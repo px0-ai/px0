@@ -1,0 +1,5 @@
+bin/
+tmp/
+.env
+*.test
+*.out
