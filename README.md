@@ -23,20 +23,34 @@ Call `px0.render()` with a template name and variables. px0 resolves the active 
 # 1. Install dependencies and dev tools (golangci-lint)
 make install
 
-# 2. Copy env file and edit as needed
+# 2. Start postgres
+docker run -d \
+  --name px0-postgres \
+  -e POSTGRES_DB=px0 \
+  -e POSTGRES_USER=px0 \
+  -e POSTGRES_PASSWORD=px0secret \
+  -p 5432:5432 \
+  -v px0_postgres_data:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# 3. Copy env file and edit as needed
 cp .env.example .env
 
-# 3. Start dev server
+# 4. Start dev server (migrations run automatically on startup)
 make dev
 ```
 
 Server is at `http://localhost:8000`.
 
-## API
+## Database and migrations
 
-| Method | Path        | Description |
-| ------ | ----------- | ----------- |
-| GET    | `/v1/health` | Hello World |
+px0 uses PostgreSQL. The connection is configured via `DATABASE_URL` in `.env`:
+
+```
+DATABASE_URL=postgres://px0:px0secret@localhost:5432/px0?sslmode=disable
+```
+
+Migrations are embedded SQL files (`internal/db/migrations/`) and run automatically every time the server starts. They are tracked in a `schema_migrations` table so each migration is applied exactly once. There is no separate migrate command — starting the server is sufficient.
 
 ## Development
 
