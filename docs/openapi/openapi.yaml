@@ -1,0 +1,70 @@
+openapi: 3.1.0
+info:
+  title: px0 API
+  description: |
+    Core API for px0, a modern prompt management, versioning, and execution service.
+    
+    This specification serves as the source of truth for downstream code generation,
+    including Documentation, SDKs, CLIs, and Model Context Protocol (MCP) servers.
+    All endpoints are rigorously validated against this specification at test time
+    to ensure absolute zero-drift between implementation and documentation.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+paths:
+  /v1/health:
+    $ref: "./health.yaml#/paths/~1v1~1health"
+  /v1/auth/register:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1register"
+  /v1/auth/login:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1login"
+  /v1/auth/session:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
+  /v1/auth/me:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1me"
+  /v1/api-keys:
+    $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
+  /v1/api-keys/{id}:
+    $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
+  /v1/prompts:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts"
+  /v1/prompts/{id}:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
+  /v1/prompts/{id}/render:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1render"
+  /v1/prompts/{id}/versions:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions"
+  /v1/prompts/{id}/versions/{version}:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}"
+  /v1/prompts/{id}/versions/{version}/publish:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1publish"
+  /v1/prompts/{id}/versions/{version}/render:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Use a session token retrieved from login (Bearer <token>).
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Use a programmatic API key generated under API Keys CRUD (X-API-Key <key>).
+  schemas:
+    APIError:
+      $ref: "./auth.yaml#/components/schemas/APIError"
+    User:
+      $ref: "./auth.yaml#/components/schemas/User"
+    APIKey:
+      $ref: "./api-keys.yaml#/components/schemas/APIKey"
+    Prompt:
+      $ref: "./prompts.yaml#/components/schemas/Prompt"
+    PromptVersion:
+      $ref: "./prompts.yaml#/components/schemas/PromptVersion"
+    RenderRequest:
+      $ref: "./prompts.yaml#/components/schemas/RenderRequest"
+    RenderResponse:
+      $ref: "./prompts.yaml#/components/schemas/RenderResponse"

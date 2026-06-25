@@ -1,0 +1,848 @@
+openapi: 3.1.0
+info:
+  title: Prompts & Rendering API
+  version: 1.0.0
+paths:
+  /v1/prompts:
+    post:
+      summary: Create a Prompt
+      description: Creates a new prompt container.
+      operationId: createPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-test-coverage:
+        - "TestCreatePrompt_Success: Verifies prompt creation and response payload."
+        - "TestCreatePrompt_MissingName: Verifies that missing name returns 400 and 'name is required'."
+        - "TestCreatePrompt_Unauthorized: Verifies that unauthenticated request returns 401."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePromptRequest"
+      responses:
+        "201":
+          description: Prompt created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                invalid_body:
+                  value: { "error": "invalid request body" }
+                name_required:
+                  value: { "error": "name is required" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+    get:
+      summary: List Prompts
+      description: Lists all available prompt containers.
+      operationId: listPrompts
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-test-coverage:
+        - "TestListPrompts: Verifies listing populated prompt containers."
+        - "TestListPrompts_Empty: Verifies that listing when empty returns an empty array."
+      responses:
+        "200":
+          description: List of prompts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompts
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/prompts/{id}:
+    get:
+      summary: Get a Prompt
+      description: Returns details of a specific prompt container by its unique UUID.
+      operationId: getPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt.
+          schema:
+            type: string
+            format: uuid
+      x-test-coverage:
+        - "TestGetPrompt_Success: Verifies finding a prompt by ID."
+        - "TestGetPrompt_NotFound: Verifies 404 response on missing prompt ID."
+      responses:
+        "200":
+          description: Prompt details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid prompt id"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+    delete:
+      summary: Delete a Prompt
+      description: Deletes a specific prompt container along with all its template versions.
+      operationId: deletePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt to delete.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Prompt successfully deleted
+        "400":
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid prompt id"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/prompts/{id}/render:
+    post:
+      summary: Render Live Prompt Version
+      description: Renders the active 'live' template version of a prompt using supplied variables.
+      operationId: renderLive
+      tags:
+        - Rendering
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "Fails with 404 if no live version is found."
+        - "Fails with 422 if template execution fails due to invalid parameters or template syntax mismatches."
+      x-test-coverage:
+        - "TestRenderLive_Success: Verifies rendering with complete variables returning 200 OK."
+        - "TestRenderLive_NoLiveVersion: Verifies that requesting a render with only 'draft' versions fails with 404 and 'no live version found for this prompt'."
+        - "TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderRequest"
+      responses:
+        "200":
+          description: Rendered template string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenderResponse"
+        "400":
+          description: Invalid UUID or bad body JSON
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid prompt id"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt or live version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                prompt_not_found:
+                  value: { "error": "prompt not found" }
+                no_live_version:
+                  value: { "error": "no live version found for this prompt" }
+        "422":
+          description: Render execution failed
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "template execution failed: ..."
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/prompts/{id}/versions:
+    post:
+      summary: Create a Prompt Version
+      description: Creates a new version of the prompt template in 'draft' state.
+      operationId: createVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "Validates template string syntax using Go's text/template parser before creating the entry."
+      x-test-coverage:
+        - "TestCreateVersion_Success: Verifies version number is incremented to draft status 1."
+        - "TestCreateVersion_InvalidTemplate: Verifies syntax check fails with 400 and 'invalid template'."
+        - "TestCreateVersion_MissingTemplate: Verifies missing template rejects with 400 and 'template is required'."
+        - "TestCreateVersion_PromptNotFound: Verifies 404 response on missing parent prompt UUID."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVersionRequest"
+      responses:
+        "201":
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid template or syntax error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                missing_template:
+                  value: { "error": "template is required" }
+                syntax_error:
+                  value: { "error": "invalid template: template parse error..." }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+    get:
+      summary: List Prompt Versions
+      description: Lists all template versions associated with a prompt container.
+      operationId: listVersions
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-test-coverage:
+        - "TestListVersions: Verifies active versions listing."
+      responses:
+        "200":
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - versions
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+
+  /v1/prompts/{id}/versions/{version}:
+    get:
+      summary: Get Prompt Version
+      description: Retrieves details of a specific prompt template version by version number.
+      operationId: getVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number.
+          schema:
+            type: integer
+      x-test-coverage:
+        - "TestGetVersion: Verifies details retrieval of specific version."
+        - "TestGetVersion_NotFound: Verifies 404 response on missing version sequence number."
+      responses:
+        "200":
+          description: Prompt version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+
+    put:
+      summary: Update Prompt Version Draft
+      description: |
+        Updates the draft template code of a specific version.
+        Only versions currently in the 'draft' status may be modified.
+      operationId: updateVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to update.
+          schema:
+            type: integer
+      x-edge-cases:
+        - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template)."
+      x-test-coverage:
+        - "TestUpdateVersion_Draft: Verifies modification updates template content and returns 200."
+        - "TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and 'only draft versions can be modified'."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVersionRequest"
+      responses:
+        "200":
+          description: Version updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid syntax or missing template
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "template is required"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Only draft versions can be modified
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only draft versions can be modified"
+
+  /v1/prompts/{id}/versions/{version}/publish:
+    post:
+      summary: Publish Prompt Version
+      description: |
+        Publishes a draft version of the prompt template, marking it as 'live'.
+        This automatically updates any pre-existing 'live' version to 'archived', maintaining exactly one active live prompt.
+      operationId: publishVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to publish.
+          schema:
+            type: integer
+      x-edge-cases:
+        - "Switches previous live versions to archived status automatically."
+        - "Returns 422 if the specified version is already 'live'."
+      x-test-coverage:
+        - "TestPublishVersion: Verifies that status changes to 'live' and published_at gets populated."
+        - "TestPublishVersion_ArchivesPreviousLive: Verifies that publishing v2 transitions v1 status to archived."
+        - "TestPublishVersion_AlreadyLive: Verifies republishing a live template returns 422."
+      responses:
+        "200":
+          description: Version published successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Publishing error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only draft versions can be modified"
+
+  /v1/prompts/{id}/versions/{version}/render:
+    post:
+      summary: Render Specific Prompt Version
+      description: Renders a specific template version of a prompt (even draft status) using supplied variables.
+      operationId: renderVersion
+      tags:
+        - Rendering
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to render.
+          schema:
+            type: integer
+      x-test-coverage:
+        - "TestRenderVersion_Draft: Verifies that rendering works on draft templates."
+        - "TestRenderVersion_NotFound: Verifies 404 response if the requested version sequence number does not exist."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderRequest"
+      responses:
+        "200":
+          description: Rendered template string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenderResponse"
+        "400":
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Execution failure
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "template execution failed: ..."
+
+components:
+  schemas:
+    Prompt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier.
+        name:
+          type: string
+          description: Name of the prompt container.
+        description:
+          type: string
+          description: Brief summary explaining the prompt purpose.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - description
+        - created_at
+        - updated_at
+    PromptVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique version identifier.
+        prompt_id:
+          type: string
+          format: uuid
+          description: Reference to parent Prompt ID.
+        version:
+          type: integer
+          description: Incrementing sequence number of the version.
+        template:
+          type: string
+          description: The template syntax code with Go template parameters.
+          example: "Hello {{.name}}!"
+        status:
+          type: string
+          enum: [draft, live, archived]
+          description: Active lifecycle status of this template version.
+        created_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when status was set to live. Null if draft.
+      required:
+        - id
+        - prompt_id
+        - version
+        - template
+        - status
+        - created_at
+        - published_at
+    CreatePromptRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: My Prompt
+        description:
+          type: string
+          example: Useful prompt
+      required:
+        - name
+    CreateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: "Hello, {{.name}}!"
+      required:
+        - template
+    UpdateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: "Hello, {{.name}}! Count is {{.count}}."
+      required:
+        - template
+    RenderRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          description: Key-value dictionary of arguments interpolated into the prompt template.
+          example: { "name": "Alice", "count": 5 }
+    RenderResponse:
+      type: object
+      properties:
+        rendered:
+          type: string
+          description: Fully parsed template response with variable replacements.
+          example: "Hello, Alice! Count is 5."
+        version:
+          type: integer
+          description: Sequence version number that was executed.
+          example: 1
+      required:
+        - rendered
+        - version

@@ -17,6 +17,7 @@ func TestCreateAPIKey_Success(t *testing.T) {
 		`{"name":"ci-pipeline"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	body := decodeBody(t, resp)
@@ -35,6 +36,7 @@ func TestCreateAPIKey_MissingName(t *testing.T) {
 	req := newReq(t, http.MethodPost, "/v1/api-keys", `{}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	resp.Body.Close()
 }
@@ -49,6 +51,7 @@ func TestCreateAPIKey_RequiresSession(t *testing.T) {
 		`{"name":"escalated"}`, apiKey)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
 }
@@ -63,6 +66,7 @@ func TestListAPIKeys(t *testing.T) {
 	req := newReq(t, http.MethodGet, "/v1/api-keys", "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	body := decodeBody(t, resp)
@@ -83,12 +87,14 @@ func TestDeleteAPIKey(t *testing.T) {
 	req := newReq(t, http.MethodPost, "/v1/api-keys", `{"name":"temp"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	body := decodeBody(t, resp)
 	id := body["id"].(string)
 
 	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/api-keys/%s", id), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	resp.Body.Close()
 
@@ -96,6 +102,7 @@ func TestDeleteAPIKey(t *testing.T) {
 	req = newReq(t, http.MethodGet, "/v1/api-keys", "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	body = decodeBody(t, resp)
 	assert.Empty(t, body["api_keys"].([]any))
 }
@@ -108,6 +115,7 @@ func TestDeleteAPIKey_NotFound(t *testing.T) {
 		"/v1/api-keys/00000000-0000-0000-0000-000000000001", "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	AssertContract(t, resp)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }

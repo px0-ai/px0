@@ -1,0 +1,262 @@
+openapi: 3.1.0
+info:
+  title: Auth API
+  version: 1.0.0
+paths:
+  /v1/auth/register:
+    post:
+      summary: Register a new user
+      description: Registers a new user with an email and password.
+      operationId: register
+      tags:
+        - Auth
+      x-edge-cases:
+        - "Fails with 400 Bad Request if email or password are empty, or password is shorter than 8 characters."
+        - "Fails with 409 Conflict if email is already registered."
+      x-test-coverage:
+        - "TestRegister_Success: Verifies standard register returns 201 and User model."
+        - "TestRegister_EmptyFields: Verifies empty fields reject with 400 and 'email and password are required'."
+        - "TestRegister_ShortPassword: Verifies password shorter than 8 chars rejects with 400 and 'password must be at least 8 characters'."
+        - "TestRegister_DuplicateEmail: Verifies registering an existing email rejects with 409 and 'email already registered'."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - user
+        "400":
+          description: Invalid inputs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              examples:
+                invalid_body:
+                  summary: Invalid JSON body structure
+                  value: { "error": "invalid request body" }
+                missing_fields:
+                  summary: Missing email or password
+                  value: { "error": "email and password are required" }
+                short_password:
+                  summary: Password is less than 8 characters long
+                  value: { "error": "password must be at least 8 characters" }
+        "409":
+          description: Conflict (Email registered)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              examples:
+                duplicate_email:
+                  summary: Email is already in use
+                  value: { "error": "email already registered" }
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/auth/login:
+    post:
+      summary: Login
+      description: Authenticates a user and creates a new session token.
+      operationId: login
+      tags:
+        - Auth
+      x-edge-cases:
+        - "Accepts JSON body. Session duration is configurable via SESSION_DURATION_HOURS environment variable (defaults to 24 hours)."
+      x-test-coverage:
+        - "TestLogin_Success: Verifies successful authentication and returns a token and expiry."
+        - "TestLogin_InvalidCredentials: Verifies that incorrect passwords or emails reject with 401 and 'invalid credentials'."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: The session token to be used in standard Bearer authentication.
+                    example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: The timestamp when this session token expires.
+                  user:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - token
+                  - expires_at
+                  - user
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "invalid request body"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "invalid credentials"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/auth/session:
+    delete:
+      summary: Logout
+      description: Destroys the active session token, logging the user out.
+      operationId: logout
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "If Bearer token is missing, the route returns 204 directly without throwing errors."
+      x-test-coverage:
+        - "TestLogout_Success: Verifies standard 204 response and session deletion."
+      responses:
+        "204":
+          description: Logged out successfully (No content)
+
+  /v1/auth/me:
+    get:
+      summary: Get Current User
+      description: Returns the profile of the currently logged-in user.
+      operationId: getMe
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "Requires session authentication. Programmatic API keys are not authorized."
+      x-test-coverage:
+        - "TestMe_Success: Verifies current user profile retrieval."
+        - "TestMe_Unauthorized: Verifies that accessing the endpoint with no token returns 401 and 'unauthorized'."
+      responses:
+        "200":
+          description: Current user payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - user
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "403":
+          description: Forbidden / Session required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "session required"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+components:
+  schemas:
+    APIError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Standard error message.
+      required:
+        - error
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique user identifier.
+        email:
+          type: string
+          format: email
+          description: Email address of the user.
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the user was created.
+      required:
+        - id
+        - email
+        - created_at
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          minLength: 8
+          example: secretpassword123
+      required:
+        - email
+        - password
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          example: secretpassword123
+      required:
+        - email
+        - password

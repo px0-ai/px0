@@ -1,14 +1,21 @@
 package handler_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
+	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
 
@@ -16,19 +23,29 @@ import (
 	"github.com/px0-ai/px0/internal/testutil"
 )
 
-// testApp wraps *fiber.App and overrides Test to use an unlimited timeout.
-// This prevents spurious timeouts when the race detector slows down bcrypt
-// and avoids leaving handler goroutines running past their deadline.
-type testApp struct{ *fiber.App }
+// testApp wraps *fiber.App and overrides Test to use an unlimited timeout
+// and automatically asserts that all request/response exchanges conform to
+// the OpenAPI spec definition.
+type testApp struct {
+	*fiber.App
+	t *testing.T
+}
 
 func (a *testApp) Test(req *http.Request, _ ...int) (*http.Response, error) {
-	return a.App.Test(req, -1)
+	resp, err := a.App.Test(req, -1)
+	if err == nil && a.t != nil {
+		AssertContract(a.t, resp)
+	}
+	return resp, err
 }
 
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	testutil.SetupDB(t)
-	return &testApp{app.New()}
+	return &testApp{
+		App: app.New(),
+		t:   t,
+	}
 }
 
 // newReq builds an HTTP request with optional JSON body and bearer token.
@@ -124,4 +141,92 @@ func setupAPIKey(t *testing.T, a *testApp, token string) string {
 
 	body := decodeBody(t, resp)
 	return body["key"].(string)
+}
+
+var globalRouter routers.Router
+
+func initSpecRouter(t *testing.T) {
+	if globalRouter != nil {
+		return
+	}
+	t.Helper()
+
+	path := filepath.Join("..", "..", "docs", "openapi", "openapi.yaml")
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+
+	doc, err := loader.LoadFromFile(path)
+	require.NoError(t, err, "failed to load openapi spec from %s", path)
+
+	err = doc.Validate(loader.Context)
+	require.NoError(t, err, "openapi spec validation failed")
+
+	// Clear servers to bypass host-matching and port-matching during local integration tests
+	doc.Servers = nil
+
+	router, err := legacy.NewRouter(doc)
+	require.NoError(t, err, "failed to initialize legacy router with doc")
+	globalRouter = router
+}
+
+// AssertContract ensures that the given HTTP response and its originating request
+// fully comply with the OpenAPI 3.1 schema defined in docs/openapi/.
+func AssertContract(t *testing.T, resp *http.Response) {
+	t.Helper()
+	initSpecRouter(t)
+
+	require.NotNil(t, resp.Request, "response has no associated request")
+
+	// Find the route inside the spec
+	route, pathParams, err := globalRouter.FindRoute(resp.Request)
+	require.NoError(t, err, "Route not documented in OpenAPI spec: %s %s", resp.Request.Method, resp.Request.URL.Path)
+
+	// Clone request body so kin-openapi can read it without exhausting the reader
+	var reqBodyBytes []byte
+	if resp.Request.Body != nil {
+		reqBodyBytes, err = io.ReadAll(resp.Request.Body)
+		require.NoError(t, err)
+		resp.Request.Body = io.NopCloser(bytes.NewReader(reqBodyBytes))
+	}
+
+	// Validate Request only on successful responses (status < 400).
+	// For intentional failure tests, the request body is designed to be invalid.
+	var reqInput *openapi3filter.RequestValidationInput
+	if resp.StatusCode < 400 {
+		reqInput = &openapi3filter.RequestValidationInput{
+			Request:    resp.Request,
+			PathParams: pathParams,
+			Route:      route,
+			Options: &openapi3filter.Options{
+				AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+			},
+		}
+		err = openapi3filter.ValidateRequest(context.Background(), reqInput)
+		require.NoError(t, err, "Request validation failed against OpenAPI spec")
+	} else {
+		// Even for failure codes, we construct RequestValidationInput for ValidateResponse to match response schemas
+		reqInput = &openapi3filter.RequestValidationInput{
+			Request:    resp.Request,
+			PathParams: pathParams,
+			Route:      route,
+		}
+	}
+
+	// Clone response body so kin-openapi can read it without exhausting it for downstream assertions
+	var respBodyBytes []byte
+	if resp.Body != nil {
+		respBodyBytes, err = io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+	}
+
+	// Validate Response
+	respInput := &openapi3filter.ResponseValidationInput{
+		RequestValidationInput: reqInput,
+		Status:                 resp.StatusCode,
+		Header:                 resp.Header,
+		Body:                   io.NopCloser(bytes.NewReader(respBodyBytes)),
+	}
+	err = openapi3filter.ValidateResponse(context.Background(), respInput)
+	require.NoError(t, err, "Response validation failed against OpenAPI spec (drift detected!)")
 }

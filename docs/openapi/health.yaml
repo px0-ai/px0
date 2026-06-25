@@ -1,0 +1,25 @@
+openapi: 3.1.0
+info:
+  title: Health API
+  version: 1.0.0
+paths:
+  /v1/health:
+    get:
+      summary: Health Check
+      description: Verifies that the service is running.
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Hello, World!
+                required:
+                  - message

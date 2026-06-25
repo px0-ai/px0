@@ -21,6 +21,8 @@ func TestHello(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
+	AssertContract(t, resp)
+
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}

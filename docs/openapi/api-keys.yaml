@@ -1,0 +1,231 @@
+openapi: 3.1.0
+info:
+  title: API Keys API
+  version: 1.0.0
+paths:
+  /v1/api-keys:
+    post:
+      summary: Create an API Key
+      description: |
+        Generates a new programmatic API key for accessing authorized resources.
+        The full, secret API key is returned ONLY once in this response and cannot be recovered later.
+      operationId: createAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "The full key prefixed with 'px0_' is returned only on creation."
+        - "Must be called with standard session token; attempts to escalate using an existing API Key will return 401 Unauthorized."
+      x-test-coverage:
+        - "TestCreateAPIKey_Success: Verifies successful key generation and returned properties."
+        - "TestCreateAPIKey_MissingName: Verifies that creating a key with empty name returns 400 and 'name is required'."
+        - "TestCreateAPIKey_RequiresSession: Verifies that API key authentication is rejected for key generation."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAPIKeyRequest"
+      responses:
+        "201":
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyCreatedResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                invalid_body:
+                  summary: Invalid JSON structure
+                  value: { "error": "invalid request body" }
+                name_required:
+                  summary: Missing key name
+                  value: { "error": "name is required" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+    get:
+      summary: List API Keys
+      description: Lists metadata for all programmatic API keys. Secret key values are omitted.
+      operationId: listAPIKeys
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - "TestListAPIKeys: Verifies active keys list does not include full secret values."
+      responses:
+        "200":
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/APIKey"
+                required:
+                  - api_keys
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+  /v1/api-keys/{id}:
+    delete:
+      summary: Delete an API Key
+      description: Revokes and permanently deletes an API key by its unique UUID.
+      operationId: deleteAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - "TestDeleteAPIKey: Verifies successful deletion of key returning 204."
+        - "TestDeleteAPIKey_NotFound: Verifies that deleting a non-existent UUID key returns 404 and 'api key not found'."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to delete.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: API key successfully deleted
+        "400":
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid id"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "api key not found"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+components:
+  schemas:
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique API Key identifier.
+        name:
+          type: string
+          description: Human-readable name given to the API key.
+        key_prefix:
+          type: string
+          description: First 12 characters of the API Key used for visual identification.
+          example: px0_1a2b3c4d
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the API Key was created.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the API Key was last used. Null if never used.
+      required:
+        - id
+        - name
+        - key_prefix
+        - created_at
+        - last_used_at
+    CreateAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Descriptive name for the key.
+          example: ci-pipeline
+      required:
+        - name
+    APIKeyCreatedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique API Key identifier.
+        name:
+          type: string
+          description: Human-readable name of the key.
+        key:
+          type: string
+          description: The fully generated secure raw API Key string. This is returned ONLY ONCE.
+          example: px0_7f9ba3271cf881309d9be8c9c0fcae47a95b8d29c3f0b2da8e89cf21e5c3df01
+        key_prefix:
+          type: string
+          description: Identifying prefix of the key.
+          example: px0_7f9ba327
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp of creation.
+      required:
+        - id
+        - name
+        - key
+        - key_prefix
+        - created_at
