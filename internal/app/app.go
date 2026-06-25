@@ -10,6 +10,8 @@ import (
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{AppName: "px0"})
 
+	app.Use(middleware.Metrics())
+
 	v1 := app.Group("/v1")
 	v1.Get("/health", handler.Hello)
 

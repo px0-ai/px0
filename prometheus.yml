@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s # Set scrape interval to 5 seconds for fast local development and instant visualization
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
