@@ -27,6 +27,14 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
   /v1/api-keys/{id}:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
+  /v1/teams:
+    $ref: "./teams.yaml#/paths/~1v1~1teams"
+  /v1/admin/teams:
+    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams"
+  /v1/admin/teams/{id}/members:
+    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members"
+  /v1/admin/teams/{id}/members/{userID}:
+    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members~1{userID}"
   /v1/prompts:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:

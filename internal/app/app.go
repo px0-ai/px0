@@ -25,6 +25,14 @@ func New() *fiber.App {
 	auth.Delete("/session", handler.Logout)
 	auth.Get("/me", middleware.RequireSession, handler.Me)
 
+	teams := v1.Group("/teams", middleware.RequireSession)
+	teams.Get("", handler.ListUserTeams)
+
+	adminTeams := v1.Group("/admin/teams", middleware.RequireAdmin)
+	adminTeams.Post("", handler.CreateTeam)
+	adminTeams.Post("/:id/members", handler.AddTeamMember)
+	adminTeams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
+
 	apiKeys := v1.Group("/api-keys", middleware.RequireSession)
 	apiKeys.Post("", handler.CreateAPIKey)
 	apiKeys.Get("", handler.ListAPIKeys)

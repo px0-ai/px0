@@ -199,6 +199,9 @@ components:
           type: string
           description: Descriptive name for the key.
           example: ci-pipeline
+        team_id:
+          type: string
+          format: uuid
       required:
         - name
     APIKeyCreatedResponse:
@@ -226,6 +229,10 @@ components:
       required:
         - id
         - name
+        - key
+        - key_prefix
+        - created_at
+
         - key
         - key_prefix
         - created_at

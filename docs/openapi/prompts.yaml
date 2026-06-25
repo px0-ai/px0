@@ -806,6 +806,11 @@ components:
         description:
           type: string
           example: Useful prompt
+        team_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
       required:
         - name
     CreateVersionRequest:

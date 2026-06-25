@@ -61,6 +61,7 @@ var (
 	ErrEmailAlreadyRegistered  = &APIError{Status: fiber.StatusConflict, Message: "email already registered"}
 	ErrInvalidCredentials      = &APIError{Status: fiber.StatusUnauthorized, Message: "invalid credentials"}
 	ErrSessionRequired         = &APIError{Status: fiber.StatusForbidden, Message: "session required"}
+	ErrForbidden               = &APIError{Status: fiber.StatusForbidden, Message: "forbidden"}
 	ErrUnauthorized            = &APIError{Status: fiber.StatusUnauthorized, Message: "unauthorized"}
 	ErrPromptNotFound          = &APIError{Status: fiber.StatusNotFound, Message: "prompt not found"}
 	ErrNoLiveVersionFound      = &APIError{Status: fiber.StatusNotFound, Message: "no live version found for this prompt"}

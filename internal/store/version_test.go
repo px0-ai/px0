@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -14,7 +15,9 @@ import (
 
 func newPrompt(t *testing.T, ctx context.Context) *model.Prompt {
 	t.Helper()
-	p, err := store.CreatePrompt(ctx, "Test Prompt", "")
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+	p, err := store.CreatePrompt(ctx, "Test Prompt", "", []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 	return p
 }

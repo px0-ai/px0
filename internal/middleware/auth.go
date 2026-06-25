@@ -33,6 +33,23 @@ func RequireSession(c *fiber.Ctx) error {
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
+func RequireAdmin(c *fiber.Ctx) error {
+	if !trySessionAuth(c) {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	user, err := store.GetUserByID(c.Context(), userID)
+	if err != nil || !user.IsAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+	return c.Next()
+}
+
 func trySessionAuth(c *fiber.Ctx) bool {
 	auth := c.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
@@ -69,6 +86,7 @@ func tryAPIKeyAuth(c *fiber.Ctx) bool {
 		_ = store.TouchAPIKey(context.Background(), apiKey.ID)
 	}()
 
+	c.Locals("apiKeyTeamID", apiKey.TeamID)
 	// API key auth has no associated user; use uuid.Nil as sentinel.
 	c.Locals(LocalsUserID, uuid.Nil)
 	return true

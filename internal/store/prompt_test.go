@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -13,8 +14,11 @@ import (
 
 func TestCreatePrompt(t *testing.T) {
 	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
 
-	p, err := store.CreatePrompt(context.Background(), "Greeting", "A greeting prompt")
+	p, err := store.CreatePrompt(ctx, "Greeting", "A greeting prompt", []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 	assert.NotEmpty(t, p.ID)
 	assert.Equal(t, "Greeting", p.Name)
@@ -25,19 +29,24 @@ func TestCreatePrompt(t *testing.T) {
 func TestListPrompts(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
 
-	store.CreatePrompt(ctx, "Prompt A", "") //nolint:errcheck
-	store.CreatePrompt(ctx, "Prompt B", "") //nolint:errcheck
+	store.CreatePrompt(ctx, "Prompt A", "", []uuid.UUID{tm.ID}) //nolint:errcheck
+	store.CreatePrompt(ctx, "Prompt B", "", []uuid.UUID{tm.ID}) //nolint:errcheck
 
-	prompts, err := store.ListPrompts(ctx)
+	prompts, err := store.ListPrompts(ctx, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 	assert.Len(t, prompts, 2)
 }
 
 func TestListPrompts_Empty(t *testing.T) {
 	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
 
-	prompts, err := store.ListPrompts(context.Background())
+	prompts, err := store.ListPrompts(ctx, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 	assert.Empty(t, prompts)
 }
@@ -45,11 +54,13 @@ func TestListPrompts_Empty(t *testing.T) {
 func TestGetPromptByID(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-
-	created, err := store.CreatePrompt(ctx, "Find Me", "desc")
+	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	got, err := store.GetPromptByID(ctx, created.ID)
+	created, err := store.CreatePrompt(ctx, "Find Me", "desc", []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+
+	got, err := store.GetPromptByID(ctx, created.ID, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, got.ID)
 	assert.Equal(t, "Find Me", got.Name)
@@ -57,28 +68,36 @@ func TestGetPromptByID(t *testing.T) {
 
 func TestGetPromptByID_NotFound(t *testing.T) {
 	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
 
-	_, err := store.GetPromptByID(context.Background(), nonExistentUUID())
+	_, err = store.GetPromptByID(ctx, nonExistentUUID(), []uuid.UUID{tm.ID})
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestDeletePrompt(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-
-	p, err := store.CreatePrompt(ctx, "Delete Me", "")
+	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	err = store.DeletePrompt(ctx, p.ID)
+	p, err := store.CreatePrompt(ctx, "Delete Me", "", []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 
-	_, err = store.GetPromptByID(ctx, p.ID)
+	err = store.DeletePrompt(ctx, p.ID, []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+
+	_, err = store.GetPromptByID(ctx, p.ID, []uuid.UUID{tm.ID})
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestDeletePrompt_NotFound(t *testing.T) {
 	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
 
-	err := store.DeletePrompt(context.Background(), nonExistentUUID())
+	err = store.DeletePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID})
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }

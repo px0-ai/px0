@@ -391,6 +391,142 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: internal error
+  /v1/teams:
+    get:
+      summary: List User Teams
+      description: Returns a list of teams the authenticated user belongs to.
+      operationId: listUserTeams
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: A list of teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Team'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/admin/teams:
+    post:
+      summary: Create Team
+      description: Creates a new team. Requires admin privileges.
+      operationId: createTeam
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Engineering
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/Team'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/admin/teams/{id}/members:
+    post:
+      summary: Add Team Member
+      description: Adds a user to a team. Requires admin privileges.
+      operationId: addTeamMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+  /v1/admin/teams/{id}/members/{userID}:
+    delete:
+      summary: Remove Team Member
+      description: Removes a user from a team. Requires admin privileges.
+      operationId: removeTeamMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
   /v1/prompts:
     post:
       summary: Create a Prompt
@@ -1307,6 +1443,9 @@ components:
           type: string
           description: Descriptive name for the key.
           example: ci-pipeline
+        team_id:
+          type: string
+          format: uuid
       required:
         - name
     APIKeyCreatedResponse:
@@ -1337,6 +1476,24 @@ components:
         - key
         - key_prefix
         - created_at
+        - key
+        - key_prefix
+        - created_at
+    Team:
+      type: object
+      required:
+        - id
+        - name
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     CreatePromptRequest:
       type: object
       properties:
@@ -1346,6 +1503,11 @@ components:
         description:
           type: string
           example: Useful prompt
+        team_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
       required:
         - name
     CreateVersionRequest:

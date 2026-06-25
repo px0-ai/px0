@@ -27,7 +27,12 @@ func CreateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID); err != nil {
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
@@ -58,7 +63,12 @@ func ListVersions(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID); err != nil {
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
@@ -142,6 +152,18 @@ func PublishVersion(c *fiber.Ctx) error {
 	versionNum, err := strconv.Atoi(c.Params("version"))
 	if err != nil {
 		return apierr.ErrInvalidVersionNumber.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	version, err := store.PublishVersion(c.Context(), promptID, versionNum)

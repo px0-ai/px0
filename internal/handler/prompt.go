@@ -12,8 +12,9 @@ import (
 )
 
 type createPromptRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	TeamIDs     []uuid.UUID `json:"team_ids"`
 }
 
 func CreatePrompt(c *fiber.Ctx) error {
@@ -25,7 +26,16 @@ func CreatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrNameRequired.Respond(c)
 	}
 
-	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description)
+	teamIDs := req.TeamIDs
+	if len(teamIDs) == 0 {
+		var err error
+		teamIDs, err = getRequestTeamIDs(c)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
+	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description, teamIDs)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -33,7 +43,12 @@ func CreatePrompt(c *fiber.Ctx) error {
 }
 
 func ListPrompts(c *fiber.Ctx) error {
-	prompts, err := store.ListPrompts(c.Context())
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	prompts, err := store.ListPrompts(c.Context(), teamIDs)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -49,7 +64,12 @@ func GetPrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), id)
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
@@ -65,7 +85,12 @@ func DeletePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	if err := store.DeletePrompt(c.Context(), id); err != nil {
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.DeletePrompt(c.Context(), id, teamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}

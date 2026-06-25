@@ -14,14 +14,14 @@ import (
 	"github.com/px0-ai/px0/internal/model"
 )
 
-func CreateAPIKey(ctx context.Context, name, keyPrefix, keyHash string) (*model.APIKey, error) {
+func CreateAPIKey(ctx context.Context, name string, teamID uuid.UUID, keyPrefix, keyHash string) (*model.APIKey, error) {
 	k := &model.APIKey{}
 	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO api_keys (name, key_prefix, key_hash)
-		 VALUES ($1, $2, $3)
-		 RETURNING id, name, key_prefix, key_hash, created_at, last_used_at`,
-		name, keyPrefix, keyHash,
-	).Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+		`INSERT INTO api_keys (name, team_id, key_prefix, key_hash)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, name, team_id, key_prefix, key_hash, created_at, last_used_at`,
+		name, teamID, keyPrefix, keyHash,
+	).Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -32,10 +32,11 @@ func CreateAPIKey(ctx context.Context, name, keyPrefix, keyHash string) (*model.
 	return k, nil
 }
 
-func ListAPIKeys(ctx context.Context) ([]*model.APIKey, error) {
+func ListAPIKeys(ctx context.Context, teamIDs []uuid.UUID) ([]*model.APIKey, error) {
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, name, key_prefix, key_hash, created_at, last_used_at
-		 FROM api_keys ORDER BY created_at DESC`,
+		`SELECT id, name, team_id, key_prefix, key_hash, created_at, last_used_at
+		 FROM api_keys WHERE team_id = ANY($1) ORDER BY created_at DESC`,
+		teamIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list api keys: %w", err)
@@ -45,7 +46,7 @@ func ListAPIKeys(ctx context.Context) ([]*model.APIKey, error) {
 	var keys []*model.APIKey
 	for rows.Next() {
 		k := &model.APIKey{}
-		if err := rows.Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -56,10 +57,10 @@ func ListAPIKeys(ctx context.Context) ([]*model.APIKey, error) {
 func GetAPIKeyByHash(ctx context.Context, keyHash string) (*model.APIKey, error) {
 	k := &model.APIKey{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, name, key_prefix, key_hash, created_at, last_used_at
+		`SELECT id, name, team_id, key_prefix, key_hash, created_at, last_used_at
 		 FROM api_keys WHERE key_hash = $1`,
 		keyHash,
-	).Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	).Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
