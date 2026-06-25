@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/arpitbhayani/px0/internal/model"
-	"github.com/arpitbhayani/px0/internal/store"
-	"github.com/arpitbhayani/px0/internal/testutil"
+	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/store"
+	"github.com/px0-ai/px0/internal/testutil"
 )
 
 func newPrompt(t *testing.T, ctx context.Context) *model.Prompt {
@@ -166,10 +166,10 @@ func TestPublishVersion_ArchivesPreviousLive(t *testing.T) {
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
-	store.CreateVersion(ctx, p.ID, "v1")   //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 1)     //nolint:errcheck
-	store.CreateVersion(ctx, p.ID, "v2")   //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 2)     //nolint:errcheck
+	store.CreateVersion(ctx, p.ID, "v1") //nolint:errcheck
+	store.PublishVersion(ctx, p.ID, 1)   //nolint:errcheck
+	store.CreateVersion(ctx, p.ID, "v2") //nolint:errcheck
+	store.PublishVersion(ctx, p.ID, 2)   //nolint:errcheck
 
 	v1, err := store.GetVersion(ctx, p.ID, 1)
 	require.NoError(t, err)

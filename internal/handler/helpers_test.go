@@ -12,8 +12,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
 
-	"github.com/arpitbhayani/px0/internal/app"
-	"github.com/arpitbhayani/px0/internal/testutil"
+	"github.com/px0-ai/px0/internal/app"
+	"github.com/px0-ai/px0/internal/testutil"
 )
 
 // testApp wraps *fiber.App and overrides Test to use an unlimited timeout.

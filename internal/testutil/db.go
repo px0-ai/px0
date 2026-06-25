@@ -8,13 +8,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/arpitbhayani/px0/internal/db"
+	"github.com/px0-ai/px0/internal/db"
 )
 
 var (
-	once     sync.Once
-	pool     *pgxpool.Pool
-	skipDB   bool
+	once   sync.Once
+	pool   *pgxpool.Pool
+	skipDB bool
 )
 
 // SetupDB connects to the test database and runs migrations once per test

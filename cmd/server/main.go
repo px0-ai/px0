@@ -7,10 +7,10 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/arpitbhayani/px0/internal/app"
-	"github.com/arpitbhayani/px0/internal/db"
-	"github.com/arpitbhayani/px0/internal/rdb"
-	"github.com/arpitbhayani/px0/internal/telemetry"
+	"github.com/px0-ai/px0/internal/app"
+	"github.com/px0-ai/px0/internal/db"
+	"github.com/px0-ai/px0/internal/rdb"
+	"github.com/px0-ai/px0/internal/telemetry"
 )
 
 func main() {

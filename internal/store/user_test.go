@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/arpitbhayani/px0/internal/store"
-	"github.com/arpitbhayani/px0/internal/testutil"
+	"github.com/px0-ai/px0/internal/store"
+	"github.com/px0-ai/px0/internal/testutil"
 )
 
 func TestCreateUser(t *testing.T) {

@@ -14,14 +14,14 @@ import (
 var (
 	meter                 metric.Meter
 	requestCounter        metric.Int64Counter
-	durationHistogram      metric.Float64Histogram
-	activeRequestsCounter  metric.Int64UpDownCounter
+	durationHistogram     metric.Float64Histogram
+	activeRequestsCounter metric.Int64UpDownCounter
 )
 
 func init() {
 	// OpenTelemetry's global provider is lazy-initialized.
 	// Instruments registered here will automatically hook into the real meter provider once initialized.
-	meter = otel.GetMeterProvider().Meter("github.com/arpitbhayani/px0/internal/middleware")
+	meter = otel.GetMeterProvider().Meter("github.com/px0-ai/px0/internal/middleware")
 
 	var err error
 	requestCounter, err = meter.Int64Counter(

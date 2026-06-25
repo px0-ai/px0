@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arpitbhayani/px0/internal/db"
-	"github.com/arpitbhayani/px0/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/px0-ai/px0/internal/db"
+	"github.com/px0-ai/px0/internal/model"
 )
 
 func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*model.PromptVersion, error) {

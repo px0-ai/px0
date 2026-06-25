@@ -14,7 +14,7 @@ linters-settings:
   gofmt:
     simplify: true
   goimports:
-    local-prefixes: github.com/arpitbhayani/px0
+    local-prefixes: github.com/px0-ai/px0
 
 issues:
   exclude-use-default: false

@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arpitbhayani/px0/internal/apierr"
-	"github.com/arpitbhayani/px0/internal/middleware"
-	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/px0-ai/px0/internal/apierr"
+	"github.com/px0-ai/px0/internal/middleware"
+	"github.com/px0-ai/px0/internal/store"
 )
 
 type registerRequest struct {

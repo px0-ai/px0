@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arpitbhayani/px0/internal/db"
-	"github.com/arpitbhayani/px0/internal/model"
-	"github.com/arpitbhayani/px0/internal/rdb"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/px0-ai/px0/internal/db"
+	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/rdb"
 )
 
 const sessionKeyPrefix = "px0:session:"

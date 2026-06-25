@@ -7,9 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/px0-ai/px0/internal/apierr"
 )
 
 func TestAPIError(t *testing.T) {

@@ -3,11 +3,12 @@ package handler
 import (
 	"errors"
 
-	"github.com/arpitbhayani/px0/internal/apierr"
-	"github.com/arpitbhayani/px0/internal/model"
-	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+
+	"github.com/px0-ai/px0/internal/apierr"
+	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/store"
 )
 
 type createPromptRequest struct {

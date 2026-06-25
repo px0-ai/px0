@@ -7,7 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/arpitbhayani/px0/internal/middleware"
+	"github.com/px0-ai/px0/internal/middleware"
 )
 
 func TestMetricsMiddleware_Success(t *testing.T) {

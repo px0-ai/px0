@@ -7,7 +7,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/arpitbhayani/px0/internal/rdb"
+	"github.com/px0-ai/px0/internal/rdb"
 )
 
 // SetupRedis connects to the test Redis instance and flushes the test database
