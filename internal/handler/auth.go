@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/arpitbhayani/px0/internal/middleware"
 	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
@@ -29,26 +30,26 @@ type loginRequest struct {
 func Register(c *fiber.Ctx) error {
 	var req registerRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 	if req.Email == "" || req.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email and password are required"})
+		return apierr.ErrEmailPasswordRequired.Respond(c)
 	}
 	if len(req.Password) < 8 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "password must be at least 8 characters"})
+		return apierr.ErrPasswordTooShort.Respond(c)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	user, err := store.CreateUser(c.Context(), req.Email, string(hash))
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
-			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "email already registered"})
+			return apierr.ErrEmailAlreadyRegistered.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"user": user})
@@ -57,21 +58,21 @@ func Register(c *fiber.Ctx) error {
 func Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 
 	user, err := store.GetUserByEmail(c.Context(), req.Email)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		return apierr.ErrInvalidCredentials.Respond(c)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		return apierr.ErrInvalidCredentials.Respond(c)
 	}
 
 	token, err := generateToken()
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	hours := 24
@@ -82,7 +83,7 @@ func Login(c *fiber.Ctx) error {
 	expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
 	session, err := store.CreateSession(c.Context(), user.ID, token, expiresAt)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	return c.JSON(fiber.Map{
@@ -104,12 +105,12 @@ func Logout(c *fiber.Ctx) error {
 func Me(c *fiber.Ctx) error {
 	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
 	if !ok || userID == uuid.Nil {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "session required"})
+		return apierr.ErrSessionRequired.Respond(c)
 	}
 
 	user, err := store.GetUserByID(c.Context(), userID)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.JSON(fiber.Map{"user": user})
 }

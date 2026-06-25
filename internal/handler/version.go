@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"text/template"
 
+	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/arpitbhayani/px0/internal/model"
 	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
@@ -22,30 +23,30 @@ type updateVersionRequest struct {
 func CreateVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
 	if _, err := store.GetPromptByID(c.Context(), promptID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "prompt not found"})
+			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	var req createVersionRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 	if req.Template == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "template is required"})
+		return apierr.ErrTemplateRequired.Respond(c)
 	}
 	if _, err := template.New("").Parse(req.Template); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid template: " + err.Error()})
+		return apierr.ErrInvalidTemplate.WithDetails(err.Error()).Respond(c)
 	}
 
 	version, err := store.CreateVersion(c.Context(), promptID, req.Template)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"version": version})
 }
@@ -53,19 +54,19 @@ func CreateVersion(c *fiber.Ctx) error {
 func ListVersions(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
 	if _, err := store.GetPromptByID(c.Context(), promptID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "prompt not found"})
+			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	versions, err := store.ListVersions(c.Context(), promptID)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	if versions == nil {
 		versions = []*model.PromptVersion{}
@@ -76,19 +77,19 @@ func ListVersions(c *fiber.Ctx) error {
 func GetVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 	versionNum, err := strconv.Atoi(c.Params("version"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid version number"})
+		return apierr.ErrInvalidVersionNumber.Respond(c)
 	}
 
 	version, err := store.GetVersion(c.Context(), promptID, versionNum)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "version not found"})
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.JSON(fiber.Map{"version": version})
 }
@@ -96,40 +97,38 @@ func GetVersion(c *fiber.Ctx) error {
 func UpdateVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 	versionNum, err := strconv.Atoi(c.Params("version"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid version number"})
+		return apierr.ErrInvalidVersionNumber.Respond(c)
 	}
 
 	existing, err := store.GetVersion(c.Context(), promptID, versionNum)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "version not found"})
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	if existing.Status != model.VersionStatusDraft {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error": "only draft versions can be modified",
-		})
+		return apierr.ErrOnlyDraftsModifiable.Respond(c)
 	}
 
 	var req updateVersionRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 	if req.Template == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "template is required"})
+		return apierr.ErrTemplateRequired.Respond(c)
 	}
 	if _, err := template.New("").Parse(req.Template); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid template: " + err.Error()})
+		return apierr.ErrInvalidTemplate.WithDetails(err.Error()).Respond(c)
 	}
 
 	updated, err := store.UpdateVersionTemplate(c.Context(), existing.ID, req.Template)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.JSON(fiber.Map{"version": updated})
 }
@@ -137,22 +136,22 @@ func UpdateVersion(c *fiber.Ctx) error {
 func PublishVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 	versionNum, err := strconv.Atoi(c.Params("version"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid version number"})
+		return apierr.ErrInvalidVersionNumber.Respond(c)
 	}
 
 	version, err := store.PublishVersion(c.Context(), promptID, versionNum)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "version not found"})
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
 		if errors.Is(err, store.ErrConflict) {
-			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
+			return apierr.NewAPIError(fiber.StatusUnprocessableEntity, err.Error()).Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.JSON(fiber.Map{"version": version})
 }

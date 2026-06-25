@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ func RequireAuth(c *fiber.Ctx) error {
 	if trySessionAuth(c) || tryAPIKeyAuth(c) {
 		return c.Next()
 	}
-	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	return apierr.ErrUnauthorized.Respond(c)
 }
 
 // RequireSession accepts only a session token. Used for endpoints that manage
@@ -28,7 +29,7 @@ func RequireSession(c *fiber.Ctx) error {
 	if trySessionAuth(c) {
 		return c.Next()
 	}
-	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	return apierr.ErrUnauthorized.Respond(c)
 }
 
 func trySessionAuth(c *fiber.Ctx) bool {

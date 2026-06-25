@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 
+	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/arpitbhayani/px0/internal/model"
 	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
@@ -17,15 +18,15 @@ type createPromptRequest struct {
 func CreatePrompt(c *fiber.Ctx) error {
 	var req createPromptRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 	if req.Name == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name is required"})
+		return apierr.ErrNameRequired.Respond(c)
 	}
 
 	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"prompt": prompt})
 }
@@ -33,7 +34,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 func ListPrompts(c *fiber.Ctx) error {
 	prompts, err := store.ListPrompts(c.Context())
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	if prompts == nil {
 		prompts = []*model.Prompt{}
@@ -44,15 +45,15 @@ func ListPrompts(c *fiber.Ctx) error {
 func GetPrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
 	prompt, err := store.GetPromptByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "prompt not found"})
+			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
@@ -60,14 +61,14 @@ func GetPrompt(c *fiber.Ctx) error {
 func DeletePrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid prompt id"})
+		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
 	if err := store.DeletePrompt(c.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "prompt not found"})
+			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }

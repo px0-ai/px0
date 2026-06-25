@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/arpitbhayani/px0/internal/apierr"
 	"github.com/arpitbhayani/px0/internal/model"
 	"github.com/arpitbhayani/px0/internal/store"
 	"github.com/gofiber/fiber/v2"
@@ -20,15 +21,15 @@ type createAPIKeyRequest struct {
 func CreateAPIKey(c *fiber.Ctx) error {
 	var req createAPIKeyRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 	if req.Name == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name is required"})
+		return apierr.ErrNameRequired.Respond(c)
 	}
 
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	key := "px0_" + hex.EncodeToString(raw)
 	keyPrefix := key[:12] // "px0_" + first 8 hex chars
@@ -36,22 +37,22 @@ func CreateAPIKey(c *fiber.Ctx) error {
 
 	apiKey, err := store.CreateAPIKey(c.Context(), req.Name, keyPrefix, keyHash)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"id":          apiKey.ID,
-		"name":        apiKey.Name,
-		"key":         key,
-		"key_prefix":  apiKey.KeyPrefix,
-		"created_at":  apiKey.CreatedAt,
+		"id":         apiKey.ID,
+		"name":       apiKey.Name,
+		"key":        key,
+		"key_prefix": apiKey.KeyPrefix,
+		"created_at": apiKey.CreatedAt,
 	})
 }
 
 func ListAPIKeys(c *fiber.Ctx) error {
 	keys, err := store.ListAPIKeys(c.Context())
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	if keys == nil {
 		keys = []*model.APIKey{}
@@ -62,14 +63,14 @@ func ListAPIKeys(c *fiber.Ctx) error {
 func DeleteAPIKey(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		return apierr.ErrInvalidID.Respond(c)
 	}
 
 	if err := store.DeleteAPIKey(c.Context(), id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "api key not found"})
+			return apierr.ErrAPIKeyNotFound.Respond(c)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		return apierr.ErrInternalError.Respond(c)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
