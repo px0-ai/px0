@@ -1,8 +1,11 @@
-.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down
+.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down spec-bundle
 
 install:
 	go mod download
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+spec-bundle:
+	npx -y @redocly/cli bundle docs/openapi/openapi.yaml --output docs/openapi/openapi-bundled.yaml
 
 dev:
 	go run ./cmd/server

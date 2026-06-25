@@ -83,6 +83,7 @@ setupAPIKey(t, app, token)               // create API key, returns raw key
 | `make test-store` | Store tests only, verbose |
 | `make test-handler` | Handler tests only, verbose |
 | `make test-coverage` | Coverage report to coverage.html |
+| `make spec-bundle` | Bundles multi-file OpenAPI specification into a single self-contained file |
 | `make check` | lint + vet + test (required before PR) |
 
 ## API Development and Contract Testing
@@ -93,11 +94,21 @@ This project uses OpenAPI specifications as the source of truth for public APIs.
 
 API definitions are stored in modular files inside `docs/openapi/`:
 
-- `openapi.yaml`: The central unified entry point referencing all modular domains.
+- `openapi.yaml`: The central unified entry point referencing all modular domains via external `$ref`s.
 - `health.yaml`: Health check spec.
 - `auth.yaml`: User registration, session login, logout, and self profile specs.
 - `api-keys.yaml`: Programmatic API keys CRUD specs.
 - `prompts.yaml`: Prompts CRUD, draft version management, and template render specs.
+
+#### Single-File Bundled Specification
+Some external tools, generators, or older parsers do not support multi-file specifications with external `$ref`s. To resolve this:
+
+- **`openapi-bundled.yaml`**: A fully self-contained, compiled version of the entire OpenAPI specification.
+- To re-generate this bundle after modifying the modular specifications, run:
+  ```bash
+  make spec-bundle
+  ```
+  This command uses Redocly to compile all external references inline, ensuring absolute compatibility with Swagger UI, SDK generators, and external loaders.
 
 ### Contract Assertions
 

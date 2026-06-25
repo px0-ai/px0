@@ -1,0 +1,1366 @@
+openapi: 3.1.0
+info:
+  title: px0 API
+  description: |
+    Core API for px0, a modern prompt management, versioning, and execution service.
+
+    This specification serves as the source of truth for downstream code generation,
+    including Documentation, SDKs, CLIs, and Model Context Protocol (MCP) servers.
+    All endpoints are rigorously validated against this specification at test time
+    to ensure absolute zero-drift between implementation and documentation.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+paths:
+  /v1/health:
+    get:
+      summary: Health Check
+      description: Verifies that the service is running.
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Hello, World!
+                required:
+                  - message
+  /v1/auth/register:
+    post:
+      summary: Register a new user
+      description: Registers a new user with an email and password.
+      operationId: register
+      tags:
+        - Auth
+      x-edge-cases:
+        - Fails with 400 Bad Request if email or password are empty, or password is shorter than 8 characters.
+        - Fails with 409 Conflict if email is already registered.
+      x-test-coverage:
+        - 'TestRegister_Success: Verifies standard register returns 201 and User model.'
+        - 'TestRegister_EmptyFields: Verifies empty fields reject with 400 and ''email and password are required''.'
+        - 'TestRegister_ShortPassword: Verifies password shorter than 8 chars rejects with 400 and ''password must be at least 8 characters''.'
+        - 'TestRegister_DuplicateEmail: Verifies registering an existing email rejects with 409 and ''email already registered''.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                  - user
+        '400':
+          description: Invalid inputs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                invalid_body:
+                  summary: Invalid JSON body structure
+                  value:
+                    error: invalid request body
+                missing_fields:
+                  summary: Missing email or password
+                  value:
+                    error: email and password are required
+                short_password:
+                  summary: Password is less than 8 characters long
+                  value:
+                    error: password must be at least 8 characters
+        '409':
+          description: Conflict (Email registered)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                duplicate_email:
+                  summary: Email is already in use
+                  value:
+                    error: email already registered
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/auth/login:
+    post:
+      summary: Login
+      description: Authenticates a user and creates a new session token.
+      operationId: login
+      tags:
+        - Auth
+      x-edge-cases:
+        - Accepts JSON body. Session duration is configurable via SESSION_DURATION_HOURS environment variable (defaults to 24 hours).
+      x-test-coverage:
+        - 'TestLogin_Success: Verifies successful authentication and returns a token and expiry.'
+        - 'TestLogin_InvalidCredentials: Verifies that incorrect passwords or emails reject with 401 and ''invalid credentials''.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: The session token to be used in standard Bearer authentication.
+                    example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: The timestamp when this session token expires.
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                  - token
+                  - expires_at
+                  - user
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid request body
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid credentials
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/auth/session:
+    delete:
+      summary: Logout
+      description: Destroys the active session token, logging the user out.
+      operationId: logout
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - If Bearer token is missing, the route returns 204 directly without throwing errors.
+      x-test-coverage:
+        - 'TestLogout_Success: Verifies standard 204 response and session deletion.'
+      responses:
+        '204':
+          description: Logged out successfully (No content)
+  /v1/auth/me:
+    get:
+      summary: Get Current User
+      description: Returns the profile of the currently logged-in user.
+      operationId: getMe
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - Requires session authentication. Programmatic API keys are not authorized.
+      x-test-coverage:
+        - 'TestMe_Success: Verifies current user profile retrieval.'
+        - 'TestMe_Unauthorized: Verifies that accessing the endpoint with no token returns 401 and ''unauthorized''.'
+      responses:
+        '200':
+          description: Current user payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                  - user
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '403':
+          description: Forbidden / Session required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: session required
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/api-keys:
+    post:
+      summary: Create an API Key
+      description: |
+        Generates a new programmatic API key for accessing authorized resources.
+        The full, secret API key is returned ONLY once in this response and cannot be recovered later.
+      operationId: createAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - The full key prefixed with 'px0_' is returned only on creation.
+        - Must be called with standard session token; attempts to escalate using an existing API Key will return 401 Unauthorized.
+      x-test-coverage:
+        - 'TestCreateAPIKey_Success: Verifies successful key generation and returned properties.'
+        - 'TestCreateAPIKey_MissingName: Verifies that creating a key with empty name returns 400 and ''name is required''.'
+        - 'TestCreateAPIKey_RequiresSession: Verifies that API key authentication is rejected for key generation.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+      responses:
+        '201':
+          description: API key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreatedResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                invalid_body:
+                  summary: Invalid JSON structure
+                  value:
+                    error: invalid request body
+                name_required:
+                  summary: Missing key name
+                  value:
+                    error: name is required
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+    get:
+      summary: List API Keys
+      description: Lists metadata for all programmatic API keys. Secret key values are omitted.
+      operationId: listAPIKeys
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - 'TestListAPIKeys: Verifies active keys list does not include full secret values.'
+      responses:
+        '200':
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIKey'
+                required:
+                  - api_keys
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/api-keys/{id}:
+    delete:
+      summary: Delete an API Key
+      description: Revokes and permanently deletes an API key by its unique UUID.
+      operationId: deleteAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - 'TestDeleteAPIKey: Verifies successful deletion of key returning 204.'
+        - 'TestDeleteAPIKey_NotFound: Verifies that deleting a non-existent UUID key returns 404 and ''api key not found''.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to delete.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: API key successfully deleted
+        '400':
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid id
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: api key not found
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/prompts:
+    post:
+      summary: Create a Prompt
+      description: Creates a new prompt container.
+      operationId: createPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-test-coverage:
+        - 'TestCreatePrompt_Success: Verifies prompt creation and response payload.'
+        - 'TestCreatePrompt_MissingName: Verifies that missing name returns 400 and ''name is required''.'
+        - 'TestCreatePrompt_Unauthorized: Verifies that unauthenticated request returns 401.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptRequest'
+      responses:
+        '201':
+          description: Prompt created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: '#/components/schemas/Prompt'
+                required:
+                  - prompt
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                invalid_body:
+                  value:
+                    error: invalid request body
+                name_required:
+                  value:
+                    error: name is required
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+    get:
+      summary: List Prompts
+      description: Lists all available prompt containers.
+      operationId: listPrompts
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-test-coverage:
+        - 'TestListPrompts: Verifies listing populated prompt containers.'
+        - 'TestListPrompts_Empty: Verifies that listing when empty returns an empty array.'
+      responses:
+        '200':
+          description: List of prompts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prompt'
+                required:
+                  - prompts
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/prompts/{id}:
+    get:
+      summary: Get a Prompt
+      description: Returns details of a specific prompt container by its unique UUID.
+      operationId: getPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt.
+          schema:
+            type: string
+            format: uuid
+      x-test-coverage:
+        - 'TestGetPrompt_Success: Verifies finding a prompt by ID.'
+        - 'TestGetPrompt_NotFound: Verifies 404 response on missing prompt ID.'
+      responses:
+        '200':
+          description: Prompt details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: '#/components/schemas/Prompt'
+                required:
+                  - prompt
+        '400':
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid prompt id
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: prompt not found
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+    delete:
+      summary: Delete a Prompt
+      description: Deletes a specific prompt container along with all its template versions.
+      operationId: deletePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt to delete.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Prompt successfully deleted
+        '400':
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid prompt id
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: prompt not found
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/prompts/{id}/render:
+    post:
+      summary: Render Live Prompt Version
+      description: Renders the active 'live' template version of a prompt using supplied variables.
+      operationId: renderLive
+      tags:
+        - Rendering
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - Fails with 404 if no live version is found.
+        - Fails with 422 if template execution fails due to invalid parameters or template syntax mismatches.
+      x-test-coverage:
+        - 'TestRenderLive_Success: Verifies rendering with complete variables returning 200 OK.'
+        - 'TestRenderLive_NoLiveVersion: Verifies that requesting a render with only ''draft'' versions fails with 404 and ''no live version found for this prompt''.'
+        - 'TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderRequest'
+      responses:
+        '200':
+          description: Rendered template string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderResponse'
+        '400':
+          description: Invalid UUID or bad body JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid prompt id
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt or live version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                prompt_not_found:
+                  value:
+                    error: prompt not found
+                no_live_version:
+                  value:
+                    error: no live version found for this prompt
+        '422':
+          description: Render execution failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: 'template execution failed: ...'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/prompts/{id}/versions:
+    post:
+      summary: Create a Prompt Version
+      description: Creates a new version of the prompt template in 'draft' state.
+      operationId: createVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - Validates template string syntax using Go's text/template parser before creating the entry.
+      x-test-coverage:
+        - 'TestCreateVersion_Success: Verifies version number is incremented to draft status 1.'
+        - 'TestCreateVersion_InvalidTemplate: Verifies syntax check fails with 400 and ''invalid template''.'
+        - 'TestCreateVersion_MissingTemplate: Verifies missing template rejects with 400 and ''template is required''.'
+        - 'TestCreateVersion_PromptNotFound: Verifies 404 response on missing parent prompt UUID.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+      responses:
+        '201':
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Invalid template or syntax error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                missing_template:
+                  value:
+                    error: template is required
+                syntax_error:
+                  value:
+                    error: 'invalid template: template parse error...'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: prompt not found
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+    get:
+      summary: List Prompt Versions
+      description: Lists all template versions associated with a prompt container.
+      operationId: listVersions
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-test-coverage:
+        - 'TestListVersions: Verifies active versions listing.'
+      responses:
+        '200':
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - versions
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: prompt not found
+  /v1/prompts/{id}/versions/{version}:
+    get:
+      summary: Get Prompt Version
+      description: Retrieves details of a specific prompt template version by version number.
+      operationId: getVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number.
+          schema:
+            type: integer
+      x-test-coverage:
+        - 'TestGetVersion: Verifies details retrieval of specific version.'
+        - 'TestGetVersion_NotFound: Verifies 404 response on missing version sequence number.'
+      responses:
+        '200':
+          description: Prompt version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid version number
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+    put:
+      summary: Update Prompt Version Draft
+      description: |
+        Updates the draft template code of a specific version.
+        Only versions currently in the 'draft' status may be modified.
+      operationId: updateVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to update.
+          schema:
+            type: integer
+      x-edge-cases:
+        - Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template).
+      x-test-coverage:
+        - 'TestUpdateVersion_Draft: Verifies modification updates template content and returns 200.'
+        - 'TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and ''only draft versions can be modified''.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVersionRequest'
+      responses:
+        '200':
+          description: Version updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Invalid syntax or missing template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: template is required
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+        '422':
+          description: Only draft versions can be modified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: only draft versions can be modified
+  /v1/prompts/{id}/versions/{version}/publish:
+    post:
+      summary: Publish Prompt Version
+      description: |
+        Publishes a draft version of the prompt template, marking it as 'live'.
+        This automatically updates any pre-existing 'live' version to 'archived', maintaining exactly one active live prompt.
+      operationId: publishVersion
+      tags:
+        - Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to publish.
+          schema:
+            type: integer
+      x-edge-cases:
+        - Switches previous live versions to archived status automatically.
+        - Returns 422 if the specified version is already 'live'.
+      x-test-coverage:
+        - 'TestPublishVersion: Verifies that status changes to ''live'' and published_at gets populated.'
+        - 'TestPublishVersion_ArchivesPreviousLive: Verifies that publishing v2 transitions v1 status to archived.'
+        - 'TestPublishVersion_AlreadyLive: Verifies republishing a live template returns 422.'
+      responses:
+        '200':
+          description: Version published successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid version number
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+        '422':
+          description: Publishing error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: only draft versions can be modified
+  /v1/prompts/{id}/versions/{version}/render:
+    post:
+      summary: Render Specific Prompt Version
+      description: Renders a specific template version of a prompt (even draft status) using supplied variables.
+      operationId: renderVersion
+      tags:
+        - Rendering
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number to render.
+          schema:
+            type: integer
+      x-test-coverage:
+        - 'TestRenderVersion_Draft: Verifies that rendering works on draft templates.'
+        - 'TestRenderVersion_NotFound: Verifies 404 response if the requested version sequence number does not exist.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderRequest'
+      responses:
+        '200':
+          description: Rendered template string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderResponse'
+        '400':
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid version number
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+        '422':
+          description: Execution failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: 'template execution failed: ...'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Use a session token retrieved from login (Bearer <token>).
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Use a programmatic API key generated under API Keys CRUD (X-API-Key <key>).
+  schemas:
+    APIError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Standard error message.
+      required:
+        - error
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique user identifier.
+        email:
+          type: string
+          format: email
+          description: Email address of the user.
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the user was created.
+      required:
+        - id
+        - email
+        - created_at
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique API Key identifier.
+        name:
+          type: string
+          description: Human-readable name given to the API key.
+        key_prefix:
+          type: string
+          description: First 12 characters of the API Key used for visual identification.
+          example: px0_1a2b3c4d
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the API Key was created.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the API Key was last used. Null if never used.
+      required:
+        - id
+        - name
+        - key_prefix
+        - created_at
+        - last_used_at
+    Prompt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier.
+        name:
+          type: string
+          description: Name of the prompt container.
+        description:
+          type: string
+          description: Brief summary explaining the prompt purpose.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - description
+        - created_at
+        - updated_at
+    PromptVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique version identifier.
+        prompt_id:
+          type: string
+          format: uuid
+          description: Reference to parent Prompt ID.
+        version:
+          type: integer
+          description: Incrementing sequence number of the version.
+        template:
+          type: string
+          description: The template syntax code with Go template parameters.
+          example: Hello {{.name}}!
+        status:
+          type: string
+          enum:
+            - draft
+            - live
+            - archived
+          description: Active lifecycle status of this template version.
+        created_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when status was set to live. Null if draft.
+      required:
+        - id
+        - prompt_id
+        - version
+        - template
+        - status
+        - created_at
+        - published_at
+    RenderRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          description: Key-value dictionary of arguments interpolated into the prompt template.
+          example:
+            name: Alice
+            count: 5
+    RenderResponse:
+      type: object
+      properties:
+        rendered:
+          type: string
+          description: Fully parsed template response with variable replacements.
+          example: Hello, Alice! Count is 5.
+        version:
+          type: integer
+          description: Sequence version number that was executed.
+          example: 1
+      required:
+        - rendered
+        - version
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          minLength: 8
+          example: secretpassword123
+      required:
+        - email
+        - password
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          example: secretpassword123
+      required:
+        - email
+        - password
+    CreateAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Descriptive name for the key.
+          example: ci-pipeline
+      required:
+        - name
+    APIKeyCreatedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique API Key identifier.
+        name:
+          type: string
+          description: Human-readable name of the key.
+        key:
+          type: string
+          description: The fully generated secure raw API Key string. This is returned ONLY ONCE.
+          example: px0_7f9ba3271cf881309d9be8c9c0fcae47a95b8d29c3f0b2da8e89cf21e5c3df01
+        key_prefix:
+          type: string
+          description: Identifying prefix of the key.
+          example: px0_7f9ba327
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp of creation.
+      required:
+        - id
+        - name
+        - key
+        - key_prefix
+        - created_at
+    CreatePromptRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: My Prompt
+        description:
+          type: string
+          example: Useful prompt
+      required:
+        - name
+    CreateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: Hello, {{.name}}!
+      required:
+        - template
+    UpdateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: Hello, {{.name}}! Count is {{.count}}.
+      required:
+        - template
