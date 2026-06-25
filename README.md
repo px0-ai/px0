@@ -19,61 +19,154 @@ Call `px0.render()` with a template name and variables. px0 resolves the active 
 
 ## Quickstart
 
+You can choose to run the entire application stack inside Docker or run only the dependencies in Docker and run the Go server locally.
+
+### Option A: Run everything in Docker (Easiest)
+
+This builds and starts the app along with PostgreSQL, Redis, and the full OpenTelemetry monitoring stack (Prometheus and Grafana).
+
 ```bash
-# 1. Install dependencies and dev tools (golangci-lint)
-make install
-
-# 2. Start postgres
-docker run -d \
-  --name px0-postgres \
-  -e POSTGRES_DB=px0 \
-  -e POSTGRES_USER=px0 \
-  -e POSTGRES_PASSWORD=px0secret \
-  -p 5432:5432 \
-  -v px0_postgres_data:/var/lib/postgresql/data \
-  postgres:16-alpine
-
-# 3. Copy env file and edit as needed
+# 1. Copy the environment variables template
 cp .env.example .env
 
-# 4. Start dev server (migrations run automatically on startup)
+# 2. Build and start all services in the background
+make docker-up
+```
+
+- **App Server**: `http://localhost:8000`
+- **Grafana (Dashboards)**: `http://localhost:3000` (preconfigured anonymous Admin access)
+- **Prometheus**: `http://localhost:9090`
+
+To tear down all running services, run:
+```bash
+make docker-down
+```
+
+---
+
+### Option B: Run only dependencies in Docker, run App on host (Best for fast development)
+
+This starts postgres, redis, and monitoring tools in Docker, but allows you to run the Go server locally for a faster write-compile feedback loop.
+
+```bash
+# 1. Install local dependencies and Go dev tools
+make install
+
+# 2. Copy the environment variables template
+cp .env.example .env
+
+# 3. Start local dependencies in the background
+docker compose up -d postgres redis otel-collector prometheus grafana
+
+# 4. Edit your `.env` file to use the host-mapped ports:
+# DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable
+# REDIS_URL=redis://localhost:6385
+
+# 5. Start the Go dev server on your host (port 8000)
 make dev
 ```
 
-Server is at `http://localhost:8000`.
-
 ## Database and migrations
 
-px0 uses PostgreSQL. The connection is configured via `DATABASE_URL` in `.env`:
+px0 uses PostgreSQL. The connection is configured via `DATABASE_URL` in `.env`.
 
-```
-DATABASE_URL=postgres://px0:px0secret@localhost:5432/px0?sslmode=disable
-```
+Depending on your setup, configure your connection string as follows:
+
+- **When running on the host (Option B)**, connect to the mapped Postgres port `5435`:
+  ```
+  DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable
+  ```
+- **When running entirely inside Docker (Option A)**, the service resolves internally at:
+  ```
+  DATABASE_URL=postgres://px0:px0secret@postgres:5432/px0?sslmode=disable
+  ```
 
 Migrations are embedded SQL files (`internal/db/migrations/`) and run automatically every time the server starts. They are tracked in a `schema_migrations` table so each migration is applied exactly once. There is no separate migrate command — starting the server is sufficient.
 
 ## Development
 
+This section guides you through developing and testing `px0` locally on your machine.
+
+### 1. Prerequisites
+Ensure you have the following installed locally:
+- **Go** (v1.21+)
+- **Docker & Docker Compose**
+- **golangci-lint** (optional, installed automatically via `make install`)
+
+### 2. Environment Variables (`.env`)
+Copy `.env.example` to `.env` and configure it:
 ```bash
-make lint      # golangci-lint run
-make format    # gofmt
-make vet       # go vet
-make test      # go test ./...
-make check     # lint + vet + test (run before pushing)
+cp .env.example .env
 ```
+For local development where dependencies run in Docker, configure your local variables to point to the host-mapped ports:
+- `DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable`
+- `REDIS_URL=redis://localhost:6385`
+
+### 3. Running the App Locally
+Start the database, cache, and monitoring tools in the background:
+```bash
+docker compose up -d postgres redis otel-collector prometheus grafana
+```
+Run the application locally on your host machine (starts the server on port `8000`):
+```bash
+make dev
+```
+
+### 4. Running Tests
+The project features unit and integration tests. Integration tests run against a separate test database and will skip automatically if Postgres is unreachable.
+
+#### Step 4a: Create the Test Database
+Create a dedicated `px0_test` database inside your running Docker Postgres container:
+```bash
+docker exec -it $(docker ps -f "name=postgres" --format "{{.Names}}") psql -U px0 -c "CREATE DATABASE px0_test;"
+```
+
+#### Step 4b: Execute Tests
+To run all tests (unit + integration), configure the `TEST_DATABASE_URL` to match your host-mapped Postgres port (`5435`) and run `make test`:
+```bash
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test
+```
+
+You can also run target-specific tests:
+```bash
+# Run only database store layer integration tests
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-store
+
+# Run only HTTP handler integration tests
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-handler
+
+# Run tests and generate HTML coverage report
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-coverage
+```
+
+### 5. Code Quality & Formatting
+Run the following make targets before committing your code:
+```bash
+make format    # Formats all Go files using gofmt
+make lint      # Runs static analysis via golangci-lint
+make vet       # Runs go vet
+make check     # Runs lint + vet + tests sequentially
+```
+
+### 6. Local Monitoring & Dashboards
+When running locally, OpenTelemetry metrics are automatically emitted to the `otel-collector` (on port `4317`). You can monitor metrics such as latency, HTTP requests, and system behavior via:
+- **Grafana**: `http://localhost:3000` (Pre-configured dashboard included)
+- **Prometheus**: `http://localhost:9090`
+
+---
 
 ## Production
 
-Docker:
+### Docker Setup
 
 ```bash
-make docker-up    # build and start in background
-make docker-down  # stop
+make docker-up    # Build and start all services (including app) in the background
+make docker-down  # Stop all services
 ```
 
-Manual:
+### Manual Setup
 
 ```bash
-make build    # compile to bin/server
-make run      # go run ./cmd/server
+make build    # Compile to bin/server
+make run      # Run the built binary via go run ./cmd/server
 ```
