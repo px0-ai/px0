@@ -18,8 +18,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  message:
+                  status:
                     type: string
-                    example: Hello, World!
+                    example: OK
                 required:
-                  - message
+                  - status

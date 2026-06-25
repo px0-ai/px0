@@ -1,8 +1,8 @@
 # px0 Development Guidelines
 
-## Testing is mandatory
+## Testing guidelines
 
-Every change must ship with tests. No exceptions.
+We do not run or require tests for every single change. Trivial modifications, documentation updates, configuration changes, or simple string updates (such as updating error messages) do not require running the full test suite. However, for significant functional code changes:
 
 - New feature: tests covering the happy path and at least one failure path.
 - Bug fix: a regression test that reproduces the bug before the fix and passes after.

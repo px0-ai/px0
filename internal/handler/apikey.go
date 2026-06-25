@@ -30,7 +30,7 @@ func CreateAPIKey(c *fiber.Ctx) error {
 
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	key := "px0_" + hex.EncodeToString(raw)
 	keyPrefix := key[:12] // "px0_" + first 8 hex chars
@@ -38,7 +38,7 @@ func CreateAPIKey(c *fiber.Ctx) error {
 
 	apiKey, err := store.CreateAPIKey(c.Context(), req.Name, keyPrefix, keyHash)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -53,7 +53,7 @@ func CreateAPIKey(c *fiber.Ctx) error {
 func ListAPIKeys(c *fiber.Ctx) error {
 	keys, err := store.ListAPIKeys(c.Context())
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	if keys == nil {
 		keys = []*model.APIKey{}
@@ -71,7 +71,7 @@ func DeleteAPIKey(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrAPIKeyNotFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }

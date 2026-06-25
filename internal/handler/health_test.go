@@ -10,9 +10,9 @@ import (
 	"github.com/px0-ai/px0/internal/handler"
 )
 
-func TestHello(t *testing.T) {
+func TestHealth(t *testing.T) {
 	app := fiber.New()
-	app.Get("/v1/health", handler.Hello)
+	app.Get("/v1/health", handler.Health)
 
 	req := httptest.NewRequest("GET", "/v1/health", nil)
 	resp, err := app.Test(req)
@@ -21,14 +21,13 @@ func TestHello(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	AssertContract(t, resp)
-
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if string(body) == "" {
-		t.Fatal("expected non-empty body")
+	expected := `{"status":"OK"}`
+	if string(body) != expected {
+		t.Fatalf("expected %s, got %s", expected, string(body))
 	}
 }

@@ -27,7 +27,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 
 	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"prompt": prompt})
 }
@@ -35,7 +35,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 func ListPrompts(c *fiber.Ctx) error {
 	prompts, err := store.ListPrompts(c.Context())
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	if prompts == nil {
 		prompts = []*model.Prompt{}
@@ -54,7 +54,7 @@ func GetPrompt(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
@@ -69,7 +69,7 @@ func DeletePrompt(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }

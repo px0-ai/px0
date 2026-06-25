@@ -28,11 +28,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  message:
+                  status:
                     type: string
-                    example: Hello, World!
+                    example: OK
                 required:
-                  - message
+                  - status
   /v1/auth/register:
     post:
       summary: Register a new user

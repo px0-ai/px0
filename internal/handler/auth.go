@@ -42,7 +42,7 @@ func Register(c *fiber.Ctx) error {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	user, err := store.CreateUser(c.Context(), req.Email, string(hash))
@@ -50,7 +50,7 @@ func Register(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrDuplicate) {
 			return apierr.ErrEmailAlreadyRegistered.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"user": user})
@@ -73,7 +73,7 @@ func Login(c *fiber.Ctx) error {
 
 	token, err := generateToken()
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	hours := 24
@@ -84,7 +84,7 @@ func Login(c *fiber.Ctx) error {
 	expiresAt := time.Now().Add(time.Duration(hours) * time.Hour)
 	session, err := store.CreateSession(c.Context(), user.ID, token, expiresAt)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	return c.JSON(fiber.Map{
@@ -111,7 +111,7 @@ func Me(c *fiber.Ctx) error {
 
 	user, err := store.GetUserByID(c.Context(), userID)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.JSON(fiber.Map{"user": user})
 }

@@ -3,7 +3,10 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
@@ -17,8 +20,32 @@ import (
 
 var meterProvider *metric.MeterProvider
 
+type otelErrorHandler struct {
+	mu         sync.Mutex
+	warnedConn bool
+}
+
+func (h *otelErrorHandler) Handle(err error) {
+	if err == nil {
+		return
+	}
+	errStr := err.Error()
+	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "Unavailable") || strings.Contains(errStr, "dial tcp") {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if !h.warnedConn {
+			log.Println("warn: OpenTelemetry collector is unreachable; background metrics upload will be skipped.")
+			h.warnedConn = true
+		}
+		return
+	}
+	log.Printf("otel error: %v", err)
+}
+
 // InitMetrics initializes the OpenTelemetry metric SDK and starts runtime metrics.
 func InitMetrics(ctx context.Context) (func(), error) {
+	otel.SetErrorHandler(&otelErrorHandler{})
+
 	// 1. Create the OTLP exporter. It connects to the collector over gRPC.
 	// By default, it respects OTEL_EXPORTER_OTLP_ENDPOINT. If not set, it defaults to localhost:4317.
 	exporter, err := otlpmetricgrpc.New(ctx)

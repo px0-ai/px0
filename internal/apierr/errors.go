@@ -2,6 +2,7 @@ package apierr
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -18,7 +19,14 @@ func (e *APIError) Error() string {
 }
 
 // Respond sends the API error as a JSON response using the configured structure.
-func (e *APIError) Respond(c *fiber.Ctx) error {
+func (e *APIError) Respond(c *fiber.Ctx, errs ...error) error {
+	if len(errs) > 0 && errs[0] != nil {
+		log.Printf("[ERROR] status=%d method=%s path=%s err=%v msg=%s", e.Status, c.Method(), c.Path(), errs[0], e.Message)
+	} else if e.Status >= 500 {
+		log.Printf("[ERROR] status=%d method=%s path=%s msg=%s", e.Status, c.Method(), c.Path(), e.Message)
+	} else if e.Status >= 400 {
+		log.Printf("[WARN] status=%d method=%s path=%s msg=%s", e.Status, c.Method(), c.Path(), e.Message)
+	}
 	return c.Status(e.Status).JSON(fiber.Map{
 		"error": e.Message,
 	})
@@ -44,7 +52,7 @@ func NewAPIError(status int, message string) *APIError {
 var (
 	ErrInvalidRequestBody      = &APIError{Status: fiber.StatusBadRequest, Message: "invalid request body"}
 	ErrNameRequired            = &APIError{Status: fiber.StatusBadRequest, Message: "name is required"}
-	ErrInternalError           = &APIError{Status: fiber.StatusInternalServerError, Message: "internal error"}
+	ErrInternalError           = &APIError{Status: fiber.StatusInternalServerError, Message: "internal error. If you think this error should not have happened, please raise an issue in the GitHub repository: https://github.com/px0-ai/px0"}
 	ErrInvalidID               = &APIError{Status: fiber.StatusBadRequest, Message: "invalid id"}
 	ErrInvalidPromptID         = &APIError{Status: fiber.StatusBadRequest, Message: "invalid prompt id"}
 	ErrAPIKeyNotFound          = &APIError{Status: fiber.StatusNotFound, Message: "api key not found"}
@@ -58,7 +66,7 @@ var (
 	ErrNoLiveVersionFound      = &APIError{Status: fiber.StatusNotFound, Message: "no live version found for this prompt"}
 	ErrInvalidVersionNumber    = &APIError{Status: fiber.StatusBadRequest, Message: "invalid version number"}
 	ErrVersionNotFound         = &APIError{Status: fiber.StatusNotFound, Message: "version not found"}
-	ErrTemplateParseError      = &APIError{Status: fiber.StatusInternalServerError, Message: "template parse error"}
+	ErrTemplateParseError      = &APIError{Status: fiber.StatusInternalServerError, Message: "template parse error. If you think this error should not have happened, please raise an issue in the GitHub repository: https://github.com/px0-ai/px0"}
 	ErrTemplateExecutionFailed = &APIError{Status: fiber.StatusUnprocessableEntity, Message: "template execution failed"}
 	ErrTemplateRequired        = &APIError{Status: fiber.StatusBadRequest, Message: "template is required"}
 	ErrInvalidTemplate         = &APIError{Status: fiber.StatusBadRequest, Message: "invalid template"}

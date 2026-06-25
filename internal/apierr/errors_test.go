@@ -2,6 +2,7 @@ package apierr_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,9 @@ func TestAPIError_Respond(t *testing.T) {
 	app.Get("/test-details", func(c *fiber.Ctx) error {
 		return apierr.ErrInvalidTemplate.WithDetails("bad template syntax").Respond(c)
 	})
+	app.Get("/test-underlying", func(c *fiber.Ctx) error {
+		return apierr.ErrInternalError.Respond(c, errors.New("db connection failure"))
+	})
 
 	// Test static error
 	req := httptest.NewRequest(http.MethodGet, "/test-err", nil)
@@ -59,4 +63,16 @@ func TestAPIError_Respond(t *testing.T) {
 	err = json.Unmarshal(body, &data)
 	assert.NoError(t, err)
 	assert.Equal(t, "invalid template: bad template syntax", data["error"])
+
+	// Test error with underlying error
+	req = httptest.NewRequest(http.MethodGet, "/test-underlying", nil)
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	body, err = io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	err = json.Unmarshal(body, &data)
+	assert.NoError(t, err)
+	assert.Equal(t, "internal error. If you think this error should not have happened, please raise an issue in the GitHub repository: https://github.com/px0-ai/px0", data["error"])
 }

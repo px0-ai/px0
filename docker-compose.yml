@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6385:6379"
+      - "6379:6379"
     restart: unless-stopped
 
   postgres:
@@ -12,7 +12,7 @@ services:
       POSTGRES_USER: px0
       POSTGRES_PASSWORD: px0secret
     ports:
-      - "5435:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

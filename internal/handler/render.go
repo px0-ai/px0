@@ -27,7 +27,7 @@ func RenderLive(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	version, err := store.GetLiveVersion(c.Context(), promptID)
@@ -35,7 +35,7 @@ func RenderLive(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrNoLiveVersionFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	return executeRender(c, version.Template, version.Version)
@@ -56,7 +56,7 @@ func RenderVersion(c *fiber.Ctx) error {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)
 		}
-		return apierr.ErrInternalError.Respond(c)
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	return executeRender(c, version.Template, version.Version)
@@ -73,12 +73,12 @@ func executeRender(c *fiber.Ctx, tmplStr string, versionNum int) error {
 
 	tmpl, err := template.New("prompt").Parse(tmplStr)
 	if err != nil {
-		return apierr.ErrTemplateParseError.Respond(c)
+		return apierr.ErrTemplateParseError.Respond(c, err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, req.Variables); err != nil {
-		return apierr.ErrTemplateExecutionFailed.WithDetails(err.Error()).Respond(c)
+		return apierr.ErrTemplateExecutionFailed.WithDetails(err.Error()).Respond(c, err)
 	}
 
 	return c.JSON(fiber.Map{

@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/px0-ai/px0/internal/handler"
 	"github.com/px0-ai/px0/internal/middleware"
@@ -10,10 +11,13 @@ import (
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{AppName: "px0"})
 
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+	}))
 	app.Use(middleware.Metrics())
 
 	v1 := app.Group("/v1")
-	v1.Get("/health", handler.Hello)
+	v1.Get("/health", handler.Health)
 
 	auth := v1.Group("/auth")
 	auth.Post("/register", handler.Register)

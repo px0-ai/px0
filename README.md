@@ -59,8 +59,8 @@ cp .env.example .env
 docker compose up -d postgres redis otel-collector prometheus grafana
 
 # 4. Edit your `.env` file to use the host-mapped ports:
-# DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable
-# REDIS_URL=redis://localhost:6385
+# DATABASE_URL=postgres://px0:px0secret@localhost:5432/px0?sslmode=disable
+# REDIS_URL=redis://localhost:6379
 
 # 5. Start the Go dev server on your host (port 8000)
 make dev
@@ -72,9 +72,9 @@ px0 uses PostgreSQL. The connection is configured via `DATABASE_URL` in `.env`.
 
 Depending on your setup, configure your connection string as follows:
 
-- **When running on the host (Option B)**, connect to the mapped Postgres port `5435`:
+- **When running on the host (Option B)**, connect to the mapped Postgres port `5432`:
   ```
-  DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable
+  DATABASE_URL=postgres://px0:px0secret@localhost:5432/px0?sslmode=disable
   ```
 - **When running entirely inside Docker (Option A)**, the service resolves internally at:
   ```
@@ -99,8 +99,8 @@ Copy `.env.example` to `.env` and configure it:
 cp .env.example .env
 ```
 For local development where dependencies run in Docker, configure your local variables to point to the host-mapped ports:
-- `DATABASE_URL=postgres://px0:px0secret@localhost:5435/px0?sslmode=disable`
-- `REDIS_URL=redis://localhost:6385`
+- `DATABASE_URL=postgres://px0:px0secret@localhost:5432/px0?sslmode=disable`
+- `REDIS_URL=redis://localhost:6379`
 
 ### 3. Running the App Locally
 Start the database, cache, and monitoring tools in the background:
@@ -122,21 +122,21 @@ docker exec -it $(docker ps -f "name=postgres" --format "{{.Names}}") psql -U px
 ```
 
 #### Step 4b: Execute Tests
-To run all tests (unit + integration), configure the `TEST_DATABASE_URL` to match your host-mapped Postgres port (`5435`) and run `make test`:
+To run all tests (unit + integration), configure the `TEST_DATABASE_URL` to match your host-mapped Postgres port (`5432`) and run `make test`:
 ```bash
-TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5432/px0_test?sslmode=disable" make test
 ```
 
 You can also run target-specific tests:
 ```bash
 # Run only database store layer integration tests
-TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-store
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5432/px0_test?sslmode=disable" make test-store
 
 # Run only HTTP handler integration tests
-TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-handler
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5432/px0_test?sslmode=disable" make test-handler
 
 # Run tests and generate HTML coverage report
-TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5435/px0_test?sslmode=disable" make test-coverage
+TEST_DATABASE_URL="postgres://px0:px0secret@localhost:5432/px0_test?sslmode=disable" make test-coverage
 ```
 
 ### 5. Code Quality & Formatting
