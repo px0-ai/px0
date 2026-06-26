@@ -7,9 +7,10 @@ import (
 )
 
 type Team struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID  `json:"id"`
+	OrgID     *uuid.UUID `json:"org_id,omitempty"`
+	Name      string     `json:"name"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type TeamMember struct {

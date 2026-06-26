@@ -48,6 +48,23 @@ func CreateVerifiedUser(ctx context.Context, email, passwordHash string) (*model
 	return u, nil
 }
 
+func CreateAdminUser(ctx context.Context, email, passwordHash string, isVerified bool) (*model.User, error) {
+	u := &model.User{}
+	err := db.Pool.QueryRow(ctx,
+		`INSERT INTO users (email, password_hash, is_admin, is_verified) VALUES ($1, $2, TRUE, $3)
+		 RETURNING id, email, password_hash, is_admin, is_verified, created_at`,
+		email, passwordHash, isVerified,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &u.IsVerified, &u.CreatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrDuplicate
+		}
+		return nil, fmt.Errorf("create admin user: %w", err)
+	}
+	return u, nil
+}
+
 func GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
 	u := &model.User{}
 	err := db.Pool.QueryRow(ctx,

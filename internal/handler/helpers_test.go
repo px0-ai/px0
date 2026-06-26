@@ -89,8 +89,9 @@ func setupUser(t *testing.T, a *testApp) string {
 	email := "test@px0.dev"
 	password := "testpassword"
 
+	// Register publicly (without admin key and without team_id) to become an Admin user.
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "test_admin_key")
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "register failed")
@@ -101,8 +102,11 @@ func setupUser(t *testing.T, a *testApp) string {
 	userID, err := uuid.Parse(userIDStr)
 	require.NoError(t, err)
 
-	// Create and associate a team for the user to satisfy RBAC and organization constraints in subsequent tests.
+	// Manually verify user and create a default team for them in the test DB
 	ctx := context.Background()
+	err = store.VerifyUser(ctx, userID)
+	require.NoError(t, err)
+
 	team, err := store.CreateTeam(ctx, "Test Setup Team")
 	require.NoError(t, err)
 	err = store.AddTeamMember(ctx, team.ID, userID)

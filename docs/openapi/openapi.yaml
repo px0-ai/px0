@@ -33,10 +33,16 @@ paths:
     $ref: "./teams.yaml#/paths/~1v1~1teams"
   /v1/admin/teams:
     $ref: "./teams.yaml#/paths/~1v1~1admin~1teams"
+  /v1/admin/teams/{id}:
+    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}"
   /v1/admin/teams/{id}/members:
     $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members"
   /v1/admin/teams/{id}/members/{userID}:
     $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members~1{userID}"
+  /v1/admin/orgs:
+    $ref: "./orgs.yaml#/paths/~1v1~1admin~1orgs"
+  /v1/admin/orgs/{id}:
+    $ref: "./orgs.yaml#/paths/~1v1~1admin~1orgs~1{id}"
   /v1/prompts:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
@@ -70,6 +76,8 @@ components:
       $ref: "./auth.yaml#/components/schemas/User"
     APIKey:
       $ref: "./api-keys.yaml#/components/schemas/APIKey"
+    Organization:
+      $ref: "./orgs.yaml#/components/schemas/Organization"
     Prompt:
       $ref: "./prompts.yaml#/components/schemas/Prompt"
     PromptVersion:

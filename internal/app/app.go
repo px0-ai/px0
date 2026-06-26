@@ -31,8 +31,13 @@ func New() *fiber.App {
 
 	adminTeams := v1.Group("/admin/teams", middleware.RequireAdmin)
 	adminTeams.Post("", handler.CreateTeam)
+	adminTeams.Put("/:id", handler.UpdateTeam)
 	adminTeams.Post("/:id/members", handler.AddTeamMember)
 	adminTeams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
+
+	adminOrgs := v1.Group("/admin/orgs", middleware.RequireAdmin)
+	adminOrgs.Post("", handler.CreateOrg)
+	adminOrgs.Put("/:id", handler.UpdateOrg)
 
 	apiKeys := v1.Group("/api-keys", middleware.RequireSession)
 	apiKeys.Post("", handler.CreateAPIKey)

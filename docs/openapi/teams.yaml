@@ -47,6 +47,10 @@ paths:
                 name:
                   type: string
                   example: "Engineering"
+                org_id:
+                  type: string
+                  format: uuid
+                  example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
       responses:
         "201":
           description: Created
@@ -71,6 +75,72 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+  /v1/admin/teams/{id}:
+    put:
+      summary: Update Team
+      description: Updates an existing team. Requires admin privileges.
+      operationId: updateTeam
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: "Engineering"
+                org_id:
+                  type: string
+                  format: uuid
+                  example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: "#/components/schemas/Team"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Not Found
           content:
             application/json:
               schema:
@@ -154,6 +224,9 @@ components:
         - created_at
       properties:
         id:
+          type: string
+          format: uuid
+        org_id:
           type: string
           format: uuid
         name:

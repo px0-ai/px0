@@ -25,8 +25,9 @@ import (
 )
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string     `json:"email"`
+	Password string     `json:"password"`
+	TeamID   *uuid.UUID `json:"team_id,omitempty"`
 }
 
 type loginRequest struct {
@@ -56,23 +57,51 @@ func Register(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	// Determine if the caller is an Admin (using ADMIN_KEY or a valid admin session)
+	isCallerAdmin := false
 	adminKey := os.Getenv("ADMIN_KEY")
-	hasAdminKey := false
-	if adminKey != "" {
-		authHeader := c.Get("Authorization")
-		apiKeyHeader := c.Get("X-API-Key")
+	authHeader := c.Get("Authorization")
+	apiKeyHeader := c.Get("X-API-Key")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
 
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == adminKey || authHeader == adminKey || apiKeyHeader == adminKey {
-			hasAdminKey = true
+	if adminKey != "" && (token == adminKey || authHeader == adminKey || apiKeyHeader == adminKey) {
+		isCallerAdmin = true
+	} else if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") && token != "" {
+		if session, err := store.GetSessionByToken(c.Context(), token); err == nil {
+			if callerUser, err := store.GetUserByID(c.Context(), session.UserID); err == nil && callerUser.IsAdmin {
+				isCallerAdmin = true
+			}
+		}
+	}
+
+	// Validate team_id depending on whether the caller is an Admin
+	if isCallerAdmin {
+		if req.TeamID == nil {
+			return apierr.NewAPIError(fiber.StatusBadRequest, "admin must pass team_id when registering a user").Respond(c)
+		}
+	} else {
+		if req.TeamID != nil {
+			return apierr.NewAPIError(fiber.StatusForbidden, "only admins can register users with a team_id").Respond(c)
 		}
 	}
 
 	var user *model.User
-	if hasAdminKey {
-		user, err = store.CreateVerifiedUser(c.Context(), req.Email, string(hash))
-	} else {
+	if isCallerAdmin {
+		// Admin registers standard user directly as verified
 		user, err = store.CreateUser(c.Context(), req.Email, string(hash))
+		if err == nil {
+			// Automatically mark user as verified
+			_ = store.VerifyUser(c.Context(), user.ID)
+			user.IsVerified = true
+
+			// Join specified team
+			if err = store.AddTeamMember(c.Context(), *req.TeamID, user.ID); err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		}
+	} else {
+		// Public registration creates a new Admin user (unverified by default)
+		user, err = store.CreateAdminUser(c.Context(), req.Email, string(hash), false)
 	}
 
 	if err != nil {
@@ -82,7 +111,7 @@ func Register(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if !hasAdminKey {
+	if !isCallerAdmin {
 		code, err := GenerateVerificationCode()
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)

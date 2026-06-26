@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
@@ -11,7 +13,13 @@ import (
 )
 
 type createTeamRequest struct {
-	Name string `json:"name"`
+	Name  string     `json:"name"`
+	OrgID *uuid.UUID `json:"org_id,omitempty"`
+}
+
+type updateTeamRequest struct {
+	Name  string     `json:"name"`
+	OrgID *uuid.UUID `json:"org_id,omitempty"`
 }
 
 type addTeamMemberRequest struct {
@@ -27,11 +35,42 @@ func CreateTeam(c *fiber.Ctx) error {
 		return apierr.ErrNameRequired.Respond(c)
 	}
 
-	team, err := store.CreateTeam(c.Context(), req.Name)
+	var team *model.Team
+	var err error
+	if req.OrgID != nil {
+		team, err = store.CreateTeamWithOrg(c.Context(), req.Name, *req.OrgID)
+	} else {
+		team, err = store.CreateTeam(c.Context(), req.Name)
+	}
+
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"team": team})
+}
+
+func UpdateTeam(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	var req updateTeamRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+	if req.Name == "" {
+		return apierr.ErrNameRequired.Respond(c)
+	}
+
+	team, err := store.UpdateTeam(c.Context(), id, req.Name, req.OrgID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"team": team})
 }
 
 func AddTeamMember(c *fiber.Ctx) error {

@@ -26,18 +26,19 @@ func TestRegister_Success(t *testing.T) {
 	assert.Equal(t, "new@test.com", user["email"])
 	assert.NotEmpty(t, user["id"])
 	assert.Equal(t, false, user["is_verified"])
+	assert.Equal(t, true, user["is_admin"]) // Public registers as Admin
 }
 
 func TestRegister_DuplicateEmail(t *testing.T) {
 	a := newTestApp(t)
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password123"}`, "test_admin_key")
+		`{"email":"dup@test.com","password":"password123"}`, "")
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password456"}`, "test_admin_key")
+		`{"email":"dup@test.com","password":"password456"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -76,34 +77,55 @@ func TestRegister_ShortPassword(t *testing.T) {
 func TestLogin_Success(t *testing.T) {
 	a := newTestApp(t)
 
-	// register first with admin key to directly verify
+	// register first
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"login@test.com","password":"password123"}`, "test_admin_key")
-	resp, _ := a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost, "/v1/auth/login",
 		`{"email":"login@test.com","password":"password123"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	
+	body := decodeBody(t, resp)
+	userVal := body["user"].(map[string]any)
+	userIDStr := userVal["id"].(string)
+	resp.Body.Close()
+
+	// Manually verify so login succeeds
+	user, err := store.GetUserByEmail(context.Background(), "login@test.com")
+	require.NoError(t, err)
+	err = store.VerifyUser(context.Background(), user.ID)
+	require.NoError(t, err)
+
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		`{"email":"login@test.com","password":"password123"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	body := decodeBody(t, resp)
+	body = decodeBody(t, resp)
 	assert.NotEmpty(t, body["token"])
 	assert.NotEmpty(t, body["expires_at"])
 	assert.NotEmpty(t, body["user"])
+	assert.Equal(t, userIDStr, body["user"].(map[string]any)["id"])
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
 	a := newTestApp(t)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"wp@test.com","password":"password123"}`, "test_admin_key")
-	resp, _ := a.Test(req)
+		`{"email":"wp@test.com","password":"password123"}`, "")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 	resp.Body.Close()
+
+	// Manually verify
+	user, err := store.GetUserByEmail(context.Background(), "wp@test.com")
+	require.NoError(t, err)
+	err = store.VerifyUser(context.Background(), user.ID)
+	require.NoError(t, err)
 
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
 		`{"email":"wp@test.com","password":"wrongpassword"}`, "")
-	resp, err := a.Test(req)
+	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
@@ -165,10 +187,15 @@ func TestMe_Unauthorized(t *testing.T) {
 
 func TestRegister_BypassVerificationWithAdminKey(t *testing.T) {
 	a := newTestApp(t)
+
+	// Create a team first since admins MUST pass a team_id when registering a user
+	ctx := context.Background()
+	team, err := store.CreateTeam(ctx, "Bypass Verification Team")
+	require.NoError(t, err)
 	
-	// register with admin key as bearer token
+	// register with admin key as bearer token and pass team_id
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"bypass-bearer@test.com","password":"password123"}`, "test_admin_key")
+		fmt.Sprintf(`{"email":"bypass-bearer@test.com","password":"password123","team_id":%q}`, team.ID), "test_admin_key")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -186,9 +213,9 @@ func TestRegister_BypassVerificationWithAdminKey(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// register with admin key as X-API-Key header
+	// register with admin key as X-API-Key header and pass team_id
 	req = newAPIKeyReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"bypass-header@test.com","password":"password123"}`, "test_admin_key")
+		fmt.Sprintf(`{"email":"bypass-header@test.com","password":"password123","team_id":%q}`, team.ID), "test_admin_key")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -202,7 +229,7 @@ func TestRegister_BypassVerificationWithAdminKey(t *testing.T) {
 func TestRegister_AndVerifyFlow(t *testing.T) {
 	a := newTestApp(t)
 
-	// 1. Register without admin key (unverified)
+	// 1. Register publicly without admin key and without team_id (unverified admin)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
 		`{"email":"verify-flow@test.com","password":"password123"}`, "")
 	resp, err := a.Test(req)
@@ -212,6 +239,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	body := decodeBody(t, resp)
 	userVal := body["user"].(map[string]any)
 	assert.Equal(t, false, userVal["is_verified"])
+	assert.Equal(t, true, userVal["is_admin"]) // Registered publicly as Admin
 	resp.Body.Close()
 
 	// 2. Login should fail (user is not verified)

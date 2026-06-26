@@ -36,13 +36,15 @@ paths:
   /v1/auth/register:
     post:
       summary: Register a new user
-      description: Registers a new user with an email and password.
+      description: Registers a new user with an email and password. Optional team_id can be passed by an admin.
       operationId: register
       tags:
         - Auth
       x-edge-cases:
         - Fails with 400 Bad Request if email or password are empty, or password is shorter than 8 characters.
         - Fails with 409 Conflict if email is already registered.
+        - If admin registers a user, team_id is required.
+        - If public user registers, team_id is forbidden.
       x-test-coverage:
         - 'TestRegister_Success: Verifies standard register returns 201 and User model.'
         - 'TestRegister_EmptyFields: Verifies empty fields reject with 400 and ''email and password are required''.'
@@ -248,21 +250,18 @@ paths:
           description: Logged out successfully (No content)
   /v1/auth/me:
     get:
-      summary: Get Current User
+      summary: Logout
       description: Returns the profile of the currently logged-in user.
-      operationId: getMe
+      operationId: me
       tags:
         - Auth
       security:
         - BearerAuth: []
-      x-edge-cases:
-        - Requires session authentication. Programmatic API keys are not authorized.
       x-test-coverage:
-        - 'TestMe_Success: Verifies current user profile retrieval.'
-        - 'TestMe_Unauthorized: Verifies that accessing the endpoint with no token returns 401 and ''unauthorized''.'
+        - 'TestMe_WithSession: Verifies self profile lookup.'
       responses:
         '200':
-          description: Current user payload
+          description: User profile
           content:
             application/json:
               schema:
@@ -280,22 +279,6 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: unauthorized
-        '403':
-          description: Forbidden / Session required
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: session required
-        '500':
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: internal error
   /v1/api-keys:
     post:
       summary: Create an API Key
@@ -501,6 +484,10 @@ paths:
                 name:
                   type: string
                   example: Engineering
+                org_id:
+                  type: string
+                  format: uuid
+                  example: f47ac10b-58cc-4372-a567-0e02b2c3d479
       responses:
         '201':
           description: Created
@@ -525,6 +512,72 @@ paths:
                 $ref: '#/components/schemas/APIError'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/admin/teams/{id}:
+    put:
+      summary: Update Team
+      description: Updates an existing team. Requires admin privileges.
+      operationId: updateTeam
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Engineering
+                org_id:
+                  type: string
+                  format: uuid
+                  example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    $ref: '#/components/schemas/Team'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Not Found
           content:
             application/json:
               schema:
@@ -597,6 +650,117 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden
+  /v1/admin/orgs:
+    post:
+      summary: Create Organization
+      description: Creates a new organization. Requires admin privileges.
+      operationId: createOrg
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Acme Corp
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  org:
+                    $ref: '#/components/schemas/Organization'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/admin/orgs/{id}:
+    put:
+      summary: Update Organization
+      description: Updates an existing organization's metadata. Requires admin privileges.
+      operationId: updateOrg
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Acme Industries
+      responses:
+        '200':
+          description: Updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  org:
+                    $ref: '#/components/schemas/Organization'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts:
     post:
       summary: Create a Prompt
@@ -1338,7 +1502,7 @@ components:
       properties:
         error:
           type: string
-          description: Standard error message.
+          example: invalid credentials
       required:
         - error
     User:
@@ -1355,6 +1519,9 @@ components:
         is_verified:
           type: boolean
           description: Whether the user's email has been verified.
+        is_admin:
+          type: boolean
+          description: Whether the user is an admin.
         created_at:
           type: string
           format: date-time
@@ -1363,6 +1530,7 @@ components:
         - id
         - email
         - is_verified
+        - is_admin
         - created_at
     APIKey:
       type: object
@@ -1393,6 +1561,21 @@ components:
         - key_prefix
         - created_at
         - last_used_at
+    Organization:
+      type: object
+      required:
+        - id
+        - name
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     Prompt:
       type: object
       properties:
@@ -1494,6 +1677,10 @@ components:
           type: string
           minLength: 8
           example: secretpassword123
+        team_id:
+          type: string
+          format: uuid
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
       required:
         - email
         - password
@@ -1574,6 +1761,9 @@ components:
         - created_at
       properties:
         id:
+          type: string
+          format: uuid
+        org_id:
           type: string
           format: uuid
         name:
