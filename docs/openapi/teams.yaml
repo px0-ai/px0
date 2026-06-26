@@ -4,6 +4,8 @@ paths:
       summary: List User Teams
       description: Returns a list of teams the authenticated user belongs to.
       operationId: listUserTeams
+      tags:
+        - Teams
       security:
         - BearerAuth: []
       responses:
@@ -29,6 +31,8 @@ paths:
       summary: Create Team
       description: Creates a new team. Requires admin privileges.
       operationId: createTeam
+      tags:
+        - Teams
       security:
         - BearerAuth: []
       requestBody:
@@ -76,6 +80,8 @@ paths:
       summary: Add Team Member
       description: Adds a user to a team. Requires admin privileges.
       operationId: addTeamMember
+      tags:
+        - Teams
       security:
         - BearerAuth: []
       parameters:
@@ -111,6 +117,8 @@ paths:
       summary: Remove Team Member
       description: Removes a user from a team. Requires admin privileges.
       operationId: removeTeamMember
+      tags:
+        - Teams
       security:
         - BearerAuth: []
       parameters:
