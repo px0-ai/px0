@@ -44,7 +44,6 @@ func (a *testApp) Test(req *http.Request, _ ...int) (*http.Response, error) {
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	testutil.SetupDB(t)
-	t.Setenv("ADMIN_KEY", "test_admin_key")
 	return &testApp{
 		App: app.New(),
 		t:   t,

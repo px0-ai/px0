@@ -185,47 +185,6 @@ func TestMe_Unauthorized(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestRegister_BypassVerificationWithAdminKey(t *testing.T) {
-	a := newTestApp(t)
-
-	// Create a team first since admins MUST pass a team_id when registering a user
-	ctx := context.Background()
-	team, err := store.CreateTeam(ctx, "Bypass Verification Team")
-	require.NoError(t, err)
-	
-	// register with admin key as bearer token and pass team_id
-	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":"bypass-bearer@test.com","password":"password123","team_id":%q}`, team.ID), "test_admin_key")
-	resp, err := a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
-	body := decodeBody(t, resp)
-	user := body["user"].(map[string]any)
-	assert.Equal(t, true, user["is_verified"])
-	resp.Body.Close()
-
-	// should be able to login directly
-	req = newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"bypass-bearer@test.com","password":"password123"}`, "")
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
-
-	// register with admin key as X-API-Key header and pass team_id
-	req = newAPIKeyReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":"bypass-header@test.com","password":"password123","team_id":%q}`, team.ID), "test_admin_key")
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
-	body = decodeBody(t, resp)
-	user = body["user"].(map[string]any)
-	assert.Equal(t, true, user["is_verified"])
-	resp.Body.Close()
-}
-
 func TestRegister_AndVerifyFlow(t *testing.T) {
 	a := newTestApp(t)
 

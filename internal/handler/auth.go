@@ -57,19 +57,16 @@ func Register(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Determine if the caller is an Admin (using ADMIN_KEY or a valid admin session)
+	// Determine if the caller is an Admin (using a valid admin session)
 	isCallerAdmin := false
-	adminKey := os.Getenv("ADMIN_KEY")
 	authHeader := c.Get("Authorization")
-	apiKeyHeader := c.Get("X-API-Key")
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-
-	if adminKey != "" && (token == adminKey || authHeader == adminKey || apiKeyHeader == adminKey) {
-		isCallerAdmin = true
-	} else if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") && token != "" {
-		if session, err := store.GetSessionByToken(c.Context(), token); err == nil {
-			if callerUser, err := store.GetUserByID(c.Context(), session.UserID); err == nil && callerUser.IsAdmin {
-				isCallerAdmin = true
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token != "" {
+			if session, err := store.GetSessionByToken(c.Context(), token); err == nil {
+				if callerUser, err := store.GetUserByID(c.Context(), session.UserID); err == nil && callerUser.IsAdmin {
+					isCallerAdmin = true
+				}
 			}
 		}
 	}
