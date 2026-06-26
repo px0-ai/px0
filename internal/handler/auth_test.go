@@ -154,7 +154,7 @@ func TestLogout(t *testing.T) {
 	resp.Body.Close()
 
 	// token no longer works
-	req = newReq(t, http.MethodGet, "/v1/prompts", "", token)
+	req = newReq(t, http.MethodGet, "/v1/prompts/00000000-0000-0000-0000-000000000001", "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)

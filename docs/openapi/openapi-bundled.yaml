@@ -436,7 +436,7 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: internal error
-  /v1/teams:
+  /v1/me/teams:
     get:
       summary: List User Teams
       description: Returns a list of teams the authenticated user belongs to.
@@ -463,15 +463,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/admin/teams:
+  /v1/orgs/{orgID}/teams:
     post:
       summary: Create Team
-      description: Creates a new team. Requires admin privileges.
+      description: Creates a new team under a specific organization. Requires admin privileges.
       operationId: createTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization to create the team under.
       requestBody:
         required: true
         content:
@@ -484,10 +492,6 @@ paths:
                 name:
                   type: string
                   example: Engineering
-                org_id:
-                  type: string
-                  format: uuid
-                  example: f47ac10b-58cc-4372-a567-0e02b2c3d479
       responses:
         '201':
           description: Created
@@ -516,7 +520,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/admin/teams/{id}:
+  /v1/teams/{id}:
     put:
       summary: Update Team
       description: Updates an existing team. Requires admin privileges.
@@ -582,7 +586,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/admin/teams/{id}/members:
+  /v1/teams/{id}/members:
     post:
       summary: Add Team Member
       description: Adds a user to a team. Requires admin privileges.
@@ -619,7 +623,7 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden
-  /v1/admin/teams/{id}/members/{userID}:
+  /v1/teams/{id}/members/{userID}:
     delete:
       summary: Remove Team Member
       description: Removes a user from a team. Requires admin privileges.
@@ -650,7 +654,7 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden
-  /v1/admin/orgs:
+  /v1/orgs:
     post:
       summary: Create Organization
       description: Creates a new organization. Requires admin privileges.
@@ -699,7 +703,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/admin/orgs/{id}:
+  /v1/orgs/{id}:
     put:
       summary: Update Organization
       description: Updates an existing organization's metadata. Requires admin privileges.
@@ -761,7 +765,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/prompts:
+  /v1/teams/{teamID}/prompts:
     post:
       summary: Create a Prompt
       description: Creates a new prompt container.
@@ -771,6 +775,14 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the team.
       x-test-coverage:
         - 'TestCreatePrompt_Success: Verifies prompt creation and response payload.'
         - 'TestCreatePrompt_MissingName: Verifies that missing name returns 400 and ''name is required''.'
@@ -831,6 +843,14 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the team.
       x-test-coverage:
         - 'TestListPrompts: Verifies listing populated prompt containers.'
         - 'TestListPrompts_Empty: Verifies that listing when empty returns an empty array.'

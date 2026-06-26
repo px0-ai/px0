@@ -1,19 +1,25 @@
 package handler_test
 
 import (
+	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/store"
 )
 
 func TestCreatePrompt_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
 
-	req := newReq(t, http.MethodPost, "/v1/prompts",
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
 		`{"name":"My Prompt","description":"Useful prompt"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -29,8 +35,9 @@ func TestCreatePrompt_Success(t *testing.T) {
 func TestCreatePrompt_MissingName(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
 
-	req := newReq(t, http.MethodPost, "/v1/prompts",
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
 		`{"description":"no name"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -40,7 +47,7 @@ func TestCreatePrompt_MissingName(t *testing.T) {
 
 func TestCreatePrompt_Unauthorized(t *testing.T) {
 	a := newTestApp(t)
-	req := newReq(t, http.MethodPost, "/v1/prompts",
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", uuid.New().String()),
 		`{"name":"p"}`, "")
 
 	resp, err := a.Test(req)
@@ -52,11 +59,12 @@ func TestCreatePrompt_Unauthorized(t *testing.T) {
 func TestListPrompts(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
 
 	setupPrompt(t, a, token)
 	setupPrompt(t, a, token)
 
-	req := newReq(t, http.MethodGet, "/v1/prompts", "", token)
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -69,8 +77,9 @@ func TestListPrompts(t *testing.T) {
 func TestListPrompts_Empty(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
 
-	req := newReq(t, http.MethodGet, "/v1/prompts", "", token)
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -143,7 +152,13 @@ func TestPrompts_APIKeyAuth(t *testing.T) {
 	apiKey := setupAPIKey(t, a, token)
 
 	// API key works for listing prompts
-	req := newAPIKeyReq(t, http.MethodGet, "/v1/prompts", "", apiKey)
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))
+	ctx := context.Background()
+	apiKeyModel, err := store.GetAPIKeyByHash(ctx, hash)
+	require.NoError(t, err)
+	teamID := apiKeyModel.TeamID.String()
+
+	req := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", apiKey)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

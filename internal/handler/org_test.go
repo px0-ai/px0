@@ -14,7 +14,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	token := setupUser(t, a) // verified admin user
 
 	// 1. Create Organization
-	req := newReq(t, http.MethodPost, "/v1/admin/orgs", `{"name":"Acme Corp"}`, token)
+	req := newReq(t, http.MethodPost, "/v1/orgs", `{"name":"Acme Corp"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -25,7 +25,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	orgIDStr := org["id"].(string)
 
 	// 2. Update Organization
-	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/admin/orgs/%s", orgIDStr), `{"name":"Acme Industries"}`, token)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/orgs/%s", orgIDStr), `{"name":"Acme Industries"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -36,7 +36,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	assert.Equal(t, orgIDStr, org["id"])
 
 	// 3. Create Team with Org reference
-	req = newReq(t, http.MethodPost, "/v1/admin/teams", fmt.Sprintf(`{"name":"Dev Team","org_id":%q}`, orgIDStr), token)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Dev Team"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -48,7 +48,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	teamIDStr := team["id"].(string)
 
 	// 4. Update Team (change name & org reference)
-	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/admin/teams/%s", teamIDStr), fmt.Sprintf(`{"name":"Engineers Team","org_id":%q}`, orgIDStr), token)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s", teamIDStr), fmt.Sprintf(`{"name":"Engineers Team","org_id":%q}`, orgIDStr), token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

@@ -26,18 +26,22 @@ func New() *fiber.App {
 	auth.Delete("/session", handler.Logout)
 	auth.Get("/me", middleware.RequireSession, handler.Me)
 
-	teams := v1.Group("/teams", middleware.RequireSession)
-	teams.Get("", handler.ListUserTeams)
+	me := v1.Group("/me", middleware.RequireSession)
+	me.Get("/teams", handler.ListUserTeams)
 
-	adminTeams := v1.Group("/admin/teams", middleware.RequireAdmin)
-	adminTeams.Post("", handler.CreateTeam)
-	adminTeams.Put("/:id", handler.UpdateTeam)
-	adminTeams.Post("/:id/members", handler.AddTeamMember)
-	adminTeams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
+	orgs := v1.Group("/orgs", middleware.RequireAdmin)
+	orgs.Post("", handler.CreateOrg)
+	orgs.Put("/:id", handler.UpdateOrg)
+	orgs.Post("/:orgID/teams", handler.CreateTeam)
 
-	adminOrgs := v1.Group("/admin/orgs", middleware.RequireAdmin)
-	adminOrgs.Post("", handler.CreateOrg)
-	adminOrgs.Put("/:id", handler.UpdateOrg)
+	teamPrompts := v1.Group("/teams/:teamID/prompts", middleware.RequireAuth)
+	teamPrompts.Post("", handler.CreatePrompt)
+	teamPrompts.Get("", handler.ListPrompts)
+
+	teams := v1.Group("/teams", middleware.RequireAdmin)
+	teams.Put("/:id", handler.UpdateTeam)
+	teams.Post("/:id/members", handler.AddTeamMember)
+	teams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
 
 	apiKeys := v1.Group("/api-keys", middleware.RequireSession)
 	apiKeys.Post("", handler.CreateAPIKey)
@@ -45,8 +49,6 @@ func New() *fiber.App {
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)
 
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
-	prompts.Post("", handler.CreatePrompt)
-	prompts.Get("", handler.ListPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
 	prompts.Delete("/:id", handler.DeletePrompt)
 

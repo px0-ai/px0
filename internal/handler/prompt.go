@@ -14,10 +14,30 @@ import (
 type createPromptRequest struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
-	TeamIDs     []uuid.UUID `json:"team_ids"`
 }
 
 func CreatePrompt(c *fiber.Ctx) error {
+	teamID, err := uuid.Parse(c.Params("teamID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	allowedIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	isAllowed := false
+	for _, id := range allowedIDs {
+		if id == teamID {
+			isAllowed = true
+			break
+		}
+	}
+	if !isAllowed {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
 	var req createPromptRequest
 	if err := c.BodyParser(&req); err != nil {
 		return apierr.ErrInvalidRequestBody.Respond(c)
@@ -26,16 +46,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrNameRequired.Respond(c)
 	}
 
-	teamIDs := req.TeamIDs
-	if len(teamIDs) == 0 {
-		var err error
-		teamIDs, err = getRequestTeamIDs(c)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-	}
-
-	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description, teamIDs)
+	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description, []uuid.UUID{teamID})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -43,12 +54,28 @@ func CreatePrompt(c *fiber.Ctx) error {
 }
 
 func ListPrompts(c *fiber.Ctx) error {
-	teamIDs, err := getRequestTeamIDs(c)
+	teamID, err := uuid.Parse(c.Params("teamID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	allowedIDs, err := getRequestTeamIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompts, err := store.ListPrompts(c.Context(), teamIDs)
+	isAllowed := false
+	for _, id := range allowedIDs {
+		if id == teamID {
+			isAllowed = true
+			break
+		}
+	}
+	if !isAllowed {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	prompts, err := store.ListPrompts(c.Context(), []uuid.UUID{teamID})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}

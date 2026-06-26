@@ -43,6 +43,7 @@ func (a *testApp) Test(req *http.Request, _ ...int) (*http.Response, error) {
 
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
+	t.Setenv("RESEND_API_KEY", "")
 	testutil.SetupDB(t)
 	return &testApp{
 		App: app.New(),
@@ -124,7 +125,16 @@ func setupUser(t *testing.T, a *testApp) string {
 // setupPrompt creates a prompt and returns its ID.
 func setupPrompt(t *testing.T, a *testApp, token string) string {
 	t.Helper()
-	req := newReq(t, http.MethodPost, "/v1/prompts",
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams, "User has no teams")
+	teamID := teams[0].ID
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
 		`{"name":"Test Prompt","description":"A test prompt"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -247,4 +257,17 @@ func AssertContract(t *testing.T, resp *http.Response) {
 	}
 	err = openapi3filter.ValidateResponse(context.Background(), respInput)
 	require.NoError(t, err, "Response validation failed against OpenAPI spec (drift detected!)")
+}
+
+// setupUserTeam returns the first team ID for the user's session.
+func setupUserTeam(t *testing.T, token string) string {
+	t.Helper()
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	return teams[0].ID.String()
 }

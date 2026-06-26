@@ -3,7 +3,7 @@ info:
   title: Prompts & Rendering API
   version: 1.0.0
 paths:
-  /v1/prompts:
+  /v1/teams/{teamID}/prompts:
     post:
       summary: Create a Prompt
       description: Creates a new prompt container.
@@ -13,6 +13,14 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the team.
       x-test-coverage:
         - "TestCreatePrompt_Success: Verifies prompt creation and response payload."
         - "TestCreatePrompt_MissingName: Verifies that missing name returns 400 and 'name is required'."
@@ -72,6 +80,14 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the team.
       x-test-coverage:
         - "TestListPrompts: Verifies listing populated prompt containers."
         - "TestListPrompts_Empty: Verifies that listing when empty returns an empty array."

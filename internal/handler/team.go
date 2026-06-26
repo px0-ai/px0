@@ -27,6 +27,11 @@ type addTeamMemberRequest struct {
 }
 
 func CreateTeam(c *fiber.Ctx) error {
+	orgID, err := uuid.Parse(c.Params("orgID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
 	var req createTeamRequest
 	if err := c.BodyParser(&req); err != nil {
 		return apierr.ErrInvalidRequestBody.Respond(c)
@@ -35,14 +40,7 @@ func CreateTeam(c *fiber.Ctx) error {
 		return apierr.ErrNameRequired.Respond(c)
 	}
 
-	var team *model.Team
-	var err error
-	if req.OrgID != nil {
-		team, err = store.CreateTeamWithOrg(c.Context(), req.Name, *req.OrgID)
-	} else {
-		team, err = store.CreateTeam(c.Context(), req.Name)
-	}
-
+	team, err := store.CreateTeamWithOrg(c.Context(), req.Name, orgID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}

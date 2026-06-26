@@ -1,5 +1,5 @@
 paths:
-  /v1/admin/orgs:
+  /v1/orgs:
     post:
       summary: Create Organization
       description: Creates a new organization. Requires admin privileges.
@@ -48,7 +48,7 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
-  /v1/admin/orgs/{id}:
+  /v1/orgs/{id}:
     put:
       summary: Update Organization
       description: Updates an existing organization's metadata. Requires admin privileges.

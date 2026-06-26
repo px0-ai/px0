@@ -29,22 +29,22 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
   /v1/api-keys/{id}:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
-  /v1/teams:
-    $ref: "./teams.yaml#/paths/~1v1~1teams"
-  /v1/admin/teams:
-    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams"
-  /v1/admin/teams/{id}:
-    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}"
-  /v1/admin/teams/{id}/members:
-    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members"
-  /v1/admin/teams/{id}/members/{userID}:
-    $ref: "./teams.yaml#/paths/~1v1~1admin~1teams~1{id}~1members~1{userID}"
-  /v1/admin/orgs:
-    $ref: "./orgs.yaml#/paths/~1v1~1admin~1orgs"
-  /v1/admin/orgs/{id}:
-    $ref: "./orgs.yaml#/paths/~1v1~1admin~1orgs~1{id}"
-  /v1/prompts:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts"
+  /v1/me/teams:
+    $ref: "./teams.yaml#/paths/~1v1~1me~1teams"
+  /v1/orgs/{orgID}/teams:
+    $ref: "./teams.yaml#/paths/~1v1~1orgs~1{orgID}~1teams"
+  /v1/teams/{id}:
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}"
+  /v1/teams/{id}/members:
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members"
+  /v1/teams/{id}/members/{userID}:
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
+  /v1/orgs:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs"
+  /v1/orgs/{id}:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{id}"
+  /v1/teams/{teamID}/prompts:
+    $ref: "./prompts.yaml#/paths/~1v1~1teams~1{teamID}~1prompts"
   /v1/prompts/{id}:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
   /v1/prompts/{id}/render:
