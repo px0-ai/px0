@@ -19,6 +19,8 @@ paths:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1register"
   /v1/auth/login:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1login"
+  /v1/auth/verify:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1verify"
   /v1/auth/session:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
   /v1/auth/me:

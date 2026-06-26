@@ -22,6 +22,7 @@ func New() *fiber.App {
 	auth := v1.Group("/auth")
 	auth.Post("/register", handler.Register)
 	auth.Post("/login", handler.Login)
+	auth.Post("/verify", handler.Verify)
 	auth.Delete("/session", handler.Logout)
 	auth.Get("/me", middleware.RequireSession, handler.Me)
 

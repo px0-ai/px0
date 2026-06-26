@@ -72,7 +72,7 @@ func ListAPIKeys(c *fiber.Ctx) error {
 	if keys == nil {
 		keys = []*model.APIKey{}
 	}
-	return c.JSON(fiber.Map{"keys": keys})
+	return c.JSON(fiber.Map{"api_keys": keys})
 }
 
 func DeleteAPIKey(c *fiber.Ctx) error {

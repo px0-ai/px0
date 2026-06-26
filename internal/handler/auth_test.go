@@ -1,11 +1,15 @@
 package handler_test
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/store"
 )
 
 func TestRegister_Success(t *testing.T) {
@@ -21,18 +25,19 @@ func TestRegister_Success(t *testing.T) {
 	user := body["user"].(map[string]any)
 	assert.Equal(t, "new@test.com", user["email"])
 	assert.NotEmpty(t, user["id"])
+	assert.Equal(t, false, user["is_verified"])
 }
 
 func TestRegister_DuplicateEmail(t *testing.T) {
 	a := newTestApp(t)
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password123"}`, "")
+		`{"email":"dup@test.com","password":"password123"}`, "test_admin_key")
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password456"}`, "")
+		`{"email":"dup@test.com","password":"password456"}`, "test_admin_key")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -71,9 +76,9 @@ func TestRegister_ShortPassword(t *testing.T) {
 func TestLogin_Success(t *testing.T) {
 	a := newTestApp(t)
 
-	// register first
+	// register first with admin key to directly verify
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"login@test.com","password":"password123"}`, "")
+		`{"email":"login@test.com","password":"password123"}`, "test_admin_key")
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
@@ -92,7 +97,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	a := newTestApp(t)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"wp@test.com","password":"password123"}`, "")
+		`{"email":"wp@test.com","password":"password123"}`, "test_admin_key")
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
@@ -155,5 +160,97 @@ func TestMe_Unauthorized(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestRegister_BypassVerificationWithAdminKey(t *testing.T) {
+	a := newTestApp(t)
+	
+	// register with admin key as bearer token
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"bypass-bearer@test.com","password":"password123"}`, "test_admin_key")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	
+	body := decodeBody(t, resp)
+	user := body["user"].(map[string]any)
+	assert.Equal(t, true, user["is_verified"])
+	resp.Body.Close()
+
+	// should be able to login directly
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		`{"email":"bypass-bearer@test.com","password":"password123"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// register with admin key as X-API-Key header
+	req = newAPIKeyReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"bypass-header@test.com","password":"password123"}`, "test_admin_key")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	
+	body = decodeBody(t, resp)
+	user = body["user"].(map[string]any)
+	assert.Equal(t, true, user["is_verified"])
+	resp.Body.Close()
+}
+
+func TestRegister_AndVerifyFlow(t *testing.T) {
+	a := newTestApp(t)
+
+	// 1. Register without admin key (unverified)
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	
+	body := decodeBody(t, resp)
+	userVal := body["user"].(map[string]any)
+	assert.Equal(t, false, userVal["is_verified"])
+	resp.Body.Close()
+
+	// 2. Login should fail (user is not verified)
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Fetch verification code from DB
+	user, err := store.GetUserByEmail(context.Background(), "verify-flow@test.com")
+	require.NoError(t, err)
+	
+	code, _, err := store.GetLatestVerificationCode(context.Background(), user.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, code)
+
+	// 4. Verify with incorrect code (should fail)
+	req = newReq(t, http.MethodPost, "/v1/auth/verify",
+		fmt.Sprintf(`{"email":"verify-flow@test.com","code":"invalid%s"}`, code), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 5. Verify with correct code
+	req = newReq(t, http.MethodPost, "/v1/auth/verify",
+		fmt.Sprintf(`{"email":"verify-flow@test.com","code":%q}`, code), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Login should now succeed!
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 }

@@ -160,6 +160,68 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: invalid credentials
+        '403':
+          description: User is not verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: user is not verified
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/auth/verify:
+    post:
+      summary: Verify User Email
+      description: Verifies a user's email address using a numeric code sent via email.
+      operationId: verifyEmail
+      tags:
+        - Auth
+      x-edge-cases:
+        - Fails with 400 Bad Request if verification code is invalid or expired.
+      x-test-coverage:
+        - 'TestRegister_AndVerifyFlow: Verifies the complete user verification flow.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+      responses:
+        '200':
+          description: Email verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: email verified successfully
+                required:
+                  - message
+        '400':
+          description: Invalid code or expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid verification code
+        '401':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid credentials
         '500':
           description: Internal Server Error
           content:
@@ -1290,6 +1352,9 @@ components:
           type: string
           format: email
           description: Email address of the user.
+        is_verified:
+          type: boolean
+          description: Whether the user's email has been verified.
         created_at:
           type: string
           format: date-time
@@ -1297,6 +1362,7 @@ components:
       required:
         - id
         - email
+        - is_verified
         - created_at
     APIKey:
       type: object
@@ -1444,6 +1510,19 @@ components:
       required:
         - email
         - password
+    VerifyRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        code:
+          type: string
+          example: '123456'
+      required:
+        - email
+        - code
     CreateAPIKeyRequest:
       type: object
       properties:

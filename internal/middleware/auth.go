@@ -65,6 +65,12 @@ func trySessionAuth(c *fiber.Ctx) bool {
 		return false
 	}
 
+	// Fetch user to ensure they are verified
+	user, err := store.GetUserByID(c.Context(), session.UserID)
+	if err != nil || !user.IsVerified {
+		return false
+	}
+
 	c.Locals(LocalsUserID, session.UserID)
 	return true
 }

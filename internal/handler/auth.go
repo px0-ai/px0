@@ -1,9 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +20,7 @@ import (
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/middleware"
+	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -26,6 +32,11 @@ type registerRequest struct {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type verifyRequest struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
 }
 
 func Register(c *fiber.Ctx) error {
@@ -45,12 +56,47 @@ func Register(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	user, err := store.CreateUser(c.Context(), req.Email, string(hash))
+	adminKey := os.Getenv("ADMIN_KEY")
+	hasAdminKey := false
+	if adminKey != "" {
+		authHeader := c.Get("Authorization")
+		apiKeyHeader := c.Get("X-API-Key")
+
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == adminKey || authHeader == adminKey || apiKeyHeader == adminKey {
+			hasAdminKey = true
+		}
+	}
+
+	var user *model.User
+	if hasAdminKey {
+		user, err = store.CreateVerifiedUser(c.Context(), req.Email, string(hash))
+	} else {
+		user, err = store.CreateUser(c.Context(), req.Email, string(hash))
+	}
+
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
 			return apierr.ErrEmailAlreadyRegistered.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if !hasAdminKey {
+		code, err := GenerateVerificationCode()
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+
+		expiresAt := time.Now().Add(15 * time.Minute)
+		if err := store.CreateUserVerification(c.Context(), user.ID, code, expiresAt); err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+
+		if err := SendVerificationEmail(user.Email, code); err != nil {
+			_ = apierr.NewAPIError(fiber.StatusInternalServerError, "failed to send verification email").Respond(c, err)
+			return nil
+		}
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"user": user})
@@ -65,6 +111,10 @@ func Login(c *fiber.Ctx) error {
 	user, err := store.GetUserByEmail(c.Context(), req.Email)
 	if err != nil {
 		return apierr.ErrInvalidCredentials.Respond(c)
+	}
+
+	if !user.IsVerified {
+		return apierr.ErrUserNotVerified.Respond(c)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -92,6 +142,46 @@ func Login(c *fiber.Ctx) error {
 		"expires_at": session.ExpiresAt,
 		"user":       user,
 	})
+}
+
+func Verify(c *fiber.Ctx) error {
+	var req verifyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Email == "" || req.Code == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "email and code are required").Respond(c)
+	}
+
+	user, err := store.GetUserByEmail(c.Context(), req.Email)
+	if err != nil {
+		return apierr.ErrInvalidCredentials.Respond(c)
+	}
+
+	if user.IsVerified {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "user is already verified"})
+	}
+
+	code, expiresAt, err := store.GetLatestVerificationCode(c.Context(), user.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrInvalidVerificationCode.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if req.Code != code || time.Now().After(expiresAt) {
+		return apierr.ErrInvalidVerificationCode.Respond(c)
+	}
+
+	if err := store.VerifyUser(c.Context(), user.ID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	_ = store.DeleteUserVerifications(c.Context(), user.ID)
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "email verified successfully"})
 }
 
 func Logout(c *fiber.Ctx) error {
@@ -122,4 +212,61 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func GenerateVerificationCode() (string, error) {
+	var code string
+	for i := 0; i < 6; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			return "", err
+		}
+		code += num.String()
+	}
+	return code, nil
+}
+
+func SendVerificationEmail(email, code string) error {
+	apiKey := os.Getenv("RESEND_API_KEY")
+	if apiKey == "" {
+		fmt.Printf("[EMAIL] No RESEND_API_KEY set. Verification code for %s is: %s\n", email, code)
+		return nil
+	}
+
+	from := os.Getenv("RESEND_FROM_EMAIL")
+	if from == "" {
+		from = "onboarding@resend.dev"
+	}
+
+	payload := map[string]any{
+		"from":    from,
+		"to":      []string{email},
+		"subject": "Verify your email address",
+		"html":    fmt.Sprintf("<p>Your verification code is: <strong>%s</strong></p>", code),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status: %d", resp.StatusCode)
+	}
+
+	return nil
 }

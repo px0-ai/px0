@@ -17,9 +17,11 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/px0-ai/px0/internal/app"
+	"github.com/px0-ai/px0/internal/store"
 	"github.com/px0-ai/px0/internal/testutil"
 )
 
@@ -42,6 +44,7 @@ func (a *testApp) Test(req *http.Request, _ ...int) (*http.Response, error) {
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	testutil.SetupDB(t)
+	t.Setenv("ADMIN_KEY", "test_admin_key")
 	return &testApp{
 		App: app.New(),
 		t:   t,
@@ -87,11 +90,23 @@ func setupUser(t *testing.T, a *testApp) string {
 	password := "testpassword"
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "test_admin_key")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "register failed")
-	resp.Body.Close()
+	
+	body := decodeBody(t, resp)
+	userVal := body["user"].(map[string]any)
+	userIDStr := userVal["id"].(string)
+	userID, err := uuid.Parse(userIDStr)
+	require.NoError(t, err)
+
+	// Create and associate a team for the user to satisfy RBAC and organization constraints in subsequent tests.
+	ctx := context.Background()
+	team, err := store.CreateTeam(ctx, "Test Setup Team")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, team.ID, userID)
+	require.NoError(t, err)
 
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
 		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
@@ -99,7 +114,7 @@ func setupUser(t *testing.T, a *testApp) string {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "login failed")
 
-	body := decodeBody(t, resp)
+	body = decodeBody(t, resp)
 	return body["token"].(string)
 }
 
