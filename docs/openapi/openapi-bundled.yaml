@@ -375,7 +375,7 @@ paths:
           description: Logged out successfully (No content)
   /v1/auth/me:
     get:
-      summary: Logout
+      summary: Me
       description: Returns the profile of the currently logged-in user.
       operationId: me
       tags:

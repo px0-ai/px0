@@ -338,7 +338,7 @@ paths:
 
   /v1/auth/me:
     get:
-      summary: Logout
+      summary: Me
       description: Returns the profile of the currently logged-in user.
       operationId: me
       tags:
