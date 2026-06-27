@@ -226,10 +226,6 @@ func Login(c *fiber.Ctx) error {
 		return apierr.ErrInvalidCredentials.Respond(c)
 	}
 
-	if !user.IsVerified {
-		return apierr.ErrInvalidCredentials.Respond(c)
-	}
-
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return apierr.ErrInvalidCredentials.Respond(c)
 	}

@@ -94,9 +94,9 @@ func tryAccessTokenAuth(c *fiber.Ctx) bool {
 		return false
 	}
 
-	// Fetch user to ensure they are verified
-	user, err := store.GetUserByID(c.Context(), session.UserID)
-	if err != nil || !user.IsVerified {
+	// Fetch user
+	_, err = store.GetUserByID(c.Context(), session.UserID)
+	if err != nil {
 		return false
 	}
 

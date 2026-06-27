@@ -387,12 +387,15 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	assert.Equal(t, true, userVal["is_admin"]) // Registered publicly as Admin
 	resp.Body.Close()
 
-	// 2. Login should fail (user is not verified, returning generic invalid credentials)
+	// 2. Login should succeed even if user is not verified (post-login verification flow)
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
 		`{"email":"verify-flow@test.com","password":"Password123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.NotEmpty(t, body["token"])
+	assert.Equal(t, false, body["user"].(map[string]any)["is_verified"])
 	resp.Body.Close()
 
 	// 3. Fetch verification code from DB
@@ -419,12 +422,14 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 6. Login should now succeed!
+	// 6. Login should now succeed and return a verified user!
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
 		`{"email":"verify-flow@test.com","password":"Password123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, true, body["user"].(map[string]any)["is_verified"])
 	resp.Body.Close()
 }
 
