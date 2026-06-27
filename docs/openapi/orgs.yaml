@@ -1,4 +1,31 @@
 paths:
+  /v1/me/orgs:
+    get:
+      summary: List User Organizations
+      description: Returns a list of organizations the authenticated user belongs to.
+      operationId: listUserOrgs
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: A list of organizations with roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrganizationWithRole"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
   /v1/orgs:
     post:
       summary: Create Organization
@@ -125,6 +152,26 @@ components:
           format: uuid
         name:
           type: string
+        created_at:
+          type: string
+          format: date-time
+    OrganizationWithRole:
+      type: object
+      required:
+        - id
+        - name
+        - role
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum: [ADMIN, MEMBER]
+          example: ADMIN
         created_at:
           type: string
           format: date-time

@@ -26,3 +26,23 @@ type TeamMemberResponse struct {
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type TeamJoinRequest struct {
+	ID        uuid.UUID `json:"id"`
+	TeamID    uuid.UUID `json:"team_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Status    string    `json:"status"` // "pending", "approved", "rejected"
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type InboxItem struct {
+	ID        uuid.UUID `json:"id"`
+	TeamID    uuid.UUID `json:"team_id"`
+	TeamName  string    `json:"team_name"`
+	UserID    uuid.UUID `json:"user_id"`
+	UserEmail string    `json:"user_email"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

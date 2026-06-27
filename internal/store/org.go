@@ -79,3 +79,41 @@ func OrganizationNameExistsForOther(ctx context.Context, id uuid.UUID, name stri
 	}
 	return exists, nil
 }
+
+func GetUserOrganizations(ctx context.Context, userID uuid.UUID) ([]*model.OrganizationWithRole, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT DISTINCT o.id, o.name, o.created_at
+		 FROM organizations o
+		 JOIN teams t ON t.org_id = o.id
+		 JOIN team_members tm ON tm.team_id = t.id
+		 WHERE tm.user_id = $1
+		 ORDER BY o.created_at ASC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get user organizations: %w", err)
+	}
+	defer rows.Close()
+
+	var orgs []*model.OrganizationWithRole
+	for rows.Next() {
+		org := &model.OrganizationWithRole{}
+		if err := rows.Scan(&org.ID, &org.Name, &org.CreatedAt); err != nil {
+			return nil, err
+		}
+
+		// Determine the user's role in this organization
+		isAdmin, err := IsOrgAdmin(ctx, userID, org.ID)
+		if err != nil {
+			return nil, err
+		}
+		if isAdmin {
+			org.Role = "ADMIN"
+		} else {
+			org.Role = "MEMBER"
+		}
+
+		orgs = append(orgs, org)
+	}
+	return orgs, rows.Err()
+}

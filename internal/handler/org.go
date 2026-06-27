@@ -8,6 +8,7 @@ import (
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/middleware"
+	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -101,4 +102,20 @@ func UpdateOrg(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"org": org})
+}
+
+func ListUserOrgs(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	orgs, err := store.GetUserOrganizations(c.Context(), userID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if orgs == nil {
+		orgs = []*model.OrganizationWithRole{}
+	}
+	return c.JSON(fiber.Map{"organizations": orgs})
 }

@@ -669,6 +669,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/me/orgs:
+    get:
+      summary: List User Organizations
+      description: Returns a list of organizations the authenticated user belongs to.
+      operationId: listUserOrgs
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: A list of organizations with roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrganizationWithRole'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/me/inbox:
+    get:
+      summary: Get Admin Inbox
+      description: Returns a list of pending join requests that the authenticated user is authorized to approve or reject.
+      operationId: getAdminInbox
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: A list of pending join requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inbox:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InboxItem'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/orgs/{orgID}/teams:
     post:
       summary: Create Team
@@ -714,6 +768,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+    get:
+      summary: List Org Teams
+      description: Returns a list of all teams within the specified organization.
+      operationId: listOrgTeams
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization to list teams for.
+      responses:
+        '200':
+          description: A list of teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Team'
         '401':
           description: Unauthorized
           content:
@@ -961,6 +1055,117 @@ paths:
           description: Forbidden
         '404':
           description: Not Found
+  /v1/teams/{id}/join-requests:
+    post:
+      summary: Request to Join Team
+      description: Creates a pending request for the authenticated user to join a specific team.
+      operationId: createJoinRequest
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the team to request to join.
+      responses:
+        '201':
+          description: Join request created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamJoinRequest'
+        '400':
+          description: Bad Request (already a member)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Team Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: Conflict (already has a pending request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/join-requests/{id}:
+    put:
+      summary: Resolve Join Request
+      description: Approves or rejects a pending join request.
+      operationId: resolveJoinRequest
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the join request to resolve.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - approved
+                    - rejected
+                  example: approved
+      responses:
+        '200':
+          description: Resolved request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamJoinRequest'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (not authorized to approve)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Join Request Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/orgs:
     post:
       summary: Create Organization
@@ -1919,6 +2124,115 @@ components:
         created_at:
           type: string
           format: date-time
+    OrganizationWithRole:
+      type: object
+      required:
+        - id
+        - name
+        - role
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum:
+            - ADMIN
+            - MEMBER
+          example: ADMIN
+        created_at:
+          type: string
+          format: date-time
+    Team:
+      type: object
+      required:
+        - id
+        - name
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TeamJoinRequest:
+      type: object
+      required:
+        - id
+        - team_id
+        - user_id
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    InboxItem:
+      type: object
+      required:
+        - id
+        - team_id
+        - team_name
+        - user_id
+        - user_email
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        team_name:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        user_email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     Prompt:
       type: object
       properties:
@@ -2130,24 +2444,6 @@ components:
         - key_prefix
         - operation
         - created_at
-    Team:
-      type: object
-      required:
-        - id
-        - name
-        - created_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        org_id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        created_at:
-          type: string
-          format: date-time
     TeamMemberResponse:
       type: object
       required:

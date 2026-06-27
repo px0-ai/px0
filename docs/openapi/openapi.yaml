@@ -35,6 +35,10 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
   /v1/me/teams:
     $ref: "./teams.yaml#/paths/~1v1~1me~1teams"
+  /v1/me/orgs:
+    $ref: "./orgs.yaml#/paths/~1v1~1me~1orgs"
+  /v1/me/inbox:
+    $ref: "./teams.yaml#/paths/~1v1~1me~1inbox"
   /v1/orgs/{orgID}/teams:
     $ref: "./teams.yaml#/paths/~1v1~1orgs~1{orgID}~1teams"
   /v1/teams/{id}:
@@ -45,6 +49,10 @@ paths:
     $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
   /v1/teams/{id}/members/{userID}/role:
     $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
+  /v1/teams/{id}/join-requests:
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1join-requests"
+  /v1/join-requests/{id}:
+    $ref: "./teams.yaml#/paths/~1v1~1join-requests~1{id}"
   /v1/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs"
   /v1/orgs/{id}:
@@ -84,6 +92,14 @@ components:
       $ref: "./api-keys.yaml#/components/schemas/APIKey"
     Organization:
       $ref: "./orgs.yaml#/components/schemas/Organization"
+    OrganizationWithRole:
+      $ref: "./orgs.yaml#/components/schemas/OrganizationWithRole"
+    Team:
+      $ref: "./teams.yaml#/components/schemas/Team"
+    TeamJoinRequest:
+      $ref: "./teams.yaml#/components/schemas/TeamJoinRequest"
+    InboxItem:
+      $ref: "./teams.yaml#/components/schemas/InboxItem"
     Prompt:
       $ref: "./prompts.yaml#/components/schemas/Prompt"
     PromptVersion:

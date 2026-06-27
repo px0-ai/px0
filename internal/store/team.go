@@ -351,3 +351,114 @@ func IsUserInOrg(ctx context.Context, userID uuid.UUID, orgID uuid.UUID) (bool, 
 	}
 	return exists, nil
 }
+
+func GetTeamsByOrgID(ctx context.Context, orgID uuid.UUID) ([]*model.Team, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT id, org_id, name, created_at FROM teams WHERE org_id = $1 ORDER BY name ASC`,
+		orgID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get teams by org id: %w", err)
+	}
+	defer rows.Close()
+
+	var teams []*model.Team
+	for rows.Next() {
+		t := &model.Team{}
+		if err := rows.Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	return teams, rows.Err()
+}
+
+func CreateJoinRequest(ctx context.Context, teamID, userID uuid.UUID) (*model.TeamJoinRequest, error) {
+	r := &model.TeamJoinRequest{}
+	err := db.Pool.QueryRow(ctx,
+		`INSERT INTO team_join_requests (team_id, user_id, status)
+		 VALUES ($1, $2, 'pending')
+		 RETURNING id, team_id, user_id, status, created_at, updated_at`,
+		teamID, userID,
+	).Scan(&r.ID, &r.TeamID, &r.UserID, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("create join request: %w", err)
+	}
+	return r, nil
+}
+
+func GetJoinRequestByID(ctx context.Context, requestID uuid.UUID) (*model.TeamJoinRequest, error) {
+	r := &model.TeamJoinRequest{}
+	err := db.Pool.QueryRow(ctx,
+		`SELECT id, team_id, user_id, status, created_at, updated_at FROM team_join_requests WHERE id = $1`,
+		requestID,
+	).Scan(&r.ID, &r.TeamID, &r.UserID, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get join request by id: %w", err)
+	}
+	return r, nil
+}
+
+func UpdateJoinRequestStatus(ctx context.Context, requestID uuid.UUID, status string) (*model.TeamJoinRequest, error) {
+	r := &model.TeamJoinRequest{}
+	err := db.Pool.QueryRow(ctx,
+		`UPDATE team_join_requests
+		 SET status = $1, updated_at = NOW()
+		 WHERE id = $2
+		 RETURNING id, team_id, user_id, status, created_at, updated_at`,
+		status, requestID,
+	).Scan(&r.ID, &r.TeamID, &r.UserID, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update join request status: %w", err)
+	}
+	return r, nil
+}
+
+func GetPendingJoinRequestsForAdmin(ctx context.Context, userID uuid.UUID) ([]*model.InboxItem, error) {
+	sysAdmin, err := IsSystemAdmin(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Pool.Query(ctx,
+		`SELECT DISTINCT r.id, r.team_id, t.name AS team_name, r.user_id, u.email AS user_email, r.status, r.created_at, r.updated_at
+		 FROM team_join_requests r
+		 JOIN teams t ON r.team_id = t.id
+		 JOIN users u ON r.user_id = u.id
+		 WHERE r.status = 'pending'
+		   AND (
+		     $2::BOOLEAN = TRUE
+		     OR EXISTS (
+		       SELECT 1 FROM team_members tm
+		       WHERE tm.user_id = $1 AND tm.team_id = r.team_id AND tm.role = 'admin'
+		     )
+		     OR EXISTS (
+		       SELECT 1 FROM team_members tm2
+		       JOIN teams t2 ON tm2.team_id = t2.id
+		       WHERE tm2.user_id = $1 AND tm2.role = 'admin' AND t2.org_id = t.org_id AND t.org_id IS NOT NULL
+		     )
+		   )
+		 ORDER BY r.created_at DESC`,
+		userID, sysAdmin,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get pending join requests for admin: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*model.InboxItem
+	for rows.Next() {
+		item := &model.InboxItem{}
+		if err := rows.Scan(&item.ID, &item.TeamID, &item.TeamName, &item.UserID, &item.UserEmail, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

@@ -101,3 +101,21 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestMe_Orgs(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	req := newReq(t, http.MethodGet, "/v1/me/orgs", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	orgsVal := body["organizations"].([]any)
+	assert.NotEmpty(t, orgsVal)
+
+	firstOrg := orgsVal[0].(map[string]any)
+	assert.Equal(t, "Default Test Org", firstOrg["name"])
+	assert.Equal(t, "ADMIN", firstOrg["role"])
+}
