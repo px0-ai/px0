@@ -95,7 +95,7 @@ func setupUser(t *testing.T, a *testApp) string {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "register failed")
-	
+
 	body := decodeBody(t, resp)
 	userVal := body["user"].(map[string]any)
 	userIDStr := userVal["id"].(string)
@@ -107,7 +107,10 @@ func setupUser(t *testing.T, a *testApp) string {
 	err = store.VerifyUser(ctx, userID)
 	require.NoError(t, err)
 
-	team, err := store.CreateTeam(ctx, "Test Setup Team")
+	org, err := store.CreateOrganization(ctx, "Default Test Org")
+	require.NoError(t, err)
+
+	team, err := store.CreateTeamWithOrg(ctx, "Test Setup Team", org.ID)
 	require.NoError(t, err)
 	err = store.AddTeamMember(ctx, team.ID, userID)
 	require.NoError(t, err)
@@ -161,8 +164,18 @@ func setupVersion(t *testing.T, a *testApp, token, promptID, template string) in
 // setupAPIKey creates an API key and returns the raw key string.
 func setupAPIKey(t *testing.T, a *testApp, token string) string {
 	t.Helper()
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	team := teams[0]
+	orgID := team.OrgID
+
 	req := newReq(t, http.MethodPost, "/v1/api-keys",
-		`{"name":"test-key"}`, token)
+		fmt.Sprintf(`{"name":"test-key","org_id":%q,"operation":"all","team_ids":[%q]}`, orgID.String(), team.ID.String()), token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "create api key failed")

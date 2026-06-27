@@ -39,6 +39,18 @@ func CreateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
 	var req createVersionRequest
 	if err := c.BodyParser(&req); err != nil {
 		return apierr.ErrInvalidRequestBody.Respond(c)
@@ -95,6 +107,18 @@ func GetVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidVersionNumber.Respond(c)
 	}
 
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
 	version, err := store.GetVersion(c.Context(), promptID, versionNum)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -113,6 +137,30 @@ func UpdateVersion(c *fiber.Ctx) error {
 	versionNum, err := strconv.Atoi(c.Params("version"))
 	if err != nil {
 		return apierr.ErrInvalidVersionNumber.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	existing, err := store.GetVersion(c.Context(), promptID, versionNum)
@@ -162,6 +210,18 @@ func PublishVersion(c *fiber.Ctx) error {
 	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}

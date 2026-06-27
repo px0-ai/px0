@@ -30,7 +30,7 @@ func New() *fiber.App {
 	me := v1.Group("/me", middleware.RequireAccessToken)
 	me.Get("/teams", handler.ListUserTeams)
 
-	orgs := v1.Group("/orgs", middleware.RequireAdmin)
+	orgs := v1.Group("/orgs", middleware.RequireAccessToken)
 	orgs.Post("", handler.CreateOrg)
 	orgs.Put("/:id", handler.UpdateOrg)
 	orgs.Post("/:orgID/teams", handler.CreateTeam)
@@ -39,12 +39,14 @@ func New() *fiber.App {
 	teamPrompts.Post("", handler.CreatePrompt)
 	teamPrompts.Get("", handler.ListPrompts)
 
-	teams := v1.Group("/teams", middleware.RequireAdmin)
+	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Put("/:id", handler.UpdateTeam)
 	teams.Post("/:id/members", handler.AddTeamMember)
 	teams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
+	teams.Get("/:id/members", handler.ListTeamMembers)
+	teams.Put("/:id/members/:userID/role", handler.UpdateTeamMemberRole)
 
-	apiKeys := v1.Group("/api-keys", middleware.RequireAccessToken)
+	apiKeys := v1.Group("/api-keys", middleware.RequireSessionToken)
 	apiKeys.Post("", handler.CreateAPIKey)
 	apiKeys.Get("", handler.ListAPIKeys)
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)

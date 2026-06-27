@@ -355,7 +355,7 @@ func generateToken() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	return "sess_" + hex.EncodeToString(b), nil
 }
 
 func GenerateVerificationCode() (string, error) {

@@ -1,0 +1,279 @@
+package handler_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/px0-ai/px0/internal/store"
+)
+
+func TestRolesAndPermissions(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// Setup Admin User
+	adminToken := setupUser(t, a) // creates user and verified session
+
+	adminSession, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := adminSession.UserID
+
+	// Create Organization
+	req := newReq(t, http.MethodPost, "/v1/orgs", `{"name":"Duplicate Org Name"}`, adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	orgIDStr := body["org"].(map[string]any)["id"].(string)
+
+	// 1. Check duplicate organization name creation
+	req = newReq(t, http.MethodPost, "/v1/orgs", `{"name":"Duplicate Org Name"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	resp.Body.Close()
+
+	// 2. Check update organization to duplicate name
+	req = newReq(t, http.MethodPost, "/v1/orgs", `{"name":"Other Org Name"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyOther := decodeBody(t, resp)
+	otherOrgIDStr := bodyOther["org"].(map[string]any)["id"].(string)
+
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/orgs/%s", otherOrgIDStr), `{"name":"Duplicate Org Name"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	resp.Body.Close()
+
+	// Create Team 1
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Engineering"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyTeam := decodeBody(t, resp)
+	teamIDStr := bodyTeam["team"].(map[string]any)["id"].(string)
+	teamID, _ := uuid.Parse(teamIDStr)
+
+	// Since we created the team, let's join it. First member added automatically becomes 'admin'.
+	err = store.AddTeamMember(ctx, teamID, adminUserID)
+	require.NoError(t, err)
+
+	// 3. Check duplicate team name creation in same org
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Engineering"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	resp.Body.Close()
+
+	// Create Team 2
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Product"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyTeam2 := decodeBody(t, resp)
+	team2IDStr := bodyTeam2["team"].(map[string]any)["id"].(string)
+
+	// 4. Check update team to duplicate name in same org
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s", team2IDStr), `{"name":"Engineering"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	resp.Body.Close()
+
+	// Setup Editor User
+	editorPassword := "EditorPassword123!"
+	editorHash, _ := bcrypt.GenerateFromPassword([]byte(editorPassword), bcrypt.DefaultCost)
+	editorUser, err := store.CreateVerifiedUser(ctx, "editor@px0.dev", string(editorHash))
+	require.NoError(t, err)
+
+	// Add Editor to Team 1. Since count is 1 (admin is there), they join as 'editor'.
+	err = store.AddTeamMember(ctx, teamID, editorUser.ID)
+	require.NoError(t, err)
+
+	editorSession, err := store.CreateSession(ctx, editorUser.ID, "sess_editor-token", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	editorToken := editorSession.Token
+
+	// Setup Viewer User
+	viewerPassword := "ViewerPassword123!"
+	viewerHash, _ := bcrypt.GenerateFromPassword([]byte(viewerPassword), bcrypt.DefaultCost)
+	viewerUser, err := store.CreateVerifiedUser(ctx, "viewer@px0.dev", string(viewerHash))
+	require.NoError(t, err)
+
+	// Add Viewer to Team 1. Since count is 2, they join as 'editor' by default.
+	err = store.AddTeamMember(ctx, teamID, viewerUser.ID)
+	require.NoError(t, err)
+
+	// Elevating viewer user to 'viewer' role via API (only admin can do this)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s/members/%s/role", teamIDStr, viewerUser.ID), `{"role":"viewer"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	viewerSession, err := store.CreateSession(ctx, viewerUser.ID, "sess_viewer-token", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	viewerToken := viewerSession.Token
+
+	// Check Paginated Member Listing API (Viewer, Editor, and Admin can list)
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/members?page=1", teamIDStr), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	membersBody := decodeBody(t, resp)
+	assert.Equal(t, float64(1), membersBody["page"])
+	assert.Equal(t, float64(10), membersBody["limit"])
+	assert.Equal(t, float64(3), membersBody["total"]) // admin, editor, viewer
+
+	membersList := membersBody["members"].([]any)
+	assert.Len(t, membersList, 3)
+
+	// Find each member in list and verify role
+	var foundAdmin, foundEditor, foundViewer bool
+	for _, mAny := range membersList {
+		m := mAny.(map[string]any)
+		role := m["role"].(string)
+		email := m["email"].(string)
+		if email == "test@px0.dev" {
+			assert.Equal(t, "admin", role)
+			foundAdmin = true
+		} else if email == "editor@px0.dev" {
+			assert.Equal(t, "editor", role)
+			foundEditor = true
+		} else if email == "viewer@px0.dev" {
+			assert.Equal(t, "viewer", role)
+			foundViewer = true
+		}
+	}
+	assert.True(t, foundAdmin)
+	assert.True(t, foundEditor)
+	assert.True(t, foundViewer)
+
+	// 5. Test Permissions on Prompt Actions
+	// A. Editor can Create Prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), `{"name":"Editor Prompt","description":"Prompt by editor"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyPrompt := decodeBody(t, resp)
+	promptIDStr := bodyPrompt["prompt"].(map[string]any)["id"].(string)
+	promptID, _ := uuid.Parse(promptIDStr)
+
+	// B. Viewer cannot Create Prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), `{"name":"Viewer Prompt","description":"Prompt by viewer"}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// C. Viewer can List Prompts
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	promptsBody := decodeBody(t, resp)
+	promptsList := promptsBody["prompts"].([]any)
+	assert.NotEmpty(t, promptsList)
+
+	// D. Viewer cannot Create Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", promptIDStr), `{"template":"Hello {{.name}}"}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// E. Editor can Create Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", promptIDStr), `{"template":"Hello {{.name}}"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyVersion := decodeBody(t, resp)
+	versionNum := int(bodyVersion["version"].(map[string]any)["version"].(float64))
+
+	// F. Viewer cannot Update Version
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/%d", promptIDStr, versionNum), `{"template":"Updated Hello {{.name}}"}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// G. Editor can Update Version
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/%d", promptIDStr, versionNum), `{"template":"Updated Hello {{.name}}"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// H. Viewer cannot Publish Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/publish", promptIDStr, versionNum), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// I. Editor can Publish Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/publish", promptIDStr, versionNum), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// J. Viewer can Render Live
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/render", promptIDStr), `{"variables":{"name":"John"}}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	bodyRender := decodeBody(t, resp)
+	assert.Equal(t, "Updated Hello John", bodyRender["rendered"])
+
+	// K. Editor cannot Add Team Member
+	randomUser, _ := store.CreateUser(ctx, "random@test.com", "Password123!")
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/members", teamIDStr), fmt.Sprintf(`{"user_id":%q}`, randomUser.ID), editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// L. Editor cannot Elevate Member
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s/members/%s/role", teamIDStr, viewerUser.ID), `{"role":"admin"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// M. Editor cannot Delete Prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// N. Editor can Delete Prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// Verify prompt is deleted
+	_, err = store.GetPromptByID(ctx, promptID, []uuid.UUID{teamID})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// O. Try to remove a user from a team who is not part of the organization (returns 400 Bad Request)
+	nonOrgUser, _ := store.CreateUser(ctx, "nonorguser@test.com", "Password123!")
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/teams/%s/members/%s", teamIDStr, nonOrgUser.ID), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	bodyRemoveErr := decodeBody(t, resp)
+	assert.Equal(t, "user is not a member of this organization", bodyRemoveErr["error"])
+}

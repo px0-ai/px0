@@ -14,14 +14,26 @@ import (
 	"github.com/px0-ai/px0/internal/model"
 )
 
-func CreateAPIKey(ctx context.Context, name string, teamID uuid.UUID, keyPrefix, keyHash string) (*model.APIKey, error) {
+func CreateAPIKey(ctx context.Context, name string, orgID uuid.UUID, teamIDs []uuid.UUID, operation string, keyPrefix, keyHash string) (*model.APIKey, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	k := &model.APIKey{}
-	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO api_keys (name, team_id, key_prefix, key_hash)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, name, team_id, key_prefix, key_hash, created_at, last_used_at`,
-		name, teamID, keyPrefix, keyHash,
-	).Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	// Insert API Key. Note: we set team_id to NULL, but can also set it to the first team if any team is provided
+	var firstTeamID *uuid.UUID
+	if len(teamIDs) > 0 {
+		firstTeamID = &teamIDs[0]
+	}
+
+	err = tx.QueryRow(ctx,
+		`INSERT INTO api_keys (name, org_id, team_id, operation, key_prefix, key_hash)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id, name, org_id, team_id, operation, key_prefix, key_hash, created_at, last_used_at`,
+		name, orgID, firstTeamID, operation, keyPrefix, keyHash,
+	).Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -29,14 +41,29 @@ func CreateAPIKey(ctx context.Context, name string, teamID uuid.UUID, keyPrefix,
 		}
 		return nil, fmt.Errorf("create api key: %w", err)
 	}
+
+	for _, teamID := range teamIDs {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO api_key_teams (api_key_id, team_id) VALUES ($1, $2)`,
+			k.ID, teamID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create api key team mapping: %w", err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
 	return k, nil
 }
 
-func ListAPIKeys(ctx context.Context, teamIDs []uuid.UUID) ([]*model.APIKey, error) {
+func ListAPIKeysForOrg(ctx context.Context, orgID uuid.UUID) ([]*model.APIKey, error) {
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, name, team_id, key_prefix, key_hash, created_at, last_used_at
-		 FROM api_keys WHERE team_id = ANY($1) ORDER BY created_at DESC`,
-		teamIDs,
+		`SELECT id, name, org_id, team_id, operation, key_prefix, key_hash, created_at, last_used_at
+		 FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC`,
+		orgID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list api keys: %w", err)
@@ -46,7 +73,7 @@ func ListAPIKeys(ctx context.Context, teamIDs []uuid.UUID) ([]*model.APIKey, err
 	var keys []*model.APIKey
 	for rows.Next() {
 		k := &model.APIKey{}
-		if err := rows.Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -57,15 +84,52 @@ func ListAPIKeys(ctx context.Context, teamIDs []uuid.UUID) ([]*model.APIKey, err
 func GetAPIKeyByHash(ctx context.Context, keyHash string) (*model.APIKey, error) {
 	k := &model.APIKey{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, name, team_id, key_prefix, key_hash, created_at, last_used_at
+		`SELECT id, name, org_id, team_id, operation, key_prefix, key_hash, created_at, last_used_at
 		 FROM api_keys WHERE key_hash = $1`,
 		keyHash,
-	).Scan(&k.ID, &k.Name, &k.TeamID, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	).Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get api key: %w", err)
+	}
+	return k, nil
+}
+
+func GetAPIKeyTeams(ctx context.Context, apiKeyID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT team_id FROM api_key_teams WHERE api_key_id = $1`,
+		apiKeyID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get api key teams: %w", err)
+	}
+	defer rows.Close()
+
+	var teamIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		teamIDs = append(teamIDs, id)
+	}
+	return teamIDs, rows.Err()
+}
+
+func GetAPIKeyByID(ctx context.Context, id uuid.UUID) (*model.APIKey, error) {
+	k := &model.APIKey{}
+	err := db.Pool.QueryRow(ctx,
+		`SELECT id, name, org_id, team_id, operation, key_prefix, key_hash, created_at, last_used_at
+		 FROM api_keys WHERE id = $1`,
+		id,
+	).Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyPrefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get api key by id: %w", err)
 	}
 	return k, nil
 }

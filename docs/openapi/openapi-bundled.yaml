@@ -415,13 +415,6 @@ paths:
         - API Keys
       security:
         - BearerAuth: []
-      x-edge-cases:
-        - The full key prefixed with 'px0_' is returned only on creation.
-        - Must be called with standard access token; attempts to escalate using an existing API Key will return 401 Unauthorized.
-      x-test-coverage:
-        - 'TestCreateAPIKey_Success: Verifies successful key generation and returned properties.'
-        - 'TestCreateAPIKey_MissingName: Verifies that creating a key with empty name returns 400 and ''name is required''.'
-        - 'TestCreateAPIKey_RequiresAccessToken: Verifies that API key authentication is rejected for key generation.'
       requestBody:
         required: true
         content:
@@ -441,31 +434,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-              examples:
-                invalid_body:
-                  summary: Invalid JSON structure
-                  value:
-                    error: invalid request body
-                name_required:
-                  summary: Missing key name
-                  value:
-                    error: name is required
         '401':
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-              example:
-                error: unauthorized
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
         '500':
           description: Internal Server Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-              example:
-                error: internal error
     get:
       summary: List API Keys
       description: Lists metadata for all programmatic API keys. Secret key values are omitted.
@@ -474,8 +460,13 @@ paths:
         - API Keys
       security:
         - BearerAuth: []
-      x-test-coverage:
-        - 'TestListAPIKeys: Verifies active keys list does not include full secret values.'
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: List of API keys
@@ -490,22 +481,14 @@ paths:
                       $ref: '#/components/schemas/APIKey'
                 required:
                   - api_keys
+        '400':
+          description: Bad Request
         '401':
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: unauthorized
+        '403':
+          description: Forbidden
         '500':
           description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: internal error
   /v1/api-keys/{id}:
     delete:
       summary: Delete an API Key
@@ -515,9 +498,6 @@ paths:
         - API Keys
       security:
         - BearerAuth: []
-      x-test-coverage:
-        - 'TestDeleteAPIKey: Verifies successful deletion of key returning 204.'
-        - 'TestDeleteAPIKey_NotFound: Verifies that deleting a non-existent UUID key returns 404 and ''api key not found''.'
       parameters:
         - name: id
           in: path
@@ -531,36 +511,14 @@ paths:
           description: API key successfully deleted
         '400':
           description: Invalid UUID format
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: invalid id
         '401':
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: unauthorized
+        '403':
+          description: Forbidden
         '404':
           description: API key not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: api key not found
         '500':
           description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-              example:
-                error: internal error
   /v1/me/teams:
     get:
       summary: List User Teams
@@ -712,6 +670,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
   /v1/teams/{id}/members:
+    get:
+      summary: List Team Members
+      description: Returns a paginated list of members for a given team. Requires at least viewer access.
+      operationId: listTeamMembers
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Paginated list of members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamMemberResponse'
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
     post:
       summary: Add Team Member
       description: Adds a user to a team. Requires admin privileges.
@@ -779,6 +782,62 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden
+  /v1/teams/{id}/members/{userID}/role:
+    put:
+      summary: Update Team Member Role
+      description: Updates a team member's role. Requires team admin privileges.
+      operationId: updateTeamMemberRole
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - admin
+                    - editor
+                    - viewer
+                  example: admin
+      responses:
+        '200':
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not Found
   /v1/orgs:
     post:
       summary: Create Organization
@@ -1132,7 +1191,7 @@ paths:
       description: Renders the active 'live' template version of a prompt using supplied variables.
       operationId: renderLive
       tags:
-        - Rendering
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1215,7 +1274,7 @@ paths:
       description: Creates a new version of the prompt template in 'draft' state.
       operationId: createVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1294,7 +1353,7 @@ paths:
       description: Lists all template versions associated with a prompt container.
       operationId: listVersions
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1344,7 +1403,7 @@ paths:
       description: Retrieves details of a specific prompt template version by version number.
       operationId: getVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1408,7 +1467,7 @@ paths:
         Only versions currently in the 'draft' status may be modified.
       operationId: updateVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1489,7 +1548,7 @@ paths:
         This automatically updates any pre-existing 'live' version to 'archived', maintaining exactly one active live prompt.
       operationId: publishVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1564,7 +1623,7 @@ paths:
       description: Renders a specific template version of a prompt (even draft status) using supplied variables.
       operationId: renderVersion
       tags:
-        - Rendering
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -1687,10 +1746,25 @@ components:
         name:
           type: string
           description: Human-readable name given to the API key.
+        org_id:
+          type: string
+          format: uuid
+          description: UUID of the organization.
+        team_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional UUID of the team.
         key_prefix:
           type: string
-          description: First 12 characters of the API Key used for visual identification.
-          example: px0_1a2b3c4d
+          description: First characters of the API Key used for visual identification.
+          example: ak_1a2b3c4d
+        operation:
+          type: string
+          enum:
+            - read_render
+            - all
+          description: The scope of operations.
         created_at:
           type: string
           format: date-time
@@ -1703,9 +1777,10 @@ components:
       required:
         - id
         - name
+        - org_id
         - key_prefix
+        - operation
         - created_at
-        - last_used_at
     Organization:
       type: object
       required:
@@ -1862,11 +1937,23 @@ components:
           type: string
           description: Descriptive name for the key.
           example: ci-pipeline
-        team_id:
+        org_id:
           type: string
           format: uuid
+        team_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        operation:
+          type: string
+          enum:
+            - read_render
+            - all
+          default: read_render
       required:
         - name
+        - org_id
     APIKeyCreatedResponse:
       type: object
       properties:
@@ -1880,11 +1967,13 @@ components:
         key:
           type: string
           description: The fully generated secure raw API Key string. This is returned ONLY ONCE.
-          example: px0_7f9ba3271cf881309d9be8c9c0fcae47a95b8d29c3f0b2da8e89cf21e5c3df01
+          example: ak_7f9ba3271cf881309d9be8c9c0fcae47a95b8d29c3f0b2da8e89cf21e5c3df01
         key_prefix:
           type: string
           description: Identifying prefix of the key.
-          example: px0_7f9ba327
+          example: ak_7f9ba327
+        operation:
+          type: string
         created_at:
           type: string
           format: date-time
@@ -1894,9 +1983,7 @@ components:
         - name
         - key
         - key_prefix
-        - created_at
-        - key
-        - key_prefix
+        - operation
         - created_at
     Team:
       type: object
@@ -1912,6 +1999,24 @@ components:
           type: string
           format: uuid
         name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TeamMemberResponse:
+      type: object
+      required:
+        - user_id
+        - email
+        - role
+        - created_at
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
           type: string
         created_at:
           type: string

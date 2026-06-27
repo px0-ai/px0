@@ -247,7 +247,7 @@ paths:
       description: Renders the active 'live' template version of a prompt using supplied variables.
       operationId: renderLive
       tags:
-        - Rendering
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -329,7 +329,7 @@ paths:
       description: Creates a new version of the prompt template in 'draft' state.
       operationId: createVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -407,7 +407,7 @@ paths:
       description: Lists all template versions associated with a prompt container.
       operationId: listVersions
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -458,7 +458,7 @@ paths:
       description: Retrieves details of a specific prompt template version by version number.
       operationId: getVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -523,7 +523,7 @@ paths:
         Only versions currently in the 'draft' status may be modified.
       operationId: updateVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -605,7 +605,7 @@ paths:
         This automatically updates any pre-existing 'live' version to 'archived', maintaining exactly one active live prompt.
       operationId: publishVersion
       tags:
-        - Versions
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -681,7 +681,7 @@ paths:
       description: Renders a specific template version of a prompt (even draft status) using supplied variables.
       operationId: renderVersion
       tags:
-        - Rendering
+        - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []

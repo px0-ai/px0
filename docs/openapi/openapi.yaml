@@ -39,6 +39,8 @@ paths:
     $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members"
   /v1/teams/{id}/members/{userID}:
     $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
+  /v1/teams/{id}/members/{userID}/role:
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
   /v1/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs"
   /v1/orgs/{id}:

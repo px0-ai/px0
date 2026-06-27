@@ -55,3 +55,27 @@ func GetOrganizationByID(ctx context.Context, id uuid.UUID) (*model.Organization
 	}
 	return o, nil
 }
+
+func OrganizationNameExists(ctx context.Context, name string) (bool, error) {
+	var exists bool
+	err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM organizations WHERE LOWER(name) = LOWER($1))`,
+		name,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check organization name exists: %w", err)
+	}
+	return exists, nil
+}
+
+func OrganizationNameExistsForOther(ctx context.Context, id uuid.UUID, name string) (bool, error) {
+	var exists bool
+	err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM organizations WHERE LOWER(name) = LOWER($1) AND id != $2)`,
+		name, id,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check organization name exists for other: %w", err)
+	}
+	return exists, nil
+}

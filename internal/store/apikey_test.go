@@ -15,28 +15,40 @@ import (
 func TestCreateAPIKey(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-	tm, err := store.CreateTeam(ctx, "Test Team")
+
+	org, err := store.CreateOrganization(ctx, "Test Org")
 	require.NoError(t, err)
 
-	k, err := store.CreateAPIKey(ctx, "my-key", tm.ID, "px0_abc1", "hashvalue")
+	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
+	require.NoError(t, err)
+
+	k, err := store.CreateAPIKey(ctx, "my-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_abc1", "hashvalue")
 	require.NoError(t, err)
 	assert.NotEmpty(t, k.ID)
 	assert.Equal(t, "my-key", k.Name)
-	assert.Equal(t, tm.ID, k.TeamID)
-	assert.Equal(t, "px0_abc1", k.KeyPrefix)
+	assert.Equal(t, org.ID, k.OrgID)
+	assert.Equal(t, tm.ID, *k.TeamID)
+	assert.Equal(t, "ak_abc1", k.KeyPrefix)
+	assert.Equal(t, "read_render", k.Operation)
 	assert.Nil(t, k.LastUsedAt)
 }
 
 func TestListAPIKeys(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-	tm, err := store.CreateTeam(ctx, "Test Team")
+
+	org, err := store.CreateOrganization(ctx, "Test Org")
 	require.NoError(t, err)
 
-	store.CreateAPIKey(ctx, "key-a", tm.ID, "px0_aaa1", "hash1") //nolint:errcheck
-	store.CreateAPIKey(ctx, "key-b", tm.ID, "px0_bbb1", "hash2") //nolint:errcheck
+	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
+	require.NoError(t, err)
 
-	keys, err := store.ListAPIKeys(ctx, []uuid.UUID{tm.ID})
+	_, err = store.CreateAPIKey(ctx, "key-a", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_aaa1", "hash1")
+	require.NoError(t, err)
+	_, err = store.CreateAPIKey(ctx, "key-b", org.ID, []uuid.UUID{tm.ID}, "all", "ak_bbb1", "hash2")
+	require.NoError(t, err)
+
+	keys, err := store.ListAPIKeysForOrg(ctx, org.ID)
 	require.NoError(t, err)
 	assert.Len(t, keys, 2)
 }
@@ -44,10 +56,11 @@ func TestListAPIKeys(t *testing.T) {
 func TestListAPIKeys_Empty(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-	tm, err := store.CreateTeam(ctx, "Test Team")
+
+	org, err := store.CreateOrganization(ctx, "Test Org")
 	require.NoError(t, err)
 
-	keys, err := store.ListAPIKeys(ctx, []uuid.UUID{tm.ID})
+	keys, err := store.ListAPIKeysForOrg(ctx, org.ID)
 	require.NoError(t, err)
 	assert.Empty(t, keys)
 }
@@ -55,17 +68,22 @@ func TestListAPIKeys_Empty(t *testing.T) {
 func TestGetAPIKeyByHash(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-	tm, err := store.CreateTeam(ctx, "Test Team")
+
+	org, err := store.CreateOrganization(ctx, "Test Org")
 	require.NoError(t, err)
 
-	created, err := store.CreateAPIKey(ctx, "lookup-key", tm.ID, "px0_xyz1", "testhash")
+	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
+	require.NoError(t, err)
+
+	created, err := store.CreateAPIKey(ctx, "lookup-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_xyz1", "testhash")
 	require.NoError(t, err)
 
 	got, err := store.GetAPIKeyByHash(ctx, "testhash")
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, got.ID)
 	assert.Equal(t, "lookup-key", got.Name)
-	assert.Equal(t, tm.ID, got.TeamID)
+	assert.Equal(t, org.ID, got.OrgID)
+	assert.Equal(t, tm.ID, *got.TeamID)
 }
 
 func TestGetAPIKeyByHash_NotFound(t *testing.T) {
@@ -78,10 +96,14 @@ func TestGetAPIKeyByHash_NotFound(t *testing.T) {
 func TestDeleteAPIKey(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
-	tm, err := store.CreateTeam(ctx, "Test Team")
+
+	org, err := store.CreateOrganization(ctx, "Test Org")
 	require.NoError(t, err)
 
-	k, err := store.CreateAPIKey(ctx, "del-key", tm.ID, "px0_del1", "delhash")
+	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
+	require.NoError(t, err)
+
+	k, err := store.CreateAPIKey(ctx, "del-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_del1", "delhash")
 	require.NoError(t, err)
 
 	err = store.DeleteAPIKey(ctx, k.ID)

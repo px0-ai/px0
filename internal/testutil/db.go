@@ -66,6 +66,6 @@ func SetupDB(t *testing.T) {
 
 func truncate(p *pgxpool.Pool) {
 	p.Exec(context.Background(), //nolint:errcheck
-		`TRUNCATE TABLE prompt_versions, prompts, sessions, api_keys, users CASCADE`,
+		`TRUNCATE TABLE prompt_versions, prompts, sessions, api_keys, users, teams, organizations CASCADE`,
 	)
 }

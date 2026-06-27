@@ -24,30 +24,51 @@ func RequireAuth(c *fiber.Ctx) error {
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
-// RequireAccessToken accepts only an access token. Used for endpoints that manage
-// account-level resources (e.g. API key CRUD) where API key auth is not appropriate.
+// RequireAccessToken accepts either an access token or an API key with 'all' operation.
 func RequireAccessToken(c *fiber.Ctx) error {
-	if tryAccessTokenAuth(c) {
+	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
+		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
+			if operation != "all" {
+				return apierr.ErrForbidden.Respond(c)
+			}
+		}
 		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
+// RequireSessionToken accepts only standard user session tokens (not API Keys).
+func RequireSessionToken(c *fiber.Ctx) error {
+	if tryAccessTokenAuth(c) {
+		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
+		if ok && userID != uuid.Nil {
+			return c.Next()
+		}
+	}
+	return apierr.ErrUnauthorized.Respond(c)
+}
+
 func RequireAdmin(c *fiber.Ctx) error {
-	if !tryAccessTokenAuth(c) {
-		return apierr.ErrUnauthorized.Respond(c)
-	}
+	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
+		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
+			if operation != "all" {
+				return apierr.ErrForbidden.Respond(c)
+			}
+			return c.Next()
+		}
 
-	userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		return apierr.ErrUnauthorized.Respond(c)
-	}
+		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
+		if !ok || userID == uuid.Nil {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
 
-	user, err := store.GetUserByID(c.Context(), userID)
-	if err != nil || !user.IsAdmin {
-		return apierr.ErrForbidden.Respond(c)
+		user, err := store.GetUserByID(c.Context(), userID)
+		if err != nil || !user.IsAdmin {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return c.Next()
 	}
-	return c.Next()
+	return apierr.ErrUnauthorized.Respond(c)
 }
 
 func tryAccessTokenAuth(c *fiber.Ctx) bool {
@@ -57,6 +78,14 @@ func tryAccessTokenAuth(c *fiber.Ctx) bool {
 	}
 	token := strings.TrimPrefix(auth, "Bearer ")
 	if token == "" {
+		return false
+	}
+
+	if strings.HasPrefix(token, "ak_") {
+		return tryAPIKeyWithRawKey(c, token)
+	}
+
+	if !strings.HasPrefix(token, "sess_") {
 		return false
 	}
 
@@ -80,6 +109,13 @@ func tryAPIKeyAuth(c *fiber.Ctx) bool {
 	if key == "" {
 		return false
 	}
+	return tryAPIKeyWithRawKey(c, key)
+}
+
+func tryAPIKeyWithRawKey(c *fiber.Ctx, key string) bool {
+	if !strings.HasPrefix(key, "ak_") {
+		return false
+	}
 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 	apiKey, err := store.GetAPIKeyByHash(c.Context(), hash)
@@ -92,7 +128,14 @@ func tryAPIKeyAuth(c *fiber.Ctx) bool {
 		_ = store.TouchAPIKey(context.Background(), apiKey.ID)
 	}()
 
-	c.Locals("apiKeyTeamID", apiKey.TeamID)
+	teamIDs, err := store.GetAPIKeyTeams(c.Context(), apiKey.ID)
+	if err != nil {
+		return false
+	}
+
+	c.Locals("apiKeyTeamIDs", teamIDs)
+	c.Locals("apiKeyOrgID", apiKey.OrgID)
+	c.Locals("apiKeyOperation", apiKey.Operation)
 	// API key auth has no associated user; use uuid.Nil as sentinel.
 	c.Locals(LocalsUserID, uuid.Nil)
 	return true

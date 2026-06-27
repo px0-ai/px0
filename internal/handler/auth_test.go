@@ -123,7 +123,7 @@ func TestRegister_AdminSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set up Session for Admin
-	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token", time.Now().Add(1*time.Hour))
+	session, err := store.CreateSession(ctx, adminUser.ID, "sess_valid-admin-token", time.Now().Add(1*time.Hour))
 	require.NoError(t, err)
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
@@ -159,7 +159,7 @@ func TestRegister_AdminInvalidTeamID(t *testing.T) {
 	adminUser, err := store.CreateAdminUser(ctx, "admin-caller2@test.com", string(pwdHash), true)
 	require.NoError(t, err)
 
-	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-2", time.Now().Add(1*time.Hour))
+	session, err := store.CreateSession(ctx, adminUser.ID, "sess_valid-admin-token-2", time.Now().Add(1*time.Hour))
 	require.NoError(t, err)
 
 	randomUUID := uuid.New().String()
@@ -187,7 +187,7 @@ func TestRegister_AdminTeamNoOrg(t *testing.T) {
 	err = store.AddTeamMember(ctx, team.ID, adminUser.ID)
 	require.NoError(t, err)
 
-	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-3", time.Now().Add(1*time.Hour))
+	session, err := store.CreateSession(ctx, adminUser.ID, "sess_valid-admin-token-3", time.Now().Add(1*time.Hour))
 	require.NoError(t, err)
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
@@ -222,7 +222,7 @@ func TestRegister_AdminDifferentOrg(t *testing.T) {
 	err = store.AddTeamMember(ctx, team1.ID, adminUser.ID)
 	require.NoError(t, err)
 
-	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-4", time.Now().Add(1*time.Hour))
+	session, err := store.CreateSession(ctx, adminUser.ID, "sess_valid-admin-token-4", time.Now().Add(1*time.Hour))
 	require.NoError(t, err)
 
 	// Attempts to register user to team2 (Org Two)
@@ -268,7 +268,7 @@ func TestLogin_Success(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	body := decodeBody(t, resp)
 	userVal := body["user"].(map[string]any)
 	userIDStr := userVal["id"].(string)
@@ -379,7 +379,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	body := decodeBody(t, resp)
 	userVal := body["user"].(map[string]any)
 	assert.Equal(t, false, userVal["is_verified"])
@@ -397,7 +397,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	// 3. Fetch verification code from DB
 	user, err := store.GetUserByEmail(context.Background(), "verify-flow@test.com")
 	require.NoError(t, err)
-	
+
 	code, _, err := store.GetLatestVerificationCode(context.Background(), user.ID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, code)
@@ -462,7 +462,7 @@ func TestTriggerVerification(t *testing.T) {
 	// 5. Fetch code from DB
 	user, err := store.GetUserByEmail(context.Background(), "trigger-flow@test.com")
 	require.NoError(t, err)
-	
+
 	code, _, err := store.GetLatestVerificationCode(context.Background(), user.ID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, code)

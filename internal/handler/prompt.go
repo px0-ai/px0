@@ -12,8 +12,8 @@ import (
 )
 
 type createPromptRequest struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func CreatePrompt(c *fiber.Ctx) error {
@@ -22,7 +22,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	allowedIDs, err := getRequestTeamIDs(c)
+	allowedIDs, err := getRequestEditorTeamIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -117,9 +117,21 @@ func DeletePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if err := store.DeletePrompt(c.Context(), id, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.DeletePrompt(c.Context(), id, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
