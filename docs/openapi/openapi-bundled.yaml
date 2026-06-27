@@ -47,7 +47,7 @@ paths:
         - Fails with 400 Bad Request if email or password are empty, password is shorter than 8 characters, or password does not meet complexity requirements.
         - Fails with 400 Bad Request if email format is invalid.
         - Fails with 409 Conflict if email is already registered.
-        - If admin registers a user (authenticated with Bearer token), team_id is required. The specified team must belong to an organization, and the admin must belong to a team in that same organization.
+        - If admin registers a user (authenticated with Bearer token), they can optionally pass team_id to join an existing team (which must belong to an organization that the admin belongs to). If team_id is not passed, a Default Org and Default Team are created automatically.
         - If public user registers (unauthenticated), team_id is forbidden.
         - If Bearer token is provided but is invalid, expired, unverified, or not an admin, returns 401/403 appropriately.
       x-test-coverage:
@@ -108,10 +108,6 @@ paths:
                   summary: Password lacks complexity
                   value:
                     error: password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character
-                missing_team_id:
-                  summary: Admin registering a user without team_id
-                  value:
-                    error: admin must pass team_id when registering a user
                 team_no_org:
                   summary: Specified team does not belong to any organization
                   value:

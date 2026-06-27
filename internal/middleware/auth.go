@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/px0-ai/px0/internal/apierr"
+	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -18,7 +19,17 @@ const LocalsUserID = "userID"
 // RequireAuth accepts either an access token (Authorization: Bearer <token>)
 // or an API key (X-API-Key: <key>).
 func RequireAuth(c *fiber.Ctx) error {
-	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
+	if tryAccessTokenAuth(c) {
+		userVal := c.Locals("currentUser")
+		if userVal != nil {
+			user := userVal.(*model.User)
+			if !user.IsVerified {
+				return apierr.ErrUserNotVerified.Respond(c)
+			}
+		}
+		return c.Next()
+	}
+	if tryAPIKeyAuth(c) {
 		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
@@ -26,7 +37,17 @@ func RequireAuth(c *fiber.Ctx) error {
 
 // RequireAccessToken accepts either an access token or an API key with 'all' operation.
 func RequireAccessToken(c *fiber.Ctx) error {
-	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
+	if tryAccessTokenAuth(c) {
+		userVal := c.Locals("currentUser")
+		if userVal != nil {
+			user := userVal.(*model.User)
+			if !user.IsVerified {
+				return apierr.ErrUserNotVerified.Respond(c)
+			}
+		}
+		return c.Next()
+	}
+	if tryAPIKeyAuth(c) {
 		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
 			if operation != "all" {
 				return apierr.ErrForbidden.Respond(c)
@@ -42,6 +63,13 @@ func RequireSessionToken(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
 		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
 		if ok && userID != uuid.Nil {
+			userVal := c.Locals("currentUser")
+			if userVal != nil {
+				user := userVal.(*model.User)
+				if !user.IsVerified {
+					return apierr.ErrUserNotVerified.Respond(c)
+				}
+			}
 			return c.Next()
 		}
 	}
@@ -49,24 +77,32 @@ func RequireSessionToken(c *fiber.Ctx) error {
 }
 
 func RequireAdmin(c *fiber.Ctx) error {
-	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
+	if tryAccessTokenAuth(c) {
+		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
+		if !ok || userID == uuid.Nil {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+
+		userVal := c.Locals("currentUser")
+		if userVal == nil {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+		user := userVal.(*model.User)
+		if !user.IsVerified {
+			return apierr.ErrUserNotVerified.Respond(c)
+		}
+		if !user.IsAdmin {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return c.Next()
+	}
+	if tryAPIKeyAuth(c) {
 		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
 			if operation != "all" {
 				return apierr.ErrForbidden.Respond(c)
 			}
 			return c.Next()
 		}
-
-		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
-		if !ok || userID == uuid.Nil {
-			return apierr.ErrUnauthorized.Respond(c)
-		}
-
-		user, err := store.GetUserByID(c.Context(), userID)
-		if err != nil || !user.IsAdmin {
-			return apierr.ErrForbidden.Respond(c)
-		}
-		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
@@ -95,12 +131,13 @@ func tryAccessTokenAuth(c *fiber.Ctx) bool {
 	}
 
 	// Fetch user
-	_, err = store.GetUserByID(c.Context(), session.UserID)
+	user, err := store.GetUserByID(c.Context(), session.UserID)
 	if err != nil {
 		return false
 	}
 
 	c.Locals(LocalsUserID, session.UserID)
+	c.Locals("currentUser", user)
 	return true
 }
 

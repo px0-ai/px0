@@ -124,38 +124,36 @@ func Register(c *fiber.Ctx) error {
 
 	// Validate team_id depending on whether the caller is an Admin
 	if isCallerAdmin {
-		if req.TeamID == nil {
-			return apierr.NewAPIError(fiber.StatusBadRequest, "admin must pass team_id when registering a user").Respond(c)
-		}
-
-		// Check team belongs to org and user is admin of that org/belongs to it
-		team, err := store.GetTeamByID(c.Context(), *req.TeamID)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		if req.TeamID != nil {
+			// Check team belongs to org and user is admin of that org/belongs to it
+			team, err := store.GetTeamByID(c.Context(), *req.TeamID)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+				}
+				return apierr.ErrInternalError.Respond(c, err)
 			}
-			return apierr.ErrInternalError.Respond(c, err)
-		}
 
-		if team.OrgID == nil {
-			return apierr.NewAPIError(fiber.StatusBadRequest, "team does not belong to any organization").Respond(c)
-		}
-
-		callerTeams, err := store.GetUserTeams(c.Context(), callerUser.ID)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-
-		belongsToOrg := false
-		for _, t := range callerTeams {
-			if t.OrgID != nil && *t.OrgID == *team.OrgID {
-				belongsToOrg = true
-				break
+			if team.OrgID == nil {
+				return apierr.NewAPIError(fiber.StatusBadRequest, "team does not belong to any organization").Respond(c)
 			}
-		}
 
-		if !belongsToOrg {
-			return apierr.NewAPIError(fiber.StatusForbidden, "user does not belong to the organization of the specified team").Respond(c)
+			callerTeams, err := store.GetUserTeams(c.Context(), callerUser.ID)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+
+			belongsToOrg := false
+			for _, t := range callerTeams {
+				if t.OrgID != nil && *t.OrgID == *team.OrgID {
+					belongsToOrg = true
+					break
+				}
+			}
+
+			if !belongsToOrg {
+				return apierr.NewAPIError(fiber.StatusForbidden, "user does not belong to the organization of the specified team").Respond(c)
+			}
 		}
 	} else {
 		if req.TeamID != nil {
@@ -172,9 +170,26 @@ func Register(c *fiber.Ctx) error {
 			_ = store.VerifyUser(c.Context(), user.ID)
 			user.IsVerified = true
 
-			// Join specified team
-			if err = store.AddTeamMember(c.Context(), *req.TeamID, user.ID); err != nil {
-				return apierr.ErrInternalError.Respond(c, err)
+			if req.TeamID != nil {
+				// Join specified team
+				if err = store.AddTeamMember(c.Context(), *req.TeamID, user.ID); err != nil {
+					return apierr.ErrInternalError.Respond(c, err)
+				}
+			} else {
+				// Create Default Org and Default Team
+				org, err := store.CreateOrganization(c.Context(), "Default Org")
+				if err != nil {
+					return apierr.ErrInternalError.Respond(c, err)
+				}
+
+				team, err := store.CreateTeamWithOrg(c.Context(), "Default Team", org.ID)
+				if err != nil {
+					return apierr.ErrInternalError.Respond(c, err)
+				}
+
+				if err = store.AddTeamMember(c.Context(), team.ID, user.ID); err != nil {
+					return apierr.ErrInternalError.Respond(c, err)
+				}
 			}
 		}
 	} else {

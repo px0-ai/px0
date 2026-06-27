@@ -85,12 +85,12 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	assert.Equal(t, true, userVal["is_verified"])
 	assert.Equal(t, false, userVal["is_admin"])
 
-	// 6. Test Admin registration without team_id should error out
+	// 6. Test Admin registration without team_id should succeed and create a Default Org and Default Team
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"admin-error@test.com","password":"Password123!"}`, token)
+		`{"email":"admin-no-team-id@test.com","password":"Password123!"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 	resp.Body.Close()
 
 	// 7. Test Non-Admin registration WITH team_id should fail (only admins can pass team_id)
