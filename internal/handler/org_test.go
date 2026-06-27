@@ -113,11 +113,15 @@ func TestMe_Orgs(t *testing.T) {
 
 	body := decodeBody(t, resp)
 	orgsVal := body["organizations"].([]any)
-	assert.NotEmpty(t, orgsVal)
+	assert.Len(t, orgsVal, 2)
 
 	firstOrg := orgsVal[0].(map[string]any)
-	assert.Equal(t, "Default Test Org", firstOrg["name"])
+	assert.Equal(t, "Default Org", firstOrg["name"])
 	assert.Equal(t, "ADMIN", firstOrg["role"])
+
+	secondOrg := orgsVal[1].(map[string]any)
+	assert.Equal(t, "Default Test Org", secondOrg["name"])
+	assert.Equal(t, "ADMIN", secondOrg["role"])
 }
 
 func TestOrg_People(t *testing.T) {

@@ -181,6 +181,22 @@ func Register(c *fiber.Ctx) error {
 		// Public registration creates a new Admin user (unverified by default unless RESEND_API_KEY == "mock")
 		autoVerify := os.Getenv("RESEND_API_KEY") == "mock"
 		user, err = store.CreateAdminUser(c.Context(), req.Email, string(hash), autoVerify)
+		if err == nil {
+			// Automatically create Default Org and Default Team, making user ADMIN of the org
+			org, err := store.CreateOrganization(c.Context(), "Default Org")
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+
+			team, err := store.CreateTeamWithOrg(c.Context(), "Default Team", org.ID)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+
+			if err = store.AddTeamMember(c.Context(), team.ID, user.ID); err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		}
 	}
 
 	if err != nil {
