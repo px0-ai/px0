@@ -36,20 +36,33 @@ paths:
   /v1/auth/register:
     post:
       summary: Register a new user
-      description: Registers a new user with an email and password. Optional team_id can be passed by an admin.
+      description: Registers a new user with an email and password. This endpoint can be called unauthenticated to register a new admin, or authenticated (as an admin) to register a standard user into a specific team.
       operationId: register
       tags:
         - Auth
+      security:
+        - {}
+        - BearerAuth: []
       x-edge-cases:
-        - Fails with 400 Bad Request if email or password are empty, or password is shorter than 8 characters.
+        - Fails with 400 Bad Request if email or password are empty, password is shorter than 8 characters, or password does not meet complexity requirements.
+        - Fails with 400 Bad Request if email format is invalid.
         - Fails with 409 Conflict if email is already registered.
-        - If admin registers a user, team_id is required.
-        - If public user registers, team_id is forbidden.
+        - If admin registers a user (authenticated with Bearer token), team_id is required. The specified team must belong to an organization, and the admin must belong to a team in that same organization.
+        - If public user registers (unauthenticated), team_id is forbidden.
+        - If Bearer token is provided but is invalid, expired, unverified, or not an admin, returns 401/403 appropriately.
       x-test-coverage:
         - 'TestRegister_Success: Verifies standard register returns 201 and User model.'
         - 'TestRegister_EmptyFields: Verifies empty fields reject with 400 and ''email and password are required''.'
         - 'TestRegister_ShortPassword: Verifies password shorter than 8 chars rejects with 400 and ''password must be at least 8 characters''.'
+        - 'TestRegister_InvalidEmail: Verifies that invalid email format rejects with 400.'
+        - 'TestRegister_WeakPassword: Verifies that a password without required complexity rejects with 400.'
         - 'TestRegister_DuplicateEmail: Verifies registering an existing email rejects with 409 and ''email already registered''.'
+        - 'TestRegister_AdminSuccess: Verifies that an admin can successfully register a user into their organization''s team.'
+        - 'TestRegister_AdminInvalidTeam: Verifies 404 if the specified team_id does not exist.'
+        - 'TestRegister_AdminTeamNoOrg: Verifies 400 if the specified team does not belong to any organization.'
+        - 'TestRegister_AdminDifferentOrg: Verifies 403 if the admin caller does not belong to the same organization as the specified team.'
+        - 'TestRegister_PublicForbiddenTeamID: Verifies 403 if a public (unauthenticated) call attempts to pass a team_id.'
+        - 'TestRegister_InvalidToken: Verifies 401 if an invalid Authorization header is provided.'
       requestBody:
         required: true
         content:
@@ -87,6 +100,61 @@ paths:
                   summary: Password is less than 8 characters long
                   value:
                     error: password must be at least 8 characters
+                invalid_email:
+                  summary: Invalid email format
+                  value:
+                    error: invalid email format
+                weak_password:
+                  summary: Password lacks complexity
+                  value:
+                    error: password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character
+                missing_team_id:
+                  summary: Admin registering a user without team_id
+                  value:
+                    error: admin must pass team_id when registering a user
+                team_no_org:
+                  summary: Specified team does not belong to any organization
+                  value:
+                    error: team does not belong to any organization
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                only_admins_team:
+                  summary: Public register with team_id
+                  value:
+                    error: only admins can register users with a team_id
+                different_org:
+                  summary: Admin registering user to different organization
+                  value:
+                    error: user does not belong to the organization of the specified team
+                user_not_verified:
+                  summary: Caller is not verified
+                  value:
+                    error: user is not verified
+                forbidden_caller:
+                  summary: Caller is not an admin
+                  value:
+                    error: forbidden
+        '404':
+          description: Team Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: team not found
         '409':
           description: Conflict (Email registered)
           content:
@@ -109,7 +177,7 @@ paths:
   /v1/auth/login:
     post:
       summary: Login
-      description: Authenticates a user and creates a new session token.
+      description: Authenticates a user and creates a new access token.
       operationId: login
       tags:
         - Auth
@@ -134,12 +202,12 @@ paths:
                 properties:
                   token:
                     type: string
-                    description: The session token to be used in standard Bearer authentication.
+                    description: The access token to be used in standard Bearer authentication.
                     example: f47ac10b-58cc-4372-a567-0e02b2c3d479
                   expires_at:
                     type: string
                     format: date-time
-                    description: The timestamp when this session token expires.
+                    description: The timestamp when this access token expires.
                   user:
                     $ref: '#/components/schemas/User'
                 required:
@@ -235,7 +303,7 @@ paths:
   /v1/auth/session:
     delete:
       summary: Logout
-      description: Destroys the active session token, logging the user out.
+      description: Destroys the active access token, logging the user out.
       operationId: logout
       tags:
         - Auth
@@ -292,11 +360,11 @@ paths:
         - BearerAuth: []
       x-edge-cases:
         - The full key prefixed with 'px0_' is returned only on creation.
-        - Must be called with standard session token; attempts to escalate using an existing API Key will return 401 Unauthorized.
+        - Must be called with standard access token; attempts to escalate using an existing API Key will return 401 Unauthorized.
       x-test-coverage:
         - 'TestCreateAPIKey_Success: Verifies successful key generation and returned properties.'
         - 'TestCreateAPIKey_MissingName: Verifies that creating a key with empty name returns 400 and ''name is required''.'
-        - 'TestCreateAPIKey_RequiresSession: Verifies that API key authentication is rejected for key generation.'
+        - 'TestCreateAPIKey_RequiresAccessToken: Verifies that API key authentication is rejected for key generation.'
       requestBody:
         required: true
         content:
@@ -1510,7 +1578,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: Use a session token retrieved from login (Bearer <token>).
+      description: Use an access token retrieved from login (Bearer <token>).
     ApiKeyAuth:
       type: apiKey
       in: header

@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ import (
 	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 type registerRequest struct {
 	Email    string     `json:"email"`
@@ -40,6 +43,26 @@ type verifyRequest struct {
 	Code  string `json:"code"`
 }
 
+func isValidPassword(password string) bool {
+	if len(password) < 8 {
+		return false
+	}
+	var hasUpper, hasLower, hasDigit, hasSpecial bool
+	for _, char := range password {
+		switch {
+		case char >= 'A' && char <= 'Z':
+			hasUpper = true
+		case char >= 'a' && char <= 'z':
+			hasLower = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+	return hasUpper && hasLower && hasDigit && hasSpecial
+}
+
 func Register(c *fiber.Ctx) error {
 	var req registerRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -48,8 +71,14 @@ func Register(c *fiber.Ctx) error {
 	if req.Email == "" || req.Password == "" {
 		return apierr.ErrEmailPasswordRequired.Respond(c)
 	}
+	if !emailRegex.MatchString(req.Email) {
+		return apierr.ErrInvalidEmail.Respond(c)
+	}
 	if len(req.Password) < 8 {
 		return apierr.ErrPasswordTooShort.Respond(c)
+	}
+	if !isValidPassword(req.Password) {
+		return apierr.ErrPasswordTooWeak.Respond(c)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -57,24 +86,76 @@ func Register(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Determine if the caller is an Admin (using a valid admin session)
+	// Determine if the caller is an Admin (using a valid admin access token)
 	isCallerAdmin := false
+	var callerUser *model.User
+
 	authHeader := c.Get("Authorization")
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token != "" {
-			if session, err := store.GetSessionByToken(c.Context(), token); err == nil {
-				if callerUser, err := store.GetUserByID(c.Context(), session.UserID); err == nil && callerUser.IsAdmin {
-					isCallerAdmin = true
-				}
-			}
+	if authHeader != "" {
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			return apierr.ErrUnauthorized.Respond(c)
 		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == "" {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+
+		session, err := store.GetSessionByToken(c.Context(), token)
+		if err != nil {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+
+		u, err := store.GetUserByID(c.Context(), session.UserID)
+		if err != nil {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+
+		if !u.IsVerified {
+			return apierr.ErrUserNotVerified.Respond(c)
+		}
+
+		if !u.IsAdmin {
+			return apierr.ErrForbidden.Respond(c)
+		}
+
+		isCallerAdmin = true
+		callerUser = u
 	}
 
 	// Validate team_id depending on whether the caller is an Admin
 	if isCallerAdmin {
 		if req.TeamID == nil {
 			return apierr.NewAPIError(fiber.StatusBadRequest, "admin must pass team_id when registering a user").Respond(c)
+		}
+
+		// Check team belongs to org and user is admin of that org/belongs to it
+		team, err := store.GetTeamByID(c.Context(), *req.TeamID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+			}
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+
+		if team.OrgID == nil {
+			return apierr.NewAPIError(fiber.StatusBadRequest, "team does not belong to any organization").Respond(c)
+		}
+
+		callerTeams, err := store.GetUserTeams(c.Context(), callerUser.ID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+
+		belongsToOrg := false
+		for _, t := range callerTeams {
+			if t.OrgID != nil && *t.OrgID == *team.OrgID {
+				belongsToOrg = true
+				break
+			}
+		}
+
+		if !belongsToOrg {
+			return apierr.NewAPIError(fiber.StatusForbidden, "user does not belong to the organization of the specified team").Respond(c)
 		}
 	} else {
 		if req.TeamID != nil {
@@ -140,7 +221,7 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	if !user.IsVerified {
-		return apierr.ErrUserNotVerified.Respond(c)
+		return apierr.ErrInvalidCredentials.Respond(c)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -222,7 +303,7 @@ func Logout(c *fiber.Ctx) error {
 func Me(c *fiber.Ctx) error {
 	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
 	if !ok || userID == uuid.Nil {
-		return apierr.ErrSessionRequired.Respond(c)
+		return apierr.ErrAccessTokenRequired.Respond(c)
 	}
 
 	user, err := store.GetUserByID(c.Context(), userID)

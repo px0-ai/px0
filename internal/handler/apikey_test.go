@@ -41,7 +41,7 @@ func TestCreateAPIKey_MissingName(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestCreateAPIKey_RequiresSession(t *testing.T) {
+func TestCreateAPIKey_RequiresAccessToken(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	apiKey := setupAPIKey(t, a, token)

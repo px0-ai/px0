@@ -83,11 +83,11 @@ func decodeBody(t *testing.T, resp *http.Response) map[string]any {
 	return result
 }
 
-// setupUser registers a user and returns a valid session token.
+// setupUser registers a user and returns a valid access token.
 func setupUser(t *testing.T, a *testApp) string {
 	t.Helper()
 	email := "test@px0.dev"
-	password := "testpassword"
+	password := "TestPassword123!"
 
 	// Register publicly (without admin key and without team_id) to become an Admin user.
 	req := newReq(t, http.MethodPost, "/v1/auth/register",

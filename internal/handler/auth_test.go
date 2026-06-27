@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/px0-ai/px0/internal/store"
 )
@@ -15,7 +18,7 @@ import (
 func TestRegister_Success(t *testing.T) {
 	a := newTestApp(t)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"new@test.com","password":"password123"}`, "")
+		`{"email":"new@test.com","password":"Password123!"}`, "")
 
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -33,12 +36,12 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 	a := newTestApp(t)
 
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password123"}`, "")
+		`{"email":"dup@test.com","password":"Password123!"}`, "")
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"dup@test.com","password":"password456"}`, "")
+		`{"email":"dup@test.com","password":"Password456!"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -50,7 +53,7 @@ func TestRegister_MissingFields(t *testing.T) {
 	cases := []struct {
 		body string
 	}{
-		{`{"email":"","password":"password123"}`},
+		{`{"email":"","password":"Password123!"}`},
 		{`{"email":"a@b.com","password":""}`},
 		{`{}`},
 	}
@@ -74,12 +77,194 @@ func TestRegister_ShortPassword(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestRegister_InvalidEmail(t *testing.T) {
+	a := newTestApp(t)
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"invalid-email","password":"Password123!"}`, "")
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "invalid email format", body["error"])
+}
+
+func TestRegister_WeakPassword(t *testing.T) {
+	a := newTestApp(t)
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"weak-pwd@test.com","password":"password123"}`, "") // lacks uppercase and special char
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "password must contain at least one uppercase letter")
+}
+
+func TestRegister_AdminSuccess(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// Set up Organization
+	org, err := store.CreateOrganization(ctx, "Admin Org")
+	require.NoError(t, err)
+
+	// Set up Team
+	team, err := store.CreateTeamWithOrg(ctx, "Admin Team", org.ID)
+	require.NoError(t, err)
+
+	// Set up Admin caller user
+	pwdHash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	adminUser, err := store.CreateAdminUser(ctx, "admin-caller@test.com", string(pwdHash), true)
+	require.NoError(t, err)
+
+	// Associate admin user to team (making them part of the organization)
+	err = store.AddTeamMember(ctx, team.ID, adminUser.ID)
+	require.NoError(t, err)
+
+	// Set up Session for Admin
+	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token", time.Now().Add(1*time.Hour))
+	require.NoError(t, err)
+
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password456!","team_id":%q}`, team.ID), session.Token)
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	userVal := body["user"].(map[string]any)
+	assert.Equal(t, "standard-user@test.com", userVal["email"])
+	assert.Equal(t, true, userVal["is_verified"])
+	assert.Equal(t, false, userVal["is_admin"])
+
+	members, err := store.GetTeamMembers(ctx, team.ID)
+	require.NoError(t, err)
+	found := false
+	for _, m := range members {
+		if m.Email == "standard-user@test.com" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestRegister_AdminInvalidTeamID(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	pwdHash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	adminUser, err := store.CreateAdminUser(ctx, "admin-caller2@test.com", string(pwdHash), true)
+	require.NoError(t, err)
+
+	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-2", time.Now().Add(1*time.Hour))
+	require.NoError(t, err)
+
+	randomUUID := uuid.New().String()
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password456!","team_id":%q}`, randomUUID), session.Token)
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "team not found", body["error"])
+}
+
+func TestRegister_AdminTeamNoOrg(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	team, err := store.CreateTeam(ctx, "Team No Org")
+	require.NoError(t, err)
+
+	pwdHash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	adminUser, err := store.CreateAdminUser(ctx, "admin-caller3@test.com", string(pwdHash), true)
+	require.NoError(t, err)
+
+	err = store.AddTeamMember(ctx, team.ID, adminUser.ID)
+	require.NoError(t, err)
+
+	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-3", time.Now().Add(1*time.Hour))
+	require.NoError(t, err)
+
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password456!","team_id":%q}`, team.ID), session.Token)
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "team does not belong to any organization", body["error"])
+}
+
+func TestRegister_AdminDifferentOrg(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	org1, err := store.CreateOrganization(ctx, "Org One")
+	require.NoError(t, err)
+	org2, err := store.CreateOrganization(ctx, "Org Two")
+	require.NoError(t, err)
+
+	team1, err := store.CreateTeamWithOrg(ctx, "Team One", org1.ID)
+	require.NoError(t, err)
+	team2, err := store.CreateTeamWithOrg(ctx, "Team Two", org2.ID)
+	require.NoError(t, err)
+
+	pwdHash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	adminUser, err := store.CreateAdminUser(ctx, "admin-caller4@test.com", string(pwdHash), true)
+	require.NoError(t, err)
+
+	// Admin belongs to team1 (Org One)
+	err = store.AddTeamMember(ctx, team1.ID, adminUser.ID)
+	require.NoError(t, err)
+
+	session, err := store.CreateSession(ctx, adminUser.ID, "valid-admin-token-4", time.Now().Add(1*time.Hour))
+	require.NoError(t, err)
+
+	// Attempts to register user to team2 (Org Two)
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password456!","team_id":%q}`, team2.ID), session.Token)
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "user does not belong to the organization of the specified team", body["error"])
+}
+
+func TestRegister_PublicForbiddenTeamID(t *testing.T) {
+	a := newTestApp(t)
+	randomUUID := uuid.New().String()
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password456!","team_id":%q}`, randomUUID), "")
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "only admins can register users with a team_id", body["error"])
+}
+
+func TestRegister_InvalidToken(t *testing.T) {
+	a := newTestApp(t)
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"standard-user@test.com","password":"Password456!"}`, "invalid-token-format-or-value")
+
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
 func TestLogin_Success(t *testing.T) {
 	a := newTestApp(t)
 
 	// register first
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"login@test.com","password":"password123"}`, "")
+		`{"email":"login@test.com","password":"Password123!"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -96,7 +281,7 @@ func TestLogin_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"login@test.com","password":"password123"}`, "")
+		`{"email":"login@test.com","password":"Password123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -111,7 +296,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	a := newTestApp(t)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"wp@test.com","password":"password123"}`, "")
+		`{"email":"wp@test.com","password":"Password123!"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -124,7 +309,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	require.NoError(t, err)
 
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"wp@test.com","password":"wrongpassword"}`, "")
+		`{"email":"wp@test.com","password":"WrongPassword123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -134,7 +319,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 func TestLogin_UnknownEmail(t *testing.T) {
 	a := newTestApp(t)
 	req := newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"nobody@test.com","password":"password123"}`, "")
+		`{"email":"nobody@test.com","password":"Password123!"}`, "")
 
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -161,7 +346,7 @@ func TestLogout(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestMe_WithSession(t *testing.T) {
+func TestMe_WithAccessToken(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 
@@ -190,7 +375,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 
 	// 1. Register publicly without admin key and without team_id (unverified admin)
 	req := newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+		`{"email":"verify-flow@test.com","password":"Password123!"}`, "")
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -201,12 +386,12 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	assert.Equal(t, true, userVal["is_admin"]) // Registered publicly as Admin
 	resp.Body.Close()
 
-	// 2. Login should fail (user is not verified)
+	// 2. Login should fail (user is not verified, returning generic invalid credentials)
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+		`{"email":"verify-flow@test.com","password":"Password123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
 
 	// 3. Fetch verification code from DB
@@ -235,7 +420,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 
 	// 6. Login should now succeed!
 	req = newReq(t, http.MethodPost, "/v1/auth/login",
-		`{"email":"verify-flow@test.com","password":"password123"}`, "")
+		`{"email":"verify-flow@test.com","password":"Password123!"}`, "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

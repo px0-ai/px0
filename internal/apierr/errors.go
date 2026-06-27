@@ -58,9 +58,11 @@ var (
 	ErrAPIKeyNotFound          = &APIError{Status: fiber.StatusNotFound, Message: "api key not found"}
 	ErrEmailPasswordRequired   = &APIError{Status: fiber.StatusBadRequest, Message: "email and password are required"}
 	ErrPasswordTooShort        = &APIError{Status: fiber.StatusBadRequest, Message: "password must be at least 8 characters"}
+	ErrInvalidEmail            = &APIError{Status: fiber.StatusBadRequest, Message: "invalid email format"}
+	ErrPasswordTooWeak         = &APIError{Status: fiber.StatusBadRequest, Message: "password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character"}
 	ErrEmailAlreadyRegistered  = &APIError{Status: fiber.StatusConflict, Message: "email already registered"}
 	ErrInvalidCredentials      = &APIError{Status: fiber.StatusUnauthorized, Message: "invalid credentials"}
-	ErrSessionRequired         = &APIError{Status: fiber.StatusForbidden, Message: "session required"}
+	ErrAccessTokenRequired     = &APIError{Status: fiber.StatusForbidden, Message: "access token required"}
 	ErrForbidden               = &APIError{Status: fiber.StatusForbidden, Message: "forbidden"}
 	ErrUnauthorized            = &APIError{Status: fiber.StatusUnauthorized, Message: "unauthorized"}
 	ErrPromptNotFound          = &APIError{Status: fiber.StatusNotFound, Message: "prompt not found"}

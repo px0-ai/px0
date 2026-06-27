@@ -16,11 +16,11 @@ paths:
         - BearerAuth: []
       x-edge-cases:
         - "The full key prefixed with 'px0_' is returned only on creation."
-        - "Must be called with standard session token; attempts to escalate using an existing API Key will return 401 Unauthorized."
+        - "Must be called with standard access token; attempts to escalate using an existing API Key will return 401 Unauthorized."
       x-test-coverage:
         - "TestCreateAPIKey_Success: Verifies successful key generation and returned properties."
         - "TestCreateAPIKey_MissingName: Verifies that creating a key with empty name returns 400 and 'name is required'."
-        - "TestCreateAPIKey_RequiresSession: Verifies that API key authentication is rejected for key generation."
+        - "TestCreateAPIKey_RequiresAccessToken: Verifies that API key authentication is rejected for key generation."
       requestBody:
         required: true
         content:

@@ -15,26 +15,26 @@ import (
 
 const LocalsUserID = "userID"
 
-// RequireAuth accepts either a session token (Authorization: Bearer <token>)
+// RequireAuth accepts either an access token (Authorization: Bearer <token>)
 // or an API key (X-API-Key: <key>).
 func RequireAuth(c *fiber.Ctx) error {
-	if trySessionAuth(c) || tryAPIKeyAuth(c) {
+	if tryAccessTokenAuth(c) || tryAPIKeyAuth(c) {
 		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
-// RequireSession accepts only a session token. Used for endpoints that manage
+// RequireAccessToken accepts only an access token. Used for endpoints that manage
 // account-level resources (e.g. API key CRUD) where API key auth is not appropriate.
-func RequireSession(c *fiber.Ctx) error {
-	if trySessionAuth(c) {
+func RequireAccessToken(c *fiber.Ctx) error {
+	if tryAccessTokenAuth(c) {
 		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
 func RequireAdmin(c *fiber.Ctx) error {
-	if !trySessionAuth(c) {
+	if !tryAccessTokenAuth(c) {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
@@ -50,7 +50,7 @@ func RequireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-func trySessionAuth(c *fiber.Ctx) bool {
+func tryAccessTokenAuth(c *fiber.Ctx) bool {
 	auth := c.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		return false

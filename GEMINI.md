@@ -7,6 +7,7 @@ We do not run or require tests for every single change. Trivial modifications, d
 - New feature: tests covering the happy path and at least one failure path.
 - Bug fix: a regression test that reproduces the bug before the fix and passes after.
 - Refactor: existing tests must still pass; add tests if coverage was missing.
+- OpenAPI Spec Alignment: Whenever tests are created or updated to cover new edge cases, scenarios, or validation behaviors, the OpenAPI specification (under `docs/openapi/`) must be updated. This ensures that the documentation remains perfectly aligned with the test suite and implementation.
 
 Run before every push:
 
@@ -147,3 +148,4 @@ Maintain the following standards in all OpenAPI documents to ensure correct code
 - Operation Identifiers: Assign a unique, camelCase `operationId` to every endpoint (e.g., `createPromptVersion`, `listAPIKeys`). Generators use this name for client SDK method names and CLI subcommands.
 - Rich Descriptions: Provide descriptive explanations for all path variables, query parameters, and schema fields. These are parsed into CLI flag help menus and MCP server instructions.
 - Custom Metadata Extensions: Always write natural language boundary conditions under `x-edge-cases`, and document the verifying tests under `x-test-coverage`.
+- Test-Driven Specification Alignment: When new tests or test cases are added or updated to verify edge cases/scenarios, you must update the OpenAPI specification's `x-edge-cases` and `x-test-coverage` metadata to document those scenarios.

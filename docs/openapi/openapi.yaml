@@ -63,7 +63,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: Use a session token retrieved from login (Bearer <token>).
+      description: Use an access token retrieved from login (Bearer <token>).
     ApiKeyAuth:
       type: apiKey
       in: header
