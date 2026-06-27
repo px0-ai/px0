@@ -25,6 +25,10 @@ paths:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
   /v1/auth/me:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1me"
+  /v1/auth/password-reset/trigger:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1password-reset~1trigger"
+  /v1/auth/password-reset/reset:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1password-reset~1reset"
   /v1/api-keys:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
   /v1/api-keys/{id}:

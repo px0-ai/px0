@@ -143,3 +143,63 @@ func DeleteUserVerifications(ctx context.Context, userID uuid.UUID) error {
 	}
 	return nil
 }
+
+func CreatePasswordReset(ctx context.Context, userID uuid.UUID, code string, expiresAt time.Time) error {
+	_, err := db.Pool.Exec(ctx,
+		`INSERT INTO password_resets (user_id, code, expires_at) VALUES ($1, $2, $3)`,
+		userID, code, expiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create password reset: %w", err)
+	}
+	return nil
+}
+
+func GetPasswordResetByCode(ctx context.Context, code string) (uuid.UUID, time.Time, error) {
+	var userID uuid.UUID
+	var expiresAt time.Time
+	err := db.Pool.QueryRow(ctx,
+		`SELECT user_id, expires_at FROM password_resets WHERE code = $1`,
+		code,
+	).Scan(&userID, &expiresAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, time.Time{}, ErrNotFound
+		}
+		return uuid.Nil, time.Time{}, fmt.Errorf("get password reset by code: %w", err)
+	}
+	return userID, expiresAt, nil
+}
+
+func UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	_, err := db.Pool.Exec(ctx,
+		`UPDATE users SET password_hash = $1 WHERE id = $2`,
+		passwordHash, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update user password: %w", err)
+	}
+	return nil
+}
+
+func DeletePasswordReset(ctx context.Context, code string) error {
+	_, err := db.Pool.Exec(ctx,
+		`DELETE FROM password_resets WHERE code = $1`,
+		code,
+	)
+	if err != nil {
+		return fmt.Errorf("delete password reset: %w", err)
+	}
+	return nil
+}
+
+func DeleteUserPasswordResets(ctx context.Context, userID uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx,
+		`DELETE FROM password_resets WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete user password resets: %w", err)
+	}
+	return nil
+}

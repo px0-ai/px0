@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/px0-ai/px0/internal/db"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -480,5 +481,142 @@ func TestTriggerVerification(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestPasswordReset_Flow(t *testing.T) {
+	a := newTestApp(t)
+
+	// 1. Create and verify a user so they are active/can login
+	email := "user-reset@test.com"
+	password := "OldPassword123!"
+	newPassword := "NewPassword456!"
+
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	user, err := store.GetUserByEmail(context.Background(), email)
+	require.NoError(t, err)
+
+	// Verify user so they can login
+	err = store.VerifyUser(context.Background(), user.ID)
+	require.NoError(t, err)
+
+	// 2. Trigger password reset (missing email should fail with 400)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/trigger", `{"email":""}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Trigger password reset (non-existent email should fail with 404)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/trigger", `{"email":"unknown-user@test.com"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// 4. Trigger password reset (valid email should succeed with 200)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/trigger", fmt.Sprintf(`{"email":%q}`, email), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 5. Query the generated code directly from database
+	var code string
+	err = db.Pool.QueryRow(context.Background(),
+		`SELECT code FROM password_resets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		user.ID,
+	).Scan(&code)
+	require.NoError(t, err)
+	assert.NotEmpty(t, code)
+
+	// 6. Reset password (empty password/code should fail with 400)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/reset", `{"code":"","new_password":""}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 7. Reset password (weak password should fail with 400)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/reset",
+		fmt.Sprintf(`{"code":%q,"new_password":"weak"}`, code), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 8. Reset password (invalid code should fail with 400)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/reset",
+		fmt.Sprintf(`{"code":"000000","new_password":%q}`, newPassword), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 9. Reset password successfully (should return 200 and derived email)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/reset",
+		fmt.Sprintf(`{"code":%q,"new_password":%q}`, code, newPassword), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	assert.Equal(t, "password reset successfully", body["message"])
+	assert.Equal(t, email, body["email"])
+	resp.Body.Close()
+
+	// 10. Verify that old password login fails (401)
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+
+	// 11. Verify that new password login succeeds (200)
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, newPassword), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 12. Verify that the code is deleted and cannot be reused (fails with 400)
+	req = newReq(t, http.MethodPost, "/v1/auth/password-reset/reset",
+		fmt.Sprintf(`{"code":%q,"new_password":%q}`, code, newPassword), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestRegister_AutoVerifyMock(t *testing.T) {
+	a := newTestApp(t)
+	t.Setenv("RESEND_API_KEY", "mock")
+
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"mock-autoverified@test.com","password":"Password123!"}`, "")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	user := body["user"].(map[string]any)
+	assert.Equal(t, "mock-autoverified@test.com", user["email"])
+	assert.Equal(t, true, user["is_verified"]) // Should be automatically verified!
+	resp.Body.Close()
+
+	// Verify we can login immediately without verification step!
+	req = newReq(t, http.MethodPost, "/v1/auth/login",
+		`{"email":"mock-autoverified@test.com","password":"Password123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 }

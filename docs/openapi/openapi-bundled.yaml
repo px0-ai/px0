@@ -404,6 +404,129 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: unauthorized
+  /v1/auth/password-reset/trigger:
+    post:
+      summary: Trigger Password Reset
+      description: Generates a password reset code and sends it via email to the user.
+      operationId: triggerPasswordReset
+      tags:
+        - Auth
+      x-edge-cases:
+        - Fails with 400 Bad Request if email is missing.
+        - Fails with 404 Not Found if user with specified email does not exist.
+      x-test-coverage:
+        - 'TestPasswordReset_Flow: Verifies triggering password reset and completing it successfully.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerPasswordResetRequest'
+      responses:
+        '200':
+          description: Password reset email sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: password reset email sent successfully
+                required:
+                  - message
+        '400':
+          description: Missing email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: email is required
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: user not found
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+  /v1/auth/password-reset/reset:
+    post:
+      summary: Reset Password
+      description: Resets a user's password using a valid reset code and a new password, deriving the user from the code in the database.
+      operationId: resetPassword
+      tags:
+        - Auth
+      x-edge-cases:
+        - Fails with 400 Bad Request if code or new password is empty.
+        - Fails with 400 Bad Request if new password is too short or too weak.
+        - Fails with 400 Bad Request if reset code is invalid or expired.
+      x-test-coverage:
+        - 'TestPasswordReset_Flow: Verifies complete password reset flow.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: password reset successfully
+                  email:
+                    type: string
+                    format: email
+                    example: user@example.com
+                required:
+                  - message
+                  - email
+        '400':
+          description: Invalid input or invalid/expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              examples:
+                missing_fields:
+                  summary: Missing code or password
+                  value:
+                    error: code and new_password are required
+                short_password:
+                  summary: Password too short
+                  value:
+                    error: password must be at least 8 characters
+                weak_password:
+                  summary: Password lacks complexity
+                  value:
+                    error: password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character
+                invalid_code:
+                  summary: Reset code is invalid or expired
+                  value:
+                    error: invalid or expired password reset code
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
   /v1/api-keys:
     post:
       summary: Create an API Key
@@ -1930,6 +2053,28 @@ components:
       required:
         - email
         - code
+    TriggerPasswordResetRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+      required:
+        - email
+    ResetPasswordRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          example: '123456'
+        new_password:
+          type: string
+          minLength: 8
+          example: NewSecretPassword123!
+      required:
+        - code
+        - new_password
     CreateAPIKeyRequest:
       type: object
       properties:

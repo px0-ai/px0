@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/px0-ai/px0/internal/handler"
@@ -10,6 +11,13 @@ import (
 
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{AppName: "px0"})
+
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:3001, http://127.0.0.1:3001",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-API-Key",
+		AllowMethods:     "GET, POST, HEAD, PUT, DELETE, PATCH, OPTIONS",
+		AllowCredentials: true,
+	}))
 
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
@@ -24,6 +32,8 @@ func New() *fiber.App {
 	auth.Post("/login", handler.Login)
 	auth.Get("/verify-email", handler.TriggerVerification)
 	auth.Post("/verify-email", handler.Verify)
+	auth.Post("/password-reset/trigger", handler.TriggerPasswordReset)
+	auth.Post("/password-reset/reset", handler.ResetPassword)
 	auth.Delete("/session", handler.Logout)
 	auth.Get("/me", middleware.RequireAccessToken, handler.Me)
 

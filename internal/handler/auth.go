@@ -178,8 +178,9 @@ func Register(c *fiber.Ctx) error {
 			}
 		}
 	} else {
-		// Public registration creates a new Admin user (unverified by default)
-		user, err = store.CreateAdminUser(c.Context(), req.Email, string(hash), false)
+		// Public registration creates a new Admin user (unverified by default unless RESEND_API_KEY == "mock")
+		autoVerify := os.Getenv("RESEND_API_KEY") == "mock"
+		user, err = store.CreateAdminUser(c.Context(), req.Email, string(hash), autoVerify)
 	}
 
 	if err != nil {
@@ -190,6 +191,11 @@ func Register(c *fiber.Ctx) error {
 	}
 
 	if !isCallerAdmin {
+		autoVerify := os.Getenv("RESEND_API_KEY") == "mock"
+		if autoVerify {
+			return c.Status(fiber.StatusCreated).JSON(fiber.Map{"user": user})
+		}
+
 		code, err := GenerateVerificationCode()
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
@@ -372,8 +378,8 @@ func GenerateVerificationCode() (string, error) {
 
 func SendVerificationEmail(email, code string) error {
 	apiKey := os.Getenv("RESEND_API_KEY")
-	if apiKey == "" {
-		fmt.Printf("[EMAIL] No RESEND_API_KEY set. Verification code for %s is: %s\n", email, code)
+	if apiKey == "" || apiKey == "mock" {
+		fmt.Printf("[EMAIL] No RESEND_API_KEY set or is mock. Verification code for %s is: %s\n", email, code)
 		return nil
 	}
 
@@ -413,4 +419,149 @@ func SendVerificationEmail(email, code string) error {
 	}
 
 	return nil
+}
+
+type triggerPasswordResetRequest struct {
+	Email string `json:"email"`
+}
+
+type resetPasswordRequest struct {
+	Code        string `json:"code"`
+	NewPassword string `json:"new_password"`
+}
+
+func SendPasswordResetEmail(email, code string) error {
+	apiKey := os.Getenv("RESEND_API_KEY")
+	if apiKey == "" || apiKey == "mock" {
+		fmt.Printf("[EMAIL] No RESEND_API_KEY set or is mock. Password reset code for %s is: %s\n", email, code)
+		return nil
+	}
+
+	from := os.Getenv("RESEND_FROM_EMAIL")
+	if from == "" {
+		from = "onboarding@resend.dev"
+	}
+
+	payload := map[string]any{
+		"from":    from,
+		"to":      []string{email},
+		"subject": "Reset your password",
+		"html":    fmt.Sprintf("<p>Your password reset code is: <strong>%s</strong></p>", code),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func TriggerPasswordReset(c *fiber.Ctx) error {
+	var req triggerPasswordResetRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Email == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "email is required").Respond(c)
+	}
+
+	user, err := store.GetUserByEmail(c.Context(), req.Email)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "user not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	code, err := GenerateVerificationCode()
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	expiresAt := time.Now().Add(15 * time.Minute)
+	_ = store.DeleteUserPasswordResets(c.Context(), user.ID)
+	if err := store.CreatePasswordReset(c.Context(), user.ID, code, expiresAt); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := SendPasswordResetEmail(user.Email, code); err != nil {
+		return apierr.NewAPIError(fiber.StatusInternalServerError, "failed to send password reset email").Respond(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "password reset email sent successfully",
+	})
+}
+
+func ResetPassword(c *fiber.Ctx) error {
+	var req resetPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Code == "" || req.NewPassword == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "code and new_password are required").Respond(c)
+	}
+
+	if len(req.NewPassword) < 8 {
+		return apierr.ErrPasswordTooShort.Respond(c)
+	}
+
+	if !isValidPassword(req.NewPassword) {
+		return apierr.ErrPasswordTooWeak.Respond(c)
+	}
+
+	userID, expiresAt, err := store.GetPasswordResetByCode(c.Context(), req.Code)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrInvalidResetCode.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if time.Now().After(expiresAt) {
+		_ = store.DeletePasswordReset(c.Context(), req.Code)
+		return apierr.ErrInvalidResetCode.Respond(c)
+	}
+
+	user, err := store.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.UpdateUserPassword(c.Context(), user.ID, string(hash)); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	_ = store.DeletePasswordReset(c.Context(), req.Code)
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "password reset successfully",
+		"email":   user.Email,
+	})
 }

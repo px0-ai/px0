@@ -76,4 +76,5 @@ var (
 	ErrOnlyDraftsModifiable    = &APIError{Status: fiber.StatusUnprocessableEntity, Message: "only draft versions can be modified"}
 	ErrUserNotVerified         = &APIError{Status: fiber.StatusForbidden, Message: "user is not verified"}
 	ErrInvalidVerificationCode = &APIError{Status: fiber.StatusBadRequest, Message: "invalid verification code"}
+	ErrInvalidResetCode        = &APIError{Status: fiber.StatusBadRequest, Message: "invalid or expired password reset code"}
 )
