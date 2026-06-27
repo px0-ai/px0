@@ -246,7 +246,7 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: internal error
-  /v1/auth/verify:
+  /v1/auth/verify-email:
     post:
       summary: Verify User Email
       description: Verifies a user's email address using a numeric code sent via email.
@@ -292,6 +292,63 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: invalid credentials
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: internal error
+    get:
+      summary: Trigger Verification Email
+      description: Triggers a new email verification code and sends it to the user's email.
+      operationId: triggerVerificationEmail
+      tags:
+        - Auth
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          description: The user's email address to trigger verification for.
+      x-edge-cases:
+        - Fails with 400 Bad Request if email query parameter is missing.
+        - Fails with 400 Bad Request if user is already verified.
+        - Fails with 404 Not Found if user is not found.
+      x-test-coverage:
+        - 'TestTriggerVerification: Verifies triggering a verification email.'
+      responses:
+        '200':
+          description: Verification email sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: verification email sent successfully
+                required:
+                  - message
+        '400':
+          description: Missing email, invalid email, or user already verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: email is required
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: user not found
         '500':
           description: Internal Server Error
           content:

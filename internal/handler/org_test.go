@@ -1,12 +1,16 @@
 package handler_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/store"
 )
 
 func TestOrg_CreateAndEdit(t *testing.T) {
@@ -58,9 +62,19 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 	assert.Equal(t, "Engineers Team", team["name"])
 	assert.Equal(t, orgIDStr, team["org_id"])
 
+	// Add the admin user to the newly created team so they belong to the organization
+	adminUser, err := store.GetUserByEmail(context.Background(), "test@px0.dev")
+	require.NoError(t, err)
+
+	teamID, err := uuid.Parse(teamIDStr)
+	require.NoError(t, err)
+
+	err = store.AddTeamMember(context.Background(), teamID, adminUser.ID)
+	require.NoError(t, err)
+
 	// 5. Test Register standard user by Admin with team_id
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":"standard-user@test.com","password":"password123","team_id":%q}`, teamIDStr), token)
+		fmt.Sprintf(`{"email":"standard-user@test.com","password":"Password123!","team_id":%q}`, teamIDStr), token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -73,7 +87,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 
 	// 6. Test Admin registration without team_id should error out
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		`{"email":"admin-error@test.com","password":"password123"}`, token)
+		`{"email":"admin-error@test.com","password":"Password123!"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -81,7 +95,7 @@ func TestOrg_CreateAndEdit(t *testing.T) {
 
 	// 7. Test Non-Admin registration WITH team_id should fail (only admins can pass team_id)
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
-		fmt.Sprintf(`{"email":"non-admin-error@test.com","password":"password123","team_id":%q}`, teamIDStr), "")
+		fmt.Sprintf(`{"email":"non-admin-error@test.com","password":"Password123!","team_id":%q}`, teamIDStr), "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)

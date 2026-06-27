@@ -403,7 +403,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	assert.NotEmpty(t, code)
 
 	// 4. Verify with incorrect code (should fail)
-	req = newReq(t, http.MethodPost, "/v1/auth/verify",
+	req = newReq(t, http.MethodPost, "/v1/auth/verify-email",
 		fmt.Sprintf(`{"email":"verify-flow@test.com","code":"invalid%s"}`, code), "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -411,7 +411,7 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	resp.Body.Close()
 
 	// 5. Verify with correct code
-	req = newReq(t, http.MethodPost, "/v1/auth/verify",
+	req = newReq(t, http.MethodPost, "/v1/auth/verify-email",
 		fmt.Sprintf(`{"email":"verify-flow@test.com","code":%q}`, code), "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -424,5 +424,61 @@ func TestRegister_AndVerifyFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestTriggerVerification(t *testing.T) {
+	a := newTestApp(t)
+
+	// 1. Missing email parameter
+	req := newReq(t, http.MethodGet, "/v1/auth/verify-email", "", "")
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// 2. Non-existent email
+	req = newReq(t, http.MethodGet, "/v1/auth/verify-email?email=nonexistent@test.com", "", "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Register unverified user
+	req = newReq(t, http.MethodPost, "/v1/auth/register",
+		`{"email":"trigger-flow@test.com","password":"Password123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	// 4. Trigger verification email (should succeed)
+	req = newReq(t, http.MethodGet, "/v1/auth/verify-email?email=trigger-flow@test.com", "", "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 5. Fetch code from DB
+	user, err := store.GetUserByEmail(context.Background(), "trigger-flow@test.com")
+	require.NoError(t, err)
+	
+	code, _, err := store.GetLatestVerificationCode(context.Background(), user.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, code)
+
+	// 6. Verify with the code
+	req = newReq(t, http.MethodPost, "/v1/auth/verify-email",
+		fmt.Sprintf(`{"email":"trigger-flow@test.com","code":%q}`, code), "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 7. Trigger again (should fail because user is already verified)
+	req = newReq(t, http.MethodGet, "/v1/auth/verify-email?email=trigger-flow@test.com", "", "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	resp.Body.Close()
 }

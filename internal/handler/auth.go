@@ -251,6 +251,43 @@ func Login(c *fiber.Ctx) error {
 	})
 }
 
+func TriggerVerification(c *fiber.Ctx) error {
+	email := c.Query("email")
+	if email == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "email is required").Respond(c)
+	}
+
+	user, err := store.GetUserByEmail(c.Context(), email)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "user not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if user.IsVerified {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "user is already verified").Respond(c)
+	}
+
+	code, err := GenerateVerificationCode()
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	expiresAt := time.Now().Add(15 * time.Minute)
+	if err := store.CreateUserVerification(c.Context(), user.ID, code, expiresAt); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := SendVerificationEmail(user.Email, code); err != nil {
+		return apierr.NewAPIError(fiber.StatusInternalServerError, "failed to send verification email").Respond(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "verification email sent successfully",
+	})
+}
+
 func Verify(c *fiber.Ctx) error {
 	var req verifyRequest
 	if err := c.BodyParser(&req); err != nil {
