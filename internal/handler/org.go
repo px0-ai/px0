@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -118,4 +119,57 @@ func ListUserOrgs(c *fiber.Ctx) error {
 		orgs = []*model.OrganizationWithRole{}
 	}
 	return c.JSON(fiber.Map{"organizations": orgs})
+}
+
+func ListOrgPeople(c *fiber.Ctx) error {
+	orgID, err := uuid.Parse(c.Params("orgID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	// Verify the caller is in the organization (or system admin)
+	belongs, err := store.IsUserInOrg(c.Context(), userID, orgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if !belongs {
+		sysAdmin, err := store.IsSystemAdmin(c.Context(), userID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if !sysAdmin {
+			return apierr.ErrForbidden.Respond(c)
+		}
+	}
+
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page <= 0 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	if limit <= 0 {
+		limit = 10
+	}
+
+	people, total, err := store.GetOrgPeoplePaginated(c.Context(), orgID, page, limit)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if people == nil {
+		people = []*model.User{}
+	}
+
+	return c.JSON(fiber.Map{
+		"people": people,
+		"page":   page,
+		"limit":  limit,
+		"total":  total,
+	})
 }

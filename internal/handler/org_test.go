@@ -119,3 +119,84 @@ func TestMe_Orgs(t *testing.T) {
 	assert.Equal(t, "Default Test Org", firstOrg["name"])
 	assert.Equal(t, "ADMIN", firstOrg["role"])
 }
+
+func TestOrg_People(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a) // verified user on Default Test Org
+
+	// Get organization ID
+	req := newReq(t, http.MethodGet, "/v1/me/orgs", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	orgsVal := body["organizations"].([]any)
+	require.NotEmpty(t, orgsVal)
+	orgIDStr := orgsVal[0].(map[string]any)["id"].(string)
+
+	// Fetch org people
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/orgs/%s/people?page=1&limit=5", orgIDStr), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body = decodeBody(t, resp)
+	peopleVal := body["people"].([]any)
+	assert.Len(t, peopleVal, 1) // only 1 user exists so far
+	assert.Equal(t, float64(1), body["page"])
+	assert.Equal(t, float64(5), body["limit"])
+	assert.Equal(t, float64(1), body["total"])
+
+	firstPerson := peopleVal[0].(map[string]any)
+	assert.Equal(t, "test@px0.dev", firstPerson["email"])
+}
+
+func TestTeam_Delete(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	token := setupUser(t, a) // admin on Default Test Org & Test Setup Team
+
+	// Retrieve session and user info
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+	userID := session.UserID
+
+	// Create a new team
+	teams, err := store.GetUserTeams(ctx, userID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgID.String()), `{"name":"Temp Team"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	teamIDStr := body["team"].(map[string]any)["id"].(string)
+	teamID, err := uuid.Parse(teamIDStr)
+	require.NoError(t, err)
+
+	// Join team as admin
+	err = store.AddTeamMember(ctx, teamID, userID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, userID, "admin")
+	require.NoError(t, err)
+
+	// Delete team via API
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/teams/%s", teamIDStr), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// Verify team is deleted
+	_, err = store.GetTeamByID(ctx, teamID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Verify that the user still exists in database
+	user, err := store.GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, userID, user.ID)
+}

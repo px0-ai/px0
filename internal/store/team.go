@@ -462,3 +462,58 @@ func GetPendingJoinRequestsForAdmin(ctx context.Context, userID uuid.UUID) ([]*m
 	}
 	return items, rows.Err()
 }
+
+func DeleteTeam(ctx context.Context, id uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM teams WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete team: %w", err)
+	}
+	return nil
+}
+
+func GetOrgPeoplePaginated(ctx context.Context, orgID uuid.UUID, page, limit int) ([]*model.User, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	var total int
+	err := db.Pool.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT tm.user_id)
+		 FROM team_members tm
+		 JOIN teams t ON tm.team_id = t.id
+		 WHERE t.org_id = $1 AND t.org_id IS NOT NULL`,
+		orgID,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get org people count: %w", err)
+	}
+
+	rows, err := db.Pool.Query(ctx,
+		`SELECT DISTINCT u.id, u.email, u.password_hash, u.is_admin, u.is_verified, u.created_at
+		 FROM users u
+		 JOIN team_members tm ON u.id = tm.user_id
+		 JOIN teams t ON tm.team_id = t.id
+		 WHERE t.org_id = $1 AND t.org_id IS NOT NULL
+		 ORDER BY u.created_at ASC
+		 LIMIT $2 OFFSET $3`,
+		orgID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get org people paginated: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*model.User
+	for rows.Next() {
+		u := &model.User{}
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &u.IsVerified, &u.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		users = append(users, u)
+	}
+	return users, total, rows.Err()
+}

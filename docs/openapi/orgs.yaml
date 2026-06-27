@@ -137,6 +137,76 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
+  /v1/orgs/{orgID}/people:
+    get:
+      summary: List Org People
+      description: Returns a paginated list of distinct people who are members of any team in the organization.
+      operationId: listOrgPeople
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization to list people for.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Paginated list of people
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - people
+                  - page
+                  - limit
+                  - total
+                properties:
+                  people:
+                    type: array
+                    items:
+                      $ref: "./auth.yaml#/components/schemas/User"
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
 components:
   schemas:

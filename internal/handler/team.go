@@ -528,3 +528,30 @@ func ResolveJoinRequest(c *fiber.Ctx) error {
 
 	return c.JSON(resolvedReq)
 }
+
+// DeleteTeam deletes an existing team.
+func DeleteTeam(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, id)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isTeamAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	if err := store.DeleteTeam(c.Context(), id); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}

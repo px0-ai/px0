@@ -47,6 +47,7 @@ func New() *fiber.App {
 	orgs.Put("/:id", handler.UpdateOrg)
 	orgs.Post("/:orgID/teams", handler.CreateTeam)
 	orgs.Get("/:orgID/teams", handler.ListOrgTeams)
+	orgs.Get("/:orgID/people", handler.ListOrgPeople)
 
 	teamPrompts := v1.Group("/teams/:teamID/prompts", middleware.RequireAuth)
 	teamPrompts.Post("", handler.CreatePrompt)
@@ -59,6 +60,7 @@ func New() *fiber.App {
 	teams.Get("/:id/members", handler.ListTeamMembers)
 	teams.Put("/:id/members/:userID/role", handler.UpdateTeamMemberRole)
 	teams.Post("/:id/join-requests", handler.CreateJoinRequest)
+	teams.Delete("/:id", handler.DeleteTeam)
 
 	joinRequests := v1.Group("/join-requests", middleware.RequireAccessToken)
 	joinRequests.Put("/:id", handler.ResolveJoinRequest)
