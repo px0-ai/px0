@@ -399,13 +399,13 @@ func ListOrgTeams(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// If not, verify if they are a system admin (they should be allowed to view)
+	// If not, verify if they are an Org Admin or system admin (they should be allowed to view)
 	if !belongs {
-		sysAdmin, err := store.IsSystemAdmin(c.Context(), userID)
+		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
 		}
-		if !sysAdmin {
+		if !isOrgAdmin {
 			return apierr.ErrForbidden.Respond(c)
 		}
 	}

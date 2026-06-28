@@ -139,11 +139,11 @@ func ListOrgPeople(c *fiber.Ctx) error {
 	}
 
 	if !belongs {
-		sysAdmin, err := store.IsSystemAdmin(c.Context(), userID)
+		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
 		}
-		if !sysAdmin {
+		if !isOrgAdmin {
 			return apierr.ErrForbidden.Respond(c)
 		}
 	}
