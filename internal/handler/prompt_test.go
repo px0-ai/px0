@@ -29,7 +29,59 @@ func TestCreatePrompt_Success(t *testing.T) {
 	prompt := body["prompt"].(map[string]any)
 	assert.NotEmpty(t, prompt["id"])
 	assert.Equal(t, "My Prompt", prompt["name"])
+	assert.Equal(t, "my_prompt", prompt["slug"])
+	assert.Equal(t, teamID, prompt["team_id"])
 	assert.Equal(t, "Useful prompt", prompt["description"])
+}
+
+func TestCreatePrompt_CustomSlug(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"My Prompt","slug":"My-Custom_Slug!","description":"Useful prompt"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	prompt := body["prompt"].(map[string]any)
+	assert.Equal(t, "my_custom_slug", prompt["slug"])
+}
+
+func TestCreatePrompt_Conflict(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Create first prompt
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Unique Name","description":"desc"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	// 1. Conflict on name
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Unique Name","description":"different"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "prompt with this name or slug already exists; please provide a unique name", body["error"])
+	resp.Body.Close()
+
+	// 2. Conflict on slug
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Other Name","slug":"unique_name"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, "prompt with this name or slug already exists; please provide a unique name", body["error"])
+	resp.Body.Close()
 }
 
 func TestCreatePrompt_MissingName(t *testing.T) {

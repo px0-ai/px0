@@ -2469,6 +2469,13 @@ components:
           type: string
           format: uuid
           description: Unique identifier.
+        team_id:
+          type: string
+          format: uuid
+          description: Unique identifier of the team.
+        slug:
+          type: string
+          description: Unique slug within the team.
         name:
           type: string
           description: Name of the prompt container.
@@ -2483,6 +2490,8 @@ components:
           format: date-time
       required:
         - id
+        - team_id
+        - slug
         - name
         - description
         - created_at
@@ -2700,11 +2709,9 @@ components:
         description:
           type: string
           example: Useful prompt
-        team_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
+        slug:
+          type: string
+          example: my_prompt
       required:
         - name
     CreateVersionRequest:

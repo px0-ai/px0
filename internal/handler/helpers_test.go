@@ -137,8 +137,9 @@ func setupPrompt(t *testing.T, a *testApp, token string) string {
 	require.NotEmpty(t, teams, "User has no teams")
 	teamID := teams[0].ID
 
+	uniqueName := fmt.Sprintf("Test Prompt %s", uuid.New().String())
 	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
-		`{"name":"Test Prompt","description":"A test prompt"}`, token)
+		fmt.Sprintf(`{"name":%q,"description":"A test prompt"}`, uniqueName), token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "create prompt failed")

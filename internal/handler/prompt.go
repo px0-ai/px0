@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"strings"
+	"unicode"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -14,6 +16,32 @@ import (
 type createPromptRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Slug        string `json:"slug"`
+}
+
+func NormalizeSlug(s string) string {
+	s = strings.ToLower(s)
+	var sb strings.Builder
+	lastUnderscore := false
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			sb.WriteRune(r)
+			lastUnderscore = false
+		} else if r == '_' {
+			if !lastUnderscore {
+				sb.WriteRune('_')
+				lastUnderscore = true
+			}
+		} else {
+			if sb.Len() > 0 && !lastUnderscore {
+				sb.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	res := sb.String()
+	res = strings.Trim(res, "_")
+	return res
 }
 
 func CreatePrompt(c *fiber.Ctx) error {
@@ -46,8 +74,18 @@ func CreatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrNameRequired.Respond(c)
 	}
 
-	prompt, err := store.CreatePrompt(c.Context(), req.Name, req.Description, []uuid.UUID{teamID})
+	// Normalize slug if provided; otherwise, generate from name and normalize.
+	slug := req.Slug
+	if slug == "" {
+		slug = req.Name
+	}
+	slug = NormalizeSlug(slug)
+
+	prompt, err := store.CreatePrompt(c.Context(), teamID, slug, req.Name, req.Description)
 	if err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			return apierr.NewAPIError(fiber.StatusConflict, "prompt with this name or slug already exists; please provide a unique name").Respond(c)
+		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"prompt": prompt})
