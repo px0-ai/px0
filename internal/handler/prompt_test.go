@@ -164,3 +164,113 @@ func TestPrompts_APIKeyAuth(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestListAllPrompts(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Create a prompt
+	setupPrompt(t, a, token)
+
+	// 1. By default with no team_id, nothing is shown
+	req := newReq(t, http.MethodGet, "/v1/prompts", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	prompts := body["prompts"].([]any)
+	assert.Empty(t, prompts)
+	resp.Body.Close()
+
+	// 2. With allowed team_id query parameter, matching prompts are shown
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	resp.Body.Close()
+
+	// 3. With unallowed team_id query parameter, 403 Forbidden is returned
+	unallowedTeamID := uuid.New().String()
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s", unallowedTeamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestDeletePrompt_Permissions(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// 1. Setup Org/Team Admin
+	adminToken := setupUser(t, a)
+	adminSession, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := adminSession.UserID
+
+	// Get the default team
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	teamID := teams[0].ID
+	teamIDStr := teamID.String()
+
+	// 2. Setup Editor User
+	editorUser, err := store.CreateVerifiedUser(ctx, "prompteditor@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, editorUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, editorUser.ID, "editor")
+	require.NoError(t, err)
+
+	editorSession, err := store.CreateSession(ctx, editorUser.ID, "sess_p_editor", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	editorToken := editorSession.Token
+
+	// 3. Setup Viewer User
+	viewerUser, err := store.CreateVerifiedUser(ctx, "promptviewer@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, viewerUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, viewerUser.ID, "viewer")
+	require.NoError(t, err)
+
+	viewerSession, err := store.CreateSession(ctx, viewerUser.ID, "sess_p_viewer", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	viewerToken := viewerSession.Token
+
+	// 4. Create prompt as editor
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr),
+		`{"name":"Shared Prompt","description":"Prompt to test delete"}`, editorToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	promptID := body["prompt"].(map[string]any)["id"].(string)
+	resp.Body.Close()
+
+	// 5. Viewer (Reader) cannot delete the prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Editor (Collaborator) cannot delete the prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // Only Admins can delete prompts!
+	resp.Body.Close()
+
+	// 7. Admin (Owner) can delete the prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+}

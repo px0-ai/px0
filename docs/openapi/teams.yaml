@@ -29,12 +29,20 @@ paths:
   /v1/orgs/{orgID}/teams:
     post:
       summary: Create Team
-      description: Creates a new team under a specific organization. Requires admin privileges.
+      description: Creates a new team under a specific organization. Requires Org Admin privileges (admin on the Default Team). Team admins or editors of other custom teams are not authorized to create teams.
       operationId: createTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Requires Org Admin privileges (admin on the Default Team)."
+        - "Team admins or editors of other custom teams are forbidden from creating teams."
+        - "Fails with 400 if name is empty."
+        - "Fails with 409 if the team name already exists under the target organization."
+      x-test-coverage:
+        - "TestRolesAndPermissions: Verifies that a Team Admin of a custom team is forbidden from creating a team (returns 403 Forbidden)."
+        - "TestRolesAndPermissions: Verifies that an Org Admin (admin of Default Team) can create a team (returns 201 Created)."
       parameters:
         - name: orgID
           in: path
@@ -126,12 +134,21 @@ paths:
   /v1/teams/{id}:
     put:
       summary: Update Team
-      description: Updates an existing team. Requires admin privileges.
+      description: Updates an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: updateTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Requires Org Admin, Team Admin, or Team Editor privileges."
+        - "Team Members (viewers) are forbidden from updating team details."
+        - "Returns 404 if the team does not exist."
+        - "Returns 409 if the updated team name already exists under the target organization."
+      x-test-coverage:
+        - "TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot update a team (returns 403 Forbidden)."
+        - "TestRolesAndPermissions: Verifies that an Editor (Team Editor) can update a team (returns 200 OK)."
+        - "TestRolesAndPermissions: Verifies that an Admin (Team Admin) can update a team (returns 200 OK)."
       parameters:
         - name: id
           in: path
@@ -191,12 +208,20 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
     delete:
       summary: Delete Team
-      description: Deletes an existing team. Requires admin privileges.
+      description: Deletes an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: deleteTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Requires Org Admin, Team Admin, or Team Editor privileges."
+        - "Team Members (viewers) are forbidden from deleting the team."
+        - "Returns 404 if the team does not exist."
+      x-test-coverage:
+        - "TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot delete a team (returns 403 Forbidden)."
+        - "TestRolesAndPermissions: Verifies that an Editor (Team Editor) can delete a team (returns 204 No Content)."
+        - "TestRolesAndPermissions: Verifies that an Admin (Team Admin) can delete a team (returns 204 No Content)."
       parameters:
         - name: id
           in: path

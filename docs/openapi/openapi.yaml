@@ -61,6 +61,8 @@ paths:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1people"
   /v1/teams/{teamID}/prompts:
     $ref: "./prompts.yaml#/paths/~1v1~1teams~1{teamID}~1prompts"
+  /v1/prompts:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
   /v1/prompts/{id}/render:

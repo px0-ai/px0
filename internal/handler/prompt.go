@@ -124,16 +124,54 @@ func DeletePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	adminTeamIDs, err := getRequestAdminTeamIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if err := store.DeletePrompt(c.Context(), id, editorTeamIDs); err != nil {
+	if err := store.DeletePrompt(c.Context(), id, adminTeamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func ListAllPrompts(c *fiber.Ctx) error {
+	teamIDStr := c.Query("team_id")
+	if teamIDStr == "" {
+		// By default nothing is shown
+		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+	}
+
+	teamID, err := uuid.Parse(teamIDStr)
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	allowedIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	isAllowed := false
+	for _, id := range allowedIDs {
+		if id == teamID {
+			isAllowed = true
+			break
+		}
+	}
+	if !isAllowed {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	prompts, err := store.ListPrompts(c.Context(), []uuid.UUID{teamID})
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if prompts == nil {
+		prompts = []*model.Prompt{}
+	}
+	return c.JSON(fiber.Map{"prompts": prompts})
 }

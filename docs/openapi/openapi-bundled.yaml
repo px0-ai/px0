@@ -722,12 +722,20 @@ paths:
   /v1/orgs/{orgID}/teams:
     post:
       summary: Create Team
-      description: Creates a new team under a specific organization. Requires admin privileges.
+      description: Creates a new team under a specific organization. Requires Org Admin privileges (admin on the Default Team). Team admins or editors of other custom teams are not authorized to create teams.
       operationId: createTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - Requires Org Admin privileges (admin on the Default Team).
+        - Team admins or editors of other custom teams are forbidden from creating teams.
+        - Fails with 400 if name is empty.
+        - Fails with 409 if the team name already exists under the target organization.
+      x-test-coverage:
+        - 'TestRolesAndPermissions: Verifies that a Team Admin of a custom team is forbidden from creating a team (returns 403 Forbidden).'
+        - 'TestRolesAndPermissions: Verifies that an Org Admin (admin of Default Team) can create a team (returns 201 Created).'
       parameters:
         - name: orgID
           in: path
@@ -819,12 +827,21 @@ paths:
   /v1/teams/{id}:
     put:
       summary: Update Team
-      description: Updates an existing team. Requires admin privileges.
+      description: Updates an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: updateTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - Requires Org Admin, Team Admin, or Team Editor privileges.
+        - Team Members (viewers) are forbidden from updating team details.
+        - Returns 404 if the team does not exist.
+        - Returns 409 if the updated team name already exists under the target organization.
+      x-test-coverage:
+        - 'TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot update a team (returns 403 Forbidden).'
+        - 'TestRolesAndPermissions: Verifies that an Editor (Team Editor) can update a team (returns 200 OK).'
+        - 'TestRolesAndPermissions: Verifies that an Admin (Team Admin) can update a team (returns 200 OK).'
       parameters:
         - name: id
           in: path
@@ -884,12 +901,20 @@ paths:
                 $ref: '#/components/schemas/APIError'
     delete:
       summary: Delete Team
-      description: Deletes an existing team. Requires admin privileges.
+      description: Deletes an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: deleteTeam
       tags:
         - Teams
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - Requires Org Admin, Team Admin, or Team Editor privileges.
+        - Team Members (viewers) are forbidden from deleting the team.
+        - Returns 404 if the team does not exist.
+      x-test-coverage:
+        - 'TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot delete a team (returns 403 Forbidden).'
+        - 'TestRolesAndPermissions: Verifies that an Editor (Team Editor) can delete a team (returns 204 No Content).'
+        - 'TestRolesAndPermissions: Verifies that an Admin (Team Admin) can delete a team (returns 204 No Content).'
       parameters:
         - name: id
           in: path
@@ -1486,6 +1511,60 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: internal error
+  /v1/prompts:
+    get:
+      summary: List all prompts with team filter
+      description: Returns a list of prompts. If team_id query parameter is not provided, returns an empty list by default. Users can filter by a team they are a member of.
+      operationId: listAllPrompts
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: team_id
+          in: query
+          required: false
+          description: Optional UUID of the team to filter prompts.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - By default with no team_id query parameter, returns an empty list of prompts.
+        - If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden.
+      x-test-coverage:
+        - 'TestListAllPrompts: Verifies that no team_id returns 200 with an empty list.'
+        - 'TestListAllPrompts: Verifies that a valid team_id returns 200 with prompts of that team.'
+        - 'TestListAllPrompts: Verifies that an unallowed team_id returns 403 Forbidden.'
+      responses:
+        '200':
+          description: A list of prompts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prompt'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}:
     get:
       summary: Get a Prompt
@@ -1553,13 +1632,20 @@ paths:
                 error: internal error
     delete:
       summary: Delete a Prompt
-      description: Deletes a specific prompt container along with all its template versions.
+      description: Deletes a specific prompt container along with all its template versions. Requires Org Admin or Team Admin privileges (GitHub repo owner model). Team Editors and Team Members are not authorized to delete prompts.
       operationId: deletePrompt
       tags:
         - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      x-edge-cases:
+        - Only Org Admins and Team Admins can delete a prompt.
+        - Team Editors and Team Members (viewers) are forbidden from deleting prompts.
+      x-test-coverage:
+        - 'TestDeletePrompt_Permissions: Verifies that a Team Member (viewer) cannot delete a prompt (returns 403 Forbidden).'
+        - 'TestDeletePrompt_Permissions: Verifies that a Team Editor cannot delete a prompt (returns 403 Forbidden).'
+        - 'TestDeletePrompt_Permissions: Verifies that a Team Admin can successfully delete a prompt (returns 204 No Content).'
       parameters:
         - name: id
           in: path

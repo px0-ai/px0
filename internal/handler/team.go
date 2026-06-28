@@ -86,11 +86,32 @@ func UpdateTeam(c *fiber.Ctx) error {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
+	team, err := store.GetTeamByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var isOrgAdmin bool
+	if team.OrgID != nil {
+		isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *team.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
 	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, id)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	if !isTeamAdmin {
+	isTeamEditor, err := store.IsTeamEditor(c.Context(), userID, id)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if !isOrgAdmin && !isTeamAdmin && !isTeamEditor {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
@@ -100,14 +121,6 @@ func UpdateTeam(c *fiber.Ctx) error {
 	}
 	if req.Name == "" {
 		return apierr.ErrNameRequired.Respond(c)
-	}
-
-	team, err := store.GetTeamByID(c.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
-		}
-		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	targetOrgID := team.OrgID
@@ -143,11 +156,28 @@ func AddTeamMember(c *fiber.Ctx) error {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
+	team, err := store.GetTeamByID(c.Context(), teamID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var isOrgAdmin bool
+	if team.OrgID != nil {
+		isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *team.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
 	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, teamID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	if !isTeamAdmin {
+
+	if !isOrgAdmin && !isTeamAdmin {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
@@ -189,20 +219,29 @@ func RemoveTeamMember(c *fiber.Ctx) error {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
-	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, teamID)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-	if !isTeamAdmin {
-		return apierr.ErrForbidden.Respond(c)
-	}
-
 	team, err := store.GetTeamByID(c.Context(), teamID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var isOrgAdmin bool
+	if team.OrgID != nil {
+		isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *team.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
+	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, teamID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if !isOrgAdmin && !isTeamAdmin {
+		return apierr.ErrForbidden.Respond(c)
 	}
 
 	if team.OrgID != nil {
@@ -294,11 +333,28 @@ func UpdateTeamMemberRole(c *fiber.Ctx) error {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
+	team, err := store.GetTeamByID(c.Context(), teamID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var isOrgAdmin bool
+	if team.OrgID != nil {
+		isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *team.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
 	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, teamID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	if !isTeamAdmin {
+
+	if !isOrgAdmin && !isTeamAdmin {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
@@ -541,11 +597,32 @@ func DeleteTeam(c *fiber.Ctx) error {
 		return apierr.ErrUnauthorized.Respond(c)
 	}
 
+	team, err := store.GetTeamByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var isOrgAdmin bool
+	if team.OrgID != nil {
+		isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *team.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
 	isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, id)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	if !isTeamAdmin {
+	isTeamEditor, err := store.IsTeamEditor(c.Context(), userID, id)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if !isOrgAdmin && !isTeamAdmin && !isTeamEditor {
 		return apierr.ErrForbidden.Respond(c)
 	}
 

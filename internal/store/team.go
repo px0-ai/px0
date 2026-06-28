@@ -254,7 +254,7 @@ func IsOrgAdmin(ctx context.Context, userID uuid.UUID, orgID uuid.UUID) (bool, e
 		`SELECT EXISTS (
 			SELECT 1 FROM team_members tm
 			JOIN teams t ON tm.team_id = t.id
-			WHERE tm.user_id = $1 AND t.org_id = $2 AND tm.role = 'admin'
+			WHERE tm.user_id = $1 AND t.org_id = $2 AND tm.role = 'admin' AND t.name = 'Default Team'
 		)`,
 		userID, orgID,
 	).Scan(&exists)
@@ -277,10 +277,7 @@ func IsTeamAdmin(ctx context.Context, userID uuid.UUID, teamID uuid.UUID) (bool,
 	err = db.Pool.QueryRow(ctx,
 		`SELECT EXISTS (
 			SELECT 1 FROM team_members tm
-			JOIN teams t ON tm.team_id = t.id
-			WHERE tm.user_id = $1 AND tm.role = 'admin' AND t.org_id = (
-				SELECT org_id FROM teams WHERE id = $2
-			)
+			WHERE tm.user_id = $1 AND tm.team_id = $2 AND tm.role = 'admin'
 		)`,
 		userID, teamID,
 	).Scan(&exists)

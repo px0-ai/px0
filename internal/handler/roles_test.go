@@ -257,8 +257,15 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// N. Editor can Delete Prompt
+	// N. Editor cannot Delete Prompt (GitHub model)
 	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// Admin can Delete Prompt
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", adminToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
@@ -276,4 +283,87 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	bodyRemoveErr := decodeBody(t, resp)
 	assert.Equal(t, "user is not a member of this organization", bodyRemoveErr["error"])
+
+	// P. Team Update/Delete Permission Tests
+	// 1. Viewer (Team Member) cannot edit team
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s", teamIDStr), `{"name":"Viewer Attempted Rename"}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 2. Viewer (Team Member) cannot delete team
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/teams/%s", teamIDStr), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Editor (Team Editor) can edit team
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s", teamIDStr), `{"name":"Editor Rename"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	bodyTeamRename := decodeBody(t, resp)
+	assert.Equal(t, "Editor Rename", bodyTeamRename["team"].(map[string]any)["name"].(string))
+
+	// 4. Create another temporary team to test editor deletion, because we don't want to delete the main team yet
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Temp Team Editor Del"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	bodyTempTeam := decodeBody(t, resp)
+	tempTeamIDStr := bodyTempTeam["team"].(map[string]any)["id"].(string)
+	tempTeamID, _ := uuid.Parse(tempTeamIDStr)
+
+	// Add editorUser as an 'editor' to that team
+	err = store.AddTeamMember(ctx, tempTeamID, editorUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, tempTeamID, editorUser.ID, "editor")
+	require.NoError(t, err)
+
+	// Editor can delete the team they are editor of
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/teams/%s", tempTeamIDStr), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// Q. Team Admin of a custom team (not Default Team) cannot create a new team, but Org Admin can
+	// First, let's elevate editorUser to 'admin' role on custom team Engineering (teamID)
+	// (Only the admin can update roles)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s/members/%s/role", teamIDStr, editorUser.ID), `{"role":"admin"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// editorToken is now a Team Admin of Engineering. They should NOT be able to create a new team in the organization.
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Custom Team Admin Created"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // Rejected! Not an Org Admin.
+	resp.Body.Close()
+
+	// But adminToken (Org Admin of Default Team) CAN create a team
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Org Admin Created"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	// 5. Admin can edit team
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/teams/%s", teamIDStr), `{"name":"Admin Rename"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	bodyAdminRename := decodeBody(t, resp)
+	assert.Equal(t, "Admin Rename", bodyAdminRename["team"].(map[string]any)["name"].(string))
+
+	// 6. Admin can delete team
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/teams/%s", teamIDStr), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
 }

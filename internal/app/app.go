@@ -71,6 +71,7 @@ func New() *fiber.App {
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)
 
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
+	prompts.Get("", handler.ListAllPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
 	prompts.Delete("/:id", handler.DeletePrompt)
 

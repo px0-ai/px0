@@ -64,3 +64,44 @@ func getRequestEditorTeamIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
 	}
 	return teamIDs, nil
 }
+
+func getRequestAdminTeamIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
+	if teamIDs, ok := c.Locals("apiKeyTeamIDs").([]uuid.UUID); ok {
+		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
+			if operation == "all" {
+				return teamIDs, nil
+			}
+		}
+		return nil, nil // API Key must have full write access
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return nil, fmt.Errorf("no user id in context")
+	}
+
+	teams, err := store.GetUserTeams(c.Context(), userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var teamIDs []uuid.UUID
+	for _, t := range teams {
+		var isOrgAdmin bool
+		var err error
+		if t.OrgID != nil {
+			isOrgAdmin, err = store.IsOrgAdmin(c.Context(), userID, *t.OrgID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, t.ID)
+		if err != nil {
+			return nil, err
+		}
+		if isOrgAdmin || isTeamAdmin {
+			teamIDs = append(teamIDs, t.ID)
+		}
+	}
+	return teamIDs, nil
+}
