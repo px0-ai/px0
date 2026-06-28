@@ -117,3 +117,17 @@ func GetUserOrganizations(ctx context.Context, userID uuid.UUID) ([]*model.Organ
 	}
 	return orgs, rows.Err()
 }
+
+func RemoveOrgMember(ctx context.Context, orgID, userID uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx,
+		`DELETE FROM team_members
+		 WHERE user_id = $1 AND team_id IN (
+			 SELECT id FROM teams WHERE org_id = $2
+		 )`,
+		userID, orgID,
+	)
+	if err != nil {
+		return fmt.Errorf("remove organization member: %w", err)
+	}
+	return nil
+}

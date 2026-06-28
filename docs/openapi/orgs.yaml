@@ -207,6 +207,59 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
+  /v1/orgs/{orgID}/members/{userID}:
+    delete:
+      summary: Remove Member from Organization
+      description: Removes a user from an organization by removing them from all teams in that organization. Requires Org Admin privileges.
+      operationId: removeOrgMember
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "Only Org Admins and system administrators can remove members from an organization."
+        - "Returns 403 Forbidden if a standard user tries to remove a member."
+        - "Returns 404 Not Found if the user is not a member of the organization."
+      x-test-coverage:
+        - "TestOrg_RemoveMember: Verifies that an Org Admin can successfully remove a member from the organization, removing them from all teams."
+        - "TestOrg_RemoveMember: Verifies that a standard user cannot remove a member (returns 403 Forbidden)."
+        - "TestOrg_RemoveMember: Verifies that removing a user who is not a member of the organization returns 404 Not Found."
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the user to remove from the organization.
+      responses:
+        "204":
+          description: User successfully removed from the organization
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
 components:
   schemas:

@@ -48,6 +48,7 @@ func New() *fiber.App {
 	orgs.Post("/:orgID/teams", handler.CreateTeam)
 	orgs.Get("/:orgID/teams", handler.ListOrgTeams)
 	orgs.Get("/:orgID/people", handler.ListOrgPeople)
+	orgs.Delete("/:orgID/members/:userID", handler.RemoveOrgMember)
 
 	teamPrompts := v1.Group("/teams/:teamID/prompts", middleware.RequireAuth)
 	teamPrompts.Post("", handler.CreatePrompt)

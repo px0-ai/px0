@@ -204,3 +204,69 @@ func TestTeam_Delete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userID, user.ID)
 }
+
+func TestOrg_RemoveMember(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	adminToken := setupUser(t, a) // verified admin user on Default Test Org & Test Setup Team
+
+	// Get organization and team IDs
+	session, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := session.UserID
+
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	teamID := teams[0].ID
+
+	// 1. Create a second standard user using register endpoint with adminToken
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard@test.com","password":"Password123!","team_id":%q}`, teamID.String()), adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	userVal := body["user"].(map[string]any)
+	standardUserIDStr := userVal["id"].(string)
+	standardUserID, err := uuid.Parse(standardUserIDStr)
+	require.NoError(t, err)
+
+	// Verify standard user is in the org now
+	inOrgAfter, err := store.IsUserInOrg(ctx, standardUserID, *orgID)
+	require.NoError(t, err)
+	assert.True(t, inOrgAfter)
+
+	// Log in as standard user to get their token
+	req = newReq(t, http.MethodPost, "/v1/auth/login", `{"email":"standard@test.com","password":"Password123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	standardToken := decodeBody(t, resp)["token"].(string)
+
+	// 2. Try to remove the user from the org as a non-admin (forbidden)
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/orgs/%s/members/%s", orgID.String(), standardUserID.String()), "", standardToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// 3. Try to remove a non-existent member from the org as admin (not found)
+	fakeUserID := uuid.New()
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/orgs/%s/members/%s", orgID.String(), fakeUserID.String()), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	// 4. Successfully remove standard user from the org as admin
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/orgs/%s/members/%s", orgID.String(), standardUserID.String()), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	// 5. Verify the user has been removed from the organization
+	inOrgFinal, err := store.IsUserInOrg(ctx, standardUserID, *orgID)
+	require.NoError(t, err)
+	assert.False(t, inOrgFinal)
+}

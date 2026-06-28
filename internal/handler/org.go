@@ -173,3 +173,44 @@ func ListOrgPeople(c *fiber.Ctx) error {
 		"total":  total,
 	})
 }
+
+func RemoveOrgMember(c *fiber.Ctx) error {
+	orgID, err := uuid.Parse(c.Params("orgID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	targetUserID, err := uuid.Parse(c.Params("userID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	// Verify the caller is an Org Admin (or system admin)
+	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isOrgAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	// Verify target user is in the organization
+	inOrg, err := store.IsUserInOrg(c.Context(), targetUserID, orgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !inOrg {
+		return apierr.NewAPIError(fiber.StatusNotFound, "user is not a member of this organization").Respond(c)
+	}
+
+	if err := store.RemoveOrgMember(c.Context(), orgID, targetUserID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
