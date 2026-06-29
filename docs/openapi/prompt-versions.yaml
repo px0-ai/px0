@@ -1,0 +1,959 @@
+openapi: 3.1.0
+info:
+  title: Prompt Versions API
+  version: 1.0.0
+paths:
+  /v1/prompts/{id}/versions:
+    post:
+      summary: Create a Prompt Version
+      description: Creates a new version of the prompt template in 'draft' state.
+      operationId: createVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "Validates template string syntax using Go's text/template parser before creating the entry."
+      x-test-coverage:
+        - "TestCreateVersion_Success: Verifies version number is incremented to draft status 1."
+        - "TestCreateVersion_InvalidTemplate: Verifies syntax check fails with 400 and 'invalid template'."
+        - "TestCreateVersion_MissingTemplate: Verifies missing template rejects with 400 and 'template is required'."
+        - "TestCreateVersion_PromptNotFound: Verifies 404 response on missing parent prompt UUID."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVersionRequest"
+      responses:
+        "201":
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid template or syntax error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                missing_template:
+                  value: { "error": "template is required" }
+                syntax_error:
+                  value: { "error": "invalid template: template parse error..." }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "internal error"
+
+    get:
+      summary: List Prompt Versions
+      description: Lists all template versions associated with a prompt container.
+      operationId: listVersions
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: tags
+          in: query
+          required: false
+          description: Optional comma-separated list of tags to filter prompt versions.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Optional status to filter prompt versions by (draft, live, archived).
+          schema:
+            type: string
+            enum: [draft, live, archived]
+      x-test-coverage:
+        - "TestListVersions: Verifies active versions listing."
+      responses:
+        "200":
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - versions
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+
+  /v1/prompts/{id}/versions/diff:
+    get:
+      summary: Diff Prompt Versions
+      description: Compares the templates of two prompt versions side-by-side and returns a unified diff. Requires read access to the prompt.
+      operationId: diffVersions
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: The source version number to compare from.
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: The target version number to compare to.
+      responses:
+        "200":
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                    example: 1
+                  to_version:
+                    type: integer
+                    example: 2
+                  from_template:
+                    type: string
+                    example: "Hello {{ .name }}"
+                  to_template:
+                    type: string
+                    example: "Hello {{ .name }}!\nWelcome to px0."
+                  diff:
+                    type: string
+                    example: "--- v1\n+++ v2\n@@ -1 +1,2 @@\n-Hello {{ .name }}\n+Hello {{ .name }}!\n+Welcome to px0.\n"
+                required:
+                  - from_version
+                  - to_version
+                  - from_template
+                  - to_template
+                  - diff
+        "400":
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/versions/{version}:
+    get:
+      summary: Get Prompt Version
+      description: Retrieves details of a specific prompt template version by version number.
+      operationId: getVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string).
+          schema:
+            type: string
+      x-test-coverage:
+        - "TestGetVersion: Verifies details retrieval of specific version."
+        - "TestGetVersion_NotFound: Verifies 404 response on missing version sequence number."
+      responses:
+        "200":
+          description: Prompt version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+
+    put:
+      summary: Update Prompt Version Draft
+      description: |
+        Updates the draft template code of a specific version.
+        Only versions currently in the 'draft' status may be modified.
+      operationId: updateVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to update.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template)."
+      x-test-coverage:
+        - "TestUpdateVersion_Draft: Verifies modification updates template content and returns 200."
+        - "TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and 'only draft versions can be modified'."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVersionRequest"
+      responses:
+        "200":
+          description: Version updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid syntax or missing template
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "template is required"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Only draft versions can be modified
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only draft versions can be modified"
+
+    delete:
+      summary: Delete Prompt Version Draft
+      description: |
+        Deletes a specific prompt template version.
+        Only versions currently in the 'draft' status may be deleted.
+      operationId: deletePromptVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to delete.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to delete a live/archived template)."
+      x-test-coverage:
+        - "TestDeleteVersion_Draft: Verifies deletion of specific draft version returns 204."
+        - "TestDeleteVersion_LiveVersionRejected: Verifies that deleting a published live template version fails with 422 and 'only draft versions can be deleted'."
+      responses:
+        "204":
+          description: Version deleted successfully
+        "400":
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Only draft versions can be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only draft versions can be deleted"
+
+  /v1/prompts/{id}/versions/{version}/promote:
+    post:
+      summary: Promote Prompt Version
+      description: |
+        Promotes a version of the prompt template along the lifecycle: draft -> stable -> live.
+        Promoting from draft makes it stable (read-only). Promoting from stable makes it live.
+        When promoting a version to live, any previous live version is demoted to stable.
+      operationId: promoteVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to promote.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Promotes draft to stable, or stable to live."
+        - "Switches previous live versions to stable status automatically."
+        - "Returns 422 if the specified version is already live or archived."
+      x-test-coverage:
+        - "TestPromoteVersion: Verifies promotion path draft -> stable -> live."
+        - "TestPromoteVersion_DemotesPreviousLive: Verifies demoting previous live version to stable."
+      responses:
+        "200":
+          description: Version promoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Promotion error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "cannot promote version"
+
+  /v1/prompts/{id}/versions/{version}/demote:
+    post:
+      summary: Demote Prompt Version
+      description: Demotes a live prompt version to stable (making it inactive but remaining read-only).
+      operationId: demoteVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to demote.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Returns 422 if version is not live."
+      x-test-coverage:
+        - "TestDemoteVersion_Success: Verifies demoting live version to stable."
+      responses:
+        "200":
+          description: Version demoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Demotion error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only live versions can be demoted"
+
+  /v1/prompts/{id}/versions/{version}/archive:
+    post:
+      summary: Archive Prompt Version
+      description: Archives a prompt version, marking its status as archived.
+      operationId: archiveVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to archive.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Returns 422 if version is already archived."
+      x-test-coverage:
+        - "TestArchiveVersion_Success: Verifies archiving a version."
+      responses:
+        "200":
+          description: Version archived successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Archiving error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version is already archived"
+
+  /v1/prompts/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate Prompt Version
+      description: |
+        Copies the specified prompt version's template to create a new prompt version in draft state.
+        This operation does not copy any associated payloads, only the prompt template and other metadata.
+      operationId: duplicateVersion
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to duplicate from.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Returns 404 if source version or prompt is not found."
+        - "Returns 401 if user is unauthorized."
+      x-test-coverage:
+        - "TestDuplicateVersion_Success: Verifies duplicating a version creates a new draft version."
+        - "TestDuplicateVersion_Errors: Verifies error responses for invalid prompt, missing version, etc."
+      responses:
+        "201":
+          description: Prompt version duplicated and new draft version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version or prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+
+  /v1/prompts/{id}/versions/{version}/tags:
+    post:
+      summary: Attach/Set Version Tag
+      description: Attaches a unique string tag (e.g. 'prod') to the specified prompt version, replacing the tag on any other version of this prompt if it was already assigned.
+      operationId: setVersionTag
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to tag.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag:
+                  type: string
+                  description: Tag string (alphanumeric, dots, dashes, underscores).
+                  example: prod
+                  maxLength: 50
+              required:
+                - tag
+      responses:
+        "200":
+          description: Tag attached successfully. Returns the updated version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid request or tag format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/tags:
+    get:
+      summary: List Prompt Version Tags
+      description: Lists all tags associated with versions of this prompt.
+      operationId: listVersionTags
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of prompt tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tag:
+                          type: string
+                        version:
+                          type: integer
+                      required:
+                        - tag
+                        - version
+                required:
+                  - tags
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/tags/{tag}:
+    delete:
+      summary: Remove Version Tag
+      description: Removes/deletes the specified version tag from the prompt.
+      operationId: removeVersionTag
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: tag
+          in: path
+          required: true
+          description: Tag string to remove.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Tag removed successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+components:
+  schemas:
+    PromptVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique version identifier.
+        prompt_id:
+          type: string
+          format: uuid
+          description: Reference to parent Prompt ID.
+        version:
+          type: integer
+          description: Incrementing sequence number of the version.
+        template:
+          type: string
+          description: The template syntax code with Go template parameters.
+          example: "Hello {{.name}}!"
+        status:
+          type: string
+          enum: [draft, stable, live, archived]
+          description: Active lifecycle status of this template version.
+        created_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when status was set to live. Null if draft.
+        tags:
+          type: array
+          items:
+            type: string
+          description: List of tag strings attached to this version.
+      required:
+        - id
+        - prompt_id
+        - version
+        - template
+        - status
+        - created_at
+        - published_at
+        - tags
+    CreateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: "Hello, {{.name}}!"
+      required:
+        - template
+    UpdateVersionRequest:
+      type: object
+      properties:
+        template:
+          type: string
+          example: "Hello, {{.name}}! Count is {{.count}}."
+      required:
+        - template

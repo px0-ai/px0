@@ -2,16 +2,35 @@
 
 Prompts are code. Treat them like it.
 
-px0 is open-source prompt infrastructure for AI applications. It replaces hardcoded prompt strings with versioned Jinja2 templates, in-process caching, A/B testing, and OpenTelemetry observability - so teams can iterate on prompts without touching application code.
+px0 is open-source prompt infrastructure for AI applications. It replaces hardcoded prompt strings with versioned templates, in-process caching, A/B testing, and OpenTelemetry observability - so teams can iterate on prompts without touching application code.
+
+## Benefits
+
+Using px0 brings significant operational and governance benefits to your AI systems:
+
+- No prompt hardcoding: Decouple prompt strings from code. Manage and edit them in one place.
+- No deployment overhead: Publish new versions instantly. No CI/CD runs or redeployments needed.
+- [WIP] Dynamic A/B testing: Split production traffic between templates. Find the best version using live metrics.
+- Prompt sharing: Share templates across teams. Reduce duplication and align message standards.
+- RBAC governance: Protect production prompts. Only authorized admins can promote changes.
 
 ## Features
 
-- Versioned prompt templates with a Draft-Review-Publish workflow and immutable published versions
-- Easy templating with variables, conditionals, loops, filters, and macros rendered in a sandbox
-- In-process caching with TTL, push-based invalidation, and background refresh before expiry
-- A/B testing with traffic splitting by percentage
-- OpenTelemetry observability for latency, cache hit rates, and errors
-- Sub-2ms p99 render latency
+### Implemented Features
+
+- Version-controlled prompt templates: Store and manage prompts in the database instead of hardcoding strings in application code.
+- Draft, review, and publish workflow: Support creating, promoting, demoting, archiving, and visually diffing versioned prompts.
+- Atomic promotions and instant rollouts: Go live instantly without recompiling services or running deployment pipelines.
+- Template execution: Render templates containing variables, conditionals, and loops using Go's template engine.
+- OpenTelemetry observability: HTTP request counters, server error rates, and response latency to any compliant backend.
+- Role-based access control (RBAC): Secure prompt actions using Viewer, Editor, Team Admin, and Org Admin roles.
+
+### Upcoming Features
+
+- Native multi-language client SDKs: Provide lightweight, idiomatic packages for Python, Node.js, and Go to easily execute prompt rendering.
+- Smart in-process caching: Cache active templates in memory with automatic warming, background async refresh, and push-based invalidation.
+- Traffic-split A/B testing: Route traffic between prompt versions using custom percentage weights.
+- Template-level observability: Collect deep metrics and tracing for individual template execution and cache hit rates.
 
 ## How it works
 

@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  title: Team Memberships API
+  version: 1.0.0
+paths:
+  /v1/teams/{id}/members:
+    get:
+      summary: List Team Members
+      description: Returns a paginated list of members for a given team. Requires at least viewer access.
+      operationId: listTeamMembers
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: Paginated list of members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TeamMemberResponse"
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+    post:
+      summary: Add Team Member
+      description: Adds a user to a team. Requires admin privileges.
+      operationId: addTeamMember
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+  /v1/teams/{id}/members/{userID}:
+    delete:
+      summary: Remove Team Member
+      description: Removes a user from a team. Requires admin privileges.
+      operationId: removeTeamMember
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+  /v1/teams/{id}/members/{userID}/role:
+    put:
+      summary: Update Team Member Role
+      description: Updates a team member's role. Requires team admin privileges.
+      operationId: updateTeamMemberRole
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  enum: [admin, editor, viewer]
+                  example: admin
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Not Found
+  /v1/teams/{id}/join-requests:
+    post:
+      summary: Request to Join Team
+      description: Creates a pending request for the authenticated user to join a specific team.
+      operationId: createJoinRequest
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the team to request to join.
+      responses:
+        "201":
+          description: Join request created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamJoinRequest"
+        "400":
+          description: Bad Request (already a member)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Team Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "409":
+          description: Conflict (already has a pending request)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+  /v1/me/inbox:
+    get:
+      summary: Get Admin Inbox
+      description: Returns a list of pending join requests that the authenticated user is authorized to approve or reject.
+      operationId: getAdminInbox
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: A list of pending join requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inbox:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InboxItem"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+  /v1/join-requests/{id}:
+    put:
+      summary: Resolve Join Request
+      description: Approves or rejects a pending join request.
+      operationId: resolveJoinRequest
+      tags:
+        - Team Memberships
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the join request to resolve.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected]
+                  example: approved
+      responses:
+        "200":
+          description: Resolved request details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamJoinRequest"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (not authorized to approve)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Join Request Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+components:
+  schemas:
+    TeamMemberResponse:
+      type: object
+      required:
+        - user_id
+        - email
+        - role
+        - created_at
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TeamJoinRequest:
+      type: object
+      required:
+        - id
+        - team_id
+        - user_id
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    InboxItem:
+      type: object
+      required:
+        - id
+        - team_id
+        - team_name
+        - user_id
+        - user_email
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        team_name:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        user_email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

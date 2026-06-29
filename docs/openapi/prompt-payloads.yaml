@@ -1,0 +1,328 @@
+openapi: 3.1.0
+info:
+  title: Prompt Payloads API
+  version: 1.0.0
+paths:
+  /v1/prompts/{id}/payloads:
+    post:
+      summary: Create a Prompt Payload
+      description: Creates a new sample payload for the specified prompt. Only editors of the team can create.
+      operationId: createPromptPayload
+      tags:
+        - Prompt Payloads
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePromptPayloadRequest"
+      responses:
+        "201":
+          description: Prompt payload created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    $ref: "#/components/schemas/PromptPayload"
+                required:
+                  - payload
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+    get:
+      summary: List Prompt Payloads
+      description: Lists all sample payloads associated with the specified prompt.
+      operationId: listPromptPayloads
+      tags:
+        - Prompt Payloads
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of prompt payloads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payloads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PromptPayload"
+                required:
+                  - payloads
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/payloads/{payloadID}:
+    get:
+      summary: Get a Prompt Payload
+      description: Retrieves a specific sample payload by its ID and prompt ID.
+      operationId: getPromptPayload
+      tags:
+        - Prompt Payloads
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: payloadID
+          in: path
+          required: true
+          description: Unique payload UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Prompt payload details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    $ref: "#/components/schemas/PromptPayload"
+                required:
+                  - payload
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or payload not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+    put:
+      summary: Update a Prompt Payload
+      description: Updates an existing sample payload's variables and/or optional name. Only editors can update.
+      operationId: updatePromptPayload
+      tags:
+        - Prompt Payloads
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: payloadID
+          in: path
+          required: true
+          description: Unique payload UUID.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePromptPayloadRequest"
+      responses:
+        "200":
+          description: Prompt payload updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    $ref: "#/components/schemas/PromptPayload"
+                required:
+                  - payload
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or payload not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+    delete:
+      summary: Delete a Prompt Payload
+      description: Deletes a specific sample payload. Only editors can delete.
+      operationId: deletePromptPayload
+      tags:
+        - Prompt Payloads
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: payloadID
+          in: path
+          required: true
+          description: Unique payload UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Prompt payload deleted successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or payload not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+components:
+  schemas:
+    PromptPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique payload identifier.
+        prompt_id:
+          type: string
+          format: uuid
+          description: Reference to parent Prompt ID.
+        name:
+          type: string
+          nullable: true
+          description: Optional name for this sample payload.
+        variables:
+          type: object
+          description: Standard JSON object containing variable names and sample values.
+          example: { "user": "Arpit", "role": "Admin" }
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - prompt_id
+        - variables
+        - created_at
+        - updated_at
+
+    CreatePromptPayloadRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          description: JSON object containing variable names and sample values.
+          example: { "user": "Arpit", "role": "Admin" }
+      required:
+        - variables
+
+    UpdatePromptPayloadRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Optional name for this sample payload.
+          example: "Admin Sample"
+        variables:
+          type: object
+          description: JSON object containing variable names and sample values.
+          example: { "user": "Alice", "role": "Editor" }

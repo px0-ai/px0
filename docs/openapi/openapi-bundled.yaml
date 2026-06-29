@@ -836,7 +836,7 @@ paths:
       description: Returns a list of pending join requests that the authenticated user is authorized to approve or reject.
       operationId: getAdminInbox
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       responses:
@@ -1075,7 +1075,7 @@ paths:
       description: Returns a paginated list of members for a given team. Requires at least viewer access.
       operationId: listTeamMembers
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -1120,7 +1120,7 @@ paths:
       description: Adds a user to a team. Requires admin privileges.
       operationId: addTeamMember
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -1157,7 +1157,7 @@ paths:
       description: Removes a user from a team. Requires admin privileges.
       operationId: removeTeamMember
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -1188,7 +1188,7 @@ paths:
       description: Updates a team member's role. Requires team admin privileges.
       operationId: updateTeamMemberRole
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -1244,7 +1244,7 @@ paths:
       description: Creates a pending request for the authenticated user to join a specific team.
       operationId: createJoinRequest
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -1292,7 +1292,7 @@ paths:
       description: Approves or rejects a pending join request.
       operationId: resolveJoinRequest
       tags:
-        - Teams
+        - Team Memberships
       security:
         - BearerAuth: []
       parameters:
@@ -2156,7 +2156,7 @@ paths:
       description: Compares the templates of two prompt versions side-by-side and returns a unified diff. Requires read access to the prompt.
       operationId: diffVersions
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2240,7 +2240,7 @@ paths:
       description: Renders the active 'live' template version of a prompt using supplied variables.
       operationId: renderLive
       tags:
-        - Prompts
+        - Prompt Renders
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2323,7 +2323,7 @@ paths:
       description: Creates a new version of the prompt template in 'draft' state.
       operationId: createVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2402,7 +2402,7 @@ paths:
       description: Lists all template versions associated with a prompt container.
       operationId: listVersions
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2468,7 +2468,7 @@ paths:
       description: Retrieves details of a specific prompt template version by version number.
       operationId: getVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2532,7 +2532,7 @@ paths:
         Only versions currently in the 'draft' status may be modified.
       operationId: updateVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2612,7 +2612,7 @@ paths:
         Only versions currently in the 'draft' status may be deleted.
       operationId: deletePromptVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2679,7 +2679,7 @@ paths:
         When promoting a version to live, any previous live version is demoted to stable.
       operationId: promoteVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2754,7 +2754,7 @@ paths:
       description: Demotes a live prompt version to stable (making it inactive but remaining read-only).
       operationId: demoteVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2826,7 +2826,7 @@ paths:
       description: Archives a prompt version, marking its status as archived.
       operationId: archiveVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2900,7 +2900,7 @@ paths:
         This operation does not copy any associated payloads, only the prompt template and other metadata.
       operationId: duplicateVersion
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -2966,7 +2966,7 @@ paths:
       description: Renders a specific template version of a prompt (even draft status) using supplied variables.
       operationId: renderVersion
       tags:
-        - Prompts
+        - Prompt Renders
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -3038,7 +3038,7 @@ paths:
       description: Attaches a unique string tag (e.g. 'prod') to the specified prompt version, replacing the tag on any other version of this prompt if it was already assigned.
       operationId: setVersionTag
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -3106,7 +3106,7 @@ paths:
       description: Lists all tags associated with versions of this prompt.
       operationId: listVersionTags
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -3158,7 +3158,7 @@ paths:
       description: Removes/deletes the specified version tag from the prompt.
       operationId: removeVersionTag
       tags:
-        - Prompts
+        - Prompt Versions
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
@@ -3795,7 +3795,7 @@ components:
           type: array
           items:
             type: string
-          description: List of tag strings attached to this version.
+          description: List of tag strings assigned to this version.
       required:
         - rendered
         - version

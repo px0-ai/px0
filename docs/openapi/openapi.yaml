@@ -42,21 +42,21 @@ paths:
   /v1/me/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1me~1orgs"
   /v1/me/inbox:
-    $ref: "./teams.yaml#/paths/~1v1~1me~1inbox"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1me~1inbox"
   /v1/orgs/{orgID}/teams:
     $ref: "./teams.yaml#/paths/~1v1~1orgs~1{orgID}~1teams"
   /v1/teams/{id}:
     $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}"
   /v1/teams/{id}/members:
-    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members"
   /v1/teams/{id}/members/{userID}:
-    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
   /v1/teams/{id}/members/{userID}/role:
-    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
   /v1/teams/{id}/join-requests:
-    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1join-requests"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1join-requests"
   /v1/join-requests/{id}:
-    $ref: "./teams.yaml#/paths/~1v1~1join-requests~1{id}"
+    $ref: "./team-memberships.yaml#/paths/~1v1~1join-requests~1{id}"
   /v1/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs"
   /v1/orgs/{id}:
@@ -78,33 +78,33 @@ paths:
   /v1/prompts/{id}/move:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
   /v1/prompts/{id}/versions/diff:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
   /v1/prompts/{id}/render:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1render"
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{id}~1render"
   /v1/prompts/{id}/versions:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}"
   /v1/prompts/{id}/versions/{version}/promote:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1promote"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1promote"
   /v1/prompts/{id}/versions/{version}/demote:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1demote"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1demote"
   /v1/prompts/{id}/versions/{version}/archive:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1archive"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1archive"
   /v1/prompts/{id}/versions/{version}/duplicate:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
   /v1/prompts/{id}/versions/{version}/render:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
   /v1/prompts/{id}/versions/{version}/tags:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
   /v1/prompts/{id}/tags:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1tags"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1tags"
   /v1/prompts/{id}/tags/{tag}:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1tags~1{tag}"
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1tags~1{tag}"
   /v1/prompts/{id}/payloads:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1payloads"
+    $ref: "./prompt-payloads.yaml#/paths/~1v1~1prompts~1{id}~1payloads"
   /v1/prompts/{id}/payloads/{payloadID}:
-    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1payloads~1{payloadID}"
+    $ref: "./prompt-payloads.yaml#/paths/~1v1~1prompts~1{id}~1payloads~1{payloadID}"
 
 components:
   securitySchemes:
@@ -131,22 +131,22 @@ components:
     Team:
       $ref: "./teams.yaml#/components/schemas/Team"
     TeamJoinRequest:
-      $ref: "./teams.yaml#/components/schemas/TeamJoinRequest"
+      $ref: "./team-memberships.yaml#/components/schemas/TeamJoinRequest"
     InboxItem:
-      $ref: "./teams.yaml#/components/schemas/InboxItem"
+      $ref: "./team-memberships.yaml#/components/schemas/InboxItem"
     Prompt:
       $ref: "./prompts.yaml#/components/schemas/Prompt"
     PromptVersion:
-      $ref: "./prompts.yaml#/components/schemas/PromptVersion"
+      $ref: "./prompt-versions.yaml#/components/schemas/PromptVersion"
     RenderRequest:
-      $ref: "./prompts.yaml#/components/schemas/RenderRequest"
+      $ref: "./prompt-renders.yaml#/components/schemas/RenderRequest"
     RenderResponse:
-      $ref: "./prompts.yaml#/components/schemas/RenderResponse"
+      $ref: "./prompt-renders.yaml#/components/schemas/RenderResponse"
     PromptPayload:
-      $ref: "./prompts.yaml#/components/schemas/PromptPayload"
+      $ref: "./prompt-payloads.yaml#/components/schemas/PromptPayload"
     CreatePromptPayloadRequest:
-      $ref: "./prompts.yaml#/components/schemas/CreatePromptPayloadRequest"
+      $ref: "./prompt-payloads.yaml#/components/schemas/CreatePromptPayloadRequest"
     UpdatePromptPayloadRequest:
-      $ref: "./prompts.yaml#/components/schemas/UpdatePromptPayloadRequest"
+      $ref: "./prompt-payloads.yaml#/components/schemas/UpdatePromptPayloadRequest"
     UpdatePromptRequest:
       $ref: "./prompts.yaml#/components/schemas/UpdatePromptRequest"
