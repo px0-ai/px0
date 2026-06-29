@@ -31,6 +31,7 @@ func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*m
 	if err != nil {
 		return nil, fmt.Errorf("create version: %w", err)
 	}
+	v.Tags = []string{}
 	return v, nil
 }
 
@@ -55,7 +56,15 @@ func ListVersions(ctx context.Context, promptID uuid.UUID) ([]*model.PromptVersi
 		}
 		versions = append(versions, v)
 	}
-	return versions, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := populateTagsForList(ctx, promptID, versions); err != nil {
+		return nil, fmt.Errorf("populate tags for list: %w", err)
+	}
+
+	return versions, nil
 }
 
 func GetVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
@@ -71,6 +80,9 @@ func GetVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get version: %w", err)
+	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
 	}
 	return v, nil
 }
@@ -89,6 +101,9 @@ func GetLiveVersion(ctx context.Context, promptID uuid.UUID) (*model.PromptVersi
 		}
 		return nil, fmt.Errorf("get live version: %w", err)
 	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
+	}
 	return v, nil
 }
 
@@ -106,6 +121,9 @@ func UpdateVersionTemplate(ctx context.Context, id uuid.UUID, template string) (
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("update version: %w", err)
+	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
 	}
 	return v, nil
 }
@@ -162,5 +180,38 @@ func PublishVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
+	}
 	return v, nil
+}
+
+func populateTags(ctx context.Context, v *model.PromptVersion) error {
+	if v == nil {
+		return nil
+	}
+	tags, err := GetTagsForVersion(ctx, v.PromptID, v.Version)
+	if err != nil {
+		return err
+	}
+	v.Tags = tags
+	return nil
+}
+
+func populateTagsForList(ctx context.Context, promptID uuid.UUID, versions []*model.PromptVersion) error {
+	if len(versions) == 0 {
+		return nil
+	}
+	tagMap, err := GetTagsForPrompt(ctx, promptID)
+	if err != nil {
+		return err
+	}
+	for _, v := range versions {
+		if tags, ok := tagMap[v.Version]; ok {
+			v.Tags = tags
+		} else {
+			v.Tags = []string{}
+		}
+	}
+	return nil
 }

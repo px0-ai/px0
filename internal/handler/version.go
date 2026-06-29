@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"text/template"
@@ -102,10 +103,6 @@ func GetVersion(c *fiber.Ctx) error {
 	if err != nil {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
-	versionNum, err := strconv.Atoi(c.Params("version"))
-	if err != nil {
-		return apierr.ErrInvalidVersionNumber.Respond(c)
-	}
 
 	teamIDs, err := getRequestTeamIDs(c)
 	if err != nil {
@@ -119,7 +116,7 @@ func GetVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	version, err := store.GetVersion(c.Context(), promptID, versionNum)
+	version, err := resolveVersion(c.Context(), promptID, c.Params("version"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)
@@ -133,10 +130,6 @@ func UpdateVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return apierr.ErrInvalidPromptID.Respond(c)
-	}
-	versionNum, err := strconv.Atoi(c.Params("version"))
-	if err != nil {
-		return apierr.ErrInvalidVersionNumber.Respond(c)
 	}
 
 	teamIDs, err := getRequestTeamIDs(c)
@@ -163,7 +156,7 @@ func UpdateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	existing, err := store.GetVersion(c.Context(), promptID, versionNum)
+	existing, err := resolveVersion(c.Context(), promptID, c.Params("version"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)
@@ -197,10 +190,6 @@ func PublishVersion(c *fiber.Ctx) error {
 	if err != nil {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
-	versionNum, err := strconv.Atoi(c.Params("version"))
-	if err != nil {
-		return apierr.ErrInvalidVersionNumber.Respond(c)
-	}
 
 	teamIDs, err := getRequestTeamIDs(c)
 	if err != nil {
@@ -226,7 +215,15 @@ func PublishVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	version, err := store.PublishVersion(c.Context(), promptID, versionNum)
+	target, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := store.PublishVersion(c.Context(), promptID, target.Version)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)
@@ -237,4 +234,11 @@ func PublishVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.JSON(fiber.Map{"version": version})
+}
+
+func resolveVersion(ctx context.Context, promptID uuid.UUID, versionParam string) (*model.PromptVersion, error) {
+	if versionNum, err := strconv.Atoi(versionParam); err == nil {
+		return store.GetVersion(ctx, promptID, versionNum)
+	}
+	return store.GetVersionByTag(ctx, promptID, versionParam)
 }

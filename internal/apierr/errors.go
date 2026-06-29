@@ -81,4 +81,7 @@ var (
 	ErrUserNotVerified         = &APIError{Status: fiber.StatusForbidden, Message: "user is not verified"}
 	ErrInvalidVerificationCode = &APIError{Status: fiber.StatusBadRequest, Message: "invalid verification code"}
 	ErrInvalidResetCode        = &APIError{Status: fiber.StatusBadRequest, Message: "invalid or expired password reset code"}
+	ErrTagRequired             = &APIError{Status: fiber.StatusBadRequest, Message: "tag is required"}
+	ErrInvalidTag              = &APIError{Status: fiber.StatusBadRequest, Message: "invalid tag format: must be 1-50 characters containing only letters, numbers, dashes, underscores, and dots"}
+	ErrTagNotFound             = &APIError{Status: fiber.StatusNotFound, Message: "tag not found"}
 )

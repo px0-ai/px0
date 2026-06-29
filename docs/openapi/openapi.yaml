@@ -77,6 +77,12 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1publish"
   /v1/prompts/{id}/versions/{version}/render:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
+  /v1/prompts/{id}/versions/{version}/tags:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
+  /v1/prompts/{id}/tags:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1tags"
+  /v1/prompts/{id}/tags/{tag}:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1tags~1{tag}"
   /v1/prompts/{id}/payloads:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1payloads"
   /v1/prompts/{id}/payloads/{payloadID}:

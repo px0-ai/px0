@@ -84,6 +84,9 @@ func New() *fiber.App {
 	prompts.Put("/:id/versions/:version", handler.UpdateVersion)
 	prompts.Post("/:id/versions/:version/publish", handler.PublishVersion)
 	prompts.Post("/:id/versions/:version/render", handler.RenderVersion)
+	prompts.Post("/:id/versions/:version/tags", handler.SetTag)
+	prompts.Delete("/:id/tags/:tag", handler.RemoveTag)
+	prompts.Get("/:id/tags", handler.ListTags)
 
 	prompts.Post("/:id/payloads", handler.CreatePromptPayload)
 	prompts.Get("/:id/payloads", handler.ListPromptPayloads)

@@ -535,9 +535,9 @@ paths:
         - name: version
           in: path
           required: true
-          description: Version sequence number.
+          description: Version sequence number (integer) or version tag (string).
           schema:
-            type: integer
+            type: string
       x-test-coverage:
         - "TestGetVersion: Verifies details retrieval of specific version."
         - "TestGetVersion_NotFound: Verifies 404 response on missing version sequence number."
@@ -600,9 +600,9 @@ paths:
         - name: version
           in: path
           required: true
-          description: Version sequence number to update.
+          description: Version sequence number (integer) or version tag (string) to update.
           schema:
-            type: integer
+            type: string
       x-edge-cases:
         - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template)."
       x-test-coverage:
@@ -682,9 +682,9 @@ paths:
         - name: version
           in: path
           required: true
-          description: Version sequence number to publish.
+          description: Version sequence number (integer) or version tag (string) to publish.
           schema:
-            type: integer
+            type: string
       x-edge-cases:
         - "Switches previous live versions to archived status automatically."
         - "Returns 422 if the specified version is already 'live'."
@@ -758,9 +758,9 @@ paths:
         - name: version
           in: path
           required: true
-          description: Version sequence number to render.
+          description: Version sequence number (integer) or version tag (string) to render.
           schema:
-            type: integer
+            type: string
       x-test-coverage:
         - "TestRenderVersion_Draft: Verifies that rendering works on draft templates."
         - "TestRenderVersion_NotFound: Verifies 404 response if the requested version sequence number does not exist."
@@ -809,6 +809,174 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "template execution failed: ..."
+
+  /v1/prompts/{id}/versions/{version}/tags:
+    post:
+      summary: Attach/Set Version Tag
+      description: Attaches a unique string tag (e.g. 'prod') to the specified prompt version, replacing the tag on any other version of this prompt if it was already assigned.
+      operationId: setVersionTag
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to tag.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag:
+                  type: string
+                  description: Tag string (alphanumeric, dots, dashes, underscores).
+                  example: prod
+                  maxLength: 50
+              required:
+                - tag
+      responses:
+        "200":
+          description: Tag attached successfully. Returns the updated version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid request or tag format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/tags:
+    get:
+      summary: List Prompt Version Tags
+      description: Lists all tags associated with versions of this prompt.
+      operationId: listVersionTags
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of prompt tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tag:
+                          type: string
+                        version:
+                          type: integer
+                      required:
+                        - tag
+                        - version
+                required:
+                  - tags
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/tags/{tag}:
+    delete:
+      summary: Remove Version Tag
+      description: Removes/deletes the specified version tag from the prompt.
+      operationId: removeVersionTag
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: tag
+          in: path
+          required: true
+          description: Tag string to remove.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Tag removed successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
   /v1/prompts/{id}/payloads:
     post:
@@ -1144,6 +1312,11 @@ components:
           format: date-time
           nullable: true
           description: Timestamp when status was set to live. Null if draft.
+        tags:
+          type: array
+          items:
+            type: string
+          description: List of tag strings attached to this version.
       required:
         - id
         - prompt_id
@@ -1152,6 +1325,7 @@ components:
         - status
         - created_at
         - published_at
+        - tags
     CreatePromptRequest:
       type: object
       properties:
@@ -1201,9 +1375,20 @@ components:
           type: integer
           description: Sequence version number that was executed.
           example: 1
+        slug:
+          type: string
+          description: Unique prompt slug.
+          example: my_prompt
+        tags:
+          type: array
+          items:
+            type: string
+          description: List of tag strings attached to this version.
       required:
         - rendered
         - version
+        - slug
+        - tags
 
     PromptPayload:
       type: object
