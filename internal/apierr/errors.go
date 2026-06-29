@@ -66,6 +66,10 @@ var (
 	ErrForbidden               = &APIError{Status: fiber.StatusForbidden, Message: "forbidden"}
 	ErrUnauthorized            = &APIError{Status: fiber.StatusUnauthorized, Message: "unauthorized"}
 	ErrPromptNotFound          = &APIError{Status: fiber.StatusNotFound, Message: "prompt not found"}
+	ErrPayloadNotFound         = &APIError{Status: fiber.StatusNotFound, Message: "payload not found"}
+	ErrInvalidPayloadID        = &APIError{Status: fiber.StatusBadRequest, Message: "invalid payload id"}
+	ErrPayloadVariablesRequired = &APIError{Status: fiber.StatusBadRequest, Message: "payload variables are required"}
+	ErrInvalidPayloadVariables = &APIError{Status: fiber.StatusBadRequest, Message: "invalid payload variables: must be valid JSON"}
 	ErrNoLiveVersionFound      = &APIError{Status: fiber.StatusNotFound, Message: "no live version found for this prompt"}
 	ErrInvalidVersionNumber    = &APIError{Status: fiber.StatusBadRequest, Message: "invalid version number"}
 	ErrVersionNotFound         = &APIError{Status: fiber.StatusNotFound, Message: "version not found"}

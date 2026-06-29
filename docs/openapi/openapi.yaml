@@ -77,6 +77,10 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1publish"
   /v1/prompts/{id}/versions/{version}/render:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
+  /v1/prompts/{id}/payloads:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1payloads"
+  /v1/prompts/{id}/payloads/{payloadID}:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1payloads~1{payloadID}"
 
 components:
   securitySchemes:
@@ -114,3 +118,9 @@ components:
       $ref: "./prompts.yaml#/components/schemas/RenderRequest"
     RenderResponse:
       $ref: "./prompts.yaml#/components/schemas/RenderResponse"
+    PromptPayload:
+      $ref: "./prompts.yaml#/components/schemas/PromptPayload"
+    CreatePromptPayloadRequest:
+      $ref: "./prompts.yaml#/components/schemas/CreatePromptPayloadRequest"
+    UpdatePromptPayloadRequest:
+      $ref: "./prompts.yaml#/components/schemas/UpdatePromptPayloadRequest"
