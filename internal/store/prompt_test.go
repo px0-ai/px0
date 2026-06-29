@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 	"github.com/px0-ai/px0/internal/testutil"
 )
@@ -107,14 +108,14 @@ func TestArchivePrompt(t *testing.T) {
 
 	p, err := store.CreatePrompt(ctx, tm.ID, "archive_me", "Archive Me", "")
 	require.NoError(t, err)
-	assert.False(t, p.IsArchived)
+	assert.Equal(t, model.PromptStatusActive, p.Status)
 
 	err = store.ArchivePrompt(ctx, p.ID, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 
 	got, err := store.GetPromptByID(ctx, p.ID, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
-	assert.True(t, got.IsArchived)
+	assert.Equal(t, model.PromptStatusArchived, got.Status)
 }
 
 func TestArchivePrompt_NotFound(t *testing.T) {
@@ -184,4 +185,24 @@ func TestListPrompts_Filters(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, prompts)
+
+	// Filter by Status = "active"
+	activeStatus := model.PromptStatusActive
+	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Status:  &activeStatus,
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pA.ID, prompts[0].ID)
+
+	// Filter by Status = "archived"
+	archivedStatus := model.PromptStatusArchived
+	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Status:  &archivedStatus,
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pB.ID, prompts[0].ID)
 }

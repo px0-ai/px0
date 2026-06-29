@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -274,7 +275,7 @@ func TestRolesAndPermissions(t *testing.T) {
 	// Verify prompt is archived
 	gotPrompt, err := store.GetPromptByID(ctx, promptID, []uuid.UUID{teamID})
 	require.NoError(t, err)
-	assert.True(t, gotPrompt.IsArchived)
+	assert.Equal(t, model.PromptStatusArchived, gotPrompt.Status)
 
 	// O. Try to remove a user from a team who is not part of the organization (returns 400 Bad Request)
 	nonOrgUser, _ := store.CreateUser(ctx, "nonorguser@test.com", "Password123!")

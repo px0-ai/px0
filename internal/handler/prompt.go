@@ -126,6 +126,12 @@ func ListPrompts(c *fiber.Ctx) error {
 		}
 	}
 
+	var status *string
+	statusStr := c.Query("status")
+	if statusStr != "" {
+		status = &statusStr
+	}
+
 	var archived *bool
 	archivedStr := c.Query("archived")
 	if archivedStr != "" {
@@ -138,6 +144,7 @@ func ListPrompts(c *fiber.Ctx) error {
 		TeamIDs:  []uuid.UUID{teamID},
 		Tags:     tags,
 		Archived: archived,
+		Status:   status,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -250,6 +257,12 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		}
 	}
 
+	var status *string
+	statusStr := c.Query("status")
+	if statusStr != "" {
+		status = &statusStr
+	}
+
 	var archived *bool
 	archivedStr := c.Query("archived")
 	if archivedStr != "" {
@@ -262,6 +275,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		TeamIDs:  []uuid.UUID{teamID},
 		Tags:     tags,
 		Archived: archived,
+		Status:   status,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)

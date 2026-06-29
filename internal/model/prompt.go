@@ -6,13 +6,18 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	PromptStatusActive   = "active"
+	PromptStatusArchived = "archived"
+)
+
 type Prompt struct {
 	ID          uuid.UUID `json:"id"`
 	TeamID      uuid.UUID `json:"team_id"`
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
-	IsArchived  bool      `json:"is_archived"`
+	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

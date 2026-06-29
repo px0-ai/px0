@@ -190,7 +190,7 @@ func TestArchivePrompt(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body := decodeBody(t, resp)
 	p := body["prompt"].(map[string]any)
-	assert.True(t, p["is_archived"].(bool))
+	assert.Equal(t, "archived", p["status"].(string))
 	resp.Body.Close()
 
 	// confirm it still exists and is archived
@@ -200,7 +200,7 @@ func TestArchivePrompt(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body2 := decodeBody(t, resp)
 	p2 := body2["prompt"].(map[string]any)
-	assert.True(t, p2["is_archived"].(bool))
+	assert.Equal(t, "archived", p2["status"].(string))
 	resp.Body.Close()
 }
 
@@ -332,7 +332,7 @@ func TestArchivePrompt_Permissions(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body2 := decodeBody(t, resp)
 	p := body2["prompt"].(map[string]any)
-	assert.True(t, p["is_archived"].(bool))
+	assert.Equal(t, "archived", p["status"].(string))
 	resp.Body.Close()
 }
 

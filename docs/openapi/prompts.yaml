@@ -277,7 +277,7 @@ paths:
   /v1/prompts/{id}/archive:
     post:
       summary: Archive a Prompt
-      description: Archives a specific prompt container, setting `is_archived` to true. The prompt still exists in the system and people can call it and use it, so a prompt is never deleted. Requires Org Admin or Team Admin privileges (GitHub repo owner model). Team Editors and Team Members are not authorized to archive prompts.
+      description: Archives a specific prompt container, setting `status` to 'archived'. The prompt still exists in the system and people can call it and use it, so a prompt is never deleted. Requires Org Admin or Team Admin privileges (GitHub repo owner model). Team Editors and Team Members are not authorized to archive prompts.
       operationId: archivePrompt
       tags:
         - Prompts
@@ -1396,9 +1396,10 @@ components:
         description:
           type: string
           description: Brief summary explaining the prompt purpose.
-        is_archived:
-          type: boolean
-          description: Whether the prompt is archived.
+        status:
+          type: string
+          enum: [active, archived]
+          description: Current status of the prompt container (active, archived).
         created_at:
           type: string
           format: date-time
@@ -1411,7 +1412,7 @@ components:
         - slug
         - name
         - description
-        - is_archived
+        - status
         - created_at
         - updated_at
     PromptVersion:

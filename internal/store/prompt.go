@@ -18,6 +18,7 @@ type PromptFilter struct {
 	TeamIDs  []uuid.UUID
 	Tags     []string
 	Archived *bool
+	Status   *string
 }
 
 func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description string) (*model.Prompt, error) {
@@ -25,9 +26,9 @@ func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description
 	err := db.Pool.QueryRow(ctx,
 		`INSERT INTO prompts (team_id, slug, name, description)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, team_id, slug, name, description, is_archived, created_at, updated_at`,
+		 RETURNING id, team_id, slug, name, description, status, created_at, updated_at`,
 		teamID, slug, name, description,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.IsArchived, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -39,7 +40,7 @@ func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description
 }
 
 func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, error) {
-	query := `SELECT DISTINCT p.id, p.team_id, p.slug, p.name, p.description, p.is_archived, p.created_at, p.updated_at
+	query := `SELECT DISTINCT p.id, p.team_id, p.slug, p.name, p.description, p.status, p.created_at, p.updated_at
 			  FROM prompts p`
 	args := []any{}
 	joins := ""
@@ -56,9 +57,16 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 		whereClauses = append(whereClauses, fmt.Sprintf("p.team_id = ANY($%d)", len(args)))
 	}
 
-	if filter.Archived != nil {
-		args = append(args, *filter.Archived)
-		whereClauses = append(whereClauses, fmt.Sprintf("p.is_archived = $%d", len(args)))
+	if filter.Status != nil {
+		args = append(args, *filter.Status)
+		whereClauses = append(whereClauses, fmt.Sprintf("p.status = $%d", len(args)))
+	} else if filter.Archived != nil {
+		statusVal := model.PromptStatusActive
+		if *filter.Archived {
+			statusVal = model.PromptStatusArchived
+		}
+		args = append(args, statusVal)
+		whereClauses = append(whereClauses, fmt.Sprintf("p.status = $%d", len(args)))
 	}
 
 	query += joins
@@ -76,7 +84,7 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 	var prompts []*model.Prompt
 	for rows.Next() {
 		p := &model.Prompt{}
-		if err := rows.Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.IsArchived, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		prompts = append(prompts, p)
@@ -87,11 +95,11 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 func GetPromptByID(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, team_id, slug, name, description, is_archived, created_at, updated_at
+		`SELECT id, team_id, slug, name, description, status, created_at, updated_at
 		 FROM prompts
 		 WHERE id = $1 AND team_id = ANY($2)`,
 		id, teamIDs,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.IsArchived, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -108,7 +116,7 @@ func ArchivePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error
 		return err // ErrNotFound if not found or no access
 	}
 
-	result, err := db.Pool.Exec(ctx, "UPDATE prompts SET is_archived = TRUE WHERE id = $1", id)
+	result, err := db.Pool.Exec(ctx, "UPDATE prompts SET status = 'archived' WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("archive prompt: %w", err)
 	}
