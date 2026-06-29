@@ -179,22 +179,28 @@ func TestGetPrompt_InvalidID(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestDeletePrompt(t *testing.T) {
+func TestArchivePrompt(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 
-	req := newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", id), "", token)
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", id), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	p := body["prompt"].(map[string]any)
+	assert.True(t, p["is_archived"].(bool))
 	resp.Body.Close()
 
-	// confirm it's gone
+	// confirm it still exists and is archived
 	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s", id), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body2 := decodeBody(t, resp)
+	p2 := body2["prompt"].(map[string]any)
+	assert.True(t, p2["is_archived"].(bool))
 	resp.Body.Close()
 }
 
@@ -254,7 +260,7 @@ func TestListAllPrompts(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestDeletePrompt_Permissions(t *testing.T) {
+func TestArchivePrompt_Permissions(t *testing.T) {
 	a := newTestApp(t)
 	ctx := context.Background()
 
@@ -305,24 +311,118 @@ func TestDeletePrompt_Permissions(t *testing.T) {
 	promptID := body["prompt"].(map[string]any)["id"].(string)
 	resp.Body.Close()
 
-	// 5. Viewer (Reader) cannot delete the prompt
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", viewerToken)
+	// 5. Viewer (Reader) cannot archive the prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// 6. Editor (Collaborator) cannot delete the prompt
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", editorToken)
+	// 6. Editor (Collaborator) cannot archive the prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // Only Admins can delete prompts!
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // Only Admins can archive prompts!
 	resp.Body.Close()
 
-	// 7. Admin (Owner) can delete the prompt
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", adminToken)
+	// 7. Admin (Owner) can archive the prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", adminToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body2 := decodeBody(t, resp)
+	p := body2["prompt"].(map[string]any)
+	assert.True(t, p["is_archived"].(bool))
+	resp.Body.Close()
+}
+
+func TestListAllPrompts_Filters(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Create prompt A
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Prompt Alpha","description":"First test prompt"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	pAID := body["prompt"].(map[string]any)["id"].(string)
+	resp.Body.Close()
+
+	// Create prompt B
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Prompt Beta","description":"Second test prompt"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body = decodeBody(t, resp)
+	pBID := body["prompt"].(map[string]any)["id"].(string)
+	resp.Body.Close()
+
+	// Add a version & set tag 'v1' on Prompt A
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", pAID),
+		`{"template":"Alpha body"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/tags", pAID),
+		`{"tag":"v1"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Archive Prompt B
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", pBID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Test 1: Query with team and archived=false
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team=%s&archived=false", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts := body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pAID, prompts[0].(map[string]any)["id"].(string))
+	resp.Body.Close()
+
+	// Test 2: Query with team_id and archived=true
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&archived=true", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pBID, prompts[0].(map[string]any)["id"].(string))
+	resp.Body.Close()
+
+	// Test 3: Query with tags=v1
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&tags=v1", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pAID, prompts[0].(map[string]any)["id"].(string))
+	resp.Body.Close()
+
+	// Test 4: Query with non-existent tag
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&tags=nonexistent", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Empty(t, prompts)
 	resp.Body.Close()
 }

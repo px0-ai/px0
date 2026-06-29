@@ -88,6 +88,18 @@ paths:
             type: string
             format: uuid
           description: The ID of the team.
+        - name: tags
+          in: query
+          required: false
+          description: Optional comma-separated list of tags to filter prompts.
+          schema:
+            type: string
+        - name: archived
+          in: query
+          required: false
+          description: Optional boolean to filter prompts by archive state.
+          schema:
+            type: boolean
       x-test-coverage:
         - "TestListPrompts: Verifies listing populated prompt containers."
         - "TestListPrompts_Empty: Verifies that listing when empty returns an empty array."
@@ -135,10 +147,29 @@ paths:
         - name: team_id
           in: query
           required: false
-          description: Optional UUID of the team to filter prompts.
+          description: Optional UUID of the team to filter prompts (alias of team).
           schema:
             type: string
             format: uuid
+        - name: team
+          in: query
+          required: false
+          description: Optional UUID of the team to filter prompts (alias of team_id).
+          schema:
+            type: string
+            format: uuid
+        - name: tags
+          in: query
+          required: false
+          description: Optional comma-separated list of tags to filter prompts.
+          schema:
+            type: string
+        - name: archived
+          in: query
+          required: false
+          description: Optional boolean to filter prompts by archive state.
+          schema:
+            type: boolean
       x-edge-cases:
         - "By default with no team_id query parameter, returns an empty list of prompts."
         - "If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden."
@@ -243,33 +274,43 @@ paths:
               example:
                 error: "internal error"
 
-    delete:
-      summary: Delete a Prompt
-      description: Deletes a specific prompt container along with all its template versions. Requires Org Admin or Team Admin privileges (GitHub repo owner model). Team Editors and Team Members are not authorized to delete prompts.
-      operationId: deletePrompt
+  /v1/prompts/{id}/archive:
+    post:
+      summary: Archive a Prompt
+      description: Archives a specific prompt container, setting `is_archived` to true. The prompt still exists in the system and people can call it and use it, so a prompt is never deleted. Requires Org Admin or Team Admin privileges (GitHub repo owner model). Team Editors and Team Members are not authorized to archive prompts.
+      operationId: archivePrompt
       tags:
         - Prompts
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
       x-edge-cases:
-        - "Only Org Admins and Team Admins can delete a prompt."
-        - "Team Editors and Team Members (viewers) are forbidden from deleting prompts."
+        - "Only Org Admins and Team Admins can archive a prompt."
+        - "Team Editors and Team Members (viewers) are forbidden from archiving prompts."
       x-test-coverage:
-        - "TestDeletePrompt_Permissions: Verifies that a Team Member (viewer) cannot delete a prompt (returns 403 Forbidden)."
-        - "TestDeletePrompt_Permissions: Verifies that a Team Editor cannot delete a prompt (returns 403 Forbidden)."
-        - "TestDeletePrompt_Permissions: Verifies that a Team Admin can successfully delete a prompt (returns 204 No Content)."
+        - "TestArchivePrompt_Permissions: Verifies that a Team Member (viewer) cannot archive a prompt (returns 403 Forbidden)."
+        - "TestArchivePrompt_Permissions: Verifies that a Team Editor cannot archive a prompt (returns 403 Forbidden)."
+        - "TestArchivePrompt_Permissions: Verifies that a Team Admin can successfully archive a prompt (returns 200 OK with prompt details)."
       parameters:
         - name: id
           in: path
           required: true
-          description: The unique UUID of the prompt to delete.
+          description: The unique UUID of the prompt to archive.
           schema:
             type: string
             format: uuid
       responses:
-        "204":
-          description: Prompt successfully deleted
+        "200":
+          description: Prompt successfully archived
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
         "400":
           description: Invalid UUID format
           content:
@@ -286,6 +327,14 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "unauthorized"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "forbidden"
         "404":
           description: Prompt not found
           content:
@@ -658,6 +707,72 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "only draft versions can be modified"
+
+    delete:
+      summary: Delete Prompt Version Draft
+      description: |
+        Deletes a specific prompt template version.
+        Only versions currently in the 'draft' status may be deleted.
+      operationId: deletePromptVersion
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to delete.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to delete a live/archived template)."
+      x-test-coverage:
+        - "TestDeleteVersion_Draft: Verifies deletion of specific draft version returns 204."
+        - "TestDeleteVersion_LiveVersionRejected: Verifies that deleting a published live template version fails with 422 and 'only draft versions can be deleted'."
+      responses:
+        "204":
+          description: Version deleted successfully
+        "400":
+          description: Invalid path formatting
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+        "422":
+          description: Only draft versions can be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "only draft versions can be deleted"
 
   /v1/prompts/{id}/versions/{version}/publish:
     post:
@@ -1268,6 +1383,9 @@ components:
         description:
           type: string
           description: Brief summary explaining the prompt purpose.
+        is_archived:
+          type: boolean
+          description: Whether the prompt is archived.
         created_at:
           type: string
           format: date-time
@@ -1280,6 +1398,7 @@ components:
         - slug
         - name
         - description
+        - is_archived
         - created_at
         - updated_at
     PromptVersion:

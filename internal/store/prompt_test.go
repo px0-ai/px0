@@ -56,7 +56,7 @@ func TestListPrompts(t *testing.T) {
 	_, err = store.CreatePrompt(ctx, tm.ID, "prompt_b", "Prompt B", "")
 	require.NoError(t, err)
 
-	prompts, err := store.ListPrompts(ctx, []uuid.UUID{tm.ID})
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
 	require.NoError(t, err)
 	assert.Len(t, prompts, 2)
 }
@@ -67,7 +67,7 @@ func TestListPrompts_Empty(t *testing.T) {
 	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	prompts, err := store.ListPrompts(ctx, []uuid.UUID{tm.ID})
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
 	require.NoError(t, err)
 	assert.Empty(t, prompts)
 }
@@ -99,28 +99,89 @@ func TestGetPromptByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestDeletePrompt(t *testing.T) {
+func TestArchivePrompt(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	p, err := store.CreatePrompt(ctx, tm.ID, "delete_me", "Delete Me", "")
+	p, err := store.CreatePrompt(ctx, tm.ID, "archive_me", "Archive Me", "")
+	require.NoError(t, err)
+	assert.False(t, p.IsArchived)
+
+	err = store.ArchivePrompt(ctx, p.ID, []uuid.UUID{tm.ID})
 	require.NoError(t, err)
 
-	err = store.DeletePrompt(ctx, p.ID, []uuid.UUID{tm.ID})
+	got, err := store.GetPromptByID(ctx, p.ID, []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+	assert.True(t, got.IsArchived)
+}
+
+func TestArchivePrompt_NotFound(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	_, err = store.GetPromptByID(ctx, p.ID, []uuid.UUID{tm.ID})
+	err = store.ArchivePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID})
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestDeletePrompt_NotFound(t *testing.T) {
+func TestListPrompts_Filters(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	err = store.DeletePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID})
-	assert.ErrorIs(t, err, store.ErrNotFound)
+	pA, err := store.CreatePrompt(ctx, tm.ID, "prompt_a", "Prompt A", "")
+	require.NoError(t, err)
+	pB, err := store.CreatePrompt(ctx, tm.ID, "prompt_b", "Prompt B", "")
+	require.NoError(t, err)
+
+	// 1. Archive pB
+	err = store.ArchivePrompt(ctx, pB.ID, []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+
+	// Test Archived = false (Active only)
+	activeOnly := false
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs:  []uuid.UUID{tm.ID},
+		Archived: &activeOnly,
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pA.ID, prompts[0].ID)
+
+	// Test Archived = true (Archived only)
+	archivedOnly := true
+	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs:  []uuid.UUID{tm.ID},
+		Archived: &archivedOnly,
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pB.ID, prompts[0].ID)
+
+	// 2. Create version and tag for pA
+	v, err := store.CreateVersion(ctx, pA.ID, "template")
+	require.NoError(t, err)
+	err = store.SetTag(ctx, pA.ID, v.Version, "prod")
+	require.NoError(t, err)
+
+	// Filter by tag "prod"
+	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Tags:    []string{"prod"},
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, pA.ID, prompts[0].ID)
+
+	// Filter by non-existent tag
+	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Tags:    []string{"nonexistent_tag"},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, prompts)
 }

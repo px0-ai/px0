@@ -186,6 +186,33 @@ func PublishVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 	return v, nil
 }
 
+func DeleteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) error {
+	var status string
+	err := db.Pool.QueryRow(ctx,
+		`SELECT status FROM prompt_versions WHERE prompt_id = $1 AND version = $2`,
+		promptID, versionNum,
+	).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("check version status: %w", err)
+	}
+
+	if status != model.VersionStatusDraft {
+		return fmt.Errorf("cannot delete version with status %s: %w", status, ErrConflict)
+	}
+
+	_, err = db.Pool.Exec(ctx,
+		`DELETE FROM prompt_versions WHERE prompt_id = $1 AND version = $2`,
+		promptID, versionNum,
+	)
+	if err != nil {
+		return fmt.Errorf("delete version: %w", err)
+	}
+	return nil
+}
+
 func populateTags(ctx context.Context, v *model.PromptVersion) error {
 	if v == nil {
 		return nil

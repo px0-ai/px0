@@ -215,3 +215,45 @@ func TestPublishVersion_AlreadyArchived(t *testing.T) {
 	_, err := store.PublishVersion(ctx, p.ID, 1) // try to re-publish archived
 	assert.ErrorIs(t, err, store.ErrConflict)
 }
+
+func TestDeleteVersion_Success(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+
+	v, err := store.CreateVersion(ctx, p.ID, "draft to delete")
+	require.NoError(t, err)
+
+	err = store.DeleteVersion(ctx, p.ID, v.Version)
+	require.NoError(t, err)
+
+	_, err = store.GetVersion(ctx, p.ID, v.Version)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestDeleteVersion_NotFound(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+
+	err := store.DeleteVersion(ctx, p.ID, 99)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestDeleteVersion_Conflict(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+
+	store.CreateVersion(ctx, p.ID, "v1")
+	store.PublishVersion(ctx, p.ID, 1) // v1 is now live
+
+	err := store.DeleteVersion(ctx, p.ID, 1)
+	assert.ErrorIs(t, err, store.ErrConflict)
+
+	store.CreateVersion(ctx, p.ID, "v2")
+	store.PublishVersion(ctx, p.ID, 2) // v1 is now archived, v2 is live
+
+	err = store.DeleteVersion(ctx, p.ID, 1) // v1 is archived
+	assert.ErrorIs(t, err, store.ErrConflict)
+}

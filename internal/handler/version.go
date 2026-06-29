@@ -236,6 +236,58 @@ func PublishVersion(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"version": version})
 }
 
+func DeleteVersion(c *fiber.Ctx) error {
+	promptID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	target, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	err = store.DeleteVersion(c.Context(), promptID, target.Version)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		if errors.Is(err, store.ErrConflict) {
+			return apierr.ErrOnlyDraftsDeletable.Respond(c, err)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func resolveVersion(ctx context.Context, promptID uuid.UUID, versionParam string) (*model.PromptVersion, error) {
 	if versionNum, err := strconv.Atoi(versionParam); err == nil {
 		return store.GetVersion(ctx, promptID, versionNum)

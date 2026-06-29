@@ -250,30 +250,31 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// M. Editor cannot Delete Prompt
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", viewerToken)
+	// M. Editor cannot Archive Prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptIDStr), "", viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// N. Editor cannot Delete Prompt (GitHub model)
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", editorToken)
+	// N. Editor cannot Archive Prompt (GitHub model)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptIDStr), "", editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// Admin can Delete Prompt
-	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptIDStr), "", adminToken)
+	// Admin can Archive Prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptIDStr), "", adminToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// Verify prompt is deleted
-	_, err = store.GetPromptByID(ctx, promptID, []uuid.UUID{teamID})
-	assert.ErrorIs(t, err, store.ErrNotFound)
+	// Verify prompt is archived
+	gotPrompt, err := store.GetPromptByID(ctx, promptID, []uuid.UUID{teamID})
+	require.NoError(t, err)
+	assert.True(t, gotPrompt.IsArchived)
 
 	// O. Try to remove a user from a team who is not part of the organization (returns 400 Bad Request)
 	nonOrgUser, _ := store.CreateUser(ctx, "nonorguser@test.com", "Password123!")

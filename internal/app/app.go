@@ -74,7 +74,7 @@ func New() *fiber.App {
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
 	prompts.Get("", handler.ListAllPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
-	prompts.Delete("/:id", handler.DeletePrompt)
+	prompts.Post("/:id/archive", handler.ArchivePrompt)
 
 	prompts.Post("/:id/render", handler.RenderLive)
 
@@ -82,6 +82,7 @@ func New() *fiber.App {
 	prompts.Get("/:id/versions", handler.ListVersions)
 	prompts.Get("/:id/versions/:version", handler.GetVersion)
 	prompts.Put("/:id/versions/:version", handler.UpdateVersion)
+	prompts.Delete("/:id/versions/:version", handler.DeleteVersion)
 	prompts.Post("/:id/versions/:version/publish", handler.PublishVersion)
 	prompts.Post("/:id/versions/:version/render", handler.RenderVersion)
 	prompts.Post("/:id/versions/:version/tags", handler.SetTag)

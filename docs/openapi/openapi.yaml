@@ -67,6 +67,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
+  /v1/prompts/{id}/archive:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1archive"
   /v1/prompts/{id}/render:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1render"
   /v1/prompts/{id}/versions:

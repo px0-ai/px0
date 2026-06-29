@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -113,7 +114,31 @@ func ListPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	prompts, err := store.ListPrompts(c.Context(), []uuid.UUID{teamID})
+	var tags []string
+	tagsStr := c.Query("tags")
+	if tagsStr != "" {
+		parts := strings.Split(tagsStr, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				tags = append(tags, part)
+			}
+		}
+	}
+
+	var archived *bool
+	archivedStr := c.Query("archived")
+	if archivedStr != "" {
+		if val, err := strconv.ParseBool(archivedStr); err == nil {
+			archived = &val
+		}
+	}
+
+	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
+		TeamIDs:  []uuid.UUID{teamID},
+		Tags:     tags,
+		Archived: archived,
+	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -144,7 +169,7 @@ func GetPrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
-func DeletePrompt(c *fiber.Ctx) error {
+func ArchivePrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return apierr.ErrInvalidPromptID.Respond(c)
@@ -167,19 +192,28 @@ func DeletePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if err := store.DeletePrompt(c.Context(), id, adminTeamIDs); err != nil {
+	if err := store.ArchivePrompt(c.Context(), id, adminTeamIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	return c.SendStatus(fiber.StatusNoContent)
+
+	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
 func ListAllPrompts(c *fiber.Ctx) error {
-	teamIDStr := c.Query("team_id")
+	teamIDStr := c.Query("team")
 	if teamIDStr == "" {
-		// By default nothing is shown
+		teamIDStr = c.Query("team_id")
+	}
+
+	if teamIDStr == "" {
+		// By default nothing is shown as per backwards-compatible test requirements
 		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
 	}
 
@@ -204,7 +238,31 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	prompts, err := store.ListPrompts(c.Context(), []uuid.UUID{teamID})
+	var tags []string
+	tagsStr := c.Query("tags")
+	if tagsStr != "" {
+		parts := strings.Split(tagsStr, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				tags = append(tags, part)
+			}
+		}
+	}
+
+	var archived *bool
+	archivedStr := c.Query("archived")
+	if archivedStr != "" {
+		if val, err := strconv.ParseBool(archivedStr); err == nil {
+			archived = &val
+		}
+	}
+
+	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
+		TeamIDs:  []uuid.UUID{teamID},
+		Tags:     tags,
+		Archived: archived,
+	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}

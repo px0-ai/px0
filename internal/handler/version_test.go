@@ -221,3 +221,54 @@ func TestPublishVersion_AlreadyLive(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestDeleteVersion_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "draft to delete")
+
+	req := newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// confirm it is deleted
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestDeleteVersion_LiveRejected(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "template")
+
+	// publish version 1
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+	resp, _ := a.Test(req)
+	resp.Body.Close()
+
+	// try to delete live version - should fail
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestDeleteVersion_NotFound(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s/versions/99", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}

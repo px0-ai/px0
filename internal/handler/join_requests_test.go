@@ -19,7 +19,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 
 	// 1. Setup Admin user and Organization/Team
 	adminToken := setupUser(t, a) // verified user on "Default Test Org" / "Test Setup Team"
-	
+
 	adminSession, err := store.GetSessionByToken(ctx, adminToken)
 	require.NoError(t, err)
 	adminUserID := adminSession.UserID
@@ -35,7 +35,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	body := decodeBody(t, resp)
 	teamIDStr := body["team"].(map[string]any)["id"].(string)
 	teamID, err := uuid.Parse(teamIDStr)
@@ -52,14 +52,14 @@ func TestJoinRequestsFlow(t *testing.T) {
 	// 2. Setup standard applicant user
 	applicantEmail := "applicant@px0.dev"
 	applicantPassword := "Applicant123!"
-	
+
 	// Register applicant
 	req = newReq(t, http.MethodPost, "/v1/auth/register",
 		fmt.Sprintf(`{"email":%q,"password":%q}`, applicantEmail, applicantPassword), "")
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	body = decodeBody(t, resp)
 	applicantUser := body["user"].(map[string]any)
 	applicantIDStr := applicantUser["id"].(string)
@@ -81,7 +81,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	
+
 	body = decodeBody(t, resp)
 	applicantToken := body["token"].(string)
 
@@ -90,7 +90,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	
+
 	body = decodeBody(t, resp)
 	teamsList := body["teams"].([]any)
 	assert.Len(t, teamsList, 2) // Test Setup Team & Engineering Team
@@ -100,7 +100,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	reqBody := decodeBody(t, resp)
 	requestIDStr := reqBody["id"].(string)
 	assert.Equal(t, "pending", reqBody["status"])
@@ -117,11 +117,11 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	
+
 	body = decodeBody(t, resp)
 	inboxList := body["inbox"].([]any)
 	assert.NotEmpty(t, inboxList)
-	
+
 	found := false
 	for _, itemAny := range inboxList {
 		item := itemAny.(map[string]any)
@@ -140,7 +140,7 @@ func TestJoinRequestsFlow(t *testing.T) {
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	
+
 	body = decodeBody(t, resp)
 	assert.Equal(t, "approved", body["status"])
 
