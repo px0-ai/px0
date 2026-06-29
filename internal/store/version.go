@@ -36,6 +36,36 @@ func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*m
 	return v, nil
 }
 
+func DuplicateVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
+	v := &model.PromptVersion{}
+	err := db.Pool.QueryRow(ctx, `
+		WITH source_version AS (
+			SELECT template
+			FROM prompt_versions
+			WHERE prompt_id = $1 AND version = $2
+		),
+		next_version AS (
+			SELECT COALESCE(MAX(version), 0) + 1 AS v
+			FROM prompt_versions
+			WHERE prompt_id = $1
+		)
+		INSERT INTO prompt_versions (prompt_id, version, template, status)
+		SELECT $1, nv.v, sv.template, 'draft'
+		FROM source_version sv, next_version nv
+		RETURNING id, prompt_id, version, template, status, created_at, published_at
+	`, promptID, versionNum).Scan(
+		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("duplicate version: %w", err)
+	}
+	v.Tags = []string{}
+	return v, nil
+}
+
 type VersionFilter struct {
 	Status *string
 	Tags   []string

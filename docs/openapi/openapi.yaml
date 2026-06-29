@@ -81,6 +81,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1demote"
   /v1/prompts/{id}/versions/{version}/archive:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1archive"
+  /v1/prompts/{id}/versions/{version}/duplicate:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
   /v1/prompts/{id}/versions/{version}/render:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
   /v1/prompts/{id}/versions/{version}/tags:

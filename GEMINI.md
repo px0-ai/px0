@@ -8,6 +8,7 @@ We do not run or require tests for every single change. Trivial modifications, d
 - Bug fix: a regression test that reproduces the bug before the fix and passes after.
 - Refactor: existing tests must still pass; add tests if coverage was missing.
 - OpenAPI Spec Alignment: Whenever tests are created or updated to cover new edge cases, scenarios, or validation behaviors, the OpenAPI specification (under `docs/openapi/`) must be updated. This ensures that the documentation remains perfectly aligned with the test suite and implementation.
+- Test Execution Sequence: Tests should run only after the changes are done and not before making the changes. Do not execute tests prior to making your code modifications.
 
 Run before every push:
 

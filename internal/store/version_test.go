@@ -303,3 +303,37 @@ func TestDeleteVersion_Unified(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, model.VersionStatusArchived, v2.Status) // soft-archived!
 }
+
+func TestDuplicateVersion(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+
+	v1, err := store.CreateVersion(ctx, p.ID, "original template content")
+	require.NoError(t, err)
+
+	// Set a tag on v1 to ensure tag is NOT copied
+	err = store.SetTag(ctx, p.ID, v1.Version, "v1.0")
+	require.NoError(t, err)
+
+	// Duplicate version 1
+	v2, err := store.DuplicateVersion(ctx, p.ID, v1.Version)
+	require.NoError(t, err)
+
+	assert.Equal(t, p.ID, v2.PromptID)
+	assert.Equal(t, 2, v2.Version)
+	assert.Equal(t, "original template content", v2.Template)
+	assert.Equal(t, model.VersionStatusDraft, v2.Status)
+	assert.Empty(t, v2.Tags)
+	assert.NotNil(t, v2.CreatedAt)
+	assert.Nil(t, v2.PublishedAt)
+
+	// Verify v1 is unchanged and still has its tag
+	v1Updated, err := store.GetVersion(ctx, p.ID, v1.Version)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"v1.0"}, v1Updated.Tags)
+
+	// Duplicate a non-existent version
+	_, err = store.DuplicateVersion(ctx, p.ID, 999)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}

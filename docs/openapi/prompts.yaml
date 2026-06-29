@@ -1000,6 +1000,75 @@ paths:
               example:
                 error: "version is already archived"
 
+  /v1/prompts/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate Prompt Version
+      description: |
+        Copies the specified prompt version's template to create a new prompt version in draft state.
+        This operation does not copy any associated payloads, only the prompt template and other metadata.
+      operationId: duplicateVersion
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to duplicate from.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Returns 404 if source version or prompt is not found."
+        - "Returns 401 if user is unauthorized."
+      x-test-coverage:
+        - "TestDuplicateVersion_Success: Verifies duplicating a version creates a new draft version."
+        - "TestDuplicateVersion_Errors: Verifies error responses for invalid prompt, missing version, etc."
+      responses:
+        "201":
+          description: Prompt version duplicated and new draft version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid version number"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "404":
+          description: Version or prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "version not found"
+
   /v1/prompts/{id}/versions/{version}/render:
     post:
       summary: Render Specific Prompt Version

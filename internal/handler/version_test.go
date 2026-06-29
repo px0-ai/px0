@@ -384,3 +384,69 @@ func TestDeleteVersion_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestDuplicateVersion_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "my source template content")
+
+	// Set a tag on version 1
+	reqTag := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/tags", id), `{"tag":"source-tag"}`, token)
+	respTag, err := a.Test(reqTag)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respTag.StatusCode)
+	respTag.Body.Close()
+
+	// Duplicate version 1
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/duplicate", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, float64(2), v["version"])
+	assert.Equal(t, "draft", v["status"])
+	assert.Equal(t, "my source template content", v["template"])
+	assert.Empty(t, v["tags"])
+	resp.Body.Close()
+
+	// Verify that original version's tag is still there
+	reqOrig := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	respOrig, err := a.Test(reqOrig)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respOrig.StatusCode)
+	bodyOrig := decodeBody(t, respOrig)
+	vOrig := bodyOrig["version"].(map[string]any)
+	assert.Equal(t, []any{"source-tag"}, vOrig["tags"])
+	respOrig.Body.Close()
+}
+
+func TestDuplicateVersion_Errors(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "template content")
+
+	// 1. Prompt not found
+	req := newReq(t, http.MethodPost, "/v1/prompts/00000000-0000-0000-0000-000000000001/versions/1/duplicate", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// 2. Version not found
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/99/duplicate", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Unauthorized (no token)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/duplicate", id), "", "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+}

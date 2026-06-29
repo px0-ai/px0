@@ -222,6 +222,14 @@ func TestRolesAndPermissions(t *testing.T) {
 	resp.Body.Close()
 
 	// I. Editor can Promote Version
+	// First promotion: draft -> stable
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/promote", promptIDStr, versionNum), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Second promotion: stable -> live
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/promote", promptIDStr, versionNum), "", editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
