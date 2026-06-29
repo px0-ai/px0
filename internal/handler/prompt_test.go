@@ -404,25 +404,4 @@ func TestListAllPrompts_Filters(t *testing.T) {
 	assert.Len(t, prompts, 1)
 	assert.Equal(t, pBID, prompts[0].(map[string]any)["id"].(string))
 	resp.Body.Close()
-
-	// Test 3: Query with tags=v1
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&tags=v1", teamID), "", token)
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body = decodeBody(t, resp)
-	prompts = body["prompts"].([]any)
-	assert.Len(t, prompts, 1)
-	assert.Equal(t, pAID, prompts[0].(map[string]any)["id"].(string))
-	resp.Body.Close()
-
-	// Test 4: Query with non-existent tag
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&tags=nonexistent", teamID), "", token)
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body = decodeBody(t, resp)
-	prompts = body["prompts"].([]any)
-	assert.Empty(t, prompts)
-	resp.Body.Close()
 }

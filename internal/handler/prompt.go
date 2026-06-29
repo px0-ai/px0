@@ -114,18 +114,6 @@ func ListPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	var tags []string
-	tagsStr := c.Query("tags")
-	if tagsStr != "" {
-		parts := strings.Split(tagsStr, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				tags = append(tags, part)
-			}
-		}
-	}
-
 	var status *string
 	statusStr := c.Query("status")
 	if statusStr != "" {
@@ -142,7 +130,6 @@ func ListPrompts(c *fiber.Ctx) error {
 
 	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
 		TeamIDs:  []uuid.UUID{teamID},
-		Tags:     tags,
 		Archived: archived,
 		Status:   status,
 	})
@@ -245,18 +232,6 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	var tags []string
-	tagsStr := c.Query("tags")
-	if tagsStr != "" {
-		parts := strings.Split(tagsStr, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				tags = append(tags, part)
-			}
-		}
-	}
-
 	var status *string
 	statusStr := c.Query("status")
 	if statusStr != "" {
@@ -273,7 +248,6 @@ func ListAllPrompts(c *fiber.Ctx) error {
 
 	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
 		TeamIDs:  []uuid.UUID{teamID},
-		Tags:     tags,
 		Archived: archived,
 		Status:   status,
 	})

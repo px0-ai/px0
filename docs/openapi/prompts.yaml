@@ -88,12 +88,6 @@ paths:
             type: string
             format: uuid
           description: The ID of the team.
-        - name: tags
-          in: query
-          required: false
-          description: Optional comma-separated list of tags to filter prompts.
-          schema:
-            type: string
         - name: archived
           in: query
           required: false
@@ -158,12 +152,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: tags
-          in: query
-          required: false
-          description: Optional comma-separated list of tags to filter prompts.
-          schema:
-            type: string
         - name: archived
           in: query
           required: false
