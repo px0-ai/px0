@@ -36,15 +36,20 @@ func New() *fiber.App {
 	auth.Post("/password-reset/reset", handler.ResetPassword)
 	auth.Delete("/session", handler.Logout)
 	auth.Get("/me", middleware.RequireAccessToken, handler.Me)
+	auth.Put("/me", middleware.RequireAccessToken, handler.UpdateMe)
+	auth.Post("/me/change-password", middleware.RequireAccessToken, handler.ChangePassword)
+	auth.Delete("/me", middleware.RequireAccessToken, handler.DeleteMe)
 
 	me := v1.Group("/me", middleware.RequireAccessToken)
 	me.Get("/teams", handler.ListUserTeams)
 	me.Get("/orgs", handler.ListUserOrgs)
 	me.Get("/inbox", handler.GetAdminInbox)
+	me.Delete("/teams/:teamID", handler.LeaveTeam)
 
 	orgs := v1.Group("/orgs", middleware.RequireAccessToken)
 	orgs.Post("", handler.CreateOrg)
 	orgs.Put("/:id", handler.UpdateOrg)
+	orgs.Delete("/:id", handler.DeleteOrg)
 	orgs.Post("/:orgID/teams", handler.CreateTeam)
 	orgs.Get("/:orgID/teams", handler.ListOrgTeams)
 	orgs.Get("/:orgID/people", handler.ListOrgPeople)
@@ -76,6 +81,9 @@ func New() *fiber.App {
 	prompts.Get("/:id", handler.GetPrompt)
 	prompts.Put("/:id", handler.UpdatePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
+	prompts.Post("/:id/restore", handler.RestorePrompt)
+	prompts.Post("/:id/move", handler.MovePrompt)
+	prompts.Get("/:id/versions/diff", handler.DiffVersions)
 
 	prompts.Post("/:id/render", handler.RenderLive)
 

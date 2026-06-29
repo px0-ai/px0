@@ -483,3 +483,85 @@ func TestUpdatePrompt_Handler(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestRestorePrompt(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	// Archive first
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Restore
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/restore", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	p := body["prompt"].(map[string]any)
+	assert.Equal(t, "active", p["status"].(string))
+	resp.Body.Close()
+}
+
+func TestMovePrompt(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	// Let's create a new team under the user's organization.
+	reqOrgs := newReq(t, http.MethodGet, "/v1/me/orgs", "", token)
+	respOrgs, err := a.Test(reqOrgs)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respOrgs.StatusCode)
+	bodyOrgs := decodeBody(t, respOrgs)
+	orgs := bodyOrgs["organizations"].([]any)
+	require.NotEmpty(t, orgs)
+	orgID := orgs[0].(map[string]any)["id"].(string)
+	respOrgs.Body.Close()
+
+	// Create a new target team under that org
+	reqTeam := newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgID), `{"name":"Target Team"}`, token)
+	respTeam, err := a.Test(reqTeam)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, respTeam.StatusCode)
+	bodyTeam := decodeBody(t, respTeam)
+	targetTeamID := bodyTeam["team"].(map[string]any)["id"].(string)
+	respTeam.Body.Close()
+
+	// Move prompt to the target team
+	reqMove := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/move", id), fmt.Sprintf(`{"team_id":"%s"}`, targetTeamID), token)
+	respMove, err := a.Test(reqMove)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respMove.StatusCode)
+	bodyMove := decodeBody(t, respMove)
+	pMove := bodyMove["prompt"].(map[string]any)
+	assert.Equal(t, targetTeamID, pMove["team_id"].(string))
+	respMove.Body.Close()
+}
+
+func TestDiffVersions(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	// Create version 1
+	v1 := setupVersion(t, a, token, id, "Hello {{ .name }}")
+	// Create version 2
+	v2 := setupVersion(t, a, token, id, "Hello {{ .name }}!\nWelcome to px0.")
+
+	// Request diff
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=%d&to=%d", id, v1, v2), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, float64(v1), body["from_version"])
+	assert.Equal(t, float64(v2), body["to_version"])
+	assert.Contains(t, body["diff"].(string), "Hello {{ .name }}")
+	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
+	resp.Body.Close()
+}

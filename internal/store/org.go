@@ -131,3 +131,11 @@ func RemoveOrgMember(ctx context.Context, orgID, userID uuid.UUID) error {
 	}
 	return nil
 }
+
+func DeleteOrganization(ctx context.Context, id uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM organizations WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete organization: %w", err)
+	}
+	return nil
+}

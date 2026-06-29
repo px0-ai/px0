@@ -361,9 +361,117 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
+                $ref: "#/components/schemas/APIError"
               example:
                 error: "unauthorized"
+    put:
+      summary: Update Me
+      description: Updates the profile of the currently logged-in user.
+      operationId: updateMe
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - "TestUpdateMe: Verifies that updating user profile succeeds."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeRequest"
+      responses:
+        "200":
+          description: User profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - user
+        "400":
+          description: Invalid email format or missing fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "409":
+          description: Email already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+    delete:
+      summary: Delete Me
+      description: Deletes the currently logged-in user's account.
+      operationId: deleteMe
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - "TestDeleteMe: Verifies that deleting a user account succeeds."
+      responses:
+        "204":
+          description: Account deleted successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+
+  /v1/auth/me/change-password:
+    post:
+      summary: Change Password
+      description: Changes the currently logged-in user's password.
+      operationId: changePassword
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-test-coverage:
+        - "TestChangePassword: Verifies changing authenticated password."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "password changed successfully"
+                required:
+                  - message
+        "400":
+          description: Password too short or too weak
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "401":
+          description: Unauthorized or invalid current password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
 
   /v1/auth/password-reset/trigger:
     post:
@@ -588,4 +696,26 @@ components:
           example: NewSecretPassword123!
       required:
         - code
+        - new_password
+    UpdateMeRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: newemail@example.com
+      required:
+        - email
+    ChangePasswordRequest:
+      type: object
+      properties:
+        current_password:
+          type: string
+          example: OldSecretPassword123!
+        new_password:
+          type: string
+          minLength: 8
+          example: NewSecretPassword123!
+      required:
+        - current_password
         - new_password

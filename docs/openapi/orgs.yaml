@@ -137,6 +137,42 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
+    delete:
+      summary: Delete Organization
+      description: Deletes an organization and all cascading dependencies. Requires Org Admin.
+      operationId: deleteOrg
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted successfully (No Content)
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
   /v1/orgs/{orgID}/people:
     get:
       summary: List Org People

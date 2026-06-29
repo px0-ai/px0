@@ -514,3 +514,21 @@ func GetOrgPeoplePaginated(ctx context.Context, orgID uuid.UUID, page, limit int
 	}
 	return users, total, rows.Err()
 }
+
+func GetOrgAdminUserID(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := db.Pool.QueryRow(ctx,
+		`SELECT tm.user_id FROM team_members tm
+		 JOIN teams t ON tm.team_id = t.id
+		 WHERE t.org_id = $1 AND tm.role = 'admin'
+		 LIMIT 1`,
+		orgID,
+	).Scan(&userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, ErrNotFound
+		}
+		return uuid.Nil, fmt.Errorf("get org admin user id: %w", err)
+	}
+	return userID, nil
+}

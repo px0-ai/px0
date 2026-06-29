@@ -149,3 +149,32 @@ func UpdatePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, descri
 	}
 	return p, nil
 }
+
+func RestorePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error {
+	_, err := GetPromptByID(ctx, id, teamIDs)
+	if err != nil {
+		return err // ErrNotFound if not found or no access
+	}
+
+	result, err := db.Pool.Exec(ctx, "UPDATE prompts SET status = 'active' WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("restore prompt: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func MovePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, targetTeamID uuid.UUID) error {
+	_, err := GetPromptByID(ctx, id, teamIDs)
+	if err != nil {
+		return err // ErrNotFound if not found or no access
+	}
+
+	_, err = db.Pool.Exec(ctx, "UPDATE prompts SET team_id = $1, updated_at = NOW() WHERE id = $2", targetTeamID, id)
+	if err != nil {
+		return fmt.Errorf("move prompt: %w", err)
+	}
+	return nil
+}

@@ -26,6 +26,39 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/me/teams/{teamID}:
+    delete:
+      summary: Leave Team
+      description: Allows the authenticated user to voluntarily leave a team they belong to.
+      operationId: leaveTeam
+      tags:
+        - Teams
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Left team successfully (No Content)
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Team not found or user not a member of the team
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
   /v1/orgs/{orgID}/teams:
     post:
       summary: Create Team

@@ -203,3 +203,29 @@ func DeleteUserPasswordResets(ctx context.Context, userID uuid.UUID) error {
 	}
 	return nil
 }
+
+func UpdateUserEmail(ctx context.Context, id uuid.UUID, email string) error {
+	_, err := db.Pool.Exec(ctx,
+		`UPDATE users SET email = $1 WHERE id = $2`,
+		email, id,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrDuplicate
+		}
+		return fmt.Errorf("update user email: %w", err)
+	}
+	return nil
+}
+
+func DeleteUser(ctx context.Context, id uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx,
+		`DELETE FROM users WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}

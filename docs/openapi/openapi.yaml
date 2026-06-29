@@ -25,6 +25,8 @@ paths:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
   /v1/auth/me:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1me"
+  /v1/auth/me/change-password:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1me~1change-password"
   /v1/auth/password-reset/trigger:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1password-reset~1trigger"
   /v1/auth/password-reset/reset:
@@ -35,6 +37,8 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
   /v1/me/teams:
     $ref: "./teams.yaml#/paths/~1v1~1me~1teams"
+  /v1/me/teams/{teamID}:
+    $ref: "./teams.yaml#/paths/~1v1~1me~1teams~1{teamID}"
   /v1/me/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1me~1orgs"
   /v1/me/inbox:
@@ -69,6 +73,12 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
   /v1/prompts/{id}/archive:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1archive"
+  /v1/prompts/{id}/restore:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1restore"
+  /v1/prompts/{id}/move:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
+  /v1/prompts/{id}/versions/diff:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
   /v1/prompts/{id}/render:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1render"
   /v1/prompts/{id}/versions:

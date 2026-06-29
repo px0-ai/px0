@@ -105,3 +105,76 @@ func getRequestAdminTeamIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
 	}
 	return teamIDs, nil
 }
+
+func IsOrgAdmin(c *fiber.Ctx, orgID uuid.UUID) (bool, error) {
+	if op, ok := c.Locals("apiKeyOperation").(string); ok {
+		if op == "admin" || op == "all" {
+			if keyOrgID, ok := c.Locals("apiKeyOrgID").(uuid.UUID); ok {
+				return keyOrgID == orgID, nil
+			}
+		}
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return false, nil
+	}
+	return store.IsOrgAdmin(c.Context(), userID, orgID)
+}
+
+func IsTeamAdmin(c *fiber.Ctx, teamID uuid.UUID) (bool, error) {
+	if op, ok := c.Locals("apiKeyOperation").(string); ok {
+		if op == "admin" || op == "all" {
+			if keyOrgID, ok := c.Locals("apiKeyOrgID").(uuid.UUID); ok {
+				t, err := store.GetTeamByID(c.Context(), teamID)
+				if err == nil && t.OrgID != nil && *t.OrgID == keyOrgID {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return false, nil
+	}
+	return store.IsTeamAdmin(c.Context(), userID, teamID)
+}
+
+func IsTeamEditor(c *fiber.Ctx, teamID uuid.UUID) (bool, error) {
+	if op, ok := c.Locals("apiKeyOperation").(string); ok {
+		if op == "admin" || op == "all" {
+			if keyOrgID, ok := c.Locals("apiKeyOrgID").(uuid.UUID); ok {
+				t, err := store.GetTeamByID(c.Context(), teamID)
+				if err == nil && t.OrgID != nil && *t.OrgID == keyOrgID {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return false, nil
+	}
+	return store.IsTeamEditor(c.Context(), userID, teamID)
+}
+
+func IsTeamViewer(c *fiber.Ctx, teamID uuid.UUID) (bool, error) {
+	if op, ok := c.Locals("apiKeyOperation").(string); ok {
+		if op == "admin" || op == "all" || op == "read_render" {
+			if keyOrgID, ok := c.Locals("apiKeyOrgID").(uuid.UUID); ok {
+				t, err := store.GetTeamByID(c.Context(), teamID)
+				if err == nil && t.OrgID != nil && *t.OrgID == keyOrgID {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return false, nil
+	}
+	return store.IsTeamViewer(c.Context(), userID, teamID)
+}

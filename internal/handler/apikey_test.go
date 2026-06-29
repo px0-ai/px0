@@ -192,3 +192,67 @@ func TestDeleteAPIKey_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestCreateAPIKey_GlobalScope(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	// Get organization and team IDs
+	session, err := store.GetSessionByToken(context.Background(), token)
+	require.NoError(t, err)
+	userID := session.UserID
+
+	teams, err := store.GetUserTeams(context.Background(), userID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+
+	// 1. Create a Global API key (empty team_ids)
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"global-key","org_id":%q,"team_ids":[],"operation":"read_render"}`, orgID.String()), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	apiKey := body["key"].(string)
+	resp.Body.Close()
+
+	// 2. Use the Global API key to list prompts (should succeed and resolve teams globally)
+	reqPrompts := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teams[0].ID.String()), "", apiKey)
+	respPrompts, err := a.Test(reqPrompts)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respPrompts.StatusCode)
+	respPrompts.Body.Close()
+}
+
+func TestCreateAPIKey_AdminScope(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	// Get organization and team IDs
+	session, err := store.GetSessionByToken(context.Background(), token)
+	require.NoError(t, err)
+	userID := session.UserID
+
+	teams, err := store.GetUserTeams(context.Background(), userID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+
+	// 1. Create an Admin API key
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"admin-key","org_id":%q,"team_ids":[],"operation":"admin"}`, orgID.String()), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	apiKey := body["key"].(string)
+	resp.Body.Close()
+
+	// 2. Use the Admin API Key to perform an admin action: Create a new custom team
+	reqTeam := newAPIKeyReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgID.String()), `{"name":"Admin Key Team"}`, apiKey)
+	respTeam, err := a.Test(reqTeam)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, respTeam.StatusCode)
+	respTeam.Body.Close()
+}

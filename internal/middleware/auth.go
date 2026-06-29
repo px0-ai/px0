@@ -49,7 +49,7 @@ func RequireAccessToken(c *fiber.Ctx) error {
 	}
 	if tryAPIKeyAuth(c) {
 		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
-			if operation != "all" {
+			if operation != "all" && operation != "admin" {
 				return apierr.ErrForbidden.Respond(c)
 			}
 		}
@@ -98,7 +98,7 @@ func RequireAdmin(c *fiber.Ctx) error {
 	}
 	if tryAPIKeyAuth(c) {
 		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
-			if operation != "all" {
+			if operation != "all" && operation != "admin" {
 				return apierr.ErrForbidden.Respond(c)
 			}
 			return c.Next()
@@ -170,10 +170,30 @@ func tryAPIKeyWithRawKey(c *fiber.Ctx, key string) bool {
 		return false
 	}
 
+	if len(teamIDs) == 0 {
+		// Global access key: Load all teams in this organization
+		teams, err := store.GetTeamsByOrgID(c.Context(), apiKey.OrgID)
+		if err != nil {
+			return false
+		}
+		for _, t := range teams {
+			teamIDs = append(teamIDs, t.ID)
+		}
+	}
+
+	// For admin or all scope API keys, resolve the actual Org Admin user ID of that organization
+	// to allow seamless execution of downstream handlers that require a logged-in user.
+	userID := uuid.Nil
+	if apiKey.Operation == "admin" || apiKey.Operation == "all" {
+		adminUserID, err := store.GetOrgAdminUserID(c.Context(), apiKey.OrgID)
+		if err == nil {
+			userID = adminUserID
+		}
+	}
+
 	c.Locals("apiKeyTeamIDs", teamIDs)
 	c.Locals("apiKeyOrgID", apiKey.OrgID)
 	c.Locals("apiKeyOperation", apiKey.Operation)
-	// API key auth has no associated user; use uuid.Nil as sentinel.
-	c.Locals(LocalsUserID, uuid.Nil)
+	c.Locals(LocalsUserID, userID)
 	return true
 }

@@ -592,3 +592,106 @@ func ResetPassword(c *fiber.Ctx) error {
 		"email":   user.Email,
 	})
 }
+
+type updateMeRequest struct {
+	Email string `json:"email"`
+}
+
+func UpdateMe(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	var req updateMeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Email == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "email is required").Respond(c)
+	}
+
+	if !emailRegex.MatchString(req.Email) {
+		return apierr.ErrInvalidEmail.Respond(c)
+	}
+
+	err := store.UpdateUserEmail(c.Context(), userID, req.Email)
+	if err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			return apierr.NewAPIError(fiber.StatusConflict, "email already taken").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	user, err := store.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"user": user})
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+func ChangePassword(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	var req changePasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "current_password and new_password are required").Respond(c)
+	}
+
+	if len(req.NewPassword) < 8 {
+		return apierr.ErrPasswordTooShort.Respond(c)
+	}
+
+	if !isValidPassword(req.NewPassword) {
+		return apierr.ErrPasswordTooWeak.Respond(c)
+	}
+
+	user, err := store.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		return apierr.NewAPIError(fiber.StatusUnauthorized, "invalid current password").Respond(c)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.UpdateUserPassword(c.Context(), userID, string(hash)); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "password changed successfully",
+	})
+}
+
+func DeleteMe(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	if err := store.DeleteUser(c.Context(), userID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}

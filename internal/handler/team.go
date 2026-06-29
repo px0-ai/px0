@@ -632,3 +632,31 @@ func DeleteTeam(c *fiber.Ctx) error {
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+func LeaveTeam(c *fiber.Ctx) error {
+	teamID, err := uuid.Parse(c.Params("teamID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	// Verify that user is a member of the team
+	isMember, err := store.IsTeamViewer(c.Context(), userID, teamID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isMember {
+		return apierr.NewAPIError(fiber.StatusNotFound, "user is not a member of this team").Respond(c)
+	}
+
+	// Remove membership
+	if err := store.RemoveTeamMember(c.Context(), teamID, userID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}

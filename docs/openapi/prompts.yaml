@@ -419,6 +419,126 @@ paths:
               example:
                 error: "internal error"
 
+  /v1/prompts/{id}/restore:
+    post:
+      summary: Restore a Prompt
+      description: Restores a previously archived prompt setting `status` back to 'active'. Requires Team Admin or Org Admin.
+      operationId: restorePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Prompt successfully restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/prompts/{id}/move:
+    post:
+      summary: Move a Prompt
+      description: Moves a prompt from its current team to another team. Requires admin privileges on both teams.
+      operationId: movePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - team_id
+              properties:
+                team_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Prompt successfully moved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid UUID format or team_id
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
   /v1/prompts/{id}/render:
     post:
       summary: Render Live Prompt Version
@@ -642,6 +762,83 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "prompt not found"
+
+  /v1/prompts/{id}/versions/diff:
+    get:
+      summary: Diff Prompt Versions
+      description: Compares the templates of two prompt versions side-by-side and returns a unified diff. Requires read access to the prompt.
+      operationId: diffVersions
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: The source version number to compare from.
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: The target version number to compare to.
+      responses:
+        "200":
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                    example: 1
+                  to_version:
+                    type: integer
+                    example: 2
+                  from_template:
+                    type: string
+                    example: "Hello {{ .name }}"
+                  to_template:
+                    type: string
+                    example: "Hello {{ .name }}!\nWelcome to px0."
+                  diff:
+                    type: string
+                    example: "--- v1\n+++ v2\n@@ -1 +1,2 @@\n-Hello {{ .name }}\n+Hello {{ .name }}!\n+Welcome to px0.\n"
+                required:
+                  - from_version
+                  - to_version
+                  - from_template
+                  - to_template
+                  - diff
+        "400":
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
   /v1/prompts/{id}/versions/{version}:
     get:

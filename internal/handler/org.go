@@ -214,3 +214,40 @@ func RemoveOrgMember(c *fiber.Ctx) error {
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+func DeleteOrg(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	// Verify the caller is an Org Admin (or system admin)
+	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, id)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isOrgAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	// Verify the organization actually exists
+	_, err = store.GetOrganizationByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "organization not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Delete organization (which cascades to delete related teams, prompts, etc.)
+	if err := store.DeleteOrganization(c.Context(), id); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}

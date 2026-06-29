@@ -270,3 +270,36 @@ func TestOrg_RemoveMember(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, inOrgFinal)
 }
+
+func TestDeleteOrganization(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	adminToken := setupUser(t, a) // verified admin user on Default Test Org & Test Setup Team
+
+	// Get organization and team IDs
+	session, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := session.UserID
+
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+
+	// Try to delete with fake ID (not found)
+	fakeID := uuid.New()
+	req := newReq(t, http.MethodDelete, fmt.Sprintf("/v1/orgs/%s", fakeID.String()), "", adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	// Delete organization successfully
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/orgs/%s", orgID.String()), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	// Verify organization is gone
+	_, err = store.GetOrganizationByID(ctx, *orgID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}

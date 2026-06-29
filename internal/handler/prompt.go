@@ -2,14 +2,17 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/px0-ai/px0/internal/apierr"
+	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
@@ -303,4 +306,225 @@ func UpdatePrompt(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
+func RestorePrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	adminTeamIDs, err := getRequestAdminTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.RestorePrompt(c.Context(), id, adminTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
+type movePromptRequest struct {
+	TeamID string `json:"team_id"`
+}
+
+func MovePrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	var req movePromptRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	targetTeamID, err := uuid.Parse(req.TeamID)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid target team_id").Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	// 1. Get the target team to find its OrgID
+	targetTeam, err := store.GetTeamByID(c.Context(), targetTeamID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "target team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// 2. Fetch the prompt to find its current team (we check basic read access)
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Get current team details
+	currentTeam, err := store.GetTeamByID(c.Context(), prompt.TeamID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// 3. Verify Admin permission on BOTH current team and target team
+	currentTeamAdmin := false
+	if currentTeam.OrgID != nil {
+		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, *currentTeam.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if isOrgAdmin {
+			currentTeamAdmin = true
+		}
+	}
+	if !currentTeamAdmin {
+		isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, currentTeam.ID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if isTeamAdmin {
+			currentTeamAdmin = true
+		}
+	}
+
+	targetTeamAdmin := false
+	if targetTeam.OrgID != nil {
+		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, *targetTeam.OrgID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if isOrgAdmin {
+			targetTeamAdmin = true
+		}
+	}
+	if !targetTeamAdmin {
+		isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, targetTeam.ID)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if isTeamAdmin {
+			targetTeamAdmin = true
+		}
+	}
+
+	if !currentTeamAdmin || !targetTeamAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	// Move the prompt
+	if err := store.MovePrompt(c.Context(), id, []uuid.UUID{currentTeam.ID}, targetTeamID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Retrieve updated prompt
+	prompt, err = store.GetPromptByID(c.Context(), id, []uuid.UUID{targetTeamID})
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
+func DiffVersions(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	fromVal := c.Query("from")
+	toVal := c.Query("to")
+	if fromVal == "" || toVal == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "from and to query parameters are required").Respond(c)
+	}
+
+	from, err := strconv.Atoi(fromVal)
+	if err != nil || from <= 0 {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid from version").Respond(c)
+	}
+
+	to, err := strconv.Atoi(toVal)
+	if err != nil || to <= 0 {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Verify read access to the prompt
+	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	fromVersion, err := store.GetVersion(c.Context(), id, from)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "from version not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	toVersion, err := store.GetVersion(c.Context(), id, to)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "to version not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	diff := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(fromVersion.Template),
+		B:        difflib.SplitLines(toVersion.Template),
+		FromFile: fmt.Sprintf("v%d", from),
+		ToFile:   fmt.Sprintf("v%d", to),
+		Context:  3,
+	}
+	diffText, err := difflib.GetUnifiedDiffString(diff)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"from_version":  from,
+		"to_version":    to,
+		"from_template": fromVersion.Template,
+		"to_template":   toVersion.Template,
+		"diff":          diffText,
+	})
 }

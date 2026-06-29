@@ -44,12 +44,12 @@ func CreateAPIKey(c *fiber.Ctx) error {
 	if req.Operation == "" {
 		req.Operation = "read_render"
 	}
-	if req.Operation != "read_render" && req.Operation != "all" {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid operation, must be read_render or all").Respond(c)
+	if req.Operation != "read_render" && req.Operation != "all" && req.Operation != "admin" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid operation, must be read_render, all, or admin").Respond(c)
 	}
 
-	// Verify user is admin of the organization
-	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, req.OrgID)
+	// Verify user is admin of the organization (context-aware helper support for API keys)
+	isOrgAdmin, err := IsOrgAdmin(c, req.OrgID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -115,8 +115,8 @@ func ListAPIKeys(c *fiber.Ctx) error {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	// Verify user is admin of the organization
-	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
+	// Verify user is admin of the organization (context-aware helper support for API keys)
+	isOrgAdmin, err := IsOrgAdmin(c, orgID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -153,8 +153,8 @@ func DeleteAPIKey(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Verify user is admin of the organization
-	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, apiKey.OrgID)
+	// Verify user is admin of the organization (context-aware helper support for API keys)
+	isOrgAdmin, err := IsOrgAdmin(c, apiKey.OrgID)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}

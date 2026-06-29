@@ -148,7 +148,7 @@ components:
           example: ak_1a2b3c4d
         operation:
           type: string
-          enum: [read_render, all]
+          enum: [read_render, all, admin]
           description: The scope of operations.
         created_at:
           type: string
@@ -183,7 +183,7 @@ components:
             format: uuid
         operation:
           type: string
-          enum: [read_render, all]
+          enum: [read_render, all, admin]
           default: read_render
       required:
         - name

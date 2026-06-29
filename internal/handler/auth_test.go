@@ -625,3 +625,62 @@ func TestRegister_AutoVerifyMock(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestUpdateMe(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	req := newReq(t, http.MethodPut, "/v1/auth/me", `{"email":"new-email@test.com"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	user := body["user"].(map[string]any)
+	assert.Equal(t, "new-email@test.com", user["email"])
+	resp.Body.Close()
+}
+
+func TestChangePassword(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a) // Default is test@px0.dev and TestPassword123!
+
+	// Change password
+	req := newReq(t, http.MethodPost, "/v1/auth/me/change-password", `{"current_password":"TestPassword123!","new_password":"NewPassword123!"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Login with old password should fail
+	req = newReq(t, http.MethodPost, "/v1/auth/login", `{"email":"test@px0.dev","password":"TestPassword123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+
+	// Login with new password should succeed
+	req = newReq(t, http.MethodPost, "/v1/auth/login", `{"email":"test@px0.dev","password":"NewPassword123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestDeleteMe(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	// Delete account
+	req := newReq(t, http.MethodDelete, "/v1/auth/me", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// Try to login, should fail
+	req = newReq(t, http.MethodPost, "/v1/auth/login", `{"email":"test@px0.dev","password":"TestPassword123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+}
