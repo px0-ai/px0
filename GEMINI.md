@@ -2,8 +2,16 @@
 
 ## Testing guidelines
 
-We do not run or require tests for every single change. Trivial modifications, documentation updates, configuration changes, or simple string updates (such as updating error messages) do not require running the full test suite. However, for significant functional code changes:
+We do not run or require tests for every single change. Trivial modifications, documentation updates, configuration changes, or simple string updates (such as updating error messages) do not require running the full test suite.
 
+To optimize test execution, **only run the relevant tests affected by your changes** rather than running the entire test suite on every change:
+- For database store changes: Run `make test-store` or `go test ./internal/store/...`
+- For HTTP API and handler changes: Run `make test-handler` or `go test ./internal/handler/...`
+- For highly targeted validation, run a specific test: `go test ./internal/handler/... -run TestMySpecificTest`
+
+Only run the full test suite (`make test`) when validating a major feature, preparing for a pull request, or performing final checks.
+
+For significant functional code changes:
 - New feature: tests covering the happy path and at least one failure path.
 - Bug fix: a regression test that reproduces the bug before the fix and passes after.
 - Refactor: existing tests must still pass; add tests if coverage was missing.

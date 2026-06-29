@@ -125,3 +125,27 @@ func ArchivePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error
 	}
 	return nil
 }
+
+func UpdatePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, description string) (*model.Prompt, error) {
+	// First check if the prompt belongs to one of the allowed teams
+	_, err := GetPromptByID(ctx, id, teamIDs)
+	if err != nil {
+		return nil, err // ErrNotFound if not found or no access
+	}
+
+	p := &model.Prompt{}
+	err = db.Pool.QueryRow(ctx,
+		`UPDATE prompts
+		 SET description = $1, updated_at = NOW()
+		 WHERE id = $2
+		 RETURNING id, team_id, slug, name, description, status, created_at, updated_at`,
+		description, id,
+	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update prompt: %w", err)
+	}
+	return p, nil
+}

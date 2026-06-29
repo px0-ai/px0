@@ -206,3 +206,30 @@ func TestListPrompts_Filters(t *testing.T) {
 	assert.Len(t, prompts, 1)
 	assert.Equal(t, pB.ID, prompts[0].ID)
 }
+
+func TestUpdatePrompt(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	p, err := store.CreatePrompt(ctx, tm.ID, "my_prompt", "My Prompt", "Initial description")
+	require.NoError(t, err)
+
+	// 1. Success update
+	updated, err := store.UpdatePrompt(ctx, p.ID, []uuid.UUID{tm.ID}, "Updated description")
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, updated.ID)
+	assert.Equal(t, "my_prompt", updated.Slug) // slug remains unchanged
+	assert.Equal(t, "My Prompt", updated.Name)  // name remains unchanged
+	assert.Equal(t, "Updated description", updated.Description)
+
+	// 2. Not found / Unauthorized team update
+	otherTeam, err := store.CreateTeam(ctx, "Other Team")
+	require.NoError(t, err)
+	_, err = store.UpdatePrompt(ctx, p.ID, []uuid.UUID{otherTeam.ID}, "Updated description")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	_, err = store.UpdatePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID}, "Updated description")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}

@@ -405,3 +405,81 @@ func TestListAllPrompts_Filters(t *testing.T) {
 	assert.Equal(t, pBID, prompts[0].(map[string]any)["id"].(string))
 	resp.Body.Close()
 }
+
+func TestUpdatePrompt_Handler(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// 1. Setup Admin Token & Team
+	adminToken := setupUser(t, a)
+	teamIDStr := setupUserTeam(t, adminToken)
+	teamID := uuid.MustParse(teamIDStr)
+
+	// Get admin session to match expiration
+	adminSession, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+
+	// 2. Setup Editor User & Token
+	editorUser, err := store.CreateVerifiedUser(ctx, "prompteditortest@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, editorUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, editorUser.ID, "editor")
+	require.NoError(t, err)
+
+	editorSession, err := store.CreateSession(ctx, editorUser.ID, "sess_p_editor_test", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	editorToken := editorSession.Token
+
+	// 3. Setup Viewer User & Token
+	viewerUser, err := store.CreateVerifiedUser(ctx, "promptviewertest@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, viewerUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, viewerUser.ID, "viewer")
+	require.NoError(t, err)
+
+	viewerSession, err := store.CreateSession(ctx, viewerUser.ID, "sess_p_viewer_test", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	viewerToken := viewerSession.Token
+
+	// 4. Create prompt as editor
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr),
+		`{"name":"Shared Test Prompt","description":"Initial description"}`, editorToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	promptID := body["prompt"].(map[string]any)["id"].(string)
+	resp.Body.Close()
+
+	// 5. Viewer cannot update prompt (Forbidden)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s", promptID),
+		`{"description":"Updating description"}`, viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Editor can update prompt (Success)
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s", promptID),
+		`{"description":"Updated description"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompt := body["prompt"].(map[string]any)
+	assert.Equal(t, "Shared Test Prompt", prompt["name"]) // remains unchanged
+	assert.Equal(t, "shared_test_prompt", prompt["slug"]) // remains unchanged
+	assert.Equal(t, "Updated description", prompt["description"])
+	resp.Body.Close()
+
+	// 7. Try to update non-existent prompt ID
+	nonExistentID := "00000000-0000-0000-0000-000000000001"
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s", nonExistentID),
+		`{"description":"Updated description"}`, editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}

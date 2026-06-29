@@ -74,6 +74,7 @@ func New() *fiber.App {
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
 	prompts.Get("", handler.ListAllPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
+	prompts.Put("/:id", handler.UpdatePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
 
 	prompts.Post("/:id/render", handler.RenderLive)

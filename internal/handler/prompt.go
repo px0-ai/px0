@@ -259,3 +259,48 @@ func ListAllPrompts(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"prompts": prompts})
 }
+
+type updatePromptRequest struct {
+	Description string `json:"description"`
+}
+
+func UpdatePrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// First verify that the prompt exists and the user has basic team access
+	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Verify editor permissions
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var req updatePromptRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	prompt, err := store.UpdatePrompt(c.Context(), id, editorTeamIDs, req.Description)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"prompt": prompt})
+}

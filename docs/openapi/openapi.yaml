@@ -138,3 +138,5 @@ components:
       $ref: "./prompts.yaml#/components/schemas/CreatePromptPayloadRequest"
     UpdatePromptPayloadRequest:
       $ref: "./prompts.yaml#/components/schemas/UpdatePromptPayloadRequest"
+    UpdatePromptRequest:
+      $ref: "./prompts.yaml#/components/schemas/UpdatePromptRequest"

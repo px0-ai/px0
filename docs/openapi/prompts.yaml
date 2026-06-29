@@ -261,6 +261,85 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "internal error"
+    put:
+      summary: Update a Prompt
+      description: Updates the description of a specific prompt by its unique UUID.
+      operationId: updatePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePromptRequest"
+      x-edge-cases:
+        - "Forbidden: Attempting to update a prompt with viewer permissions."
+        - "NotFound: Attempting to update a non-existent prompt ID or a prompt under an unauthorized team."
+      x-test-coverage:
+        - "TestUpdatePrompt_Success: Verifies updating description with editor token."
+        - "TestUpdatePrompt_ViewerForbidden: Verifies viewer gets a 403 response."
+        - "TestUpdatePrompt_NotFound: Verifies 404 response on missing prompt ID."
+      responses:
+        "200":
+          description: Prompt updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid input or invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "invalid request body"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "unauthorized"
+        "403":
+          description: Forbidden - Viewer or unauthorized team member
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "forbidden"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              example:
+                error: "prompt not found"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
   /v1/prompts/{id}/archive:
     post:
@@ -1780,3 +1859,11 @@ components:
           type: object
           description: JSON object containing variable names and sample values.
           example: { "user": "Alice", "role": "Editor" }
+
+    UpdatePromptRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Brief summary explaining the prompt purpose.
+          example: "Useful greeting prompt"
