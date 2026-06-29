@@ -15,10 +15,15 @@ func TestRenderLive_Success(t *testing.T) {
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "Hello, {{.name}}! Count: {{.count}}.")
 
-	// publish version 1
+	// promote version 1 to stable and then live
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, _ := a.Test(req)
+	resp.Body.Close()
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, _ = a.Test(req)
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost,
@@ -55,8 +60,13 @@ func TestRenderLive_NoVariables(t *testing.T) {
 	setupVersion(t, a, token, id, "Static prompt with no variables.")
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, _ := a.Test(req)
+	resp.Body.Close()
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, _ = a.Test(req)
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost,
@@ -109,8 +119,13 @@ func TestRenderLive_WithAPIKey(t *testing.T) {
 	setupVersion(t, a, token, id, "Hi {{.user}}!")
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, _ := a.Test(req)
+	resp.Body.Close()
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, _ = a.Test(req)
 	resp.Body.Close()
 
 	// render using API key (not session)

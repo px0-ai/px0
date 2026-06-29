@@ -2215,13 +2215,14 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: only draft versions can be deleted
-  /v1/prompts/{id}/versions/{version}/publish:
+  /v1/prompts/{id}/versions/{version}/promote:
     post:
-      summary: Publish Prompt Version
+      summary: Promote Prompt Version
       description: |
-        Publishes a draft version of the prompt template, marking it as 'live'.
-        This automatically updates any pre-existing 'live' version to 'archived', maintaining exactly one active live prompt.
-      operationId: publishVersion
+        Promotes a version of the prompt template along the lifecycle: draft -> stable -> live.
+        Promoting from draft makes it stable (read-only). Promoting from stable makes it live.
+        When promoting a version to live, any previous live version is demoted to stable.
+      operationId: promoteVersion
       tags:
         - Prompts
       security:
@@ -2238,19 +2239,19 @@ paths:
         - name: version
           in: path
           required: true
-          description: Version sequence number (integer) or version tag (string) to publish.
+          description: Version sequence number (integer) or version tag (string) to promote.
           schema:
             type: string
       x-edge-cases:
-        - Switches previous live versions to archived status automatically.
-        - Returns 422 if the specified version is already 'live'.
+        - Promotes draft to stable, or stable to live.
+        - Switches previous live versions to stable status automatically.
+        - Returns 422 if the specified version is already live or archived.
       x-test-coverage:
-        - 'TestPublishVersion: Verifies that status changes to ''live'' and published_at gets populated.'
-        - 'TestPublishVersion_ArchivesPreviousLive: Verifies that publishing v2 transitions v1 status to archived.'
-        - 'TestPublishVersion_AlreadyLive: Verifies republishing a live template returns 422.'
+        - 'TestPromoteVersion: Verifies promotion path draft -> stable -> live.'
+        - 'TestPromoteVersion_DemotesPreviousLive: Verifies demoting previous live version to stable.'
       responses:
         '200':
-          description: Version published successfully
+          description: Version promoted successfully
           content:
             application/json:
               schema:
@@ -2285,13 +2286,157 @@ paths:
               example:
                 error: version not found
         '422':
-          description: Publishing error
+          description: Promotion error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
               example:
-                error: only draft versions can be modified
+                error: cannot promote version
+  /v1/prompts/{id}/versions/{version}/demote:
+    post:
+      summary: Demote Prompt Version
+      description: Demotes a live prompt version to stable (making it inactive but remaining read-only).
+      operationId: demoteVersion
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to demote.
+          schema:
+            type: string
+      x-edge-cases:
+        - Returns 422 if version is not live.
+      x-test-coverage:
+        - 'TestDemoteVersion_Success: Verifies demoting live version to stable.'
+      responses:
+        '200':
+          description: Version demoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid version number
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+        '422':
+          description: Demotion error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: only live versions can be demoted
+  /v1/prompts/{id}/versions/{version}/archive:
+    post:
+      summary: Archive Prompt Version
+      description: Archives a prompt version, marking its status as archived.
+      operationId: archiveVersion
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique prompt UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to archive.
+          schema:
+            type: string
+      x-edge-cases:
+        - Returns 422 if version is already archived.
+      x-test-coverage:
+        - 'TestArchiveVersion_Success: Verifies archiving a version.'
+      responses:
+        '200':
+          description: Version archived successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Bad parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: invalid version number
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: unauthorized
+        '404':
+          description: Version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version not found
+        '422':
+          description: Archiving error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: version is already archived
   /v1/prompts/{id}/versions/{version}/render:
     post:
       summary: Render Specific Prompt Version
@@ -3071,6 +3216,7 @@ components:
           type: string
           enum:
             - draft
+            - stable
             - live
             - archived
           description: Active lifecycle status of this template version.

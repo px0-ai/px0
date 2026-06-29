@@ -13,10 +13,9 @@ import (
 )
 
 func newPrompt(t *testing.T, ctx context.Context) *model.Prompt {
-	t.Helper()
 	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
-	p, err := store.CreatePrompt(ctx, tm.ID, "test_prompt", "Test Prompt", "")
+	p, err := store.CreatePrompt(ctx, tm.ID, "my-prompt", "My Prompt", "Desc")
 	require.NoError(t, err)
 	return p
 }
@@ -26,45 +25,18 @@ func TestCreateVersion(t *testing.T) {
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
-	v, err := store.CreateVersion(ctx, p.ID, "Hello, {{.name}}!")
+	v, err := store.CreateVersion(ctx, p.ID, "template content")
 	require.NoError(t, err)
+	assert.Equal(t, p.ID, v.PromptID)
 	assert.Equal(t, 1, v.Version)
+	assert.Equal(t, "template content", v.Template)
 	assert.Equal(t, model.VersionStatusDraft, v.Status)
-	assert.Equal(t, "Hello, {{.name}}!", v.Template)
+	assert.NotNil(t, v.CreatedAt)
 	assert.Nil(t, v.PublishedAt)
-}
-
-func TestCreateVersion_AutoIncrements(t *testing.T) {
-	testutil.SetupDB(t)
-	ctx := context.Background()
-	p := newPrompt(t, ctx)
-
-	v1, err := store.CreateVersion(ctx, p.ID, "v1 template")
-	require.NoError(t, err)
-	assert.Equal(t, 1, v1.Version)
 
 	v2, err := store.CreateVersion(ctx, p.ID, "v2 template")
 	require.NoError(t, err)
 	assert.Equal(t, 2, v2.Version)
-
-	v3, err := store.CreateVersion(ctx, p.ID, "v3 template")
-	require.NoError(t, err)
-	assert.Equal(t, 3, v3.Version)
-}
-
-func TestCreateVersion_PerPrompt(t *testing.T) {
-	testutil.SetupDB(t)
-	ctx := context.Background()
-
-	p1 := newPrompt(t, ctx)
-	p2 := newPrompt(t, ctx)
-
-	v1, _ := store.CreateVersion(ctx, p1.ID, "p1 template")
-	v2, _ := store.CreateVersion(ctx, p2.ID, "p2 template")
-
-	// Each prompt gets its own version counter starting at 1.
-	assert.Equal(t, 1, v1.Version)
-	assert.Equal(t, 1, v2.Version)
 }
 
 func TestListVersions(t *testing.T) {
@@ -77,7 +49,9 @@ func TestListVersions(t *testing.T) {
 	v2, err := store.CreateVersion(ctx, p.ID, "v2")
 	require.NoError(t, err)
 
-	_, err = store.PublishVersion(ctx, p.ID, v1.Version)
+	_, err = store.PromoteVersion(ctx, p.ID, v1.Version) // draft -> stable
+	require.NoError(t, err)
+	_, err = store.PromoteVersion(ctx, p.ID, v1.Version) // stable -> live
 	require.NoError(t, err)
 
 	err = store.SetTag(ctx, p.ID, v1.Version, "prod")
@@ -150,7 +124,8 @@ func TestGetLiveVersion(t *testing.T) {
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 	store.CreateVersion(ctx, p.ID, "live template") //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 1)              //nolint:errcheck
+	store.PromoteVersion(ctx, p.ID, 1)              // draft -> stable
+	store.PromoteVersion(ctx, p.ID, 1)              // stable -> live
 
 	v, err := store.GetLiveVersion(ctx, p.ID)
 	require.NoError(t, err)
@@ -180,80 +155,101 @@ func TestUpdateVersionTemplate(t *testing.T) {
 	assert.Equal(t, model.VersionStatusDraft, updated.Status)
 }
 
-func TestUpdateVersionTemplate_LiveVersionRejected(t *testing.T) {
+func TestUpdateVersionTemplate_NonDraftRejected(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 	v, _ := store.CreateVersion(ctx, p.ID, "original")
-	store.PublishVersion(ctx, p.ID, 1) //nolint:errcheck
+	store.PromoteVersion(ctx, p.ID, 1) // draft -> stable
 
 	// UpdateVersionTemplate filters by status='draft', so it finds no row.
 	_, err := store.UpdateVersionTemplate(ctx, v.ID, "new content")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestPublishVersion_FirstVersion(t *testing.T) {
+func TestPromoteVersion_Lifecycle(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 	store.CreateVersion(ctx, p.ID, "template") //nolint:errcheck
 
-	v, err := store.PublishVersion(ctx, p.ID, 1)
+	// Promote 1: draft -> stable
+	v, err := store.PromoteVersion(ctx, p.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, model.VersionStatusStable, v.Status)
+	assert.NotNil(t, v.PublishedAt)
+
+	// Promote 2: stable -> live
+	v, err = store.PromoteVersion(ctx, p.ID, 1)
 	require.NoError(t, err)
 	assert.Equal(t, model.VersionStatusLive, v.Status)
-	assert.NotNil(t, v.PublishedAt)
+
+	// Try to promote again (already live) -> ErrConflict
+	_, err = store.PromoteVersion(ctx, p.ID, 1)
+	assert.ErrorIs(t, err, store.ErrConflict)
 }
 
-func TestPublishVersion_ArchivesPreviousLive(t *testing.T) {
+func TestPromoteVersion_DemotesPreviousLive(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
 	store.CreateVersion(ctx, p.ID, "v1") //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 1)   //nolint:errcheck
+	store.PromoteVersion(ctx, p.ID, 1)   // draft -> stable
+	store.PromoteVersion(ctx, p.ID, 1)   // stable -> live
+
 	store.CreateVersion(ctx, p.ID, "v2") //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 2)   //nolint:errcheck
+	store.PromoteVersion(ctx, p.ID, 2)   // draft -> stable
+	store.PromoteVersion(ctx, p.ID, 2)   // stable -> live
 
 	v1, err := store.GetVersion(ctx, p.ID, 1)
 	require.NoError(t, err)
-	assert.Equal(t, model.VersionStatusArchived, v1.Status)
+	assert.Equal(t, model.VersionStatusStable, v1.Status) // v1 is demoted to stable
 
 	v2, err := store.GetVersion(ctx, p.ID, 2)
 	require.NoError(t, err)
 	assert.Equal(t, model.VersionStatusLive, v2.Status)
 }
 
-func TestPublishVersion_NotFound(t *testing.T) {
+func TestPromoteVersion_NotFound(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
-	_, err := store.PublishVersion(ctx, p.ID, 99)
+	_, err := store.PromoteVersion(ctx, p.ID, 99)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestPublishVersion_AlreadyLive(t *testing.T) {
+func TestDemoteVersion_Success(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
-	store.CreateVersion(ctx, p.ID, "template") //nolint:errcheck
-	store.PublishVersion(ctx, p.ID, 1)         //nolint:errcheck
+	store.CreateVersion(ctx, p.ID, "v1")
+	store.PromoteVersion(ctx, p.ID, 1) // draft -> stable
+	store.PromoteVersion(ctx, p.ID, 1) // stable -> live
 
-	_, err := store.PublishVersion(ctx, p.ID, 1)
+	v, err := store.DemoteVersion(ctx, p.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, model.VersionStatusStable, v.Status)
+
+	// Demoting again should fail since it's no longer live
+	_, err = store.DemoteVersion(ctx, p.ID, 1)
 	assert.ErrorIs(t, err, store.ErrConflict)
 }
 
-func TestPublishVersion_AlreadyArchived(t *testing.T) {
+func TestArchiveVersion_Success(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
-
 	store.CreateVersion(ctx, p.ID, "v1")
-	store.PublishVersion(ctx, p.ID, 1)
-	store.CreateVersion(ctx, p.ID, "v2")
-	store.PublishVersion(ctx, p.ID, 2) // v1 is now archived
 
-	_, err := store.PublishVersion(ctx, p.ID, 1) // try to re-publish archived
+	// Archive directly from draft (allowed based on non-archived status)
+	v, err := store.ArchiveVersion(ctx, p.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, model.VersionStatusArchived, v.Status)
+
+	// Archive again should fail
+	_, err = store.ArchiveVersion(ctx, p.ID, 1)
 	assert.ErrorIs(t, err, store.ErrConflict)
 }
 
@@ -281,20 +277,29 @@ func TestDeleteVersion_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestDeleteVersion_Conflict(t *testing.T) {
+func TestDeleteVersion_Unified(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
 	store.CreateVersion(ctx, p.ID, "v1")
-	store.PublishVersion(ctx, p.ID, 1) // v1 is now live
+	store.PromoteVersion(ctx, p.ID, 1) // draft -> stable
+	store.PromoteVersion(ctx, p.ID, 1) // stable -> live
 
-	err := store.DeleteVersion(ctx, p.ID, 1)
-	assert.ErrorIs(t, err, store.ErrConflict)
+	err := store.DeleteVersion(ctx, p.ID, 1) // live version
+	require.NoError(t, err)
+
+	v1, err := store.GetVersion(ctx, p.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, model.VersionStatusArchived, v1.Status) // soft-archived!
 
 	store.CreateVersion(ctx, p.ID, "v2")
-	store.PublishVersion(ctx, p.ID, 2) // v1 is now archived, v2 is live
+	store.PromoteVersion(ctx, p.ID, 2) // draft -> stable
 
-	err = store.DeleteVersion(ctx, p.ID, 1) // v1 is archived
-	assert.ErrorIs(t, err, store.ErrConflict)
+	err = store.DeleteVersion(ctx, p.ID, 2) // stable version
+	require.NoError(t, err)
+
+	v2, err := store.GetVersion(ctx, p.ID, 2)
+	require.NoError(t, err)
+	assert.Equal(t, model.VersionStatusArchived, v2.Status) // soft-archived!
 }

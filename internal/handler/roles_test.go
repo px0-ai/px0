@@ -214,15 +214,15 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// H. Viewer cannot Publish Version
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/publish", promptIDStr, versionNum), "", viewerToken)
+	// H. Viewer cannot Promote Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/promote", promptIDStr, versionNum), "", viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// I. Editor can Publish Version
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/publish", promptIDStr, versionNum), "", editorToken)
+	// I. Editor can Promote Version
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/promote", promptIDStr, versionNum), "", editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

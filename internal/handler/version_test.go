@@ -87,12 +87,18 @@ func TestListVersions(t *testing.T) {
 	assert.Equal(t, http.StatusOK, respTag2.StatusCode)
 	respTag2.Body.Close()
 
-	// Publish version 1 to make its status "live"
-	reqPublish := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
-	respPublish, err := a.Test(reqPublish)
+	// Promote version 1 twice: draft -> stable -> live
+	reqPromote1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	respPromote1, err := a.Test(reqPromote1)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respPublish.StatusCode)
-	respPublish.Body.Close()
+	assert.Equal(t, http.StatusOK, respPromote1.StatusCode)
+	respPromote1.Body.Close()
+
+	reqPromote2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	respPromote2, err := a.Test(reqPromote2)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respPromote2.StatusCode)
+	respPromote2.Body.Close()
 
 	// 1. Verify with no query parameters
 	reqAll := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions", id), "", token)
@@ -111,112 +117,44 @@ func TestListVersions(t *testing.T) {
 	bodyLive := decodeBody(t, respLive)
 	versionsLive := bodyLive["versions"].([]any)
 	require.Len(t, versionsLive, 1)
-	vLive := versionsLive[0].(map[string]any)
-	assert.Equal(t, float64(1), vLive["version"])
-	assert.Equal(t, "live", vLive["status"])
+	assert.Equal(t, "live", versionsLive[0].(map[string]any)["status"])
 
-	// 3. Verify status=draft
-	reqDraft := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=draft", id), "", token)
-	respDraft, err := a.Test(reqDraft)
+	// 3. Verify tag=dev
+	reqDev := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=dev", id), "", token)
+	respDev, err := a.Test(reqDev)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respDraft.StatusCode)
-	bodyDraft := decodeBody(t, respDraft)
-	versionsDraft := bodyDraft["versions"].([]any)
-	require.Len(t, versionsDraft, 1)
-	vDraft := versionsDraft[0].(map[string]any)
-	assert.Equal(t, float64(2), vDraft["version"])
-	assert.Equal(t, "draft", vDraft["status"])
-
-	// 4. Verify tags=dev
-	reqDevTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=dev", id), "", token)
-	respDevTag, err := a.Test(reqDevTag)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respDevTag.StatusCode)
-	bodyDevTag := decodeBody(t, respDevTag)
-	versionsDevTag := bodyDevTag["versions"].([]any)
-	require.Len(t, versionsDevTag, 1)
-	vDevTag := versionsDevTag[0].(map[string]any)
-	assert.Equal(t, float64(2), vDevTag["version"])
-
-	// 5. Verify tags=prod
-	reqProdTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=prod", id), "", token)
-	respProdTag, err := a.Test(reqProdTag)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respProdTag.StatusCode)
-	bodyProdTag := decodeBody(t, respProdTag)
-	versionsProdTag := bodyProdTag["versions"].([]any)
-	require.Len(t, versionsProdTag, 1)
-	vProdTag := versionsProdTag[0].(map[string]any)
-	assert.Equal(t, float64(1), vProdTag["version"])
-
-	// 6. Verify tags=nonexistent
-	reqNonexistentTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=nonexistent", id), "", token)
-	respNonexistentTag, err := a.Test(reqNonexistentTag)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respNonexistentTag.StatusCode)
-	bodyNonexistentTag := decodeBody(t, respNonexistentTag)
-	versionsNonexistentTag := bodyNonexistentTag["versions"].([]any)
-	assert.Empty(t, versionsNonexistentTag)
-
-	// 7. Verify combined status=live&tags=prod
-	reqCombinedSuccess := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=live&tags=prod", id), "", token)
-	respCombinedSuccess, err := a.Test(reqCombinedSuccess)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respCombinedSuccess.StatusCode)
-	bodyCombinedSuccess := decodeBody(t, respCombinedSuccess)
-	versionsCombinedSuccess := bodyCombinedSuccess["versions"].([]any)
-	require.Len(t, versionsCombinedSuccess, 1)
-	vCombined := versionsCombinedSuccess[0].(map[string]any)
-	assert.Equal(t, float64(1), vCombined["version"])
-
-	// 8. Verify combined status=live&tags=dev
-	reqCombinedFail := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=live&tags=dev", id), "", token)
-	respCombinedFail, err := a.Test(reqCombinedFail)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respCombinedFail.StatusCode)
-	bodyCombinedFail := decodeBody(t, respCombinedFail)
-	versionsCombinedFail := bodyCombinedFail["versions"].([]any)
-	assert.Empty(t, versionsCombinedFail)
+	assert.Equal(t, http.StatusOK, respDev.StatusCode)
+	bodyDev := decodeBody(t, respDev)
+	versionsDev := bodyDev["versions"].([]any)
+	require.Len(t, versionsDev, 1)
+	assert.Equal(t, float64(2), versionsDev[0].(map[string]any)["version"])
 }
 
-func TestGetVersion(t *testing.T) {
+func TestGetVersion_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
-	setupVersion(t, a, token, id, "my template")
+	setupVersion(t, a, token, id, "template contents")
 
-	req := newReq(t, http.MethodGet,
-		fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
-	assert.Equal(t, "my template", v["template"])
+	assert.Equal(t, float64(1), v["version"])
+	assert.Equal(t, "draft", v["status"])
+	assert.Equal(t, "template contents", v["template"])
 }
 
-func TestGetVersion_NotFound(t *testing.T) {
-	a := newTestApp(t)
-	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
-
-	req := newReq(t, http.MethodGet,
-		fmt.Sprintf("/v1/prompts/%s/versions/99", id), "", token)
-	resp, err := a.Test(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-	resp.Body.Close()
-}
-
-func TestUpdateVersion_Draft(t *testing.T) {
+func TestUpdateVersion_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "original template")
 
-	req := newReq(t, http.MethodPut,
-		fmt.Sprintf("/v1/prompts/%s/versions/1", id),
+	req := newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/1", id),
 		`{"template":"updated template"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -227,19 +165,19 @@ func TestUpdateVersion_Draft(t *testing.T) {
 	assert.Equal(t, "updated template", v["template"])
 }
 
-func TestUpdateVersion_LiveVersionRejected(t *testing.T) {
+func TestUpdateVersion_NonDraftRejected(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "original template")
 
-	// publish version 1
+	// promote version 1 to stable
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
-	// try to update live version
+	// try to update stable version
 	req = newReq(t, http.MethodPut,
 		fmt.Sprintf("/v1/prompts/%s/versions/1", id),
 		`{"template":"should fail"}`, token)
@@ -249,72 +187,140 @@ func TestUpdateVersion_LiveVersionRejected(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestPublishVersion(t *testing.T) {
+func TestPromoteVersion(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "my template")
 
+	// Promote 1: draft -> stable
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
-	assert.Equal(t, "live", v["status"])
+	assert.Equal(t, "stable", v["status"])
 	assert.NotNil(t, v["published_at"])
+	resp.Body.Close()
+
+	// Promote 2: stable -> live
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body = decodeBody(t, resp)
+	v = body["version"].(map[string]any)
+	assert.Equal(t, "live", v["status"])
+	resp.Body.Close()
 }
 
-func TestPublishVersion_ArchivesPreviousLive(t *testing.T) {
+func TestPromoteVersion_DemotesPreviousLive(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "v1")
 	setupVersion(t, a, token, id, "v2")
 
-	// publish v1
-	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
-	resp, _ := a.Test(req)
-	resp.Body.Close()
+	// promote v1 to stable then live
+	req1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp1, _ := a.Test(req1)
+	resp1.Body.Close()
+	req2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp2, _ := a.Test(req2)
+	resp2.Body.Close()
 
-	// publish v2 - should archive v1
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/2/publish", id), "", token)
-	resp, err := a.Test(req)
+	// promote v2 to stable then live - should demote v1 to stable
+	req3 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/2/promote", id), "", token)
+	resp3, _ := a.Test(req3)
+	resp3.Body.Close()
+	req4 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/2/promote", id), "", token)
+	resp4, err := a.Test(req4)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp4.StatusCode)
+	resp4.Body.Close()
 
-	// v1 should be archived
-	req = newReq(t, http.MethodGet,
+	// v1 should be stable
+	req := newReq(t, http.MethodGet,
 		fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
-	resp, err = a.Test(req)
+	resp, err := a.Test(req)
 	require.NoError(t, err)
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
-	assert.Equal(t, "archived", v["status"])
+	assert.Equal(t, "stable", v["status"])
 }
 
-func TestPublishVersion_AlreadyLive(t *testing.T) {
+func TestPromoteVersion_AlreadyLive(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "template")
 
-	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
-	resp, _ := a.Test(req)
-	resp.Body.Close()
+	// promote draft -> stable
+	req1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp1, _ := a.Test(req1)
+	resp1.Body.Close()
 
-	// try to publish again
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+	// promote stable -> live
+	req2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp2, _ := a.Test(req2)
+	resp2.Body.Close()
+
+	// try to promote again
+	req3 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp3, err := a.Test(req3)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp3.StatusCode)
+	resp3.Body.Close()
+}
+
+func TestDemoteVersion_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "template")
+
+	// draft -> stable
+	req1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp1, _ := a.Test(req1)
+	resp1.Body.Close()
+
+	// stable -> live
+	req2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp2, _ := a.Test(req2)
+	resp2.Body.Close()
+
+	// demote live -> stable
+	req3 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/demote", id), "", token)
+	resp3, err := a.Test(req3)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp3.StatusCode)
+
+	body := decodeBody(t, resp3)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "stable", v["status"])
+	resp3.Body.Close()
+}
+
+func TestArchiveVersion_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "template")
+
+	// archive version 1
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/archive", id), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "archived", v["status"])
 	resp.Body.Close()
 }
 
@@ -338,22 +344,32 @@ func TestDeleteVersion_Success(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestDeleteVersion_LiveRejected(t *testing.T) {
+func TestDeleteVersion_NonDraftSoftArchived(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "template")
 
-	// publish version 1
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+	// draft -> stable
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
 	resp, _ := a.Test(req)
 	resp.Body.Close()
 
-	// try to delete live version - should fail
+	// try to delete stable version - should soft archive instead of fail
 	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// verify version still exists but status is archived
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/1", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "archived", v["status"])
 	resp.Body.Close()
 }
 

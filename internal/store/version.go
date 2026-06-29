@@ -151,14 +151,13 @@ func UpdateVersionTemplate(ctx context.Context, id uuid.UUID, template string) (
 	return v, nil
 }
 
-func PublishVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
+func PromoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Lock the target version and check it exists and is a draft.
 	var currentStatus string
 	err = tx.QueryRow(ctx,
 		`SELECT status FROM prompt_versions
@@ -172,32 +171,131 @@ func PublishVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 		}
 		return nil, fmt.Errorf("lock version: %w", err)
 	}
-	if currentStatus != model.VersionStatusDraft {
-		return nil, fmt.Errorf("version is already %s: %w", currentStatus, ErrConflict)
+
+	var nextStatus string
+	if currentStatus == model.VersionStatusDraft {
+		nextStatus = model.VersionStatusStable
+	} else if currentStatus == model.VersionStatusStable {
+		nextStatus = model.VersionStatusLive
+	} else {
+		return nil, fmt.Errorf("cannot promote version in %s status: %w", currentStatus, ErrConflict)
 	}
 
-	// Archive the current live version if any.
-	_, err = tx.Exec(ctx,
-		`UPDATE prompt_versions SET status = 'archived'
-		 WHERE prompt_id = $1 AND status = 'live'`,
-		promptID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("archive live version: %w", err)
+	// If promoting to live, we must demote the previous live version to stable.
+	if nextStatus == model.VersionStatusLive {
+		_, err = tx.Exec(ctx,
+			`UPDATE prompt_versions SET status = 'stable'
+			 WHERE prompt_id = $1 AND status = 'live'`,
+			promptID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("demote existing live version: %w", err)
+		}
 	}
 
-	// Publish the target version.
 	now := time.Now()
 	v := &model.PromptVersion{}
 	err = tx.QueryRow(ctx,
 		`UPDATE prompt_versions
-		 SET status = 'live', published_at = $1
-		 WHERE prompt_id = $2 AND version = $3
+		 SET status = $1, published_at = $2
+		 WHERE prompt_id = $3 AND version = $4
 		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
-		now, promptID, versionNum,
+		nextStatus, now, promptID, versionNum,
 	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
-		return nil, fmt.Errorf("publish version: %w", err)
+		return nil, fmt.Errorf("promote version: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
+	}
+	return v, nil
+}
+
+func DemoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var currentStatus string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM prompt_versions
+		 WHERE prompt_id = $1 AND version = $2
+		 FOR UPDATE`,
+		promptID, versionNum,
+	).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("lock version: %w", err)
+	}
+
+	if currentStatus != model.VersionStatusLive {
+		return nil, fmt.Errorf("only live versions can be demoted: %w", ErrConflict)
+	}
+
+	v := &model.PromptVersion{}
+	err = tx.QueryRow(ctx,
+		`UPDATE prompt_versions
+		 SET status = 'stable'
+		 WHERE prompt_id = $1 AND version = $2
+		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
+		promptID, versionNum,
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	if err != nil {
+		return nil, fmt.Errorf("demote version: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
+	}
+	return v, nil
+}
+
+func ArchiveVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var currentStatus string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM prompt_versions
+		 WHERE prompt_id = $1 AND version = $2
+		 FOR UPDATE`,
+		promptID, versionNum,
+	).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("lock version: %w", err)
+	}
+
+	if currentStatus == model.VersionStatusArchived {
+		return nil, fmt.Errorf("version is already archived: %w", ErrConflict)
+	}
+
+	v := &model.PromptVersion{}
+	err = tx.QueryRow(ctx,
+		`UPDATE prompt_versions
+		 SET status = 'archived'
+		 WHERE prompt_id = $1 AND version = $2
+		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
+		promptID, versionNum,
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	if err != nil {
+		return nil, fmt.Errorf("archive version: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -222,16 +320,22 @@ func DeleteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) erro
 		return fmt.Errorf("check version status: %w", err)
 	}
 
-	if status != model.VersionStatusDraft {
-		return fmt.Errorf("cannot delete version with status %s: %w", status, ErrConflict)
-	}
-
-	_, err = db.Pool.Exec(ctx,
-		`DELETE FROM prompt_versions WHERE prompt_id = $1 AND version = $2`,
-		promptID, versionNum,
-	)
-	if err != nil {
-		return fmt.Errorf("delete version: %w", err)
+	if status == model.VersionStatusDraft {
+		_, err = db.Pool.Exec(ctx,
+			`DELETE FROM prompt_versions WHERE prompt_id = $1 AND version = $2`,
+			promptID, versionNum,
+		)
+		if err != nil {
+			return fmt.Errorf("delete draft version: %w", err)
+		}
+	} else {
+		_, err = db.Pool.Exec(ctx,
+			`UPDATE prompt_versions SET status = 'archived' WHERE prompt_id = $1 AND version = $2`,
+			promptID, versionNum,
+		)
+		if err != nil {
+			return fmt.Errorf("archive version on delete: %w", err)
+		}
 	}
 	return nil
 }

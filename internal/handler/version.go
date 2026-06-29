@@ -207,7 +207,7 @@ func UpdateVersion(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"version": updated})
 }
 
-func PublishVersion(c *fiber.Ctx) error {
+func PromoteVersion(c *fiber.Ctx) error {
 	promptID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return apierr.ErrInvalidPromptID.Respond(c)
@@ -245,7 +245,109 @@ func PublishVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	version, err := store.PublishVersion(c.Context(), promptID, target.Version)
+	version, err := store.PromoteVersion(c.Context(), promptID, target.Version)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		if errors.Is(err, store.ErrConflict) {
+			return apierr.NewAPIError(fiber.StatusUnprocessableEntity, err.Error()).Respond(c, err)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"version": version})
+}
+
+func DemoteVersion(c *fiber.Ctx) error {
+	promptID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	target, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := store.DemoteVersion(c.Context(), promptID, target.Version)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		if errors.Is(err, store.ErrConflict) {
+			return apierr.NewAPIError(fiber.StatusUnprocessableEntity, err.Error()).Respond(c, err)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"version": version})
+}
+
+func ArchiveVersion(c *fiber.Ctx) error {
+	promptID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	target, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := store.ArchiveVersion(c.Context(), promptID, target.Version)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)

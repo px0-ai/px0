@@ -24,6 +24,7 @@ type Prompt struct {
 
 const (
 	VersionStatusDraft    = "draft"
+	VersionStatusStable   = "stable"
 	VersionStatusLive     = "live"
 	VersionStatusArchived = "archived"
 )
