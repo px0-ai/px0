@@ -73,14 +73,110 @@ func TestListVersions(t *testing.T) {
 	setupVersion(t, a, token, id, "v1 template")
 	setupVersion(t, a, token, id, "v2 template")
 
-	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions", id), "", token)
-	resp, err := a.Test(req)
+	// Set tag "prod" on version 1
+	reqTag1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/tags", id), `{"tag":"prod"}`, token)
+	respTag1, err := a.Test(reqTag1)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, respTag1.StatusCode)
+	respTag1.Body.Close()
 
-	body := decodeBody(t, resp)
-	versions := body["versions"].([]any)
-	assert.Len(t, versions, 2)
+	// Set tag "dev" on version 2
+	reqTag2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/2/tags", id), `{"tag":"dev"}`, token)
+	respTag2, err := a.Test(reqTag2)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respTag2.StatusCode)
+	respTag2.Body.Close()
+
+	// Publish version 1 to make its status "live"
+	reqPublish := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/publish", id), "", token)
+	respPublish, err := a.Test(reqPublish)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respPublish.StatusCode)
+	respPublish.Body.Close()
+
+	// 1. Verify with no query parameters
+	reqAll := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions", id), "", token)
+	respAll, err := a.Test(reqAll)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respAll.StatusCode)
+	bodyAll := decodeBody(t, respAll)
+	versionsAll := bodyAll["versions"].([]any)
+	assert.Len(t, versionsAll, 2)
+
+	// 2. Verify status=live
+	reqLive := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=live", id), "", token)
+	respLive, err := a.Test(reqLive)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respLive.StatusCode)
+	bodyLive := decodeBody(t, respLive)
+	versionsLive := bodyLive["versions"].([]any)
+	require.Len(t, versionsLive, 1)
+	vLive := versionsLive[0].(map[string]any)
+	assert.Equal(t, float64(1), vLive["version"])
+	assert.Equal(t, "live", vLive["status"])
+
+	// 3. Verify status=draft
+	reqDraft := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=draft", id), "", token)
+	respDraft, err := a.Test(reqDraft)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respDraft.StatusCode)
+	bodyDraft := decodeBody(t, respDraft)
+	versionsDraft := bodyDraft["versions"].([]any)
+	require.Len(t, versionsDraft, 1)
+	vDraft := versionsDraft[0].(map[string]any)
+	assert.Equal(t, float64(2), vDraft["version"])
+	assert.Equal(t, "draft", vDraft["status"])
+
+	// 4. Verify tags=dev
+	reqDevTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=dev", id), "", token)
+	respDevTag, err := a.Test(reqDevTag)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respDevTag.StatusCode)
+	bodyDevTag := decodeBody(t, respDevTag)
+	versionsDevTag := bodyDevTag["versions"].([]any)
+	require.Len(t, versionsDevTag, 1)
+	vDevTag := versionsDevTag[0].(map[string]any)
+	assert.Equal(t, float64(2), vDevTag["version"])
+
+	// 5. Verify tags=prod
+	reqProdTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=prod", id), "", token)
+	respProdTag, err := a.Test(reqProdTag)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respProdTag.StatusCode)
+	bodyProdTag := decodeBody(t, respProdTag)
+	versionsProdTag := bodyProdTag["versions"].([]any)
+	require.Len(t, versionsProdTag, 1)
+	vProdTag := versionsProdTag[0].(map[string]any)
+	assert.Equal(t, float64(1), vProdTag["version"])
+
+	// 6. Verify tags=nonexistent
+	reqNonexistentTag := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?tags=nonexistent", id), "", token)
+	respNonexistentTag, err := a.Test(reqNonexistentTag)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respNonexistentTag.StatusCode)
+	bodyNonexistentTag := decodeBody(t, respNonexistentTag)
+	versionsNonexistentTag := bodyNonexistentTag["versions"].([]any)
+	assert.Empty(t, versionsNonexistentTag)
+
+	// 7. Verify combined status=live&tags=prod
+	reqCombinedSuccess := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=live&tags=prod", id), "", token)
+	respCombinedSuccess, err := a.Test(reqCombinedSuccess)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respCombinedSuccess.StatusCode)
+	bodyCombinedSuccess := decodeBody(t, respCombinedSuccess)
+	versionsCombinedSuccess := bodyCombinedSuccess["versions"].([]any)
+	require.Len(t, versionsCombinedSuccess, 1)
+	vCombined := versionsCombinedSuccess[0].(map[string]any)
+	assert.Equal(t, float64(1), vCombined["version"])
+
+	// 8. Verify combined status=live&tags=dev
+	reqCombinedFail := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions?status=live&tags=dev", id), "", token)
+	respCombinedFail, err := a.Test(reqCombinedFail)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respCombinedFail.StatusCode)
+	bodyCombinedFail := decodeBody(t, respCombinedFail)
+	versionsCombinedFail := bodyCombinedFail["versions"].([]any)
+	assert.Empty(t, versionsCombinedFail)
 }
 
 func TestGetVersion(t *testing.T) {

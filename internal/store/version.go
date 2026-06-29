@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,14 +36,36 @@ func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*m
 	return v, nil
 }
 
-func ListVersions(ctx context.Context, promptID uuid.UUID) ([]*model.PromptVersion, error) {
-	rows, err := db.Pool.Query(ctx,
-		`SELECT id, prompt_id, version, template, status, created_at, published_at
-		 FROM prompt_versions
-		 WHERE prompt_id = $1
-		 ORDER BY version DESC`,
-		promptID,
-	)
+type VersionFilter struct {
+	Status *string
+	Tags   []string
+}
+
+func ListVersions(ctx context.Context, promptID uuid.UUID, filter VersionFilter) ([]*model.PromptVersion, error) {
+	query := `SELECT DISTINCT pv.id, pv.prompt_id, pv.version, pv.template, pv.status, pv.created_at, pv.published_at
+		 FROM prompt_versions pv`
+	args := []any{promptID}
+	joins := ""
+	whereClauses := []string{"pv.prompt_id = $1"}
+
+	if len(filter.Tags) > 0 {
+		joins += " INNER JOIN prompt_tags pt ON pt.prompt_id = pv.prompt_id AND pt.version = pv.version"
+		args = append(args, filter.Tags)
+		whereClauses = append(whereClauses, fmt.Sprintf("pt.tag = ANY($%d)", len(args)))
+	}
+
+	if filter.Status != nil {
+		args = append(args, *filter.Status)
+		whereClauses = append(whereClauses, fmt.Sprintf("pv.status = $%d", len(args)))
+	}
+
+	query += joins
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	query += " ORDER BY pv.version DESC"
+
+	rows, err := db.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list versions: %w", err)
 	}

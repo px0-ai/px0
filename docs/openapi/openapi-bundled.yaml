@@ -1971,6 +1971,22 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: tags
+          in: query
+          required: false
+          description: Optional comma-separated list of tags to filter prompt versions.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Optional status to filter prompt versions by (draft, live, archived).
+          schema:
+            type: string
+            enum:
+              - draft
+              - live
+              - archived
       x-test-coverage:
         - 'TestListVersions: Verifies active versions listing.'
       responses:

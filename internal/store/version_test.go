@@ -72,15 +72,56 @@ func TestListVersions(t *testing.T) {
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
-	store.CreateVersion(ctx, p.ID, "v1") //nolint:errcheck
-	store.CreateVersion(ctx, p.ID, "v2") //nolint:errcheck
+	v1, err := store.CreateVersion(ctx, p.ID, "v1")
+	require.NoError(t, err)
+	v2, err := store.CreateVersion(ctx, p.ID, "v2")
+	require.NoError(t, err)
 
-	versions, err := store.ListVersions(ctx, p.ID)
+	_, err = store.PublishVersion(ctx, p.ID, v1.Version)
+	require.NoError(t, err)
+
+	err = store.SetTag(ctx, p.ID, v1.Version, "prod")
+	require.NoError(t, err)
+	err = store.SetTag(ctx, p.ID, v2.Version, "dev")
+	require.NoError(t, err)
+
+	// 1. List with empty filter
+	versions, err := store.ListVersions(ctx, p.ID, store.VersionFilter{})
 	require.NoError(t, err)
 	require.Len(t, versions, 2)
-	// Returned newest first.
 	assert.Equal(t, 2, versions[0].Version)
 	assert.Equal(t, 1, versions[1].Version)
+
+	// 2. List filtering by Status = "live"
+	liveStatus := "live"
+	versions, err = store.ListVersions(ctx, p.ID, store.VersionFilter{Status: &liveStatus})
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, 1, versions[0].Version)
+
+	// 3. List filtering by Status = "draft"
+	draftStatus := "draft"
+	versions, err = store.ListVersions(ctx, p.ID, store.VersionFilter{Status: &draftStatus})
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, 2, versions[0].Version)
+
+	// 4. List filtering by Tag "dev"
+	versions, err = store.ListVersions(ctx, p.ID, store.VersionFilter{Tags: []string{"dev"}})
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, 2, versions[0].Version)
+
+	// 5. List filtering by Tag "prod"
+	versions, err = store.ListVersions(ctx, p.ID, store.VersionFilter{Tags: []string{"prod"}})
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, 1, versions[0].Version)
+
+	// 6. List filtering by non-existent tag
+	versions, err = store.ListVersions(ctx, p.ID, store.VersionFilter{Tags: []string{"nonexistent"}})
+	require.NoError(t, err)
+	require.Empty(t, versions)
 }
 
 func TestGetVersion(t *testing.T) {

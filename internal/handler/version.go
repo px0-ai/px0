@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"text/template"
 
 	"github.com/gofiber/fiber/v2"
@@ -88,7 +89,28 @@ func ListVersions(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	versions, err := store.ListVersions(c.Context(), promptID)
+	var tags []string
+	tagsStr := c.Query("tags")
+	if tagsStr != "" {
+		parts := strings.Split(tagsStr, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				tags = append(tags, part)
+			}
+		}
+	}
+
+	var status *string
+	statusStr := c.Query("status")
+	if statusStr != "" {
+		status = &statusStr
+	}
+
+	versions, err := store.ListVersions(c.Context(), promptID, store.VersionFilter{
+		Status: status,
+		Tags:   tags,
+	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
