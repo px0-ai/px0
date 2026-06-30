@@ -25,13 +25,6 @@ Using px0 brings significant operational and governance benefits to your AI syst
 - OpenTelemetry observability: HTTP request counters, server error rates, and response latency to any compliant backend.
 - Role-based access control (RBAC): Secure prompt actions using Viewer, Editor, Team Admin, and Org Admin roles.
 
-### Upcoming Features
-
-- Native multi-language client SDKs: Provide lightweight, idiomatic packages for Python, Node.js, and Go to easily execute prompt rendering.
-- Smart in-process caching: Cache active templates in memory with automatic warming, background async refresh, and push-based invalidation.
-- Traffic-split A/B testing: Route traffic between prompt versions using custom percentage weights.
-- Template-level observability: Collect deep metrics and tracing for individual template execution and cache hit rates.
-
 ## How it works
 
 Call `px0.render()` with a template name and variables. px0 resolves the active version, renders the template, and returns the prompt string. Cache, A/B routing, and OTEL spans are handled automatically with no code changes required when a prompt is updated.
@@ -43,6 +36,10 @@ To set up the full stack locally with Docker Compose, send test requests, and ex
 ## Development and Testing
 
 For instructions on configuring your local development environment, running unit and integration tests, and executing linting/vetting checks, refer to our [Development and Testing Guide](development.md).
+
+## Benchmarking and Performance
+
+For instructions on evaluating prompt rendering latency and throughput under concurrent load using our built-in load testing utility, refer to our [Benchmarking and Performance Guide](benchmarking.md).
 
 ## Production
 
