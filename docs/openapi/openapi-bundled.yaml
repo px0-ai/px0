@@ -1,13 +1,7 @@
 openapi: 3.1.0
 info:
   title: px0 API
-  description: |
-    Core API for px0, a modern prompt management, versioning, and execution service.
-
-    This specification serves as the source of truth for downstream code generation,
-    including Documentation, SDKs, CLIs, and Model Context Protocol (MCP) servers.
-    All endpoints are rigorously validated against this specification at test time
-    to ensure absolute zero-drift between implementation and documentation.
+  description: px[0] is an open-source prompt infrastructure toolkit for managing prompts in production. It replaces hardcoded prompt strings with versioned templates, in-process caching, and OpenTelemetry observability, so teams can iterate on prompts without touching application code. This is the OpenAPI specification for all the public APIs of px0.
   version: 1.0.0
 servers:
   - url: http://localhost:3000
