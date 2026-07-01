@@ -121,7 +121,7 @@ func main() {
 	// Defer final cleanup of all entities
 	defer cleanUp(ctx, conn, orgID, teamID, apiKeyID, promptID, versionID)
 
-	targetURL := fmt.Sprintf("%s/v1/prompts/%s/render", *apiEndpoint, promptID.String())
+	targetURL := fmt.Sprintf("%s/v1/prompts/%s/render", *apiEndpoint, promptSlug)
 	fmt.Printf("Target live prompt render endpoint: %s\n", targetURL)
 
 	// 3. Pre-flight Check

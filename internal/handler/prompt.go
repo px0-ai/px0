@@ -146,24 +146,58 @@ func ListPrompts(c *fiber.Ctx) error {
 }
 
 func GetPrompt(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return apierr.ErrInvalidPromptID.Respond(c)
-	}
+	param := c.Params("id")
+	var prompt *model.Prompt
+	var err error
 
 	teamIDs, err := getRequestTeamIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	id, err := uuid.Parse(param)
+	if err == nil {
+		prompt, err = store.GetPromptByID(c.Context(), id, teamIDs)
+	} else {
+		prompt, err = store.GetPromptBySlug(c.Context(), param, teamIDs)
+	}
+
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	return c.JSON(fiber.Map{"prompt": prompt})
+
+	// Now check for optional version or tag query parameter
+	versionParam := c.Query("version")
+	tagParam := c.Query("tag")
+
+	var version *model.PromptVersion
+	if versionParam != "" {
+		version, err = resolveVersion(c.Context(), prompt.ID, versionParam)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return apierr.ErrVersionNotFound.Respond(c)
+			}
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	} else if tagParam != "" {
+		version, err = store.GetVersionByTag(c.Context(), prompt.ID, tagParam)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return apierr.ErrVersionNotFound.Respond(c)
+			}
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+	}
+
+	resp := fiber.Map{"prompt": prompt}
+	if version != nil {
+		resp["version"] = version
+	}
+
+	return c.JSON(resp)
 }
 
 func ArchivePrompt(c *fiber.Ctx) error {

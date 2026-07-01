@@ -6,7 +6,6 @@ import (
 	"text/template"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/model"
@@ -18,9 +17,9 @@ type renderRequest struct {
 }
 
 func RenderLive(c *fiber.Ctx) error {
-	promptID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return apierr.ErrInvalidPromptID.Respond(c)
+	slug := c.Params("slug")
+	if slug == "" {
+		return apierr.ErrPromptNotFound.Respond(c)
 	}
 
 	teamIDs, err := getRequestTeamIDs(c)
@@ -28,7 +27,7 @@ func RenderLive(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), promptID, teamIDs)
+	prompt, err := store.GetPromptBySlug(c.Context(), slug, teamIDs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
@@ -36,7 +35,7 @@ func RenderLive(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	version, err := store.GetLiveVersion(c.Context(), promptID)
+	version, err := store.GetLiveVersion(c.Context(), prompt.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrNoLiveVersionFound.Respond(c)
@@ -48,9 +47,9 @@ func RenderLive(c *fiber.Ctx) error {
 }
 
 func RenderVersion(c *fiber.Ctx) error {
-	promptID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return apierr.ErrInvalidPromptID.Respond(c)
+	slug := c.Params("slug")
+	if slug == "" {
+		return apierr.ErrPromptNotFound.Respond(c)
 	}
 
 	teamIDs, err := getRequestTeamIDs(c)
@@ -58,7 +57,7 @@ func RenderVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), promptID, teamIDs)
+	prompt, err := store.GetPromptBySlug(c.Context(), slug, teamIDs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
@@ -66,7 +65,7 @@ func RenderVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	version, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	version, err := resolveVersion(c.Context(), prompt.ID, c.Params("version"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrVersionNotFound.Respond(c)

@@ -199,7 +199,7 @@ paths:
   /v1/prompts/{id}:
     get:
       summary: Get a Prompt
-      description: Returns details of a specific prompt container by its unique UUID.
+      description: Returns details of a specific prompt container by its unique UUID or unique slug. Optionally retrieves version or tag details if requested via query parameters.
       operationId: getPrompt
       tags:
         - Prompts
@@ -210,12 +210,24 @@ paths:
         - name: id
           in: path
           required: true
-          description: The unique UUID of the prompt.
+          description: The unique UUID or unique slug of the prompt.
           schema:
             type: string
-            format: uuid
+        - name: version
+          in: query
+          required: false
+          description: Optional version sequence number (integer) or version tag (string) to retrieve along with the prompt details.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          description: Optional version tag (string) to retrieve along with the prompt details.
+          schema:
+            type: string
       x-test-coverage:
         - "TestGetPrompt_Success: Verifies finding a prompt by ID."
+        - "TestGetPrompt_BySlugAndVersion: Verifies finding a prompt by slug, with version, and with tag query parameter."
         - "TestGetPrompt_NotFound: Verifies 404 response on missing prompt ID."
       responses:
         "200":
@@ -227,6 +239,8 @@ paths:
                 properties:
                   prompt:
                     $ref: "#/components/schemas/Prompt"
+                  version:
+                    $ref: "./prompt-versions.yaml#/components/schemas/PromptVersion"
                 required:
                   - prompt
         "400":

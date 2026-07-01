@@ -74,8 +74,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
   /v1/prompts/{id}/versions/diff:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
-  /v1/prompts/{id}/render:
-    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{id}~1render"
+  /v1/prompts/{slug}/render:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{slug}~1render"
   /v1/prompts/{id}/versions:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
@@ -88,8 +88,8 @@ paths:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1archive"
   /v1/prompts/{id}/versions/{version}/duplicate:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
-  /v1/prompts/{id}/versions/{version}/render:
-    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1render"
+  /v1/prompts/{slug}/versions/{version}/render:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{slug}~1versions~1{version}~1render"
   /v1/prompts/{id}/versions/{version}/tags:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
   /v1/prompts/{id}/tags:

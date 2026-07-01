@@ -9,10 +9,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func getPromptSlug(t *testing.T, a *testApp, id string, token string) string {
+	t.Helper()
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	return body["prompt"].(map[string]any)["slug"].(string)
+}
+
 func TestRenderLive_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hello, {{.name}}! Count: {{.count}}.")
 
 	// promote version 1 to stable and then live
@@ -27,7 +38,7 @@ func TestRenderLive_Success(t *testing.T) {
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", id),
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
 		`{"variables":{"name":"Alice","count":5}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -42,10 +53,11 @@ func TestRenderLive_NoLiveVersion(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "draft only") // not published
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", id),
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
 		`{"variables":{}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -57,6 +69,7 @@ func TestRenderLive_NoVariables(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Static prompt with no variables.")
 
 	req := newReq(t, http.MethodPost,
@@ -70,7 +83,7 @@ func TestRenderLive_NoVariables(t *testing.T) {
 	resp.Body.Close()
 
 	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", id),
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
 		`{}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -84,10 +97,11 @@ func TestRenderVersion_Draft(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Draft: {{.msg}}")
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/render", id),
+		fmt.Sprintf("/v1/prompts/%s/versions/1/render", slug),
 		`{"variables":{"msg":"hello"}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -101,9 +115,10 @@ func TestRenderVersion_NotFound(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/99/render", id),
+		fmt.Sprintf("/v1/prompts/%s/versions/99/render", slug),
 		`{"variables":{}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -116,6 +131,7 @@ func TestRenderLive_WithAPIKey(t *testing.T) {
 	token := setupUser(t, a)
 	apiKey := setupAPIKey(t, a, token)
 	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hi {{.user}}!")
 
 	req := newReq(t, http.MethodPost,
@@ -130,7 +146,7 @@ func TestRenderLive_WithAPIKey(t *testing.T) {
 
 	// render using API key (not session)
 	req = newAPIKeyReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", id),
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
 		`{"variables":{"user":"Bob"}}`, apiKey)
 	resp, err := a.Test(req)
 	require.NoError(t, err)

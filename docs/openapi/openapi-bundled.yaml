@@ -1,7 +1,8 @@
 openapi: 3.1.0
 info:
   title: px0 API
-  description: px[0] is an open-source prompt infrastructure toolkit for managing prompts in production. It replaces hardcoded prompt strings with versioned templates, in-process caching, and OpenTelemetry observability, so teams can iterate on prompts without touching application code. This is the OpenAPI specification for all the public APIs of px0.
+  description: |
+    px[0] is an open-source prompt infrastructure toolkit for managing prompts in production. It replaces hardcoded prompt strings with versioned templates, in-process caching, and OpenTelemetry observability, so teams can iterate on prompts without touching application code. This is the OpenAPI specification for all the public APIs of px0.
   version: 1.0.0
 servers:
   - url: http://localhost:3000
@@ -1808,7 +1809,7 @@ paths:
   /v1/prompts/{id}:
     get:
       summary: Get a Prompt
-      description: Returns details of a specific prompt container by its unique UUID.
+      description: Returns details of a specific prompt container by its unique UUID or unique slug. Optionally retrieves version or tag details if requested via query parameters.
       operationId: getPrompt
       tags:
         - Prompts
@@ -1819,12 +1820,24 @@ paths:
         - name: id
           in: path
           required: true
-          description: The unique UUID of the prompt.
+          description: The unique UUID or unique slug of the prompt.
           schema:
             type: string
-            format: uuid
+        - name: version
+          in: query
+          required: false
+          description: Optional version sequence number (integer) or version tag (string) to retrieve along with the prompt details.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          description: Optional version tag (string) to retrieve along with the prompt details.
+          schema:
+            type: string
       x-test-coverage:
         - 'TestGetPrompt_Success: Verifies finding a prompt by ID.'
+        - 'TestGetPrompt_BySlugAndVersion: Verifies finding a prompt by slug, with version, and with tag query parameter.'
         - 'TestGetPrompt_NotFound: Verifies 404 response on missing prompt ID.'
       responses:
         '200':
@@ -1836,6 +1849,8 @@ paths:
                 properties:
                   prompt:
                     $ref: '#/components/schemas/Prompt'
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
                 required:
                   - prompt
         '400':
@@ -2228,7 +2243,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/prompts/{id}/render:
+  /v1/prompts/{slug}/render:
     post:
       summary: Render Live Prompt Version
       description: Renders the active 'live' template version of a prompt using supplied variables.
@@ -2239,13 +2254,12 @@ paths:
         - BearerAuth: []
         - ApiKeyAuth: []
       parameters:
-        - name: id
+        - name: slug
           in: path
           required: true
-          description: Unique prompt UUID.
+          description: Unique prompt slug.
           schema:
             type: string
-            format: uuid
       x-edge-cases:
         - Fails with 404 if no live version is found.
         - Fails with 422 if template execution fails due to invalid parameters or template syntax mismatches.
@@ -2267,13 +2281,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/RenderResponse'
         '400':
-          description: Invalid UUID or bad body JSON
+          description: Invalid slug or bad body JSON
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
               example:
-                error: invalid prompt id
+                error: invalid prompt slug
         '401':
           description: Unauthorized
           content:
@@ -2954,7 +2968,7 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: version not found
-  /v1/prompts/{id}/versions/{version}/render:
+  /v1/prompts/{slug}/versions/{version}/render:
     post:
       summary: Render Specific Prompt Version
       description: Renders a specific template version of a prompt (even draft status) using supplied variables.
@@ -2965,13 +2979,12 @@ paths:
         - BearerAuth: []
         - ApiKeyAuth: []
       parameters:
-        - name: id
+        - name: slug
           in: path
           required: true
-          description: Unique prompt UUID.
+          description: Unique prompt slug.
           schema:
             type: string
-            format: uuid
         - name: version
           in: path
           required: true

@@ -167,6 +167,7 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 	bodyPrompt := decodeBody(t, resp)
 	promptIDStr := bodyPrompt["prompt"].(map[string]any)["id"].(string)
+	promptSlugStr := bodyPrompt["prompt"].(map[string]any)["slug"].(string)
 	promptID, _ := uuid.Parse(promptIDStr)
 
 	// B. Viewer cannot Create Prompt
@@ -237,7 +238,7 @@ func TestRolesAndPermissions(t *testing.T) {
 	resp.Body.Close()
 
 	// J. Viewer can Render Live
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/render", promptIDStr), `{"variables":{"name":"John"}}`, viewerToken)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/render", promptSlugStr), `{"variables":{"name":"John"}}`, viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

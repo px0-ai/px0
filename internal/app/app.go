@@ -85,7 +85,7 @@ func New() *fiber.App {
 	prompts.Post("/:id/move", handler.MovePrompt)
 	prompts.Get("/:id/versions/diff", handler.DiffVersions)
 
-	prompts.Post("/:id/render", handler.RenderLive)
+	prompts.Post("/:slug/render", handler.RenderLive)
 
 	prompts.Post("/:id/versions", handler.CreateVersion)
 	prompts.Get("/:id/versions", handler.ListVersions)
@@ -96,7 +96,7 @@ func New() *fiber.App {
 	prompts.Post("/:id/versions/:version/demote", handler.DemoteVersion)
 	prompts.Post("/:id/versions/:version/archive", handler.ArchiveVersion)
 	prompts.Post("/:id/versions/:version/duplicate", handler.DuplicateVersion)
-	prompts.Post("/:id/versions/:version/render", handler.RenderVersion)
+	prompts.Post("/:slug/versions/:version/render", handler.RenderVersion)
 	prompts.Post("/:id/versions/:version/tags", handler.SetTag)
 	prompts.Delete("/:id/tags/:tag", handler.RemoveTag)
 	prompts.Get("/:id/tags", handler.ListTags)

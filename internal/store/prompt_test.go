@@ -100,6 +100,33 @@ func TestGetPromptByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
+func TestGetPromptBySlug(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	created, err := store.CreatePrompt(ctx, tm.ID, "find_me_slug", "Find Me Slug", "desc")
+	require.NoError(t, err)
+
+	got, err := store.GetPromptBySlug(ctx, "find_me_slug", []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+	assert.Equal(t, tm.ID, got.TeamID)
+	assert.Equal(t, "find_me_slug", got.Slug)
+	assert.Equal(t, "Find Me Slug", got.Name)
+}
+
+func TestGetPromptBySlug_NotFound(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	_, err = store.GetPromptBySlug(ctx, "nonexistent", []uuid.UUID{tm.ID})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestArchivePrompt(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()

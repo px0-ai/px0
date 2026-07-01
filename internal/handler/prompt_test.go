@@ -156,6 +156,64 @@ func TestGetPrompt_Success(t *testing.T) {
 	assert.Equal(t, id, prompt["id"])
 }
 
+func TestGetPrompt_BySlugAndVersion(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
+
+	// Create a version and tag it
+	setupVersion(t, a, token, id, "Hello {{.name}}")
+	
+	// Set tag "prod" on Version 1
+	reqTag := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/tags", id),
+		`{"tag":"prod"}`, token)
+	respTag, err := a.Test(reqTag)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respTag.StatusCode)
+	respTag.Body.Close()
+
+	// 1. Get by Slug only
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s", slug), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, slug, body["prompt"].(map[string]any)["slug"])
+	assert.Nil(t, body["version"])
+	resp.Body.Close()
+
+	// 2. Get by Slug with version query parameter
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s?version=1", slug), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, slug, body["prompt"].(map[string]any)["slug"])
+	assert.NotNil(t, body["version"])
+	assert.Equal(t, float64(1), body["version"].(map[string]any)["version"])
+	assert.Equal(t, "Hello {{.name}}", body["version"].(map[string]any)["template"])
+	resp.Body.Close()
+
+	// 3. Get by Slug with tag query parameter
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s?tag=prod", slug), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, slug, body["prompt"].(map[string]any)["slug"])
+	assert.NotNil(t, body["version"])
+	assert.Equal(t, float64(1), body["version"].(map[string]any)["version"])
+	resp.Body.Close()
+
+	// 4. Get by Slug with invalid version
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s?version=99", slug), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
 func TestGetPrompt_NotFound(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
@@ -168,14 +226,14 @@ func TestGetPrompt_NotFound(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestGetPrompt_InvalidID(t *testing.T) {
+func TestGetPrompt_InvalidIDAndSlugNotFound(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 
-	req := newReq(t, http.MethodGet, "/v1/prompts/not-a-uuid", "", token)
+	req := newReq(t, http.MethodGet, "/v1/prompts/non-existent-slug", "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
 

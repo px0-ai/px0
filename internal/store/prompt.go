@@ -109,6 +109,23 @@ func GetPromptByID(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) (*mod
 	return p, nil
 }
 
+func GetPromptBySlug(ctx context.Context, slug string, teamIDs []uuid.UUID) (*model.Prompt, error) {
+	p := &model.Prompt{}
+	err := db.Pool.QueryRow(ctx,
+		`SELECT id, team_id, slug, name, description, status, created_at, updated_at
+		 FROM prompts
+		 WHERE slug = $1 AND team_id = ANY($2)`,
+		slug, teamIDs,
+	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get prompt by slug: %w", err)
+	}
+	return p, nil
+}
+
 func ArchivePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error {
 	// First check if the prompt belongs to one of the provided teams
 	_, err := GetPromptByID(ctx, id, teamIDs)
