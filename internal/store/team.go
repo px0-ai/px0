@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -451,25 +452,50 @@ func GetPendingJoinRequestsForAdmin(ctx context.Context, userID uuid.UUID) ([]*m
 
 	var items []*model.InboxItem
 	for rows.Next() {
-		item := &model.InboxItem{
-			Type: "join_request",
-			Team: &model.Team{},
-		}
+		var (
+			itemID        uuid.UUID
+			teamID        uuid.UUID
+			teamName      string
+			teamOrgID     *uuid.UUID
+			teamCreatedAt time.Time
+			userID        uuid.UUID
+			userEmail     string
+			status        string
+			createdAt     time.Time
+			updatedAt     time.Time
+		)
 		if err := rows.Scan(
-			&item.ID,
-			&item.TeamID,
-			&item.Team.Name,
-			&item.Team.OrgID,
-			&item.Team.CreatedAt,
-			&item.UserID,
-			&item.UserEmail,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
+			&itemID,
+			&teamID,
+			&teamName,
+			&teamOrgID,
+			&teamCreatedAt,
+			&userID,
+			&userEmail,
+			&status,
+			&createdAt,
+			&updatedAt,
 		); err != nil {
 			return nil, err
 		}
-		item.Team.ID = item.TeamID
+		item := &model.InboxItem{
+			ID:        itemID,
+			Type:      "join_request",
+			Status:    status,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+			Payload: &model.JoinRequestPayload{
+				UserID:    userID,
+				UserEmail: userEmail,
+				TeamID:    teamID,
+				Team: &model.Team{
+					ID:        teamID,
+					OrgID:     teamOrgID,
+					Name:      teamName,
+					CreatedAt: teamCreatedAt,
+				},
+			},
+		}
 		items = append(items, item)
 	}
 	return items, rows.Err()

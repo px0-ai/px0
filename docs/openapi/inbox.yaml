@@ -141,10 +141,7 @@ components:
         - status
         - created_at
         - updated_at
-        - user_id
-        - user_email
-        - team_id
-        - team
+        - payload
       properties:
         id:
           type: string
@@ -162,6 +159,17 @@ components:
         updated_at:
           type: string
           format: date-time
+        payload:
+          oneOf:
+            - $ref: "#/components/schemas/JoinRequestPayload"
+    JoinRequestPayload:
+      type: object
+      required:
+        - user_id
+        - user_email
+        - team_id
+        - team
+      properties:
         user_id:
           type: string
           format: uuid

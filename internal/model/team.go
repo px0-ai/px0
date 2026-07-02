@@ -37,13 +37,15 @@ type TeamJoinRequest struct {
 }
 
 type InboxItem struct {
-	ID        uuid.UUID `json:"id"`
-	Type      string    `json:"type"` // "join_request"
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID   `json:"id"`
+	Type      string      `json:"type"` // "join_request"
+	Status    string      `json:"status"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	Payload   interface{} `json:"payload"`
+}
 
-	// Join Request specific fields
+type JoinRequestPayload struct {
 	UserID    uuid.UUID `json:"user_id"`
 	UserEmail string    `json:"user_email"`
 	TeamID    uuid.UUID `json:"team_id"`

@@ -124,6 +124,8 @@ components:
       $ref: "./teams.yaml#/components/schemas/TeamJoinRequest"
     InboxItem:
       $ref: "./inbox.yaml#/components/schemas/InboxItem"
+    JoinRequestPayload:
+      $ref: "./inbox.yaml#/components/schemas/JoinRequestPayload"
     Prompt:
       $ref: "./prompts.yaml#/components/schemas/Prompt"
     PromptVersion:

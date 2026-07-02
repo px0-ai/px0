@@ -127,10 +127,13 @@ func TestJoinRequestsFlow(t *testing.T) {
 		item := itemAny.(map[string]any)
 		if item["id"].(string) == requestIDStr {
 			assert.Equal(t, "join_request", item["type"])
-			assert.Equal(t, applicantEmail, item["user_email"])
 			assert.Equal(t, "pending", item["status"])
 
-			teamMap, ok := item["team"].(map[string]any)
+			payload, ok := item["payload"].(map[string]any)
+			assert.True(t, ok, "payload object should be present")
+			assert.Equal(t, applicantEmail, payload["user_email"])
+
+			teamMap, ok := payload["team"].(map[string]any)
 			assert.True(t, ok, "embedded team object should be present")
 			assert.Equal(t, "Engineering Team", teamMap["name"])
 			assert.Equal(t, teamIDStr, teamMap["id"])
