@@ -77,7 +77,7 @@ testutil.SetupDB(t)   // connects, migrates, truncates on cleanup
 // internal/handler/helpers_test.go (package handler_test)
 newTestApp(t)                            // full app wired to test DB
 newReq(t, method, url, body, token)      // build HTTP request with bearer token
-newAPIKeyReq(t, method, url, body, key) // build request with X-API-Key
+newAPIKeyReq(t, method, url, body, key) // build request with Bearer API Key
 decodeBody(t, resp)                      // decode JSON response to map
 setupUser(t, app)                        // register + login, returns token
 setupPrompt(t, app, token)               // create prompt, returns ID

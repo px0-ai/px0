@@ -106,12 +106,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: Use an access token retrieved from login (Bearer <token>).
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: Use a programmatic API key generated under API Keys CRUD (X-API-Key <key>).
+      description: Use an access token retrieved from login (Bearer sess_...) or a programmatic API key (Bearer ak_...).
   schemas:
     APIError:
       $ref: "./auth.yaml#/components/schemas/APIError"

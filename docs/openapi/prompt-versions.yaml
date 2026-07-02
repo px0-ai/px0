@@ -12,7 +12,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -90,7 +89,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -154,7 +152,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -231,7 +228,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -296,7 +292,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -377,7 +372,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -445,7 +439,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -521,7 +514,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -594,7 +586,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -669,7 +660,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -736,7 +726,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -805,7 +794,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -858,7 +846,6 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: id
           in: path

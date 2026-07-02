@@ -16,8 +16,8 @@ import (
 
 const LocalsUserID = "userID"
 
-// RequireAuth accepts either an access token (Authorization: Bearer <token>)
-// or an API key (X-API-Key: <key>).
+// RequireAuth accepts a standard access token (Authorization: Bearer <token>)
+// which can be either a user session token (sess_...) or an API Key (ak_...).
 func RequireAuth(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
 		userVal := c.Locals("currentUser")
@@ -29,13 +29,10 @@ func RequireAuth(c *fiber.Ctx) error {
 		}
 		return c.Next()
 	}
-	if tryAPIKeyAuth(c) {
-		return c.Next()
-	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
-// RequireAccessToken accepts either an access token or an API key with 'all' operation.
+// RequireAccessToken accepts either a user session access token or an API key with 'all' or 'admin' operation.
 func RequireAccessToken(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
 		userVal := c.Locals("currentUser")
@@ -45,9 +42,6 @@ func RequireAccessToken(c *fiber.Ctx) error {
 				return apierr.ErrUserNotVerified.Respond(c)
 			}
 		}
-		return c.Next()
-	}
-	if tryAPIKeyAuth(c) {
 		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
 			if operation != "all" && operation != "admin" {
 				return apierr.ErrForbidden.Respond(c)
@@ -61,6 +55,11 @@ func RequireAccessToken(c *fiber.Ctx) error {
 // RequireSessionToken accepts only standard user session tokens (not API Keys).
 func RequireSessionToken(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
+		// Reject if authenticated via an API Key
+		if _, isAPIKey := c.Locals("apiKeyOperation").(string); isAPIKey {
+			return apierr.ErrUnauthorized.Respond(c)
+		}
+
 		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
 		if ok && userID != uuid.Nil {
 			userVal := c.Locals("currentUser")
@@ -78,6 +77,15 @@ func RequireSessionToken(c *fiber.Ctx) error {
 
 func RequireAdmin(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
+		// Is it an API Key?
+		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
+			if operation != "all" && operation != "admin" {
+				return apierr.ErrForbidden.Respond(c)
+			}
+			return c.Next()
+		}
+
+		// Otherwise standard user session
 		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
 		if !ok || userID == uuid.Nil {
 			return apierr.ErrUnauthorized.Respond(c)
@@ -95,14 +103,6 @@ func RequireAdmin(c *fiber.Ctx) error {
 			return apierr.ErrForbidden.Respond(c)
 		}
 		return c.Next()
-	}
-	if tryAPIKeyAuth(c) {
-		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
-			if operation != "all" && operation != "admin" {
-				return apierr.ErrForbidden.Respond(c)
-			}
-			return c.Next()
-		}
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
@@ -139,14 +139,6 @@ func tryAccessTokenAuth(c *fiber.Ctx) bool {
 	c.Locals(LocalsUserID, session.UserID)
 	c.Locals("currentUser", user)
 	return true
-}
-
-func tryAPIKeyAuth(c *fiber.Ctx) bool {
-	key := c.Get("X-API-Key")
-	if key == "" {
-		return false
-	}
-	return tryAPIKeyWithRawKey(c, key)
 }
 
 func tryAPIKeyWithRawKey(c *fiber.Ctx, key string) bool {

@@ -66,12 +66,10 @@ func newReq(t *testing.T, method, url, body, token string) *http.Request {
 	return req
 }
 
-// newAPIKeyReq builds a request authenticated via API key header.
+// newAPIKeyReq builds a request authenticated via API key as a Bearer token.
 func newAPIKeyReq(t *testing.T, method, url, body, apiKey string) *http.Request {
 	t.Helper()
-	req := newReq(t, method, url, body, "")
-	req.Header.Set("X-API-Key", apiKey)
-	return req
+	return newReq(t, method, url, body, apiKey)
 }
 
 // decodeBody decodes the response body as a generic map.

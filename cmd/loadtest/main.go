@@ -135,7 +135,7 @@ func main() {
 	payloadBytes, _ := json.Marshal(payloadMap)
 	req, _ := http.NewRequest("POST", targetURL, bytes.NewBuffer(payloadBytes))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", rawKey)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
 
 	resp, err := preflightClient.Do(req)
 	if err != nil {
@@ -183,7 +183,7 @@ func main() {
 						continue
 					}
 					req.Header.Set("Content-Type", "application/json")
-					req.Header.Set("X-API-Key", rawKey)
+					req.Header.Set("Authorization", "Bearer "+rawKey)
 
 					reqStart := time.Now()
 					resp, err := client.Do(req)

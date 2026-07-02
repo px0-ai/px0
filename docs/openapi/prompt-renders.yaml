@@ -12,7 +12,6 @@ paths:
         - Prompt Renders
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: slug
           in: path
@@ -93,7 +92,6 @@ paths:
         - Prompt Renders
       security:
         - BearerAuth: []
-        - ApiKeyAuth: []
       parameters:
         - name: slug
           in: path
