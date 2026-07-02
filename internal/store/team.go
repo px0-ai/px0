@@ -424,7 +424,7 @@ func GetPendingJoinRequestsForAdmin(ctx context.Context, userID uuid.UUID) ([]*m
 	}
 
 	rows, err := db.Pool.Query(ctx,
-		`SELECT DISTINCT r.id, r.team_id, t.name AS team_name, r.user_id, u.email AS user_email, r.status, r.created_at, r.updated_at
+		`SELECT DISTINCT r.id, r.team_id, t.name AS team_name, t.org_id, t.created_at AS team_created_at, r.user_id, u.email AS user_email, r.status, r.created_at, r.updated_at
 		 FROM team_join_requests r
 		 JOIN teams t ON r.team_id = t.id
 		 JOIN users u ON r.user_id = u.id
@@ -451,10 +451,25 @@ func GetPendingJoinRequestsForAdmin(ctx context.Context, userID uuid.UUID) ([]*m
 
 	var items []*model.InboxItem
 	for rows.Next() {
-		item := &model.InboxItem{}
-		if err := rows.Scan(&item.ID, &item.TeamID, &item.TeamName, &item.UserID, &item.UserEmail, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		item := &model.InboxItem{
+			Type: "join_request",
+			Team: &model.Team{},
+		}
+		if err := rows.Scan(
+			&item.ID,
+			&item.TeamID,
+			&item.Team.Name,
+			&item.Team.OrgID,
+			&item.Team.CreatedAt,
+			&item.UserID,
+			&item.UserEmail,
+			&item.Status,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		item.Team.ID = item.TeamID
 		items = append(items, item)
 	}
 	return items, rows.Err()

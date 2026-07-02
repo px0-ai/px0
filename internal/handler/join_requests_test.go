@@ -126,9 +126,15 @@ func TestJoinRequestsFlow(t *testing.T) {
 	for _, itemAny := range inboxList {
 		item := itemAny.(map[string]any)
 		if item["id"].(string) == requestIDStr {
+			assert.Equal(t, "join_request", item["type"])
 			assert.Equal(t, applicantEmail, item["user_email"])
-			assert.Equal(t, "Engineering Team", item["team_name"])
 			assert.Equal(t, "pending", item["status"])
+
+			teamMap, ok := item["team"].(map[string]any)
+			assert.True(t, ok, "embedded team object should be present")
+			assert.Equal(t, "Engineering Team", teamMap["name"])
+			assert.Equal(t, teamIDStr, teamMap["id"])
+
 			found = true
 			break
 		}
