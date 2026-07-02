@@ -370,7 +370,7 @@ paths:
       description: Returns the profile of the currently logged-in user.
       operationId: me
       tags:
-        - Auth
+        - Profile
       security:
         - BearerAuth: []
       x-test-coverage:
@@ -400,7 +400,7 @@ paths:
       description: Updates the profile of the currently logged-in user.
       operationId: updateMe
       tags:
-        - Auth
+        - Profile
       security:
         - BearerAuth: []
       x-test-coverage:
@@ -446,7 +446,7 @@ paths:
       description: Deletes the currently logged-in user's account.
       operationId: deleteMe
       tags:
-        - Auth
+        - Profile
       security:
         - BearerAuth: []
       x-test-coverage:
@@ -466,7 +466,7 @@ paths:
       description: Changes the currently logged-in user's password.
       operationId: changePassword
       tags:
-        - Auth
+        - Profile
       security:
         - BearerAuth: []
       x-test-coverage:
@@ -746,7 +746,7 @@ paths:
       description: Returns a list of teams the authenticated user belongs to.
       operationId: listUserTeams
       tags:
-        - Teams
+        - Profile
       security:
         - BearerAuth: []
       responses:
@@ -804,7 +804,7 @@ paths:
       description: Returns a list of organizations the authenticated user belongs to.
       operationId: listUserOrgs
       tags:
-        - Organizations
+        - Profile
       security:
         - BearerAuth: []
       responses:
@@ -831,7 +831,7 @@ paths:
       description: Returns a list of pending join requests that the authenticated user is authorized to approve or reject.
       operationId: getAdminInbox
       tags:
-        - Team Memberships
+        - Inbox & Join Requests
       security:
         - BearerAuth: []
       responses:
@@ -858,7 +858,7 @@ paths:
       description: Creates a new team under a specific organization. Requires Org Admin privileges (admin on the Default Team). Team admins or editors of other custom teams are not authorized to create teams.
       operationId: createTeam
       tags:
-        - Teams
+        - Team Management
       security:
         - BearerAuth: []
       x-edge-cases:
@@ -922,7 +922,7 @@ paths:
       description: Returns a list of all teams within the specified organization.
       operationId: listOrgTeams
       tags:
-        - Teams
+        - Team Management
       security:
         - BearerAuth: []
       parameters:
@@ -963,7 +963,7 @@ paths:
       description: Updates an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: updateTeam
       tags:
-        - Teams
+        - Team Management
       security:
         - BearerAuth: []
       x-edge-cases:
@@ -1037,7 +1037,7 @@ paths:
       description: Deletes an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
       operationId: deleteTeam
       tags:
-        - Teams
+        - Team Management
       security:
         - BearerAuth: []
       x-edge-cases:
@@ -1070,7 +1070,7 @@ paths:
       description: Returns a paginated list of members for a given team. Requires at least viewer access.
       operationId: listTeamMembers
       tags:
-        - Team Memberships
+        - User Management
       security:
         - BearerAuth: []
       parameters:
@@ -1115,7 +1115,7 @@ paths:
       description: Adds a user to a team. Requires admin privileges.
       operationId: addTeamMember
       tags:
-        - Team Memberships
+        - User Management
       security:
         - BearerAuth: []
       parameters:
@@ -1152,7 +1152,7 @@ paths:
       description: Removes a user from a team. Requires admin privileges.
       operationId: removeTeamMember
       tags:
-        - Team Memberships
+        - User Management
       security:
         - BearerAuth: []
       parameters:
@@ -1183,7 +1183,7 @@ paths:
       description: Updates a team member's role. Requires team admin privileges.
       operationId: updateTeamMemberRole
       tags:
-        - Team Memberships
+        - User Management
       security:
         - BearerAuth: []
       parameters:
@@ -1239,7 +1239,7 @@ paths:
       description: Creates a pending request for the authenticated user to join a specific team.
       operationId: createJoinRequest
       tags:
-        - Team Memberships
+        - Teams
       security:
         - BearerAuth: []
       parameters:
@@ -1287,7 +1287,7 @@ paths:
       description: Approves or rejects a pending join request.
       operationId: resolveJoinRequest
       tags:
-        - Team Memberships
+        - Inbox & Join Requests
       security:
         - BearerAuth: []
       parameters:

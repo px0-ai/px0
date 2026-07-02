@@ -19,9 +19,9 @@ paths:
   /v1/auth/session:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
   /v1/auth/me:
-    $ref: "./auth.yaml#/paths/~1v1~1auth~1me"
+    $ref: "./profile.yaml#/paths/~1v1~1auth~1me"
   /v1/auth/me/change-password:
-    $ref: "./auth.yaml#/paths/~1v1~1auth~1me~1change-password"
+    $ref: "./profile.yaml#/paths/~1v1~1auth~1me~1change-password"
   /v1/auth/password-reset/trigger:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1password-reset~1trigger"
   /v1/auth/password-reset/reset:
@@ -31,27 +31,27 @@ paths:
   /v1/api-keys/{id}:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
   /v1/me/teams:
-    $ref: "./teams.yaml#/paths/~1v1~1me~1teams"
+    $ref: "./profile.yaml#/paths/~1v1~1me~1teams"
   /v1/me/teams/{teamID}:
     $ref: "./teams.yaml#/paths/~1v1~1me~1teams~1{teamID}"
   /v1/me/orgs:
-    $ref: "./orgs.yaml#/paths/~1v1~1me~1orgs"
+    $ref: "./profile.yaml#/paths/~1v1~1me~1orgs"
   /v1/me/inbox:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1me~1inbox"
+    $ref: "./inbox.yaml#/paths/~1v1~1me~1inbox"
   /v1/orgs/{orgID}/teams:
-    $ref: "./teams.yaml#/paths/~1v1~1orgs~1{orgID}~1teams"
+    $ref: "./team-management.yaml#/paths/~1v1~1orgs~1{orgID}~1teams"
   /v1/teams/{id}:
-    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}"
+    $ref: "./team-management.yaml#/paths/~1v1~1teams~1{id}"
   /v1/teams/{id}/members:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members"
+    $ref: "./user-management.yaml#/paths/~1v1~1teams~1{id}~1members"
   /v1/teams/{id}/members/{userID}:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
+    $ref: "./user-management.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}"
   /v1/teams/{id}/members/{userID}/role:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
+    $ref: "./user-management.yaml#/paths/~1v1~1teams~1{id}~1members~1{userID}~1role"
   /v1/teams/{id}/join-requests:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1teams~1{id}~1join-requests"
+    $ref: "./teams.yaml#/paths/~1v1~1teams~1{id}~1join-requests"
   /v1/join-requests/{id}:
-    $ref: "./team-memberships.yaml#/paths/~1v1~1join-requests~1{id}"
+    $ref: "./inbox.yaml#/paths/~1v1~1join-requests~1{id}"
   /v1/orgs:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs"
   /v1/orgs/{id}:
@@ -119,11 +119,11 @@ components:
     OrganizationWithRole:
       $ref: "./orgs.yaml#/components/schemas/OrganizationWithRole"
     Team:
-      $ref: "./teams.yaml#/components/schemas/Team"
+      $ref: "./team-management.yaml#/components/schemas/Team"
     TeamJoinRequest:
-      $ref: "./team-memberships.yaml#/components/schemas/TeamJoinRequest"
+      $ref: "./teams.yaml#/components/schemas/TeamJoinRequest"
     InboxItem:
-      $ref: "./team-memberships.yaml#/components/schemas/InboxItem"
+      $ref: "./inbox.yaml#/components/schemas/InboxItem"
     Prompt:
       $ref: "./prompts.yaml#/components/schemas/Prompt"
     PromptVersion:

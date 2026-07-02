@@ -3,34 +3,6 @@ info:
   title: Teams API
   version: 1.0.0
 paths:
-  /v1/me/teams:
-    get:
-      summary: List User Teams
-      description: Returns a list of teams the authenticated user belongs to.
-      operationId: listUserTeams
-      tags:
-        - Teams
-      security:
-        - BearerAuth: []
-      responses:
-        "200":
-          description: A list of teams
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  teams:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Team"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-
   /v1/me/teams/{teamID}:
     delete:
       summary: Leave Team
@@ -63,236 +35,82 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
-  /v1/orgs/{orgID}/teams:
+  /v1/teams/{id}/join-requests:
     post:
-      summary: Create Team
-      description: Creates a new team under a specific organization. Requires Org Admin privileges (admin on the Default Team). Team admins or editors of other custom teams are not authorized to create teams.
-      operationId: createTeam
+      summary: Request to Join Team
+      description: Creates a pending request for the authenticated user to join a specific team.
+      operationId: createJoinRequest
       tags:
         - Teams
       security:
         - BearerAuth: []
-      x-edge-cases:
-        - "Requires Org Admin privileges (admin on the Default Team)."
-        - "Team admins or editors of other custom teams are forbidden from creating teams."
-        - "Fails with 400 if name is empty."
-        - "Fails with 409 if the team name already exists under the target organization."
-      x-test-coverage:
-        - "TestRolesAndPermissions: Verifies that a Team Admin of a custom team is forbidden from creating a team (returns 403 Forbidden)."
-        - "TestRolesAndPermissions: Verifies that an Org Admin (admin of Default Team) can create a team (returns 201 Created)."
       parameters:
-        - name: orgID
+        - name: id
           in: path
           required: true
           schema:
             type: string
             format: uuid
-            description: The ID of the organization to create the team under.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - name
-              properties:
-                name:
-                  type: string
-                  example: "Engineering"
+            description: The ID of the team to request to join.
       responses:
         "201":
-          description: Created
+          description: Join request created successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  team:
-                    $ref: "#/components/schemas/Team"
+                $ref: "#/components/schemas/TeamJoinRequest"
         "400":
-          description: Bad Request
+          description: Bad Request (already a member)
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-    get:
-      summary: List Org Teams
-      description: Returns a list of all teams within the specified organization.
-      operationId: listOrgTeams
-      tags:
-        - Teams
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: orgID
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            description: The ID of the organization to list teams for.
-      responses:
-        "200":
-          description: A list of teams
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  teams:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Team"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-  /v1/teams/{id}:
-    put:
-      summary: Update Team
-      description: Updates an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
-      operationId: updateTeam
-      tags:
-        - Teams
-      security:
-        - BearerAuth: []
-      x-edge-cases:
-        - "Requires Org Admin, Team Admin, or Team Editor privileges."
-        - "Team Members (viewers) are forbidden from updating team details."
-        - "Returns 404 if the team does not exist."
-        - "Returns 409 if the updated team name already exists under the target organization."
-      x-test-coverage:
-        - "TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot update a team (returns 403 Forbidden)."
-        - "TestRolesAndPermissions: Verifies that an Editor (Team Editor) can update a team (returns 200 OK)."
-        - "TestRolesAndPermissions: Verifies that an Admin (Team Admin) can update a team (returns 200 OK)."
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - name
-              properties:
-                name:
-                  type: string
-                  example: "Engineering"
-                org_id:
-                  type: string
-                  format: uuid
-                  example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-      responses:
-        "200":
-          description: Updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  team:
-                    $ref: "#/components/schemas/Team"
-        "400":
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "./auth.yaml#/components/schemas/APIError"
-        "403":
-          description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "404":
-          description: Not Found
+          description: Team Not Found
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
-    delete:
-      summary: Delete Team
-      description: Deletes an existing team. Requires Org Admin, Team Admin, or Team Editor privileges. Team Members (viewers) are not authorized.
-      operationId: deleteTeam
-      tags:
-        - Teams
-      security:
-        - BearerAuth: []
-      x-edge-cases:
-        - "Requires Org Admin, Team Admin, or Team Editor privileges."
-        - "Team Members (viewers) are forbidden from deleting the team."
-        - "Returns 404 if the team does not exist."
-      x-test-coverage:
-        - "TestRolesAndPermissions: Verifies that a Viewer (Team Member) cannot delete a team (returns 403 Forbidden)."
-        - "TestRolesAndPermissions: Verifies that an Editor (Team Editor) can delete a team (returns 204 No Content)."
-        - "TestRolesAndPermissions: Verifies that an Admin (Team Admin) can delete a team (returns 204 No Content)."
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "204":
-          description: Team deleted successfully
-        "401":
-          description: Unauthorized
-        "403":
-          description: Forbidden
-        "404":
-          description: Not Found
+        "409":
+          description: Conflict (already has a pending request)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
 components:
   schemas:
-    Team:
+    TeamJoinRequest:
       type: object
       required:
         - id
-        - name
+        - team_id
+        - user_id
+        - status
         - created_at
+        - updated_at
       properties:
         id:
           type: string
           format: uuid
-        org_id:
+        team_id:
           type: string
           format: uuid
-        name:
+        user_id:
           type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, approved, rejected]
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
