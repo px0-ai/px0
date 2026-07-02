@@ -82,8 +82,8 @@ func main() {
 	hashBytes := sha256.Sum256([]byte(rawKey))
 	keyHash := fmt.Sprintf("%x", hashBytes)
 	apiKeyID := uuid.New()
-	_, err = conn.Exec(ctx, "INSERT INTO api_keys (id, name, key_prefix, key_hash, org_id, operation) VALUES ($1, $2, $3, $4, $5, $6)",
-		apiKeyID, "loadtest-key-"+runID, "ak_loadtest", keyHash, orgID, "read_render")
+	_, err = conn.Exec(ctx, "INSERT INTO api_keys (id, name, key_hash, org_id, operation) VALUES ($1, $2, $3, $4, $5)",
+		apiKeyID, "loadtest-key-"+runID, keyHash, orgID, "read_render")
 	if err != nil {
 		cleanUp(ctx, conn, orgID, teamID, uuid.Nil, uuid.Nil, uuid.Nil)
 		fmt.Printf("Error: failed to create mock API key: %v\n", err)

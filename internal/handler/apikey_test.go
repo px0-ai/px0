@@ -38,7 +38,6 @@ func TestCreateAPIKey_Success(t *testing.T) {
 	assert.NotEmpty(t, body["key"])
 	key := body["key"].(string)
 	assert.True(t, len(key) > 8, "key should be long enough to be a real key")
-	assert.NotEmpty(t, body["key_prefix"])
 }
 
 func TestCreateAPIKey_MissingName(t *testing.T) {
@@ -139,7 +138,6 @@ func TestListAPIKeys(t *testing.T) {
 	// Full key must not be returned in list.
 	first := keys[0].(map[string]any)
 	assert.Nil(t, first["key"])
-	assert.NotEmpty(t, first["key_prefix"])
 }
 
 func TestDeleteAPIKey(t *testing.T) {

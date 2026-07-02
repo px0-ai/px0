@@ -142,10 +142,6 @@ components:
           format: uuid
           nullable: true
           description: Optional UUID of the team.
-        key_prefix:
-          type: string
-          description: First characters of the API Key used for visual identification.
-          example: ak_1a2b3c4d
         operation:
           type: string
           enum: [read_render, all, admin]
@@ -163,7 +159,6 @@ components:
         - id
         - name
         - org_id
-        - key_prefix
         - operation
         - created_at
     CreateAPIKeyRequest:
@@ -202,10 +197,6 @@ components:
           type: string
           description: The fully generated secure raw API Key string. This is returned ONLY ONCE.
           example: ak_7f9ba3271cf881309d9be8c9c0fcae47a95b8d29c3f0b2da8e89cf21e5c3df01
-        key_prefix:
-          type: string
-          description: Identifying prefix of the key.
-          example: ak_7f9ba327
         operation:
           type: string
         created_at:
@@ -216,6 +207,5 @@ components:
         - id
         - name
         - key
-        - key_prefix
         - operation
         - created_at

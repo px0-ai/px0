@@ -82,10 +82,9 @@ func CreateAPIKey(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	key := "ak_" + hex.EncodeToString(raw)
-	keyPrefix := key[:12] // "ak_" + first 9 hex chars
 	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 
-	apiKey, err := store.CreateAPIKey(c.Context(), req.Name, req.OrgID, req.TeamIDs, req.Operation, keyPrefix, keyHash)
+	apiKey, err := store.CreateAPIKey(c.Context(), req.Name, req.OrgID, req.TeamIDs, req.Operation, keyHash)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -94,7 +93,6 @@ func CreateAPIKey(c *fiber.Ctx) error {
 		"id":         apiKey.ID,
 		"name":       apiKey.Name,
 		"key":        key,
-		"key_prefix": apiKey.KeyPrefix,
 		"operation":  apiKey.Operation,
 		"created_at": apiKey.CreatedAt,
 	})

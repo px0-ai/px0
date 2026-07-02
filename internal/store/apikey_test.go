@@ -22,13 +22,12 @@ func TestCreateAPIKey(t *testing.T) {
 	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
 	require.NoError(t, err)
 
-	k, err := store.CreateAPIKey(ctx, "my-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_abc1", "hashvalue")
+	k, err := store.CreateAPIKey(ctx, "my-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "hashvalue")
 	require.NoError(t, err)
 	assert.NotEmpty(t, k.ID)
 	assert.Equal(t, "my-key", k.Name)
 	assert.Equal(t, org.ID, k.OrgID)
 	assert.Equal(t, tm.ID, *k.TeamID)
-	assert.Equal(t, "ak_abc1", k.KeyPrefix)
 	assert.Equal(t, "read_render", k.Operation)
 	assert.Nil(t, k.LastUsedAt)
 }
@@ -43,9 +42,9 @@ func TestListAPIKeys(t *testing.T) {
 	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
 	require.NoError(t, err)
 
-	_, err = store.CreateAPIKey(ctx, "key-a", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_aaa1", "hash1")
+	_, err = store.CreateAPIKey(ctx, "key-a", org.ID, []uuid.UUID{tm.ID}, "read_render", "hash1")
 	require.NoError(t, err)
-	_, err = store.CreateAPIKey(ctx, "key-b", org.ID, []uuid.UUID{tm.ID}, "all", "ak_bbb1", "hash2")
+	_, err = store.CreateAPIKey(ctx, "key-b", org.ID, []uuid.UUID{tm.ID}, "all", "hash2")
 	require.NoError(t, err)
 
 	keys, err := store.ListAPIKeysForOrg(ctx, org.ID)
@@ -75,7 +74,7 @@ func TestGetAPIKeyByHash(t *testing.T) {
 	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
 	require.NoError(t, err)
 
-	created, err := store.CreateAPIKey(ctx, "lookup-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_xyz1", "testhash")
+	created, err := store.CreateAPIKey(ctx, "lookup-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "testhash")
 	require.NoError(t, err)
 
 	got, err := store.GetAPIKeyByHash(ctx, "testhash")
@@ -103,7 +102,7 @@ func TestDeleteAPIKey(t *testing.T) {
 	tm, err := store.CreateTeamWithOrg(ctx, "Test Team", org.ID)
 	require.NoError(t, err)
 
-	k, err := store.CreateAPIKey(ctx, "del-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "ak_del1", "delhash")
+	k, err := store.CreateAPIKey(ctx, "del-key", org.ID, []uuid.UUID{tm.ID}, "read_render", "delhash")
 	require.NoError(t, err)
 
 	err = store.DeleteAPIKey(ctx, k.ID)
