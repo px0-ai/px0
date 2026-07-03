@@ -15,7 +15,7 @@ Ensure Docker and Docker Compose are installed on your machine.
 cp .env.example .env
 ```
 
-3. Open `.env` and set `RESEND_API_KEY=mock`. Setting this environment variable to `mock` bypasses email verification during registration, automatically verifying newly registered users. If you leave it empty, the Go API server will print the six-digit verification code to standard output, requiring you to retrieve it from the container logs and verify manually.
+3. Open `.env` and set `RESEND_API_KEY=mock`. Setting this environment variable to `mock` bypasses email verification during user registration, automatically marking newly registered users as verified immediately without generating or printing a code. (Note that for other flows—like password resets or resending verification codes—setting it to `mock` or leaving it empty will generate and print the six-digit code to standard output). If you leave `RESEND_API_KEY` empty during registration, the Go API server will generate a six-digit verification code and print it to standard output, requiring you to retrieve it from the container logs and verify manually.
 
 ## Orchestration Services
 
@@ -62,7 +62,9 @@ curl -i -X POST http://localhost:8000/v1/auth/register \
   -d '{"email": "hello@example.com", "password": "SecurePassword123!"}'
 ```
 
-If you configured `RESEND_API_KEY=mock` in your environment file, the user is verified immediately. If you left `RESEND_API_KEY` empty, retrieve the six-digit code from the container logs:
+If you configured `RESEND_API_KEY=mock` in your environment file, the user is verified immediately, and you can skip the manual verification step below. 
+
+If you left `RESEND_API_KEY` empty, retrieve the six-digit code from the container logs:
 
 ```bash
 docker compose logs app | grep EMAIL
@@ -71,7 +73,7 @@ docker compose logs app | grep EMAIL
 Then, submit the code to verify your account:
 
 ```bash
-curl -i -X POST http://localhost:8000/v1/auth/verify \
+curl -i -X POST http://localhost:8000/v1/auth/verify-email \
   -H "Content-Type: application/json" \
   -d '{"email": "hello@example.com", "code": "<retrieved_code>"}'
 ```
@@ -88,17 +90,140 @@ curl -i -X POST http://localhost:8000/v1/auth/login \
 
 Copy the token value from the JSON response to use in authenticated requests.
 
-### Step 4: Generate Repeat Requests
+### Step 4: Create and Render Your First Prompt with a Programmatic API Key (Token)
 
-Simulate continuous traffic by sending multiple request loops to the health check endpoint:
+With your session token (which starts with `sess_`), you can now make authenticated requests to configure your prompt infrastructure.
 
 ```bash
-for i in {1..20}; do curl -s http://localhost:8000/v1/health > /dev/null; sleep 0.1; done
+export PX0_ACCESS_TOKEN=<token>
 ```
+
+#### 1. Retrieve Your Organization and Team IDs
+We will query your self profile to find your organization and team IDs.
+
+##### Get Organization ID
+
+```bash
+curl -s -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  http://localhost:8000/v1/me/orgs
+```
+
+```bash
+export PX0_ORG_ID=org-id
+```
+
+##### Get Team ID:
+
+```bash
+curl -s -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  http://localhost:8000/v1/me/teams
+```
+
+```bash
+export PX0_TEAM_ID=team-id
+```
+
+#### 2. Create a Programmatic API Key (Token)
+Create a programmatic key with `all` or `read_render` operations. This acts as a machine/application token for rendering templates programmatically:
+
+```bash
+curl -i -X POST "http://localhost:8000/v1/api-keys" \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  --data @- <<EOF
+{
+  "name": "my-application-key",
+  "org_id": "${PX0_ORG_ID}",
+  "team_ids": ["${PX0_TEAM_ID}"],
+  "operation": "all"
+}
+EOF
+```
+
+```bash
+export PX0_API_KEY=api-key
+```
+
+#### 3. Create a Prompt
+
+Create a prompt container under your team. Note that passing a `slug` is optional; if omitted, the API will automatically generate and normalize a slug from the prompt's `name` (e.g. "Greeting Prompt" becomes `greeting_prompt`). Here, we explicitly define the slug as `greeting`:
+
+```bash
+curl -i -X POST http://localhost:8000/v1/teams/${PX0_TEAM_ID}/prompts \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Greeting Prompt", "slug": "greeting"}'
+```
+
+```bash
+export PX0_PROMPT_ID=prompt-id
+```
+
+#### 4. Create a Prompt Version (Template)
+
+Create a draft template version ([template syntax](https://docs.px0.ai/template-syntax)):
+
+```bash
+curl -i -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"template": "Hello, {{.name}}! Welcome to px0."}'
+```
+
+Note: We are making a note of integer version number and not prompt version ID below.
+
+```bash
+export PX0_PROMPT_VERSION_NUM=1
+```
+
+#### 5. Render Your Prompt Template
+Now, render your template by providing variables. You can render any version directly (even in draft status) or promote it to live and hit the live render endpoint.
+
+##### Option A: Render a specific version directly (works on drafts)
+Use your programmatic API key (or session token) to render version 1:
+
+```bash
+curl -i -X POST http://localhost:8000/v1/prompts/greeting/versions/${PX0_PROMPT_VERSION_NUM}/render \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"variables": {"name": "Alice"}}'
+```
+
+##### Option B: Promote the version and render the live endpoint
+First, promote your version twice to move it along the lifecycle: `draft` -> `stable` -> `live`:
+
+```bash
+# Promote from draft to stable
+curl -i -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions/${PX0_PROMPT_VERSION_NUM}/promote \
+  -H "Authorization: Bearer ${PX0_API_KEY}"
+
+# Promote from stable to live
+curl -i -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions/${PX0_PROMPT_VERSION_NUM}/promote \
+  -H "Authorization: Bearer ${PX0_API_KEY}"
+```
+
+Once live, anyone with the API key can render the current live prompt template without specifying a version number:
+
+```bash
+curl -i -X POST http://localhost:8000/v1/prompts/greeting/render \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"variables": {"name": "Bob"}}'
+```
+
+---
 
 ## Telemetry and Visualization
 
 The application emits metrics using the OpenTelemetry SDK. The metrics flow to the OpenTelemetry Collector, which exposes them on port 8889 for Prometheus to scrape.
+
+### Generating Repeat Requests for Metrics
+
+Before exploring metrics in dashboards, simulate continuous traffic by sending multiple request loops to the health check or render endpoints to populate the telemetry database:
+
+```bash
+for i in {1..20}; do curl -s http://localhost:8000/v1/health > /dev/null; sleep 0.1; done
+```
 
 ### Exploring Metrics in Prometheus
 

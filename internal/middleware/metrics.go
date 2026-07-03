@@ -93,9 +93,15 @@ func Metrics() fiber.Handler {
 
 		duration := time.Since(start).Seconds()
 
+		// Re-evaluate route path after c.Next() to get the actual matched route
+		matchedRoutePath := "unmatched"
+		if route := c.Route(); route != nil && route.Path != "" {
+			matchedRoutePath = route.Path
+		}
+
 		attrs := attribute.NewSet(
 			attribute.String("http.method", method),
-			attribute.String("http.route", routePath),
+			attribute.String("http.route", matchedRoutePath),
 			attribute.String("http.status_code", strconv.Itoa(statusCode)),
 		)
 
