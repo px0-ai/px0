@@ -6,20 +6,6 @@ This guide provides step-by-step instructions to configure the end-to-end teleme
 
 The `px0` stack uses standard cloud-native observability tools. Metrics from all core layers flow into `Prometheus` and are visualized in `Grafana` dashboards:
 
-```
-┌─────────────────┐       ┌────────────────────────┐
-│  Go API Server  │ ────> │ OpenTelemetry Collector│ ───┐
-└─────────────────┘ OTLP  └────────────────────────┘    │
-                                                        │
-┌─────────────────┐       ┌────────────────────────┐    │ Scrape
-│   PostgreSQL    │ <───  │   postgres-exporter    │ ───┼─> ┌────────────┐      ┌───────────┐
-└─────────────────┘ Query └────────────────────────┘    │   │ Prometheus │ ───> │  Grafana  │
-                                                        │   └────────────┘      └───────────┘
-┌─────────────────┐       ┌────────────────────────┐    │
-│      Redis      │ <───  │     redis-exporter     │ ───┘
-└─────────────────┘ Query └────────────────────────┘
-```
-
 - `Go API` Application Metrics: Emitted using the OpenTelemetry SDK via OTLP (gRPC) to the `otel-collector`, which exposes a Prometheus scraper endpoint.
 - `PostgreSQL` Database Metrics: Captured by the `postgres-exporter` which queries database statistics and exposes standard metrics.
 - `Redis` Caching Metrics: Captured by the `redis-exporter` which collects keyspace, memory, and connection statistics from Redis.

@@ -16,7 +16,7 @@ px0 is an open-source prompt infrastructure toolkit that lets you version, updat
 
 ## Getting Started
 
-Follow these steps to spin up the local services and send your first request. Refer to the [Getting Started Guide](get-started.md) for detailed verification and user registration instructions. For telemetry setup, metrics observation, and benchmarking details, refer to the [Telemetry and Benchmarking Guide](get-started-telemetry.md).
+Follow these steps to spin up the local services and send your first request. Refer to the [Getting Started Guide](get-started/get-started.md) for detailed verification and user registration instructions. For telemetry setup, metrics observation, and benchmarking details, refer to the [Telemetry and Benchmarking Guide](get-started/get-started-telemetry.md).
 
 ### 1. Start the Orchestration Services
 
@@ -48,7 +48,7 @@ Open the pre-configured observability dashboards in your browser.
 
 px0 includes a built-in concurrent load testing utility located at `cmd/loadtest/main.go`. This script automatically handles transaction-safe database setup, concurrent execution, and lock-free metric collection.
 
-Refer to the [Benchmarking and Performance Guide](benchmarking.md) for execution flags, metric details, and latency percentiles.
+Refer to the [Benchmarking and Performance Guide](get-started/get-started-benchmarking.md) for execution flags, metric details, and latency percentiles.
 
 ## Examples and SDKs
 
