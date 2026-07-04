@@ -16,7 +16,7 @@ px0 is an open-source prompt infrastructure toolkit that lets you version, updat
 
 ## Getting Started
 
-Follow these steps to spin up the local services and send your first request. Refer to the [Getting Started and Telemetry Guide](get-started.md) for detailed verification, user registration, and telemetry setup instructions.
+Follow these steps to spin up the local services and send your first request. Refer to the [Getting Started Guide](get-started.md) for detailed verification and user registration instructions. For telemetry setup, metrics observation, and benchmarking details, refer to the [Telemetry and Benchmarking Guide](get-started-telemetry.md).
 
 ### 1. Start the Orchestration Services
 

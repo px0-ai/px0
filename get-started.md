@@ -1,6 +1,6 @@
-# Getting Started and Telemetry Guide
+# Getting Started Guide
 
-This guide provides instructions to spin up the local services using Docker Compose, send test requests to the Go API server, and inspect the collected metrics in Prometheus and Grafana.
+This guide provides instructions to spin up the local services using Docker Compose, send test requests to the Go API server, manage users/prompts/versions, and render templates. For setting up telemetry, observing system metrics, and running benchmarks, see the [Telemetry and Benchmarking Guide](get-started-telemetry.md).
 
 ## Prerequisites
 
@@ -29,16 +29,17 @@ This command builds the Go application image, migrates the database, and boots u
 
 ## Port Mapping and Web UIs
 
-The following table lists the endpoints and interfaces exposed by the orchestrated services:
+When you boot the stack, the following services and endpoints are exposed locally:
 
 | Service | Port | Endpoint URL | Description |
 | --- | --- | --- | --- |
-| Go API Server | 8000 | http://localhost:8000 | The primary Go backend application built with Fiber |
-| Prometheus | 9090 | http://localhost:9090 | The metrics database scraping the OpenTelemetry Collector |
-| Grafana | 3000 | http://localhost:3000 | The visualization platform pre-loaded with dashboards |
-| PostgreSQL | 5432 | localhost:5432 | The main database storing users, sessions, and configurations |
-| Redis | 6379 | localhost:6379 | The caching and key-value store database |
-| OpenTelemetry Collector | 4317 | localhost:4317 | The gRPC receiver pipeline for application metrics |
+| Go API Server | `8000` | http://localhost:8000 | The primary Go backend application built with Fiber |
+| Prometheus | `9090` | http://localhost:9090 | The metrics database scraping all collector endpoints |
+| Grafana | `3000` | http://localhost:3000 | The visualization platform pre-loaded with provisioned dashboards |
+| OpenTelemetry Collector | `4317` / `4318` | localhost:4317 | The OTLP gRPC/HTTP receiver pipelines |
+| OTEL Prometheus Exporter | `8889` | http://localhost:8889 | Scraper endpoint for Go API server metrics |
+| PostgreSQL Exporter | `9187` | http://localhost:9187 | Scraper endpoint for PostgreSQL database metrics |
+| Redis Exporter | `9121` | http://localhost:9121 | Scraper endpoint for Redis cache metrics |
 
 ## Verification and Traffic Generation
 
@@ -213,79 +214,8 @@ curl -i -X POST http://localhost:8000/v1/prompts/greeting/render \
 
 ---
 
-## Telemetry and Visualization
+## Next Steps
 
-The application emits metrics using the OpenTelemetry SDK. The metrics flow to the OpenTelemetry Collector, which exposes them on port 8889 for Prometheus to scrape.
+Now that you have successfully set up local services and rendered a prompt template, you are ready to explore telemetry, visualize system behavior, and run high-concurrency benchmarks:
 
-### Generating Repeat Requests for Metrics
-
-Before exploring metrics in dashboards, simulate continuous traffic by sending multiple request loops to the health check or render endpoints to populate the telemetry database:
-
-```bash
-for i in {1..20}; do curl -s http://localhost:8000/v1/health > /dev/null; sleep 0.1; done
-```
-
-### Exploring Metrics in Prometheus
-
-Navigate to the Prometheus Expression Browser at http://localhost:9090.
-
-1. In the search bar, type `px0_http_server_requests_total` and click Execute. This displays the running total of HTTP requests.
-2. Type `px0_go_goroutine_count` to inspect active Go routine usage in the runtime container.
-3. Switch to the Graph tab to see these metrics charted over time.
-
-### Visualizing in Grafana
-
-Navigate to Grafana at http://localhost:3000. Anonymous login is enabled with Admin privileges by default, meaning you do not need credentials to access the dashboards.
-
-1. Click on Dashboards in the left navigation menu.
-2. Select the px0 folder.
-3. Click on px0 Service Dashboard.
-4. You will see pre-configured dashboards visualizing:
-   - HTTP Request Rate (RPS) broken down by method, route, and status code
-   - HTTP Latency (95th and 99th Percentile)
-   - Active and In-Flight Requests
-   - Go Goroutines count
-
-## Benchmarking the Render API
-
-The repository includes a self-contained Go loadtesting script located at `cmd/loadtest/main.go`. This script automatically handles database provisioning, concurrent API evaluation, and lock-free metric collection.
-
-### Running the Load Test
-
-1. Ensure the application and its database are running (e.g. `docker compose up -d`).
-2. Run the load test script from the root directory:
-
-```bash
-go run cmd/loadtest/main.go -concurrency 20 -duration 10
-```
-
-The script performs the following actions autonomously:
-
-- Establishes a connection to the PostgreSQL database.
-- Registers a temporary organization, team, scoped API Key, prompt, and a live prompt template version.
-- Validates the rendering endpoint connection through a pre-flight request.
-- Launches concurrent workers executing parallel `POST` requests to render the live prompt.
-- Gathers duration metrics for each individual request.
-- Safely cleans up all generated database entities.
-- Formats and displays latency and throughput metrics in a table.
-
-### Example Output
-
-When executed, the script prints an aligned console table similar to the following:
-
-```
-Metric                   | Value
-------                   | -----
-Concurrency              | 20 workers
-Benchmark Duration       | 10.00s
-Total Requests           | 24531
-Successful Requests      | 24531
-Failed Requests          | 0
-Request Throughput (RPS) | 2453.10 reqs/s
-Success Rate             | 100.00%
-Average Latency          | 8.12ms
-p50 (Median) Latency     | 7.21ms
-p90 Latency              | 12.04ms
-p95 Latency              | 15.67ms
-p99 Latency              | 22.18ms
-```
+- **[Telemetry and Benchmarking Guide](get-started-telemetry.md):** Learn how to observe system metrics (App, PostgreSQL, and Redis) in Prometheus and Grafana, configure dashboard provisioning, and run concurrent load tests.

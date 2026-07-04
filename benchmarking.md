@@ -26,7 +26,7 @@ Confirm that the Go API server is running and listening on port 8000:
 curl -i http://localhost:8000/v1/health
 ```
 
-For more details on setting up local services and accessing Prometheus or Grafana, see the [Getting Started and Telemetry Guide](get-started.md).
+For more details on setting up local services, see the [Getting Started Guide](get-started.md). For detailed setup instructions on accessing Prometheus or Grafana, see the [Telemetry and Benchmarking Guide](get-started-telemetry.md).
 
 ## Running the Benchmark
 
