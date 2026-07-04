@@ -254,3 +254,34 @@ func TestCreateAPIKey_AdminScope(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, respTeam.StatusCode)
 	respTeam.Body.Close()
 }
+
+func TestCreateAPIKey_TeamNotInOrg(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a) // system admin, org admin of "Default Test Org"
+
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+
+	// Create a second, unrelated organization and team.
+	otherOrg, err := store.CreateOrganization(ctx, "Other Org")
+	require.NoError(t, err)
+	otherTeam, err := store.CreateTeamWithOrg(ctx, "Other Team", otherOrg.ID)
+	require.NoError(t, err)
+
+	// Attempt to create an API key for the caller's own org, but scoped to a
+	// team that belongs to the unrelated org.
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"cross-org","org_id":%q,"team_ids":[%q]}`, orgID.String(), otherTeam.ID.String()), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	AssertContract(t, resp)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "team does not belong to the specified organization", body["error"])
+}
