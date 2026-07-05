@@ -14,6 +14,18 @@ paths:
         - API Keys
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Only standard user session tokens can create API keys; existing API keys cannot create or rotate other keys."
+        - "If team_ids is omitted or empty, the key is scoped to all teams in the organization."
+        - "Every supplied team_id must exist and belong to the specified org_id."
+      x-test-coverage:
+        - "TestCreateAPIKey_Success: Verifies key creation with an explicit team scope."
+        - "TestCreateAPIKey_MissingName: Verifies missing key name returns 400."
+        - "TestCreateAPIKey_RequiresAccessToken: Verifies API keys cannot create other API keys."
+        - "TestCreateAPIKey_GlobalScope: Verifies empty team_ids creates an org-wide key."
+        - "TestCreateAPIKey_AdminScope: Verifies admin operation keys can perform authorized admin actions."
+        - "TestCreateAPIKey_RejectsTeamOutsideOrg: Verifies teams from another organization are rejected."
+        - "TestCreateAPIKey_RejectsUnknownTeam: Verifies unknown team IDs are rejected."
       requestBody:
         required: true
         content:
@@ -41,6 +53,12 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Referenced team not found
           content:
             application/json:
               schema:
@@ -171,8 +189,10 @@ components:
         org_id:
           type: string
           format: uuid
+          description: Organization that owns the API key.
         team_ids:
           type: array
+          description: Optional list of teams the key can access. Omit or pass an empty array for organization-wide access.
           items:
             type: string
             format: uuid
