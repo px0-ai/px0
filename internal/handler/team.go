@@ -72,6 +72,11 @@ func CreateTeam(c *fiber.Ctx) error {
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
+
+	if err := store.AddTeamMember(c.Context(), team.ID, userID); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"team": team})
 }
 
