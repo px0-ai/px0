@@ -57,23 +57,18 @@ func CreateAPIKey(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	// If no teams are specified, default to all teams in the organization
-	if len(req.TeamIDs) == 0 {
-		// Fetch teams under the org
-		// Wait, we can list teams of the user or just keep it empty?
-		// Better return error or default if possible, let's keep it as req.TeamIDs.
-		// Wait, let's verify if teamIDs exist and belong to org if they are passed.
-		for _, teamID := range req.TeamIDs {
-			t, err := store.GetTeamByID(c.Context(), teamID)
-			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
-				}
-				return apierr.ErrInternalError.Respond(c, err)
+	// Empty team_ids intentionally creates an org-wide key. When teams are
+	// supplied, every team must exist and belong to the requested organization.
+	for _, teamID := range req.TeamIDs {
+		t, err := store.GetTeamByID(c.Context(), teamID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
 			}
-			if t.OrgID == nil || *t.OrgID != req.OrgID {
-				return apierr.NewAPIError(fiber.StatusBadRequest, "team does not belong to the specified organization").Respond(c)
-			}
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		if t.OrgID == nil || *t.OrgID != req.OrgID {
+			return apierr.NewAPIError(fiber.StatusBadRequest, "team does not belong to the specified organization").Respond(c)
 		}
 	}
 

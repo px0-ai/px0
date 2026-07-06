@@ -60,6 +60,63 @@ func TestCreateAPIKey_MissingName(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestCreateAPIKey_RejectsTeamOutsideOrg(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	require.NotNil(t, orgID)
+
+	otherOrg, err := store.CreateOrganization(ctx, "Unrelated Org")
+	require.NoError(t, err)
+	otherTeam, err := store.CreateTeamWithOrg(ctx, "Unrelated Team", otherOrg.ID)
+	require.NoError(t, err)
+
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"bad-scope","org_id":%q,"team_ids":[%q],"operation":"read_render"}`, orgID.String(), otherTeam.ID.String()), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	assert.Equal(t, "team does not belong to the specified organization", body["error"])
+
+	keys, err := store.ListAPIKeysForOrg(ctx, *orgID)
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
+func TestCreateAPIKey_RejectsUnknownTeam(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	require.NotNil(t, orgID)
+
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"missing-team","org_id":%q,"team_ids":[%q]}`, orgID.String(), "00000000-0000-0000-0000-000000000001"), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	assert.Equal(t, "team not found", body["error"])
+}
+
 func TestCreateAPIKey_RequiresAccessToken(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
