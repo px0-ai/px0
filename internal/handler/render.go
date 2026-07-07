@@ -85,7 +85,7 @@ func executeRender(c *fiber.Ctx, prompt *model.Prompt, version *model.PromptVers
 		req.Variables = map[string]any{}
 	}
 
-	tmpl, err := template.New("prompt").Parse(version.Template)
+	tmpl, err := template.New("prompt").Option("missingkey=error").Parse(version.Template)
 	if err != nil {
 		return apierr.ErrTemplateParseError.Respond(c, err)
 	}
