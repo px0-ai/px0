@@ -22,10 +22,12 @@ paths:
       x-edge-cases:
         - "Fails with 404 if no live version is found."
         - "Fails with 422 if template execution fails due to invalid parameters or template syntax mismatches."
+        - "Fails with 422 when the template references a variable that is not present in the request variables."
       x-test-coverage:
         - "TestRenderLive_Success: Verifies rendering with complete variables returning 200 OK."
         - "TestRenderLive_NoLiveVersion: Verifies that requesting a render with only 'draft' versions fails with 404 and 'no live version found for this prompt'."
         - "TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied."
+        - "TestRenderLive_MissingVariable: Verifies missing template variables fail with 422 instead of rendering placeholder text."
       requestBody:
         required: true
         content:
@@ -105,8 +107,11 @@ paths:
           description: Version sequence number (integer) or version tag (string) to render.
           schema:
             type: string
+      x-edge-cases:
+        - "Fails with 422 when the template references a variable that is not present in the request variables."
       x-test-coverage:
         - "TestRenderVersion_Draft: Verifies that rendering works on draft templates."
+        - "TestRenderVersion_MissingVariable: Verifies missing template variables fail with 422 for explicit version renders."
         - "TestRenderVersion_NotFound: Verifies 404 response if the requested version sequence number does not exist."
       requestBody:
         required: true

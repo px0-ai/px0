@@ -93,6 +93,38 @@ func TestRenderLive_NoVariables(t *testing.T) {
 	assert.Equal(t, "Static prompt with no variables.", body["rendered"])
 }
 
+func TestRenderLive_MissingVariable(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
+	setupVersion(t, a, token, id, "Hello, {{.name}}!")
+
+	req := newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		`{"variables":{}}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	errMsg, ok := body["error"].(string)
+	require.True(t, ok)
+	assert.Contains(t, errMsg, "template execution failed")
+}
+
 func TestRenderVersion_Draft(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
@@ -109,6 +141,26 @@ func TestRenderVersion_Draft(t *testing.T) {
 
 	body := decodeBody(t, resp)
 	assert.Equal(t, "Draft: hello", body["rendered"])
+}
+
+func TestRenderVersion_MissingVariable(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
+	setupVersion(t, a, token, id, "Draft: {{.msg}}")
+
+	req := newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/render", slug),
+		`{"variables":{}}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	errMsg, ok := body["error"].(string)
+	require.True(t, ok)
+	assert.Contains(t, errMsg, "template execution failed")
 }
 
 func TestRenderVersion_NotFound(t *testing.T) {
