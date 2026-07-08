@@ -605,6 +605,75 @@ func TestUpdatePrompt_Handler(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestDeletePrompt_Handler(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	// 1. Setup Admin Token & Team
+	adminToken := setupUser(t, a)
+	teamIDStr := setupUserTeam(t, adminToken)
+	teamID := uuid.MustParse(teamIDStr)
+
+	// Get admin session to match expiration
+	adminSession, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+
+	// 2. Setup Editor User & Token
+	editorUser, err := store.CreateVerifiedUser(ctx, "promptdeleteeditor@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, editorUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, editorUser.ID, "editor")
+	require.NoError(t, err)
+
+	editorSession, err := store.CreateSession(ctx, editorUser.ID, "sess_p_delete_editor", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	editorToken := editorSession.Token
+
+	// 3. Setup Viewer User & Token
+	viewerUser, err := store.CreateVerifiedUser(ctx, "promptdeleteviewer@px0.dev", "Password123!")
+	require.NoError(t, err)
+	err = store.AddTeamMember(ctx, teamID, viewerUser.ID)
+	require.NoError(t, err)
+	err = store.UpdateTeamMemberRole(ctx, teamID, viewerUser.ID, "viewer")
+	require.NoError(t, err)
+
+	viewerSession, err := store.CreateSession(ctx, viewerUser.ID, "sess_p_delete_viewer", adminSession.ExpiresAt)
+	require.NoError(t, err)
+	viewerToken := viewerSession.Token
+
+	// 4. Create prompt as editor
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr),
+		`{"name":"Delete Test Prompt","description":"Initial description"}`, editorToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	promptID := body["prompt"].(map[string]any)["id"].(string)
+	resp.Body.Close()
+
+	// 5. Viewer cannot delete prompt (Forbidden)
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", viewerToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Editor can delete prompt (Success)
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	// 7. Try to delete already deleted prompt (Not Found)
+	req = newReq(t, http.MethodDelete, fmt.Sprintf("/v1/prompts/%s", promptID), "", editorToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
 func TestRestorePrompt(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)

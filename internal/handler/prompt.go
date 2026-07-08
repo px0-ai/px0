@@ -389,6 +389,41 @@ func UpdatePrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
+func DeletePrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if err := store.DeletePrompt(c.Context(), id, editorTeamIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	search.Get().Deindex(c.Context(), id)
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func RestorePrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {

@@ -190,6 +190,22 @@ func RestorePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error
 	return nil
 }
 
+func DeletePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error {
+	_, err := GetPromptByID(ctx, id, teamIDs)
+	if err != nil {
+		return err // ErrNotFound if not found or no access
+	}
+
+	result, err := db.Pool.Exec(ctx, "DELETE FROM prompts WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("delete prompt: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func MovePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, targetTeamID uuid.UUID) error {
 	_, err := GetPromptByID(ctx, id, teamIDs)
 	if err != nil {

@@ -80,6 +80,7 @@ func New() *fiber.App {
 	prompts.Get("", handler.ListAllPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
 	prompts.Put("/:id", handler.UpdatePrompt)
+	prompts.Delete("/:id", handler.DeletePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
 	prompts.Post("/:id/restore", handler.RestorePrompt)
 	prompts.Post("/:id/move", handler.MovePrompt)

@@ -260,3 +260,32 @@ func TestUpdatePrompt(t *testing.T) {
 	_, err = store.UpdatePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID}, "Updated description")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestDeletePrompt(t *testing.T) {
+	ctx := context.Background()
+	testutil.SetupDB(t)
+
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	p, err := store.CreatePrompt(ctx, tm.ID, "my_prompt", "My Prompt", "Initial description")
+	require.NoError(t, err)
+
+	// 1. Not found / Unauthorized team delete
+	otherTeam, err := store.CreateTeam(ctx, "Other Team")
+	require.NoError(t, err)
+	err = store.DeletePrompt(ctx, p.ID, []uuid.UUID{otherTeam.ID})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// 2. Success delete
+	err = store.DeletePrompt(ctx, p.ID, []uuid.UUID{tm.ID})
+	require.NoError(t, err)
+
+	// Verify it's actually deleted
+	_, err = store.GetPromptByID(ctx, p.ID, []uuid.UUID{tm.ID})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// 3. Try deleting non-existent prompt
+	err = store.DeletePrompt(ctx, nonExistentUUID(), []uuid.UUID{tm.ID})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}

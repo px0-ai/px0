@@ -2016,6 +2016,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+    delete:
+      summary: Delete a Prompt
+      description: Hard deletes a specific prompt by its unique UUID.
+      operationId: deletePrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the prompt.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - 'Forbidden: Attempting to delete a prompt with viewer permissions.'
+        - 'NotFound: Attempting to delete a non-existent prompt ID or a prompt under an unauthorized team.'
+      x-test-coverage:
+        - 'TestDeletePrompt_Success: Verifies deleting with editor token.'
+        - 'TestDeletePrompt_ViewerForbidden: Verifies viewer gets a 403 response.'
+        - 'TestDeletePrompt_NotFound: Verifies 404 response on missing prompt ID.'
+      responses:
+        '204':
+          description: Prompt deleted successfully
+        '400':
+          description: Invalid input or invalid UUID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden - Viewer or unauthorized team member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/archive:
     post:
       summary: Archive a Prompt
