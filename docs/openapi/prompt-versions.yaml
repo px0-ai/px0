@@ -914,8 +914,11 @@ components:
         model:
           type: string
           nullable: true
-          description: Optional model name intended to execute this prompt version.
-          example: gpt-4.1
+          description: |
+            Optional model spec intended to execute this prompt version.
+            Recommended format is `provider/model?key=value&key=value`, where query
+            parameters can carry provider-specific options such as temperature or token limits.
+          example: anthropic/opus-4.6?temp=0.7&max_tokens=1024
         created_at:
           type: string
           format: date-time
@@ -947,8 +950,11 @@ components:
           example: "Hello, {{.name}}!"
         model:
           type: string
-          description: Optional model name intended to execute this prompt version.
-          example: gpt-4.1
+          description: |
+            Optional model spec intended to execute this prompt version.
+            Recommended format is `provider/model?key=value&key=value`, where query
+            parameters can carry provider-specific options such as temperature or token limits.
+          example: anthropic/opus-4.6?temp=0.7&max_tokens=1024
       required:
         - template
     UpdateVersionRequest:
@@ -959,5 +965,8 @@ components:
           example: "Hello, {{.name}}! Count is {{.count}}."
         model:
           type: string
-          description: Optional model name intended to execute this prompt version.
-          example: gpt-4.1-mini
+          description: |
+            Optional model spec intended to execute this prompt version.
+            Recommended format is `provider/model?key=value&key=value`, where query
+            parameters can carry provider-specific options such as temperature or token limits.
+          example: openai/gpt-4.1-mini?temp=0.2
