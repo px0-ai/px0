@@ -40,7 +40,8 @@ func SetTag(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	prompt, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -80,6 +81,8 @@ func SetTag(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	syncPromptSearchIndex(c.Context(), prompt)
+
 	return c.JSON(fiber.Map{"version": updatedVersion})
 }
 
@@ -110,7 +113,8 @@ func RemoveTag(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	prompt, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -124,6 +128,8 @@ func RemoveTag(c *fiber.Ctx) error {
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
+
+	syncPromptSearchIndex(c.Context(), prompt)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }

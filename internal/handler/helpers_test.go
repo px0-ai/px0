@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/px0-ai/px0/internal/app"
+	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/store"
 	"github.com/px0-ai/px0/internal/testutil"
 )
@@ -45,6 +46,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	t.Setenv("RESEND_API_KEY", "")
 	testutil.SetupDB(t)
+	search.Init(search.NoopProvider{})
 	return &testApp{
 		App: app.New(),
 		t:   t,

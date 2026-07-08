@@ -10,6 +10,8 @@ import (
 	"github.com/px0-ai/px0/internal/app"
 	"github.com/px0-ai/px0/internal/db"
 	"github.com/px0-ai/px0/internal/rdb"
+	"github.com/px0-ai/px0/internal/search"
+	"github.com/px0-ai/px0/internal/searchfactory"
 	"github.com/px0-ai/px0/internal/telemetry"
 )
 
@@ -40,6 +42,12 @@ func main() {
 		log.Printf("warn: redis unavailable, sessions will not be cached: %v", err)
 	}
 	defer rdb.Close()
+
+	if p, err := searchfactory.NewProvider(ctx); err != nil {
+		log.Printf("warn: search provider unavailable, search is disabled: %v", err)
+	} else {
+		search.Init(p)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

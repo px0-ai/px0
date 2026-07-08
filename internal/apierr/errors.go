@@ -21,7 +21,11 @@ func (e *APIError) Error() string {
 // Respond sends the API error as a JSON response using the configured structure.
 func (e *APIError) Respond(c *fiber.Ctx, errs ...error) error {
 	if len(errs) > 0 && errs[0] != nil {
-		log.Printf("[ERROR] status=%d method=%s path=%s err=%v msg=%s", e.Status, c.Method(), c.Path(), errs[0], e.Message)
+		if e.Status >= 500 {
+			log.Printf("[ERROR] status=%d method=%s path=%s err=%v msg=%s", e.Status, c.Method(), c.Path(), errs[0], e.Message)
+		} else {
+			log.Printf("[WARN] status=%d method=%s path=%s err=%v msg=%s", e.Status, c.Method(), c.Path(), errs[0], e.Message)
+		}
 	} else if e.Status >= 500 {
 		log.Printf("[ERROR] status=%d method=%s path=%s msg=%s", e.Status, c.Method(), c.Path(), e.Message)
 	} else if e.Status >= 400 {

@@ -65,9 +65,44 @@ func GetSessionByToken(ctx context.Context, token string) (*model.Session, error
 // DeleteSession removes the session from Postgres and evicts it from the cache
 // so a logged-out token cannot be replayed via a stale cache entry.
 func DeleteSession(ctx context.Context, token string) error {
-	evictSession(ctx, token)
 	_, err := db.Pool.Exec(ctx, "DELETE FROM sessions WHERE token = $1", token)
-	return err
+	if err != nil {
+		return err
+	}
+	evictSession(ctx, token)
+	return nil
+}
+
+// DeleteSessionsByUserID removes all sessions for a user from Postgres and evicts them from the cache.
+func DeleteSessionsByUserID(ctx context.Context, userID uuid.UUID) error {
+	rows, err := db.Pool.Query(ctx, "SELECT token FROM sessions WHERE user_id = $1", userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var tokens []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return err
+		}
+		tokens = append(tokens, t)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.Pool.Exec(ctx, "DELETE FROM sessions WHERE user_id = $1", userID)
+	if err != nil {
+		return err
+	}
+
+	for _, t := range tokens {
+		evictSession(ctx, t)
+	}
+
+	return nil
 }
 
 // sessionFromCache returns a session from Redis or nil on any miss/error.

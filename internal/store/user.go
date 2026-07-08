@@ -159,7 +159,7 @@ func GetPasswordResetByCode(ctx context.Context, code string) (uuid.UUID, time.T
 	var userID uuid.UUID
 	var expiresAt time.Time
 	err := db.Pool.QueryRow(ctx,
-		`SELECT user_id, expires_at FROM password_resets WHERE code = $1`,
+		`SELECT user_id, expires_at FROM password_resets WHERE code = $1 AND expires_at > NOW()`,
 		code,
 	).Scan(&userID, &expiresAt)
 	if err != nil {
@@ -179,6 +179,11 @@ func UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash stri
 	if err != nil {
 		return fmt.Errorf("update user password: %w", err)
 	}
+	
+	if err := DeleteSessionsByUserID(ctx, userID); err != nil {
+		return fmt.Errorf("delete user sessions: %w", err)
+	}
+
 	return nil
 }
 
@@ -220,6 +225,10 @@ func UpdateUserEmail(ctx context.Context, id uuid.UUID, email string) error {
 }
 
 func DeleteUser(ctx context.Context, id uuid.UUID) error {
+	if err := DeleteSessionsByUserID(ctx, id); err != nil {
+		return fmt.Errorf("delete user sessions: %w", err)
+	}
+
 	_, err := db.Pool.Exec(ctx,
 		`DELETE FROM users WHERE id = $1`,
 		id,

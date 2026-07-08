@@ -92,6 +92,22 @@ paths:
           description: Optional boolean to filter prompts by archive state.
           schema:
             type: boolean
+        - name: q
+          in: query
+          required: false
+          description: >
+            Full-text search query. When provided, results are filtered and ranked
+            by relevance across prompt name, description, and slug using
+            PostgreSQL Full-Text Search. When absent, returns the unranked list.
+          schema:
+            type: string
+            example: "summarize text"
+      x-edge-cases:
+        - "When ?q= is absent or empty, falls back to the standard listing path with no change in behaviour."
+        - "When ?q= is present and no results match, returns an empty array (not 404)."
+        - "Tags filtering at list endpoints is not part of the current API contract (out of scope)."
+        - "Pagination is deferred — no Limit/Offset/TotalCount yet."
+        - "Score is internal-only; not exposed in the API response."
       x-test-coverage:
         - "TestListPrompts: Verifies listing populated prompt containers."
         - "TestListPrompts_Empty: Verifies that listing when empty returns an empty array."
@@ -156,9 +172,24 @@ paths:
           description: Optional boolean to filter prompts by archive state.
           schema:
             type: boolean
+        - name: q
+          in: query
+          required: false
+          description: >
+            Full-text search query. When provided, results are filtered and ranked
+            by relevance across prompt name, description, and slug using
+            PostgreSQL Full-Text Search. When absent, returns the unranked list.
+          schema:
+            type: string
+            example: "summarize text"
       x-edge-cases:
         - "By default with no team_id query parameter, returns an empty list of prompts."
         - "If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden."
+        - "When ?q= is absent or empty, falls back to the standard listing path with no change in behaviour."
+        - "When ?q= is present and no results match, returns an empty array (not 404)."
+        - "Tags filtering at list endpoints is not part of the current API contract (out of scope)."
+        - "Pagination is deferred — no Limit/Offset/TotalCount yet."
+        - "Score is internal-only; not exposed in the API response."
       x-test-coverage:
         - "TestListAllPrompts: Verifies that no team_id returns 200 with an empty list."
         - "TestListAllPrompts: Verifies that a valid team_id returns 200 with prompts of that team."

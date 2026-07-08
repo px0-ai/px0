@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/px0-ai/px0/internal/search"
+	"github.com/px0-ai/px0/internal/searchfactory"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -64,6 +66,8 @@ func TestCreatePrompt_Conflict(t *testing.T) {
 	resp.Body.Close()
 
 	// 1. Conflict on name
+	// Note: It is intentional that name/slug reuse is blocked globally across all statuses (including archived).
+	// This ensures `GET /v1/prompts/:slug` remains stable and never returns multiple rows or ambiguous results for historical lookups.
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
 		`{"name":"Unique Name","description":"different"}`, token)
 	resp, err = a.Test(req)
@@ -139,6 +143,65 @@ func TestListPrompts_Empty(t *testing.T) {
 	body := decodeBody(t, resp)
 	prompts := body["prompts"].([]any)
 	assert.Empty(t, prompts)
+}
+
+func TestListPrompts_Filters(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Create prompt 1: "billing"
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Support Bot","description":"Handles billing issues"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	// Create prompt 2: "technical"
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Tech Bot","description":"Handles technical issues"}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+
+	body := decodeBody(t, resp)
+	techPromptID := body["prompt"].(map[string]any)["id"].(string)
+
+	// 1. Search with Q=billing
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=billing", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts := body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, "Support Bot", prompts[0].(map[string]any)["name"])
+
+	// 2. Archive tech prompt
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", techPromptID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Default search (should only return active: Support Bot)
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, "Support Bot", prompts[0].(map[string]any)["name"])
+
+	// 4. Search with archived=true
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?archived=true", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+	assert.Equal(t, "Tech Bot", prompts[0].(map[string]any)["name"])
 }
 
 func TestGetPrompt_Success(t *testing.T) {
@@ -623,3 +686,108 @@ func TestDiffVersions(t *testing.T) {
 	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
 	resp.Body.Close()
 }
+
+func TestSearchPrompts_FTS(t *testing.T) {
+	// Enable postgres search provider for this test
+	t.Setenv("SEARCH_PROVIDER", "postgres")
+
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Build the real Postgres provider and wire it to search.Default
+	ctx := context.Background()
+	p, err := searchfactory.NewProvider(ctx)
+	require.NoError(t, err)
+	search.Init(p)
+
+	// Clean up global state after test
+	t.Cleanup(func() {
+		search.Init(search.NoopProvider{})
+	})
+
+	// Create 3 prompts with differing names/descriptions/status
+	// 1. Matches "database" in name (Highest rank)
+	req1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Relational Database Tutorial","description":"A guide to tables."}`, token)
+	resp1, err := a.Test(req1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp1.StatusCode)
+	resp1.Body.Close()
+
+	// 2. Matches "database" in description (Medium rank)
+	req2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Active Record Guide","description":"How to query the database."}`, token)
+	resp2, err := a.Test(req2)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp2.StatusCode)
+	resp2.Body.Close()
+
+	// 3. Matches "database" in description, but is archived
+	req3 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"Legacy System Docs","description":"Details about old database."}`, token)
+	resp3, err := a.Test(req3)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp3.StatusCode)
+	body3 := decodeBody(t, resp3)
+	p3ID := body3["prompt"].(map[string]any)["id"].(string)
+	resp3.Body.Close()
+
+	// Archive the third prompt
+	reqArch := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", p3ID), "", token)
+	respArch, err := a.Test(reqArch)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respArch.StatusCode)
+	respArch.Body.Close()
+
+	// --- Query 0: Search "database" with NO status filter → defaults to active, so 2 matches returned ---
+	reqSearch0 := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=database", teamID), "", token)
+	respSearch0, err := a.Test(reqSearch0)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respSearch0.StatusCode)
+	bodySearch0 := decodeBody(t, respSearch0)
+	prompts0 := bodySearch0["prompts"].([]any)
+	// No status filter → defaults to active
+	require.Len(t, prompts0, 2)
+	respSearch0.Body.Close()
+
+	// --- Query 1: Search "database" with status=active → only the 2 active prompts, rank-ordered ---
+	reqSearch1 := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=database&status=active", teamID), "", token)
+	respSearch1, err := a.Test(reqSearch1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respSearch1.StatusCode)
+
+	bodySearch1 := decodeBody(t, respSearch1)
+	prompts1 := bodySearch1["prompts"].([]any)
+	require.Len(t, prompts1, 2)
+
+	// Rank order: Prompt 1 ("Relational Database Tutorial") matches "database" in Name (Weight A).
+	// Prompt 2 ("Active Record Guide") matches in Description (Weight B). Prompt 1 must rank first.
+	assert.Equal(t, "Relational Database Tutorial", prompts1[0].(map[string]any)["name"])
+	assert.Equal(t, "Active Record Guide", prompts1[1].(map[string]any)["name"])
+	respSearch1.Body.Close()
+
+	// --- Query 2: Search for "database" with status=archived (should return the archived matching prompt) ---
+	reqSearch2 := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=database&status=archived", teamID), "", token)
+	respSearch2, err := a.Test(reqSearch2)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respSearch2.StatusCode)
+
+	bodySearch2 := decodeBody(t, respSearch2)
+	prompts2 := bodySearch2["prompts"].([]any)
+	require.Len(t, prompts2, 1)
+	assert.Equal(t, "Legacy System Docs", prompts2[0].(map[string]any)["name"])
+	assert.Equal(t, p3ID, prompts2[0].(map[string]any)["id"].(string))
+	respSearch2.Body.Close()
+
+	// --- Query 3: Search for "database" with no matches ---
+	reqSearch3 := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=nonexistentkeyword", teamID), "", token)
+	respSearch3, err := a.Test(reqSearch3)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respSearch3.StatusCode)
+
+	bodySearch3 := decodeBody(t, respSearch3)
+	assert.Empty(t, bodySearch3["prompts"].([]any))
+	respSearch3.Body.Close()
+}
+

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -92,6 +94,9 @@ func CreatePrompt(c *fiber.Ctx) error {
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
+
+	syncPromptSearchIndex(c.Context(), prompt)
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"prompt": prompt})
 }
 
@@ -117,17 +122,36 @@ func ListPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	var status *string
-	statusStr := c.Query("status")
-	if statusStr != "" {
-		status = &statusStr
-	}
+	status, archived := parsePromptStatusFilter(c)
 
-	var archived *bool
-	archivedStr := c.Query("archived")
-	if archivedStr != "" {
-		if val, err := strconv.ParseBool(archivedStr); err == nil {
-			archived = &val
+	// Full-text search path: when ?q= is provided, route through the search provider.
+	// Falls back to store.ListPrompts when q is empty (preserves existing behaviour)
+	// or when the provider is a NoopProvider (returns search.ErrNotImplemented).
+	if q := c.Query("q"); q != "" {
+		results, err := search.Get().Search(c.Context(), search.SearchQuery{
+			Q:       q,
+			TeamIDs: []uuid.UUID{teamID},
+			Status:  status,
+		})
+		if err != nil {
+			if errors.Is(err, search.ErrNotImplemented) {
+				// Provider is a NoopProvider; fall through to the store layer below.
+			} else {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		} else {
+			if len(results) == 0 {
+				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+			}
+			ids := make([]uuid.UUID, len(results))
+			for i, r := range results {
+				ids[i] = r.PromptID
+			}
+			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+			return c.JSON(fiber.Map{"prompts": prompts})
 		}
 	}
 
@@ -135,6 +159,7 @@ func ListPrompts(c *fiber.Ctx) error {
 		TeamIDs:  []uuid.UUID{teamID},
 		Archived: archived,
 		Status:   status,
+		Q:        c.Query("q"),
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -230,6 +255,8 @@ func ArchivePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	_ = search.Get().Deindex(c.Context(), id)
+
 	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -269,17 +296,34 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	var status *string
-	statusStr := c.Query("status")
-	if statusStr != "" {
-		status = &statusStr
-	}
+	status, archived := parsePromptStatusFilter(c)
 
-	var archived *bool
-	archivedStr := c.Query("archived")
-	if archivedStr != "" {
-		if val, err := strconv.ParseBool(archivedStr); err == nil {
-			archived = &val
+	// Full-text search path: when ?q= is provided, route through the search provider.
+	if q := c.Query("q"); q != "" {
+		results, err := search.Get().Search(c.Context(), search.SearchQuery{
+			Q:       q,
+			TeamIDs: []uuid.UUID{teamID},
+			Status:  status,
+		})
+		if err != nil {
+			if errors.Is(err, search.ErrNotImplemented) {
+				// Provider is a NoopProvider; fall through to the store layer below.
+			} else {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		} else {
+			if len(results) == 0 {
+				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+			}
+			ids := make([]uuid.UUID, len(results))
+			for i, r := range results {
+				ids[i] = r.PromptID
+			}
+			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+			return c.JSON(fiber.Map{"prompts": prompts})
 		}
 	}
 
@@ -287,6 +331,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		TeamIDs:  []uuid.UUID{teamID},
 		Archived: archived,
 		Status:   status,
+		Q:        c.Query("q"),
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -339,6 +384,8 @@ func UpdatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	syncPromptSearchIndex(c.Context(), prompt)
+
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
@@ -376,6 +423,9 @@ func RestorePrompt(c *fiber.Ctx) error {
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
+
+	syncPromptSearchIndex(c.Context(), prompt)
+
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
@@ -488,6 +538,9 @@ func MovePrompt(c *fiber.Ctx) error {
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
+
+	syncPromptSearchIndex(c.Context(), prompt)
+
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
@@ -561,4 +614,61 @@ func DiffVersions(c *fiber.Ctx) error {
 		"to_template":   toVersion.Template,
 		"diff":          diffText,
 	})
+}
+
+// syncPromptSearchIndex is a helper to push the latest prompt state and tags to the search provider.
+// It is called in a fire-and-forget manner during prompt mutations.
+func syncPromptSearchIndex(ctx context.Context, prompt *model.Prompt) {
+	tagMap, _ := store.GetTagsForPrompt(ctx, prompt.ID)
+	uniqueTags := make(map[string]bool)
+	for _, tags := range tagMap {
+		for _, tag := range tags {
+			uniqueTags[tag] = true
+		}
+	}
+	var tagList []string
+	for tag := range uniqueTags {
+		tagList = append(tagList, tag)
+	}
+
+	_ = search.Get().Index(ctx, search.IndexablePrompt{
+		ID:          prompt.ID,
+		TeamID:      prompt.TeamID,
+		Name:        prompt.Name,
+		Description: prompt.Description,
+		Slug:        prompt.Slug,
+		Status:      prompt.Status,
+		Tags:        tagList,
+	})
+}
+
+// parsePromptStatusFilter normalizes status and archived query parameters into 
+// a robust Status pointer (which universally propagates to FTS and DB fallbacks)
+// and an Archived boolean (for store.ListPrompts backwards-compatibility).
+func parsePromptStatusFilter(c *fiber.Ctx) (*string, *bool) {
+	var status *string
+	statusStr := c.Query("status")
+	if statusStr != "" {
+		status = &statusStr
+	}
+
+	var archived *bool
+	archivedStr := c.Query("archived")
+	if archivedStr != "" {
+		if val, err := strconv.ParseBool(archivedStr); err == nil {
+			archived = &val
+		}
+	}
+
+	// If status is explicitly provided, it always wins (FTS and store both prioritize it).
+	// If no status is provided, we must derive it from archived, or default to "active".
+	if statusStr == "" {
+		val := "active"
+		if archived != nil && *archived {
+			val = "archived"
+		}
+		status = &val
+	}
+
+	return status, archived
 }
