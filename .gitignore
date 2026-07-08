@@ -3,3 +3,6 @@ tmp/
 .env
 *.test
 *.out
+.agents/
+*.exe
+test-output.txt
