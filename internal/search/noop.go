@@ -15,9 +15,6 @@ var _ Provider = NoopProvider{}
 type NoopProvider struct{}
 
 func (NoopProvider) Search(_ context.Context, q SearchQuery) ([]SearchResult, error) {
-	if q.Vector != nil {
-		return nil, ErrVectorSearchNotSupported
-	}
 	return nil, ErrNotImplemented
 }
 

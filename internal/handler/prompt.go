@@ -25,6 +25,25 @@ type createPromptRequest struct {
 	Slug        string `json:"slug"`
 }
 
+// parseVectorParam parses a comma-separated float32 slice from a query string value.
+// Returns nil if the string is empty, or an error if any token is not a valid float.
+func parseVectorParam(raw string) ([]float32, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	vec := make([]float32, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		f, err := strconv.ParseFloat(p, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid vector value %q: %w", p, err)
+		}
+		vec = append(vec, float32(f))
+	}
+	return vec, nil
+}
+
 func NormalizeSlug(s string) string {
 	s = strings.ToLower(s)
 	var sb strings.Builder
@@ -124,10 +143,50 @@ func ListPrompts(c *fiber.Ctx) error {
 
 	status, archived := parsePromptStatusFilter(c)
 
-	// Full-text search path: when ?q= is provided, route through the search provider.
-	// Falls back to store.ListPrompts when q is empty (preserves existing behaviour)
-	// or when the provider is a NoopProvider (returns search.ErrNotImplemented).
-	if q := c.Query("q"); q != "" {
+	// Full-text search and vector search path.
+	// Vector takes precedence if provided.
+	vectorRaw := c.Query("vector")
+	vector, err := parseVectorParam(vectorRaw)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid vector parameter: "+err.Error()).Respond(c)
+	}
+
+	topK := 10
+	if k := c.QueryInt("top_k", 10); k > 0 {
+		topK = k
+	}
+
+	if vector != nil {
+		results, err := search.Get().Search(c.Context(), search.SearchQuery{
+			Vector:  vector,
+			TopK:    topK,
+			TeamIDs: []uuid.UUID{teamID},
+			Status:  status,
+		})
+		if err != nil {
+			if errors.Is(err, search.ErrVectorSearchNotSupported) {
+				return apierr.NewAPIError(fiber.StatusBadRequest, "vector search not supported by the active search provider").Respond(c)
+			}
+			if errors.Is(err, search.ErrNotImplemented) {
+				// Provider is a NoopProvider; fall through to the store layer below.
+			} else {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		} else {
+			if len(results) == 0 {
+				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+			}
+			ids := make([]uuid.UUID, len(results))
+			for i, r := range results {
+				ids[i] = r.PromptID
+			}
+			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+			return c.JSON(fiber.Map{"prompts": prompts})
+		}
+	} else if q := c.Query("q"); q != "" {
 		results, err := search.Get().Search(c.Context(), search.SearchQuery{
 			Q:       q,
 			TeamIDs: []uuid.UUID{teamID},
@@ -298,8 +357,50 @@ func ListAllPrompts(c *fiber.Ctx) error {
 
 	status, archived := parsePromptStatusFilter(c)
 
-	// Full-text search path: when ?q= is provided, route through the search provider.
-	if q := c.Query("q"); q != "" {
+	// Full-text search and vector search path.
+	// Vector takes precedence if provided.
+	vectorRaw := c.Query("vector")
+	vector, err := parseVectorParam(vectorRaw)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid vector parameter: "+err.Error()).Respond(c)
+	}
+
+	topK := 10
+	if k := c.QueryInt("top_k", 10); k > 0 {
+		topK = k
+	}
+
+	if vector != nil {
+		results, err := search.Get().Search(c.Context(), search.SearchQuery{
+			Vector:  vector,
+			TopK:    topK,
+			TeamIDs: []uuid.UUID{teamID},
+			Status:  status,
+		})
+		if err != nil {
+			if errors.Is(err, search.ErrVectorSearchNotSupported) {
+				return apierr.NewAPIError(fiber.StatusBadRequest, "vector search not supported by the active search provider").Respond(c)
+			}
+			if errors.Is(err, search.ErrNotImplemented) {
+				// Provider is a NoopProvider; fall through to the store layer below.
+			} else {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+		} else {
+			if len(results) == 0 {
+				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+			}
+			ids := make([]uuid.UUID, len(results))
+			for i, r := range results {
+				ids[i] = r.PromptID
+			}
+			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+			return c.JSON(fiber.Map{"prompts": prompts})
+		}
+	} else if q := c.Query("q"); q != "" {
 		results, err := search.Get().Search(c.Context(), search.SearchQuery{
 			Q:       q,
 			TeamIDs: []uuid.UUID{teamID},

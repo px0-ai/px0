@@ -860,3 +860,35 @@ func TestSearchPrompts_FTS(t *testing.T) {
 	respSearch3.Body.Close()
 }
 
+func TestListPrompts_InvalidVector(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?vector=abc", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "invalid vector parameter")
+}
+
+func TestListPrompts_VectorUnsupportedProvider(t *testing.T) {
+	// Active provider is NoopProvider by default in tests
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?vector=0.1,0.2,0.3", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	// Should fall back to store.ListPrompts and return OK
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	prompts := body["prompts"].([]any)
+	assert.Len(t, prompts, 1)
+}
+
