@@ -28,6 +28,7 @@ paths:
         - "TestRenderLive_NoLiveVersion: Verifies that requesting a render with only 'draft' versions fails with 404 and 'no live version found for this prompt'."
         - "TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied."
         - "TestRenderLive_MissingVariable: Verifies missing template variables fail with 422 instead of rendering placeholder text."
+        - "TestRenderLive_IncludesModel: Verifies render responses include the prompt version model."
       requestBody:
         required: true
         content:
@@ -189,8 +190,14 @@ components:
           items:
             type: string
           description: List of tag strings assigned to this version.
+        model:
+          type: string
+          nullable: true
+          description: Optional model name intended to execute this prompt version.
+          example: gpt-4.1
       required:
         - rendered
         - version
         - slug
         - tags
+        - model

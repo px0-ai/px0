@@ -39,6 +39,23 @@ func TestCreateVersion(t *testing.T) {
 	assert.Equal(t, 2, v2.Version)
 }
 
+func TestCreateVersionWithModel(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+
+	versionModel := "gpt-4.1"
+	v, err := store.CreateVersionWithModel(ctx, p.ID, "template content", &versionModel)
+	require.NoError(t, err)
+	require.NotNil(t, v.Model)
+	assert.Equal(t, versionModel, *v.Model)
+
+	got, err := store.GetVersion(ctx, p.ID, v.Version)
+	require.NoError(t, err)
+	require.NotNil(t, got.Model)
+	assert.Equal(t, versionModel, *got.Model)
+}
+
 func TestListVersions(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
@@ -153,6 +170,36 @@ func TestUpdateVersionTemplate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "updated", updated.Template)
 	assert.Equal(t, model.VersionStatusDraft, updated.Status)
+}
+
+func TestUpdateVersionModel(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+	v, err := store.CreateVersion(ctx, p.ID, "original")
+	require.NoError(t, err)
+
+	versionModel := "gpt-4.1-mini"
+	updated, err := store.UpdateVersionDraft(ctx, v.ID, nil, &versionModel)
+	require.NoError(t, err)
+	assert.Equal(t, "original", updated.Template)
+	require.NotNil(t, updated.Model)
+	assert.Equal(t, versionModel, *updated.Model)
+}
+
+func TestDuplicateVersionCopiesModel(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	p := newPrompt(t, ctx)
+	versionModel := "gpt-4.1"
+	_, err := store.CreateVersionWithModel(ctx, p.ID, "original", &versionModel)
+	require.NoError(t, err)
+
+	duplicated, err := store.DuplicateVersion(ctx, p.ID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "original", duplicated.Template)
+	require.NotNil(t, duplicated.Model)
+	assert.Equal(t, versionModel, *duplicated.Model)
 }
 
 func TestUpdateVersionTemplate_NonDraftRejected(t *testing.T) {

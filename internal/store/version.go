@@ -15,6 +15,10 @@ import (
 )
 
 func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*model.PromptVersion, error) {
+	return CreateVersionWithModel(ctx, promptID, template, nil)
+}
+
+func CreateVersionWithModel(ctx context.Context, promptID uuid.UUID, template string, versionModel *string) (*model.PromptVersion, error) {
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx, `
 		WITH next_version AS (
@@ -22,12 +26,12 @@ func CreateVersion(ctx context.Context, promptID uuid.UUID, template string) (*m
 			FROM prompt_versions
 			WHERE prompt_id = $1
 		)
-		INSERT INTO prompt_versions (prompt_id, version, template, status)
-		SELECT $1, v, $2, 'draft'
+		INSERT INTO prompt_versions (prompt_id, version, template, status, model)
+		SELECT $1, v, $2, 'draft', $3
 		FROM next_version
-		RETURNING id, prompt_id, version, template, status, created_at, published_at
-	`, promptID, template).Scan(
-		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt,
+		RETURNING id, prompt_id, version, template, status, model, created_at, published_at
+	`, promptID, template, versionModel).Scan(
+		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create version: %w", err)
@@ -40,7 +44,7 @@ func DuplicateVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx, `
 		WITH source_version AS (
-			SELECT template
+			SELECT template, model
 			FROM prompt_versions
 			WHERE prompt_id = $1 AND version = $2
 		),
@@ -49,12 +53,12 @@ func DuplicateVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (
 			FROM prompt_versions
 			WHERE prompt_id = $1
 		)
-		INSERT INTO prompt_versions (prompt_id, version, template, status)
-		SELECT $1, nv.v, sv.template, 'draft'
+		INSERT INTO prompt_versions (prompt_id, version, template, status, model)
+		SELECT $1, nv.v, sv.template, 'draft', sv.model
 		FROM source_version sv, next_version nv
-		RETURNING id, prompt_id, version, template, status, created_at, published_at
+		RETURNING id, prompt_id, version, template, status, model, created_at, published_at
 	`, promptID, versionNum).Scan(
-		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt,
+		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -72,7 +76,7 @@ type VersionFilter struct {
 }
 
 func ListVersions(ctx context.Context, promptID uuid.UUID, filter VersionFilter) ([]*model.PromptVersion, error) {
-	query := `SELECT DISTINCT pv.id, pv.prompt_id, pv.version, pv.template, pv.status, pv.created_at, pv.published_at
+	query := `SELECT DISTINCT pv.id, pv.prompt_id, pv.version, pv.template, pv.status, pv.model, pv.created_at, pv.published_at
 		 FROM prompt_versions pv`
 	args := []any{promptID}
 	joins := ""
@@ -104,7 +108,7 @@ func ListVersions(ctx context.Context, promptID uuid.UUID, filter VersionFilter)
 	var versions []*model.PromptVersion
 	for rows.Next() {
 		v := &model.PromptVersion{}
-		if err := rows.Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt); err != nil {
 			return nil, err
 		}
 		versions = append(versions, v)
@@ -123,11 +127,11 @@ func ListVersions(ctx context.Context, promptID uuid.UUID, filter VersionFilter)
 func GetVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, prompt_id, version, template, status, created_at, published_at
+		`SELECT id, prompt_id, version, template, status, model, created_at, published_at
 		 FROM prompt_versions
 		 WHERE prompt_id = $1 AND version = $2`,
 		promptID, versionNum,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -143,11 +147,11 @@ func GetVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model
 func GetLiveVersion(ctx context.Context, promptID uuid.UUID) (*model.PromptVersion, error) {
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, prompt_id, version, template, status, created_at, published_at
+		`SELECT id, prompt_id, version, template, status, model, created_at, published_at
 		 FROM prompt_versions
 		 WHERE prompt_id = $1 AND status = 'live'`,
 		promptID,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -161,14 +165,34 @@ func GetLiveVersion(ctx context.Context, promptID uuid.UUID) (*model.PromptVersi
 }
 
 func UpdateVersionTemplate(ctx context.Context, id uuid.UUID, template string) (*model.PromptVersion, error) {
+	return UpdateVersionDraft(ctx, id, &template, nil)
+}
+
+func UpdateVersionDraft(ctx context.Context, id uuid.UUID, template *string, versionModel *string) (*model.PromptVersion, error) {
+	setClauses := []string{}
+	args := []any{}
+	if template != nil {
+		args = append(args, *template)
+		setClauses = append(setClauses, fmt.Sprintf("template = $%d", len(args)))
+	}
+	if versionModel != nil {
+		args = append(args, *versionModel)
+		setClauses = append(setClauses, fmt.Sprintf("model = $%d", len(args)))
+	}
+	if len(setClauses) == 0 {
+		return nil, ErrConflict
+	}
+	args = append(args, id)
+
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx,
-		`UPDATE prompt_versions
-		 SET template = $1
-		 WHERE id = $2 AND status = 'draft'
-		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
-		template, id,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+		fmt.Sprintf(`UPDATE prompt_versions
+		 SET %s
+		 WHERE id = $%d AND status = 'draft'
+		 RETURNING id, prompt_id, version, template, status, model, created_at, published_at`,
+			strings.Join(setClauses, ", "), len(args)),
+		args...,
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -229,9 +253,9 @@ func PromoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 		`UPDATE prompt_versions
 		 SET status = $1, published_at = $2
 		 WHERE prompt_id = $3 AND version = $4
-		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
+		 RETURNING id, prompt_id, version, template, status, model, created_at, published_at`,
 		nextStatus, now, promptID, versionNum,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		return nil, fmt.Errorf("promote version: %w", err)
 	}
@@ -275,9 +299,9 @@ func DemoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*mo
 		`UPDATE prompt_versions
 		 SET status = 'stable'
 		 WHERE prompt_id = $1 AND version = $2
-		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
+		 RETURNING id, prompt_id, version, template, status, model, created_at, published_at`,
 		promptID, versionNum,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		return nil, fmt.Errorf("demote version: %w", err)
 	}
@@ -321,9 +345,9 @@ func ArchiveVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 		`UPDATE prompt_versions
 		 SET status = 'archived'
 		 WHERE prompt_id = $1 AND version = $2
-		 RETURNING id, prompt_id, version, template, status, created_at, published_at`,
+		 RETURNING id, prompt_id, version, template, status, model, created_at, published_at`,
 		promptID, versionNum,
-	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt)
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt)
 	if err != nil {
 		return nil, fmt.Errorf("archive version: %w", err)
 	}

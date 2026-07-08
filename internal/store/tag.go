@@ -94,12 +94,12 @@ func GetTagsForPrompt(ctx context.Context, promptID uuid.UUID) (map[int][]string
 func GetVersionByTag(ctx context.Context, promptID uuid.UUID, tag string) (*model.PromptVersion, error) {
 	v := &model.PromptVersion{}
 	err := db.Pool.QueryRow(ctx, `
-		SELECT pv.id, pv.prompt_id, pv.version, pv.template, pv.status, pv.created_at, pv.published_at
+		SELECT pv.id, pv.prompt_id, pv.version, pv.template, pv.status, pv.model, pv.created_at, pv.published_at
 		FROM prompt_versions pv
 		JOIN prompt_tags pt ON pv.prompt_id = pt.prompt_id AND pv.version = pt.version
 		WHERE pt.prompt_id = $1 AND pt.tag = $2
 	`, promptID, tag).Scan(
-		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.CreatedAt, &v.PublishedAt,
+		&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.CreatedAt, &v.PublishedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

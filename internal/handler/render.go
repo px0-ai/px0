@@ -100,5 +100,6 @@ func executeRender(c *fiber.Ctx, prompt *model.Prompt, version *model.PromptVers
 		"version":  version.Version,
 		"slug":     prompt.Slug,
 		"tags":     version.Tags,
+		"model":    version.Model,
 	})
 }

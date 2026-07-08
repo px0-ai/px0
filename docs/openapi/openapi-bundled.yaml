@@ -2289,6 +2289,7 @@ paths:
         - 'TestRenderLive_NoLiveVersion: Verifies that requesting a render with only ''draft'' versions fails with 404 and ''no live version found for this prompt''.'
         - 'TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied.'
         - 'TestRenderLive_MissingVariable: Verifies missing template variables fail with 422 instead of rendering placeholder text.'
+        - 'TestRenderLive_IncludesModel: Verifies render responses include the prompt version model.'
       requestBody:
         required: true
         content:
@@ -2366,8 +2367,11 @@ paths:
             format: uuid
       x-edge-cases:
         - Validates template string syntax using Go's text/template parser before creating the entry.
+        - If model is supplied, it must be a non-empty string after trimming whitespace.
       x-test-coverage:
         - 'TestCreateVersion_Success: Verifies version number is incremented to draft status 1.'
+        - 'TestCreateVersion_WithModel: Verifies prompt version model is persisted and returned.'
+        - 'TestCreateVersion_BlankModel: Verifies blank model values reject with 400.'
         - 'TestCreateVersion_InvalidTemplate: Verifies syntax check fails with 400 and ''invalid template''.'
         - 'TestCreateVersion_MissingTemplate: Verifies missing template rejects with 400 and ''template is required''.'
         - 'TestCreateVersion_PromptNotFound: Verifies 404 response on missing parent prompt UUID.'
@@ -2578,8 +2582,10 @@ paths:
             type: string
       x-edge-cases:
         - Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template).
+        - Allows updating model without changing the template while the version is still a draft.
       x-test-coverage:
         - 'TestUpdateVersion_Draft: Verifies modification updates template content and returns 200.'
+        - 'TestUpdateVersion_ModelOnly: Verifies model-only updates on draft versions.'
         - 'TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and ''only draft versions can be modified''.'
       requestBody:
         required: true
@@ -2919,7 +2925,7 @@ paths:
       summary: Duplicate Prompt Version
       description: |
         Copies the specified prompt version's template to create a new prompt version in draft state.
-        This operation does not copy any associated payloads, only the prompt template and other metadata.
+        This operation does not copy any associated payloads, only the prompt template and model.
       operationId: duplicateVersion
       tags:
         - Prompt Versions
@@ -3762,6 +3768,11 @@ components:
             - live
             - archived
           description: Active lifecycle status of this template version.
+        model:
+          type: string
+          nullable: true
+          description: Optional model name intended to execute this prompt version.
+          example: gpt-4.1
         created_at:
           type: string
           format: date-time
@@ -3781,6 +3792,7 @@ components:
         - version
         - template
         - status
+        - model
         - created_at
         - published_at
         - tags
@@ -3814,11 +3826,17 @@ components:
           items:
             type: string
           description: List of tag strings assigned to this version.
+        model:
+          type: string
+          nullable: true
+          description: Optional model name intended to execute this prompt version.
+          example: gpt-4.1
       required:
         - rendered
         - version
         - slug
         - tags
+        - model
     PromptPayload:
       type: object
       properties:
@@ -4062,6 +4080,10 @@ components:
         template:
           type: string
           example: Hello, {{.name}}!
+        model:
+          type: string
+          description: Optional model name intended to execute this prompt version.
+          example: gpt-4.1
       required:
         - template
     UpdateVersionRequest:
@@ -4070,5 +4092,7 @@ components:
         template:
           type: string
           example: Hello, {{.name}}! Count is {{.count}}.
-      required:
-        - template
+        model:
+          type: string
+          description: Optional model name intended to execute this prompt version.
+          example: gpt-4.1-mini

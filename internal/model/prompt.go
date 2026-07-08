@@ -35,6 +35,7 @@ type PromptVersion struct {
 	Version     int        `json:"version"`
 	Template    string     `json:"template"`
 	Status      string     `json:"status"`
+	Model       *string    `json:"model"`
 	CreatedAt   time.Time  `json:"created_at"`
 	PublishedAt *time.Time `json:"published_at"`
 	Tags        []string   `json:"tags"`

@@ -27,6 +27,36 @@ func TestCreateVersion_Success(t *testing.T) {
 	assert.Equal(t, "Hello, {{.name}}!", v["template"])
 }
 
+func TestCreateVersion_WithModel(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", id),
+		`{"template":"Hello, {{.name}}!","model":"gpt-4.1"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "Hello, {{.name}}!", v["template"])
+	assert.Equal(t, "gpt-4.1", v["model"])
+}
+
+func TestCreateVersion_BlankModel(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", id),
+		`{"template":"Hello","model":"  "}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+}
+
 func TestCreateVersion_InvalidTemplate(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
@@ -163,6 +193,24 @@ func TestUpdateVersion_Success(t *testing.T) {
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
 	assert.Equal(t, "updated template", v["template"])
+}
+
+func TestUpdateVersion_ModelOnly(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "original template")
+
+	req := newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/1", id),
+		`{"model":"gpt-4.1-mini"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "original template", v["template"])
+	assert.Equal(t, "gpt-4.1-mini", v["model"])
 }
 
 func TestUpdateVersion_NonDraftRejected(t *testing.T) {
