@@ -30,6 +30,9 @@ func NewProvider() search.Provider {
 // back to the regular store.ListPrompts path.
 // Status is applied as a WHERE clause when non-nil (early DB-level filter).
 func (p *Provider) Search(ctx context.Context, q search.SearchQuery) ([]search.SearchResult, error) {
+	if q.Vector != nil {
+		return nil, search.ErrVectorSearchNotSupported
+	}
 	if q.Q == "" {
 		return nil, nil
 	}

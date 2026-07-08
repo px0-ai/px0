@@ -11,11 +11,22 @@ import (
 // Compile-time check: NoopProvider must satisfy Provider interface
 var _ Provider = (*NoopProvider)(nil)
 
-func TestNoopProvider_Search(t *testing.T) {
+func TestNoopProvider_Search_TextQuery(t *testing.T) {
 	p := &NoopProvider{}
 	results, err := p.Search(context.Background(), SearchQuery{Q: "test"})
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Fatalf("expected ErrNotImplemented, got %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected empty results, got %d", len(results))
+	}
+}
+
+func TestNoopProvider_Search_VectorQuery(t *testing.T) {
+	p := &NoopProvider{}
+	results, err := p.Search(context.Background(), SearchQuery{Vector: []float32{1.0, 2.0}})
+	if !errors.Is(err, ErrVectorSearchNotSupported) {
+		t.Fatalf("expected ErrVectorSearchNotSupported, got %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected empty results, got %d", len(results))

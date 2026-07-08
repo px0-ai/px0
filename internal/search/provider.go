@@ -25,6 +25,15 @@ type SearchQuery struct {
 
 	// Status optionally filters by prompt status ("active", "archived").
 	Status *string
+
+	// Vector is a pre-computed query embedding for vector-similarity search.
+	// When non-nil, providers that support vector search MUST use it.
+	// When nil, providers fall back to keyword/FTS search on Q.
+	Vector []float32
+
+	// TopK limits the number of vector results returned (default: 10).
+	// Ignored by FTS providers.
+	TopK int
 }
 
 // SearchResult is a single hit returned by the provider.
@@ -36,6 +45,10 @@ type SearchResult struct {
 	// External providers (Algolia, ES) return their own native scores.
 	// Zero means the provider does not support scoring.
 	Score float64
+
+	// Distance is the vector similarity distance from the query embedding.
+	// Lower is more similar. Zero means the provider is FTS-only.
+	Distance float32
 }
 
 // IndexablePrompt is the minimal document shape passed to Index / Deindex.
@@ -49,6 +62,11 @@ type IndexablePrompt struct {
 	Slug        string
 	Status      string
 	Tags        []string
+
+	// Embedding is the pre-computed vector representation of this prompt.
+	// Nil means the caller did not supply an embedding (e.g. Postgres FTS path).
+	// External vector providers (Qdrant, Pinecone) use this during Index().
+	Embedding []float32
 }
 
 // Provider is the contract every search backend must implement.

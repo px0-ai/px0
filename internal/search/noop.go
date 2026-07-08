@@ -14,7 +14,10 @@ var _ Provider = NoopProvider{}
 // Use it in tests or as a stand-in while implementing a real provider.
 type NoopProvider struct{}
 
-func (NoopProvider) Search(_ context.Context, _ SearchQuery) ([]SearchResult, error) {
+func (NoopProvider) Search(_ context.Context, q SearchQuery) ([]SearchResult, error) {
+	if q.Vector != nil {
+		return nil, ErrVectorSearchNotSupported
+	}
 	return nil, ErrNotImplemented
 }
 
