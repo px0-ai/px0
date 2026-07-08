@@ -23,6 +23,8 @@ import (
 //   - "elasticsearch" → Elasticsearch (not yet implemented)
 //   - "opensearch"    → OpenSearch    (not yet implemented)
 //   - "algolia"       → Algolia       (not yet implemented)
+//   - "qdrant"        → Qdrant Vector Search (not yet implemented)
+//   - "pinecone"      → Pinecone Vector Search (not yet implemented)
 //   - ""              → defaults to NoopProvider with a warning
 //
 // If SEARCH_PROVIDER is set to a known-but-unimplemented provider, it returns
@@ -39,7 +41,7 @@ func NewProvider(_ context.Context) (search.Provider, error) {
 		log.Println("info: using postgres full-text search provider")
 		return pgprovider.NewProvider(), nil
 
-	case "elasticsearch", "opensearch", "algolia":
+	case "elasticsearch", "opensearch", "algolia", "qdrant", "pinecone":
 		return nil, fmt.Errorf("%w: %q", search.ErrProviderNotConfigured, name)
 
 	default:
