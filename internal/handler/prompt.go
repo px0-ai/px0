@@ -189,6 +189,7 @@ func ListPrompts(c *fiber.Ctx) error {
 	} else if q := c.Query("q"); q != "" {
 		results, err := search.Get().Search(c.Context(), search.SearchQuery{
 			Q:       q,
+			TopK:    topK,
 			TeamIDs: []uuid.UUID{teamID},
 			Status:  status,
 		})
@@ -219,6 +220,7 @@ func ListPrompts(c *fiber.Ctx) error {
 		Archived: archived,
 		Status:   status,
 		Q:        c.Query("q"),
+		Limit:    &topK,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -403,6 +405,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 	} else if q := c.Query("q"); q != "" {
 		results, err := search.Get().Search(c.Context(), search.SearchQuery{
 			Q:       q,
+			TopK:    topK,
 			TeamIDs: []uuid.UUID{teamID},
 			Status:  status,
 		})
@@ -433,6 +436,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		Archived: archived,
 		Status:   status,
 		Q:        c.Query("q"),
+		Limit:    &topK,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)

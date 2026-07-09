@@ -20,6 +20,7 @@ type PromptFilter struct {
 	Archived *bool
 	Status   *string
 	Q        string
+	Limit    *int
 }
 
 func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description string) (*model.Prompt, error) {
@@ -81,6 +82,11 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 	query += " ORDER BY p.created_at DESC"
+
+	if filter.Limit != nil {
+		args = append(args, *filter.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
 
 	rows, err := db.Pool.Query(ctx, query, args...)
 	if err != nil {
