@@ -4,24 +4,44 @@ import (
 	"sync/atomic"
 )
 
-var defaultProvider atomic.Pointer[Provider]
+var (
+	defaultFTSProvider     atomic.Pointer[Provider]
+	defaultVectorProvider   atomic.Pointer[Provider]
+)
 
 func init() {
-	// Start safely with a NoopProvider so we never panic on a nil dereference
+	// Start safely with NoopProviders so we never panic on a nil dereference
 	// before main.go finishes initialization.
 	var p Provider = NoopProvider{}
-	defaultProvider.Store(&p)
+	defaultFTSProvider.Store(&p)
+	defaultVectorProvider.Store(&p)
 }
 
-// Get returns the active search provider for the process.
+// GetFTS returns the active FTS search provider for the process.
 // It is lock-free, safe for concurrent reads, and guaranteed to never return nil.
-func Get() Provider {
-	return *defaultProvider.Load()
+func GetFTS() Provider {
+	return *defaultFTSProvider.Load()
 }
 
-// Init initialises the package-level default provider using the given Provider.
-// The provider is constructed by searchfactory.NewProvider() in main.go, which
-// keeps the import graph cycle-free (search/postgres → search, searchfactory → both).
-func Init(p Provider) {
-	defaultProvider.Store(&p)
+// GetVector returns the active vector search provider for the process.
+// It is lock-free, safe for concurrent reads, and guaranteed to never return nil.
+func GetVector() Provider {
+	return *defaultVectorProvider.Load()
+}
+
+// Init initialises the package-level FTS and vector providers.
+//
+// The two slots are independent: the FTS provider (e.g. postgres FTS) is
+// installed unwrapped because its Index is already a no-op and auto-embed
+// on the search path is the bug this refactor fixes. The vector provider
+// is wrapped in embeddingDecorator so that the handler can still rely on
+// Index() uploading an embedding when one is available — but Search()
+// does NOT auto-embed (see decorator.go).
+func Init(fts Provider, vector Provider) {
+	// FTS is installed as-is. Wrapping it with the embedding decorator
+	// has no effect on Search (which we just made a pass-through) and
+	// would only add confusion, since FTS providers don't consume vectors.
+	defaultFTSProvider.Store(&fts)
+	var wrappedVector Provider = embeddingDecorator{Provider: vector}
+	defaultVectorProvider.Store(&wrappedVector)
 }

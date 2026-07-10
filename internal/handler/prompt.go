@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"unicode"
@@ -141,94 +142,7 @@ func ListPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	status, archived := parsePromptStatusFilter(c)
-
-	// Full-text search and vector search path.
-	// Vector takes precedence if provided.
-	vectorRaw := c.Query("vector")
-	vector, err := parseVectorParam(vectorRaw)
-	if err != nil {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid vector parameter: "+err.Error()).Respond(c)
-	}
-
-	topK := 10
-	if k := c.QueryInt("top_k", 10); k > 0 {
-		topK = k
-	}
-
-	if vector != nil {
-		results, err := search.Get().Search(c.Context(), search.SearchQuery{
-			Vector:  vector,
-			TopK:    topK,
-			TeamIDs: []uuid.UUID{teamID},
-			Status:  status,
-		})
-		if err != nil {
-			if errors.Is(err, search.ErrVectorSearchNotSupported) {
-				return apierr.NewAPIError(fiber.StatusBadRequest, "vector search not supported by the active search provider").Respond(c)
-			}
-			if errors.Is(err, search.ErrNotImplemented) {
-				// Provider is a NoopProvider; fall through to the store layer below.
-			} else {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-		} else {
-			if len(results) == 0 {
-				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
-			}
-			ids := make([]uuid.UUID, len(results))
-			for i, r := range results {
-				ids[i] = r.PromptID
-			}
-			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
-			if err != nil {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-			return c.JSON(fiber.Map{"prompts": prompts})
-		}
-	} else if q := c.Query("q"); q != "" {
-		results, err := search.Get().Search(c.Context(), search.SearchQuery{
-			Q:       q,
-			TopK:    topK,
-			TeamIDs: []uuid.UUID{teamID},
-			Status:  status,
-		})
-		if err != nil {
-			if errors.Is(err, search.ErrNotImplemented) {
-				// Provider is a NoopProvider; fall through to the store layer below.
-			} else {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-		} else {
-			if len(results) == 0 {
-				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
-			}
-			ids := make([]uuid.UUID, len(results))
-			for i, r := range results {
-				ids[i] = r.PromptID
-			}
-			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
-			if err != nil {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-			return c.JSON(fiber.Map{"prompts": prompts})
-		}
-	}
-
-	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
-		TeamIDs:  []uuid.UUID{teamID},
-		Archived: archived,
-		Status:   status,
-		Q:        c.Query("q"),
-		Limit:    &topK,
-	})
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-	if prompts == nil {
-		prompts = []*model.Prompt{}
-	}
-	return c.JSON(fiber.Map{"prompts": prompts})
+	return listPromptsForTeam(c, teamID)
 }
 
 func GetPrompt(c *fiber.Ctx) error {
@@ -316,7 +230,7 @@ func ArchivePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	_ = search.Get().Deindex(c.Context(), id)
+	_ = search.GetVector().Deindex(c.Context(), id)
 
 	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
 	if err != nil {
@@ -333,7 +247,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 
 	if teamIDStr == "" {
 		// By default nothing is shown as per backwards-compatible test requirements
-		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}, "engine": "fts"})
 	}
 
 	teamID, err := uuid.Parse(teamIDStr)
@@ -357,94 +271,7 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	status, archived := parsePromptStatusFilter(c)
-
-	// Full-text search and vector search path.
-	// Vector takes precedence if provided.
-	vectorRaw := c.Query("vector")
-	vector, err := parseVectorParam(vectorRaw)
-	if err != nil {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid vector parameter: "+err.Error()).Respond(c)
-	}
-
-	topK := 10
-	if k := c.QueryInt("top_k", 10); k > 0 {
-		topK = k
-	}
-
-	if vector != nil {
-		results, err := search.Get().Search(c.Context(), search.SearchQuery{
-			Vector:  vector,
-			TopK:    topK,
-			TeamIDs: []uuid.UUID{teamID},
-			Status:  status,
-		})
-		if err != nil {
-			if errors.Is(err, search.ErrVectorSearchNotSupported) {
-				return apierr.NewAPIError(fiber.StatusBadRequest, "vector search not supported by the active search provider").Respond(c)
-			}
-			if errors.Is(err, search.ErrNotImplemented) {
-				// Provider is a NoopProvider; fall through to the store layer below.
-			} else {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-		} else {
-			if len(results) == 0 {
-				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
-			}
-			ids := make([]uuid.UUID, len(results))
-			for i, r := range results {
-				ids[i] = r.PromptID
-			}
-			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
-			if err != nil {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-			return c.JSON(fiber.Map{"prompts": prompts})
-		}
-	} else if q := c.Query("q"); q != "" {
-		results, err := search.Get().Search(c.Context(), search.SearchQuery{
-			Q:       q,
-			TopK:    topK,
-			TeamIDs: []uuid.UUID{teamID},
-			Status:  status,
-		})
-		if err != nil {
-			if errors.Is(err, search.ErrNotImplemented) {
-				// Provider is a NoopProvider; fall through to the store layer below.
-			} else {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-		} else {
-			if len(results) == 0 {
-				return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
-			}
-			ids := make([]uuid.UUID, len(results))
-			for i, r := range results {
-				ids[i] = r.PromptID
-			}
-			prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
-			if err != nil {
-				return apierr.ErrInternalError.Respond(c, err)
-			}
-			return c.JSON(fiber.Map{"prompts": prompts})
-		}
-	}
-
-	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
-		TeamIDs:  []uuid.UUID{teamID},
-		Archived: archived,
-		Status:   status,
-		Q:        c.Query("q"),
-		Limit:    &topK,
-	})
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-	if prompts == nil {
-		prompts = []*model.Prompt{}
-	}
-	return c.JSON(fiber.Map{"prompts": prompts})
+	return listPromptsForTeam(c, teamID)
 }
 
 type updatePromptRequest struct {
@@ -524,7 +351,7 @@ func DeletePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	search.Get().Deindex(c.Context(), id)
+	search.GetVector().Deindex(c.Context(), id)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -771,7 +598,7 @@ func syncPromptSearchIndex(ctx context.Context, prompt *model.Prompt) {
 		tagList = append(tagList, tag)
 	}
 
-	_ = search.Get().Index(ctx, search.IndexablePrompt{
+	if err := search.GetVector().Index(ctx, search.IndexablePrompt{
 		ID:          prompt.ID,
 		TeamID:      prompt.TeamID,
 		Name:        prompt.Name,
@@ -779,10 +606,12 @@ func syncPromptSearchIndex(ctx context.Context, prompt *model.Prompt) {
 		Slug:        prompt.Slug,
 		Status:      prompt.Status,
 		Tags:        tagList,
-	})
+	}); err != nil {
+		log.Printf("warn: search index failed for prompt %s: %v", prompt.ID, err)
+	}
 }
 
-// parsePromptStatusFilter normalizes status and archived query parameters into 
+// parsePromptStatusFilter normalizes status and archived query parameters into
 // a robust Status pointer (which universally propagates to FTS and DB fallbacks)
 // and an Archived boolean (for store.ListPrompts backwards-compatibility).
 func parsePromptStatusFilter(c *fiber.Ctx) (*string, *bool) {
@@ -811,4 +640,219 @@ func parsePromptStatusFilter(c *fiber.Ctx) (*string, *bool) {
 	}
 
 	return status, archived
+}
+
+// listPromptsForTeam is the shared, mode-aware implementation used by
+// ListPrompts (team-scoped) and ListAllPrompts (cross-team). It reads the
+// ?mode= query parameter and dispatches to the appropriate ranking engine.
+//
+// Mode routing:
+//   - "fts" (default): real PostgreSQL FTS via the search provider when ?q=
+//     is set, plain listing otherwise. Does not silently fall back to ILIKE.
+//   - "vector": pre-computed ?vector= or an embedded ?q=. Embedder must be
+//     configured; embedding failures yield 501 — never a silent alias to FTS.
+//   - "hybrid": returns 501 (not yet implemented).
+//
+// For backward compatibility, callers that omit ?mode= but supply a raw
+// ?vector= are routed to mode=vector (the historical behaviour). Callers
+// that supply ?q= without ?mode= are routed to mode=fts.
+//
+// Every successful response includes an "engine" field identifying which
+// path actually served the request, so clients (and tests) can verify the
+// mode they asked for is the mode that ran.
+func listPromptsForTeam(c *fiber.Ctx, teamID uuid.UUID) error {
+	status, archived := parsePromptStatusFilter(c)
+
+	mode, ok := parseSearchMode(c)
+	if !ok {
+		// parseSearchMode already wrote a 4xx response; return nil so
+		// fiber doesn't run ErrorHandler on top of it.
+		return nil
+	}
+
+	// Backward-compat: callers predating ?mode= may still send ?vector=
+	// without ?mode=; treat that as an implicit mode=vector request.
+	if mode == "fts" && strings.TrimSpace(c.Query("vector")) != "" {
+		mode = "vector"
+	}
+
+	topK := 10
+	if k := c.QueryInt("top_k", 10); k > 0 {
+		topK = k
+	}
+
+	switch mode {
+	case "fts":
+		return runFTSMode(c, teamID, status, archived, topK)
+	case "vector":
+		return runVectorMode(c, teamID, status, topK)
+	case "hybrid":
+		return apierr.NewAPIError(fiber.StatusNotImplemented, "hybrid search not implemented").Respond(c)
+	}
+	return apierr.ErrInternalError.Respond(c, fmt.Errorf("unhandled search mode %q", mode))
+}
+
+// parseSearchMode reads ?mode= and validates it. An empty or missing
+// value defaults to "fts". On invalid input, it writes a 400 response
+// and returns ok=false so the caller can short-circuit with a nil
+// return — returning a non-nil error here would cause fiber's
+// ErrorHandler to attempt another write and potentially clobber the
+// 400 with a 500.
+func parseSearchMode(c *fiber.Ctx) (string, bool) {
+	raw := strings.ToLower(strings.TrimSpace(c.Query("mode")))
+	switch raw {
+	case "":
+		return "fts", true
+	case "fts", "vector", "hybrid":
+		return raw, true
+	default:
+		_ = apierr.NewAPIError(fiber.StatusBadRequest, "invalid mode: must be one of 'fts', 'vector', 'hybrid'").Respond(c)
+		return "", false
+	}
+}
+
+// runFTSMode handles mode=fts. With ?q= set, it routes to the FTS
+// search provider (PostgreSQL FTS when that provider is active) via
+// search.GetFTS().Search. Without ?q=, it returns a plain listing.
+//
+// Unlike the previous behaviour, this path never silently falls back to
+// the ILIKE-based store.ListPrompts. A search provider that returns
+// ErrNotImplemented or ErrVectorSearchNotSupported produces 501.
+func runFTSMode(c *fiber.Ctx, teamID uuid.UUID, status *string, archived *bool, topK int) error {
+	q := c.Query("q")
+	if q == "" {
+		return runPlainList(c, teamID, status, archived, topK)
+	}
+
+	results, err := search.GetFTS().Search(c.Context(), search.SearchQuery{
+		Q:       q,
+		TopK:    topK,
+		TeamIDs: []uuid.UUID{teamID},
+		Status:  status,
+	})
+	if err != nil {
+		if errors.Is(err, search.ErrNotImplemented) {
+			return apierr.NewAPIError(fiber.StatusNotImplemented, "fts search not implemented by the active search provider").Respond(c)
+		}
+		if errors.Is(err, search.ErrVectorSearchNotSupported) {
+			// An active embedder auto-converted the FTS query into a vector
+			// query and the underlying provider does not support vectors.
+			// Surface the mismatch rather than aliasing to anything else.
+			return apierr.NewAPIError(fiber.StatusNotImplemented, "fts search not available: the active search provider does not support FTS for this query").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return respondWithPromptIDs(c, results, teamID, status, "fts")
+}
+
+// runPlainList returns a non-search listing of prompts for the team,
+// filtered by status/archived. Used by mode=fts when ?q= is empty.
+func runPlainList(c *fiber.Ctx, teamID uuid.UUID, status *string, archived *bool, topK int) error {
+	prompts, err := store.ListPromptsByFilter(c.Context(), store.PromptFilter{
+		TeamIDs:  []uuid.UUID{teamID},
+		Archived: archived,
+		Status:   status,
+		Limit:    &topK,
+	})
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if prompts == nil {
+		prompts = []*model.Prompt{}
+	}
+	return c.JSON(fiber.Map{"prompts": prompts, "engine": "fts"})
+}
+
+// runVectorMode handles mode=vector. It resolves a query vector from
+// ?vector= or, when only ?q= is provided, by asking the global embedder
+// to embed the text. A missing or failing embedder yields 501 — no
+// silent alias to FTS or to plain listing.
+func runVectorMode(c *fiber.Ctx, teamID uuid.UUID, status *string, topK int) error {
+	vector, ok := resolveVectorFromQuery(c)
+	if !ok {
+		// resolveVectorFromQuery already wrote a 4xx/5xx response;
+		// return nil so fiber doesn't run ErrorHandler on top of it.
+		return nil
+	}
+	if vector == nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "vector mode requires either vector= or q= parameter").Respond(c)
+	}
+
+	results, err := search.GetVector().Search(c.Context(), search.SearchQuery{
+		Vector:  vector,
+		TopK:    topK,
+		TeamIDs: []uuid.UUID{teamID},
+		Status:  status,
+	})
+	if err != nil {
+		if errors.Is(err, search.ErrVectorSearchNotSupported) {
+			return apierr.NewAPIError(fiber.StatusBadRequest, "vector search not supported by the active search provider").Respond(c)
+		}
+		if errors.Is(err, search.ErrNotImplemented) {
+			return apierr.NewAPIError(fiber.StatusNotImplemented, "vector search not implemented by the active search provider").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return respondWithPromptIDs(c, results, teamID, status, "vector")
+}
+
+// resolveVectorFromQuery returns a query vector using, in order:
+//  1. a pre-computed ?vector= parameter (no embedder required),
+//  2. an embedded ?q= via the global embedder (require a working embedder),
+//  3. (nil, true) when neither is supplied, so the caller can produce a
+//     precise 400 explaining that vector mode needs a vector.
+//
+// On embedder absence or embed failure, it writes a 4xx/5xx response
+// via apierr.Respond and returns ok=false so the caller can short-circuit
+// with a nil return. Same rationale as parseSearchMode: returning a
+// non-nil error from the handler would invoke fiber's ErrorHandler
+// and potentially clobber the response already written by Respond.
+func resolveVectorFromQuery(c *fiber.Ctx) ([]float32, bool) {
+	vectorRaw := c.Query("vector")
+	vector, err := parseVectorParam(vectorRaw)
+	if err != nil {
+		_ = apierr.NewAPIError(fiber.StatusBadRequest, "invalid vector parameter: "+err.Error()).Respond(c)
+		return nil, false
+	}
+	if vector != nil {
+		return vector, true
+	}
+
+	q := c.Query("q")
+	if q == "" {
+		return nil, true
+	}
+
+	embedder := search.GetEmbedder()
+	if embedder == nil {
+		_ = apierr.NewAPIError(fiber.StatusNotImplemented, "vector search unavailable: no embedder configured (set EMBEDDER_PROVIDER and HF_TOKEN)").Respond(c)
+		return nil, false
+	}
+
+	embedded, err := embedder.Embed(c.Context(), q)
+	if err != nil {
+		_ = apierr.NewAPIError(fiber.StatusNotImplemented, "vector search unavailable: embedding failed: "+err.Error()).Respond(c)
+		return nil, false
+	}
+	return embedded, true
+}
+
+// respondWithPromptIDs hydrates the given SearchResults into full Prompt
+// records (preserving the provider's score order) and writes the standard
+// {"prompts": [...], "engine": <engine>} JSON response. The "engine" field
+// always reflects the path that produced the results, never the caller's
+// requested mode, so clients can detect mismatches.
+func respondWithPromptIDs(c *fiber.Ctx, results []search.SearchResult, teamID uuid.UUID, status *string, engine string) error {
+	if len(results) == 0 {
+		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}, "engine": engine})
+	}
+	ids := make([]uuid.UUID, len(results))
+	for i, r := range results {
+		ids[i] = r.PromptID
+	}
+	prompts, err := store.GetPromptsByIDs(c.Context(), ids, []uuid.UUID{teamID}, status)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"prompts": prompts, "engine": engine})
 }

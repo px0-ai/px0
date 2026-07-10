@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/px0-ai/px0/internal/search"
+	"github.com/px0-ai/px0/internal/search/hf"
 	"github.com/px0-ai/px0/internal/searchfactory"
 	"github.com/px0-ai/px0/internal/store"
 )
@@ -166,15 +167,16 @@ func TestListPrompts_Filters(t *testing.T) {
 	body := decodeBody(t, resp)
 	techPromptID := body["prompt"].(map[string]any)["id"].(string)
 
-	// 1. Search with Q=billing
+	// 1. Search with Q=billing. The default NoopProvider does not implement
+	// FTS, so this must surface as 501 — the previous behaviour of
+	// silently falling back to ILIKE is no longer reachable.
 	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?q=billing", teamID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
 	body = decodeBody(t, resp)
-	prompts := body["prompts"].([]any)
-	assert.Len(t, prompts, 1)
-	assert.Equal(t, "Support Bot", prompts[0].(map[string]any)["name"])
+	assert.Contains(t, body["error"], "fts search not implemented")
+	resp.Body.Close()
 
 	// 2. Archive tech prompt
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", techPromptID), "", token)
@@ -183,17 +185,18 @@ func TestListPrompts_Filters(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 3. Default search (should only return active: Support Bot)
+	// 3. Default search (no q, no vector) — plain listing, only active: Support Bot
 	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body = decodeBody(t, resp)
-	prompts = body["prompts"].([]any)
+	prompts := body["prompts"].([]any)
 	assert.Len(t, prompts, 1)
 	assert.Equal(t, "Support Bot", prompts[0].(map[string]any)["name"])
+	assert.Equal(t, "fts", body["engine"])
 
-	// 4. Search with archived=true
+	// 4. Listing with archived=true — plain listing, only archived: Tech Bot
 	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?archived=true", teamID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -757,22 +760,26 @@ func TestDiffVersions(t *testing.T) {
 }
 
 func TestSearchPrompts_FTS(t *testing.T) {
-	// Enable postgres search provider for this test
-	t.Setenv("SEARCH_PROVIDER", "postgres")
+	// Enable postgres FTS provider for this test
+	t.Setenv("SEARCH_FTS_PROVIDER", "postgres")
+	t.Setenv("SEARCH_VECTOR_PROVIDER", "noop")
 
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	teamID := setupUserTeam(t, token)
 
-	// Build the real Postgres provider and wire it to search.Default
+	// Build the real Postgres FTS provider and a noop vector provider
+	// and wire both to search.
 	ctx := context.Background()
-	p, err := searchfactory.NewProvider(ctx)
+	fts, err := searchfactory.NewFTSProvider(ctx)
 	require.NoError(t, err)
-	search.Init(p)
+	vec, err := searchfactory.NewVectorProvider(ctx)
+	require.NoError(t, err)
+	search.Init(fts, vec)
 
 	// Clean up global state after test
 	t.Cleanup(func() {
-		search.Init(search.NoopProvider{})
+		search.Init(search.NoopProvider{}, search.NoopProvider{})
 	})
 
 	// Create 3 prompts with differing names/descriptions/status
@@ -874,7 +881,9 @@ func TestListPrompts_InvalidVector(t *testing.T) {
 }
 
 func TestListPrompts_VectorUnsupportedProvider(t *testing.T) {
-	// Active provider is NoopProvider by default in tests
+	// Active provider is NoopProvider by default in tests. A vector
+	// request must surface the unavailability as 501, not silently
+	// fall back to the FTS / listing path.
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	teamID := setupUserTeam(t, token)
@@ -884,11 +893,191 @@ func TestListPrompts_VectorUnsupportedProvider(t *testing.T) {
 	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?vector=0.1,0.2,0.3", teamID), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
-	// Should fall back to store.ListPrompts and return OK
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
+	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
 	body := decodeBody(t, resp)
-	prompts := body["prompts"].([]any)
-	assert.Len(t, prompts, 1)
+	assert.Contains(t, body["error"], "vector search not implemented")
+}
+
+func TestListPrompts_EngineFieldDefault(t *testing.T) {
+	// No ?q= and no ?vector= → plain listing with engine=fts.
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "fts", body["engine"], "default mode must report engine=fts")
+}
+
+func TestListPrompts_InvalidMode(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?mode=bogus", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "invalid mode")
+}
+
+func TestListPrompts_ModeHybridReturns501(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?mode=hybrid&q=hello", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "hybrid search not implemented")
+}
+
+func TestListPrompts_ModeVectorNoQueryNoVector(t *testing.T) {
+	// mode=vector with neither vector= nor q= must 400 with a clear error,
+	// not silently fall through to FTS.
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?mode=vector", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "vector mode requires")
+}
+
+func TestListPrompts_ModeVectorNoEmbedder(t *testing.T) {
+	// mode=vector with a q but no embedder registered must 501,
+	// not silently fall through to FTS or listing.
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts?mode=vector&q=hello", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "vector search unavailable")
+	assert.Contains(t, body["error"], "no embedder configured")
+}
+
+func TestListAllPrompts_EngineField(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	req := newReq(t, http.MethodGet, "/v1/prompts", "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "fts", body["engine"], "no-team list should also report engine=fts")
+	assert.Empty(t, body["prompts"])
+
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s", teamID), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, "fts", body["engine"])
+}
+
+// TestListPrompts_FTSMode_DoesNotAutoEmbed is the regression test for
+// the Phase 2 fix. Before the fix, mode=fts with an embedder registered
+// would silently auto-embed the text query and pass it as a vector to
+// the FTS provider, which would then return 501 (vector not supported).
+// After the fix, mode=fts must NOT touch the embedder at all — the FTS
+// provider receives a plain text SearchQuery with Vector unset.
+//
+// We assert this by:
+//  1. Setting a noop vector provider (so any vector path would 501).
+//  2. Registering a real (HF) embedder.
+//  3. Sending mode=fts&q=hello and asserting we get a 200 from the FTS
+//     path, not a 501 from the vector path. With the auto-embed bug
+//     the query would reach the FTS provider as a vector and 501.
+func TestListPrompts_FTSMode_DoesNotAutoEmbed(t *testing.T) {
+	t.Setenv("EMBEDDER_PROVIDER", "huggingface")
+	t.Setenv("HF_TOKEN", "fake-token-for-test") // any non-empty value
+	t.Setenv("SEARCH_FTS_PROVIDER", "postgres")
+	t.Setenv("SEARCH_VECTOR_PROVIDER", "noop")
+
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// Wire the real FTS provider and a noop vector provider.
+	ctx := context.Background()
+	fts, err := searchfactory.NewFTSProvider(ctx)
+	require.NoError(t, err)
+	vec, err := searchfactory.NewVectorProvider(ctx)
+	require.NoError(t, err)
+	search.Init(fts, vec)
+
+	// Register an HF embedder (the auto-embed bug's trigger).
+	search.SetEmbedder(hf.NewEmbedder())
+	t.Cleanup(func() {
+		search.SetEmbedder(nil)
+		search.Init(search.NoopProvider{}, search.NoopProvider{})
+	})
+
+	// Create a prompt so the FTS query has something to find.
+	createReq := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+		`{"name":"FTS Mode No Auto Embed","description":"hello world"}`, token)
+	createResp, err := a.Test(createReq)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, createResp.StatusCode)
+	createResp.Body.Close()
+
+	// mode=fts with a text query. With the auto-embed bug, this would
+	// silently embed the query and pass it as a vector to the FTS
+	// provider, which would 501. After the fix, the FTS provider
+	// receives a plain text query and does FTS.
+	req := newReq(t, http.MethodGet,
+		fmt.Sprintf("/v1/teams/%s/prompts?mode=fts&q=hello", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+
+	// The response should be a real FTS result (200) or an empty FTS
+	// result (200), NOT a 501 from the FTS provider receiving a vector.
+	// An empty result is possible because the tsvector may not match
+	// the user's plain text in a way that exceeds the rank threshold.
+	assert.NotEqual(t, http.StatusNotImplemented, resp.StatusCode,
+		"mode=fts must not auto-embed; got 501 (auto-embed bug still present)")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Equal(t, "fts", body["engine"])
+}
+
+// TestListPrompts_VectorMode_StillRequiresEmbedder confirms that the
+// Phase 2 fix did not regress mode=vector: with no embedder, mode=vector
+// + q= still 501s (resolveVectorFromQuery is still the sole path that
+// embeds a text query into a vector).
+func TestListPrompts_VectorMode_StillRequiresEmbedder(t *testing.T) {
+	// Make sure no embedder is registered.
+	t.Setenv("EMBEDDER_PROVIDER", "")
+	t.Setenv("HF_TOKEN", "")
+
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	// mode=vector + q but no embedder should 501.
+	req := newReq(t, http.MethodGet,
+		fmt.Sprintf("/v1/teams/%s/prompts?mode=vector&q=hello", teamID), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+	body := decodeBody(t, resp)
+	assert.Contains(t, body["error"], "no embedder configured")
 }
 

@@ -14,21 +14,44 @@ import (
 	"github.com/px0-ai/px0/internal/search"
 )
 
-type mockProvider struct {
-	IndexCalls   []search.IndexablePrompt
-	DeindexCalls []uuid.UUID
+type mockFTSProvider struct {
+	SearchCalls   int
+	IndexCalls    []search.IndexablePrompt
+	DeindexCalls  []uuid.UUID
 }
 
-func (m *mockProvider) Search(ctx context.Context, q search.SearchQuery) ([]search.SearchResult, error) {
+func (m *mockFTSProvider) Search(ctx context.Context, q search.SearchQuery) ([]search.SearchResult, error) {
+	m.SearchCalls++
 	return nil, nil
 }
 
-func (m *mockProvider) Index(ctx context.Context, p search.IndexablePrompt) error {
+func (m *mockFTSProvider) Index(ctx context.Context, p search.IndexablePrompt) error {
 	m.IndexCalls = append(m.IndexCalls, p)
 	return nil
 }
 
-func (m *mockProvider) Deindex(ctx context.Context, promptID uuid.UUID) error {
+func (m *mockFTSProvider) Deindex(ctx context.Context, promptID uuid.UUID) error {
+	m.DeindexCalls = append(m.DeindexCalls, promptID)
+	return nil
+}
+
+type mockVectorProvider struct {
+	SearchCalls  int
+	IndexCalls   []search.IndexablePrompt
+	DeindexCalls []uuid.UUID
+}
+
+func (m *mockVectorProvider) Search(ctx context.Context, q search.SearchQuery) ([]search.SearchResult, error) {
+	m.SearchCalls++
+	return nil, nil
+}
+
+func (m *mockVectorProvider) Index(ctx context.Context, p search.IndexablePrompt) error {
+	m.IndexCalls = append(m.IndexCalls, p)
+	return nil
+}
+
+func (m *mockVectorProvider) Deindex(ctx context.Context, promptID uuid.UUID) error {
 	m.DeindexCalls = append(m.DeindexCalls, promptID)
 	return nil
 }
@@ -38,34 +61,42 @@ func TestPromptMutations_SearchTriggers(t *testing.T) {
 	token := setupUser(t, a)
 	teamID := setupUserTeam(t, token)
 
-	// Inject the mock provider and restore it after
-	originalProvider := search.Get()
-	mock := &mockProvider{}
-	search.Init(mock)
-	t.Cleanup(func() { search.Init(originalProvider) })
+	// Inject mock providers and restore the originals after.
+	originalFTS := search.GetFTS()
+	originalVector := search.GetVector()
+	mockFTS := &mockFTSProvider{}
+	mockVector := &mockVectorProvider{}
+	search.Init(mockFTS, mockVector)
+	t.Cleanup(func() { search.Init(originalFTS, originalVector) })
 
-	// 1. Create a prompt (should trigger Index)
+	// 1. Create a prompt (should trigger Index on the vector provider,
+	// since that's the one wrapped in the embedding decorator).
 	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
 		`{"name":"Trigger Test","description":"Initial desc","slug":"trigger_test"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-	
+
 	body := decodeBody(t, resp)
 	promptMap := body["prompt"].(map[string]any)
 	promptIDStr := promptMap["id"].(string)
 	promptID := uuid.MustParse(promptIDStr)
 
-	require.Len(t, mock.IndexCalls, 1, "CreatePrompt should call Index once")
-	assert.Equal(t, promptID, mock.IndexCalls[0].ID)
-	assert.Equal(t, "Trigger Test", mock.IndexCalls[0].Name)
-	assert.Equal(t, "Initial desc", mock.IndexCalls[0].Description)
-	assert.Equal(t, "trigger_test", mock.IndexCalls[0].Slug)
-	assert.Equal(t, model.PromptStatusActive, mock.IndexCalls[0].Status)
-	assert.Empty(t, mock.IndexCalls[0].Tags) // No tags initially
+	require.Len(t, mockVector.IndexCalls, 1, "CreatePrompt should call Index on the vector provider once")
+	assert.Equal(t, promptID, mockVector.IndexCalls[0].ID)
+	assert.Equal(t, "Trigger Test", mockVector.IndexCalls[0].Name)
+	assert.Equal(t, "Initial desc", mockVector.IndexCalls[0].Description)
+	assert.Equal(t, "trigger_test", mockVector.IndexCalls[0].Slug)
+	assert.Equal(t, model.PromptStatusActive, mockVector.IndexCalls[0].Status)
+	assert.Empty(t, mockVector.IndexCalls[0].Tags) // No tags initially
+
+	// FTS Index should NOT be called for plain FTS providers
+	// (postgres is a no-op; qdrant would not receive the index either
+	// since the handler routes Index through the vector slot only).
+	assert.Empty(t, mockFTS.IndexCalls, "FTS provider's Index should not be called")
 
 	// Clear mock calls for the next step
-	mock.IndexCalls = nil
+	mockVector.IndexCalls = nil
 
 	// 2. Update the prompt (should trigger Index)
 	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s", promptID),
@@ -74,12 +105,12 @@ func TestPromptMutations_SearchTriggers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	require.Len(t, mock.IndexCalls, 1, "UpdatePrompt should call Index once")
-	assert.Equal(t, promptID, mock.IndexCalls[0].ID)
-	assert.Equal(t, "Updated desc", mock.IndexCalls[0].Description)
+	require.Len(t, mockVector.IndexCalls, 1, "UpdatePrompt should call Index once")
+	assert.Equal(t, promptID, mockVector.IndexCalls[0].ID)
+	assert.Equal(t, "Updated desc", mockVector.IndexCalls[0].Description)
 
 	// Clear mock calls
-	mock.IndexCalls = nil
+	mockVector.IndexCalls = nil
 
 	// 3. Create a version and tag it (should trigger Index to update tags)
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", promptID),
@@ -94,20 +125,20 @@ func TestPromptMutations_SearchTriggers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	require.Len(t, mock.IndexCalls, 1, "SetTag should call Index once")
-	assert.Equal(t, promptID, mock.IndexCalls[0].ID)
-	assert.Contains(t, mock.IndexCalls[0].Tags, "live")
+	require.Len(t, mockVector.IndexCalls, 1, "SetTag should call Index once")
+	assert.Equal(t, promptID, mockVector.IndexCalls[0].ID)
+	assert.Contains(t, mockVector.IndexCalls[0].Tags, "live")
 
 	// Clear mock calls
-	mock.IndexCalls = nil
+	mockVector.IndexCalls = nil
 
-	// 4. Archive the prompt (should trigger Deindex)
+	// 4. Archive the prompt (should trigger Deindex on the vector provider)
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	require.Len(t, mock.DeindexCalls, 1, "ArchivePrompt should call Deindex once")
-	assert.Equal(t, promptID, mock.DeindexCalls[0])
-	require.Len(t, mock.IndexCalls, 0, "ArchivePrompt should not call Index")
+	require.Len(t, mockVector.DeindexCalls, 1, "ArchivePrompt should call Deindex on the vector provider once")
+	assert.Equal(t, promptID, mockVector.DeindexCalls[0])
+	require.Len(t, mockVector.IndexCalls, 0, "ArchivePrompt should not call Index")
 }

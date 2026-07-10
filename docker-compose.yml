@@ -103,5 +103,16 @@ services:
       - prometheus
     restart: unless-stopped
 
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    ports:
+      - "6333:6333" # HTTP API
+      - "6334:6334" # gRPC API
+    volumes:
+      - qdrant_storage:/qdrant/storage:z
+    restart: always
+
 volumes:
   postgres_data:
+  qdrant_storage:

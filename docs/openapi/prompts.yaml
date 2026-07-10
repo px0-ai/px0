@@ -86,6 +86,21 @@ paths:
             type: string
             format: uuid
           description: The ID of the team.
+        - name: mode
+          in: query
+          required: false
+          description: >
+            Search mode. "fts" (default) uses full-text search against the
+            tsvector column. "vector" requires a pre-computed ?vector= or a
+            query embedder for ?q=. "hybrid" combines FTS and vector
+            ranking (not yet implemented — returns 501). Unknown values
+            return 400. Defaults to "fts" when absent; callers that omit
+            ?mode= but supply a raw ?vector= are routed to "vector" for
+            backwards compatibility.
+          schema:
+            type: string
+            enum: [fts, vector, hybrid]
+            default: fts
         - name: archived
           in: query
           required: false
@@ -96,9 +111,14 @@ paths:
           in: query
           required: false
           description: >
-            Full-text search query. When provided, results are filtered and ranked
-            by relevance across prompt name, description, and slug using
-            PostgreSQL Full-Text Search. When absent, returns the unranked list.
+            Full-text search query. When provided under ?mode=fts (or
+            when ?mode= is absent), results are filtered and ranked by
+            relevance across prompt name (weight A), description
+            (weight B), and slug (weight C) using PostgreSQL Full-Text
+            Search. An empty ?q= short-circuits to an empty result
+            set rather than relying on websearch_to_tsquery(''). When
+            ?mode=vector is requested without a ?vector=, the embedder
+            is used to embed ?q=.
           schema:
             type: string
             example: "summarize text"
@@ -106,11 +126,12 @@ paths:
           in: query
           required: false
           description: >
-            Pre-computed query embedding for vector-similarity search, expressed as a
-            comma-separated list of float32 values (e.g. "0.12,0.45,0.98").
-            When provided, results are ranked by vector distance instead of FTS score.
-            Mutually exclusive with ?q= — if both are sent, vector takes precedence.
-            Returns 400 if the active search provider does not support vector search.
+            Pre-computed query embedding for vector-similarity search,
+            expressed as a comma-separated list of float32 values
+            (e.g. "0.12,0.45,0.98"). When provided, results are ranked
+            by vector distance. With ?mode=vector, returns 400 if the
+            value cannot be parsed and 501 if the active search
+            provider does not support vector search.
           schema:
             type: string
             example: "0.12,0.45,0.98"
@@ -118,25 +139,42 @@ paths:
           in: query
           required: false
           description: >
-            Maximum number of results to return when using vector search (default: 10).
-            Ignored for full-text search and listing paths.
+            Maximum number of results to return when using vector
+            search (default: 10). Also caps the FTS results when
+            ?mode=fts is requested with a ?q=.
           schema:
             type: integer
             default: 10
             minimum: 1
             maximum: 100
       x-edge-cases:
-        - "When ?q= is absent or empty, falls back to the standard listing path with no change in behaviour."
+        - "When ?q= is absent and ?mode=fts, returns the unranked listing (no FTS)."
+        - "When ?q= is present and ?mode=fts, returns FTS results ranked by ts_rank with a minimum-rank threshold."
+        - "When ?q= is empty, the FTS path short-circuits to an empty result set (not relying on websearch_to_tsquery(''))."
         - "When ?q= is present and no results match, returns an empty array (not 404)."
-        - "When ?vector= is present but the active provider does not support vector search, returns 400."
-        - "When both ?q= and ?vector= are present, ?vector= takes precedence."
-        - "?top_k= is only applied during vector search; ignored for FTS or listing."
+        - "When ?mode=vector with neither ?vector= nor ?q=, returns 400."
+        - "When ?mode=vector with a ?q= but no embedder configured, returns 501 (no silent alias to FTS)."
+        - "When ?mode=vector with a ?q= and embedder present but embedding fails, returns 501 with the embedder error in the body."
+        - "When ?mode=vector with a ?vector= but no vector-capable provider active, returns 501."
+        - "When ?mode=hybrid, returns 501 (not yet implemented)."
+        - "When ?mode= is an unknown value, returns 400."
+        - "Backwards-compat: callers that omit ?mode= but supply ?vector= are routed to ?mode=vector."
+        - "?top_k= caps FTS results too, not just vector results."
         - "Tags filtering at list endpoints is not part of the current API contract (out of scope)."
         - "Pagination is deferred — no Limit/Offset/TotalCount yet."
+        - "The response always includes an 'engine' field identifying the path that served the request (fts, vector, or hybrid)."
         - "Score is internal-only; not exposed in the API response."
       x-test-coverage:
         - "TestListPrompts: Verifies listing populated prompt containers."
         - "TestListPrompts_Empty: Verifies that listing when empty returns an empty array."
+        - "TestListPrompts_EngineFieldDefault: Verifies that a no-arg list returns engine=fts."
+        - "TestListPrompts_InvalidMode: Verifies that ?mode=bogus returns 400."
+        - "TestListPrompts_ModeHybridReturns501: Verifies that ?mode=hybrid returns 501."
+        - "TestListPrompts_ModeVectorNoQueryNoVector: Verifies that ?mode=vector with no input returns 400."
+        - "TestListPrompts_ModeVectorNoEmbedder: Verifies that ?mode=vector with ?q= and no embedder returns 501."
+        - "TestListPrompts_VectorUnsupportedProvider: Verifies that a vector request with a NoopProvider returns 501, not a silent fallthrough."
+        - "TestListPrompts_InvalidVector: Verifies that an unparseable ?vector= returns 400."
+        - "TestSearchPrompts_FTS: Verifies real tsvector FTS ranking with name (A) > description (B) > slug (C) weights."
       responses:
         "200":
           description: List of prompts
@@ -149,17 +187,30 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Prompt"
+                  engine:
+                    type: string
+                    enum: [fts, vector, hybrid]
+                    description: >
+                      Identifies which ranking path actually served the
+                      request. Always present so clients (and tests) can
+                      verify the mode they requested is the mode that ran.
+                    example: "fts"
                 required:
                   - prompts
+                  - engine
         "400":
-          description: Bad request (invalid vector param or unsupported)
+          description: Bad request (invalid mode, invalid vector param, or missing input for the chosen mode)
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               examples:
+                invalid_mode:
+                  value: { "error": "invalid mode: must be one of 'fts', 'vector', 'hybrid'" }
                 invalid_vector:
                   value: { "error": "invalid vector parameter: invalid value \"abc\"" }
+                vector_requires_input:
+                  value: { "error": "vector mode requires either vector= or q= parameter" }
                 unsupported_provider:
                   value: { "error": "vector search not supported by the active search provider" }
         "401":
@@ -178,6 +229,23 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "internal error"
+        "501":
+          description: Not implemented (vector/hybrid unavailable, or active provider cannot honour the requested mode)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                hybrid_unsupported:
+                  value: { "error": "hybrid search not implemented" }
+                vector_no_embedder:
+                  value: { "error": "vector search unavailable: no embedder configured (set EMBEDDER_PROVIDER and HF_TOKEN)" }
+                vector_embed_failed:
+                  value: { "error": "vector search unavailable: embedding failed: hf: status 503" }
+                fts_not_supported:
+                  value: { "error": "fts search not implemented by the active search provider" }
+                vector_not_supported:
+                  value: { "error": "vector search not implemented by the active search provider" }
 
   /v1/prompts:
     get:
@@ -203,6 +271,17 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: mode
+          in: query
+          required: false
+          description: >
+            Search mode. Same semantics as on /v1/teams/{teamID}/prompts.
+            "fts" (default) uses PostgreSQL FTS, "vector" requires an
+            embedder or pre-computed ?vector=, "hybrid" returns 501.
+          schema:
+            type: string
+            enum: [fts, vector, hybrid]
+            default: fts
         - name: archived
           in: query
           required: false
@@ -213,9 +292,9 @@ paths:
           in: query
           required: false
           description: >
-            Full-text search query. When provided, results are filtered and ranked
-            by relevance across prompt name, description, and slug using
-            PostgreSQL Full-Text Search. When absent, returns the unranked list.
+            Full-text search query. See /v1/teams/{teamID}/prompts for
+            semantics; same weight ordering and same short-circuit
+            behaviour for empty values.
           schema:
             type: string
             example: "summarize text"
@@ -223,11 +302,8 @@ paths:
           in: query
           required: false
           description: >
-            Pre-computed query embedding for vector-similarity search, expressed as a
-            comma-separated list of float32 values (e.g. "0.12,0.45,0.98").
-            When provided, results are ranked by vector distance instead of FTS score.
-            Mutually exclusive with ?q= — if both are sent, vector takes precedence.
-            Returns 400 if the active search provider does not support vector search.
+            Pre-computed query embedding for vector-similarity search.
+            See /v1/teams/{teamID}/prompts for full semantics.
           schema:
             type: string
             example: "0.12,0.45,0.98"
@@ -235,28 +311,29 @@ paths:
           in: query
           required: false
           description: >
-            Maximum number of results to return when using vector search (default: 10).
-            Ignored for full-text search and listing paths.
+            Maximum number of results to return when using vector
+            search (default: 10). Also caps FTS results.
           schema:
             type: integer
             default: 10
             minimum: 1
             maximum: 100
       x-edge-cases:
-        - "By default with no team_id query parameter, returns an empty list of prompts."
+        - "By default with no team_id query parameter, returns an empty list of prompts (engine=fts)."
         - "If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden."
-        - "When ?q= is absent or empty, falls back to the standard listing path with no change in behaviour."
+        - "When ?q= is absent and ?mode=fts, returns the unranked listing."
+        - "When ?q= is present and ?mode=fts, returns FTS results ranked by ts_rank with a minimum-rank threshold."
+        - "When ?q= is empty, the FTS path short-circuits to an empty result set."
         - "When ?q= is present and no results match, returns an empty array (not 404)."
-        - "When ?vector= is present but the active provider does not support vector search, returns 400."
-        - "When both ?q= and ?vector= are present, ?vector= takes precedence."
-        - "?top_k= is only applied during vector search; ignored for FTS or listing."
-        - "Tags filtering at list endpoints is not part of the current API contract (out of scope)."
+        - "When ?mode=vector, ?mode=hybrid, or other unavailable modes, returns the same 4xx/5xx as on the team-scoped endpoint."
+        - "?top_k= caps FTS results too, not just vector results."
+        - "The response always includes an 'engine' field identifying the path that served the request."
         - "Pagination is deferred — no Limit/Offset/TotalCount yet."
-        - "Score is internal-only; not exposed in the API response."
       x-test-coverage:
-        - "TestListAllPrompts: Verifies that no team_id returns 200 with an empty list."
+        - "TestListAllPrompts: Verifies that no team_id returns 200 with an empty list and engine=fts."
         - "TestListAllPrompts: Verifies that a valid team_id returns 200 with prompts of that team."
         - "TestListAllPrompts: Verifies that an unallowed team_id returns 403 Forbidden."
+        - "TestListAllPrompts_EngineField: Verifies that the response always includes engine=fts."
       responses:
         "200":
           description: A list of prompts
@@ -269,15 +346,29 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Prompt"
+                  engine:
+                    type: string
+                    enum: [fts, vector, hybrid]
+                    description: >
+                      Identifies which ranking path actually served
+                      the request. Always present.
+                    example: "fts"
+                required:
+                  - prompts
+                  - engine
         "400":
-          description: Bad request (invalid vector param or unsupported)
+          description: Bad request (invalid mode, invalid vector param, or missing input for the chosen mode)
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               examples:
+                invalid_mode:
+                  value: { "error": "invalid mode: must be one of 'fts', 'vector', 'hybrid'" }
                 invalid_vector:
                   value: { "error": "invalid vector parameter: invalid value \"abc\"" }
+                vector_requires_input:
+                  value: { "error": "vector mode requires either vector= or q= parameter" }
                 unsupported_provider:
                   value: { "error": "vector search not supported by the active search provider" }
         "401":
@@ -298,6 +389,19 @@ paths:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
+        "501":
+          description: Not implemented (vector/hybrid unavailable, or active provider cannot honour the requested mode)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+              examples:
+                hybrid_unsupported:
+                  value: { "error": "hybrid search not implemented" }
+                vector_no_embedder:
+                  value: { "error": "vector search unavailable: no embedder configured (set EMBEDDER_PROVIDER and HF_TOKEN)" }
+                vector_not_supported:
+                  value: { "error": "vector search not implemented by the active search provider" }
 
   /v1/prompts/{id}:
     get:

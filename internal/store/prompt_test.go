@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -46,7 +47,7 @@ func TestCreatePrompt_Duplicate(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrDuplicate)
 }
 
-func TestListPrompts(t *testing.T) {
+func TestListPromptsByFilter(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	tm, err := store.CreateTeam(ctx, "Test Team")
@@ -57,20 +58,158 @@ func TestListPrompts(t *testing.T) {
 	_, err = store.CreatePrompt(ctx, tm.ID, "prompt_b", "Prompt B", "")
 	require.NoError(t, err)
 
-	prompts, err := store.ListPrompts(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
+	prompts, err := store.ListPromptsByFilter(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
 	require.NoError(t, err)
 	assert.Len(t, prompts, 2)
 }
 
-func TestListPrompts_Empty(t *testing.T) {
+func TestListPromptsByFilter_Empty(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	tm, err := store.CreateTeam(ctx, "Test Team")
 	require.NoError(t, err)
 
-	prompts, err := store.ListPrompts(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
+	prompts, err := store.ListPromptsByFilter(ctx, store.PromptFilter{TeamIDs: []uuid.UUID{tm.ID}})
 	require.NoError(t, err)
 	assert.Empty(t, prompts)
+}
+
+func TestListPrompts_EmptyQueryReturnsEmpty(t *testing.T) {
+	// ListPrompts is the FTS function: an empty Q must short-circuit to
+	// an empty result set rather than relying on websearch_to_tsquery('')
+	// behaviour, which is implementation-defined.
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	_, err = store.CreatePrompt(ctx, tm.ID, "anything", "Anything", "Some description")
+	require.NoError(t, err)
+
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Q:       "",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, prompts, "empty Q must short-circuit to empty results")
+}
+
+func TestListPrompts_FTS_WeightedByField(t *testing.T) {
+	// Migration 020 assigns weight A to name, B to description, C to slug.
+	// A name-only match should outrank a description-only match for the
+	// same token, all other things being equal.
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	nameMatch, err := store.CreatePrompt(ctx, tm.ID, "alpha_slug", "Database Tutorial", "unrelated desc")
+	require.NoError(t, err)
+
+	descMatch, err := store.CreatePrompt(ctx, tm.ID, "other_slug", "Other Name", "mentions database")
+	require.NoError(t, err)
+
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Q:       "database",
+	})
+	require.NoError(t, err)
+	require.Len(t, prompts, 2, "both prompts should match 'database'")
+	assert.Equal(t, nameMatch.ID, prompts[0].ID, "name match (weight A) should rank first")
+	assert.Equal(t, descMatch.ID, prompts[1].ID, "description match (weight B) should rank second")
+}
+
+func TestListPrompts_FTS_RespectsStatusFilter(t *testing.T) {
+	// An archived prompt must not appear in active-only FTS results,
+	// even if its tsvector would match the query.
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	active, err := store.CreatePrompt(ctx, tm.ID, "active", "Database Active", "desc")
+	require.NoError(t, err)
+
+	archived, err := store.CreatePrompt(ctx, tm.ID, "archived", "Database Archived", "desc")
+	require.NoError(t, err)
+
+	require.NoError(t, store.ArchivePrompt(ctx, archived.ID, []uuid.UUID{tm.ID}))
+
+	activeStatus := model.PromptStatusActive
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Q:       "database",
+		Status:  &activeStatus,
+	})
+	require.NoError(t, err)
+	require.Len(t, prompts, 1)
+	assert.Equal(t, active.ID, prompts[0].ID)
+}
+
+func TestListPrompts_FTS_TeamScope(t *testing.T) {
+	// A match in another team must not bleed into the caller's results.
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tmA, err := store.CreateTeam(ctx, "Team A")
+	require.NoError(t, err)
+	tmB, err := store.CreateTeam(ctx, "Team B")
+	require.NoError(t, err)
+
+	_, err = store.CreatePrompt(ctx, tmA.ID, "a", "Database in A", "desc")
+	require.NoError(t, err)
+	promptB, err := store.CreatePrompt(ctx, tmB.ID, "b", "Database in B", "desc")
+	require.NoError(t, err)
+
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tmB.ID},
+		Q:       "database",
+	})
+	require.NoError(t, err)
+	require.Len(t, prompts, 1)
+	assert.Equal(t, promptB.ID, prompts[0].ID)
+}
+
+func TestListPrompts_FTS_NoMatch(t *testing.T) {
+	// A query with no real lexical overlap should return empty,
+	// not every prompt that contains the substring anywhere.
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	_, err = store.CreatePrompt(ctx, tm.ID, "p1", "Refund Helper", "handles refunds")
+	require.NoError(t, err)
+	_, err = store.CreatePrompt(ctx, tm.ID, "p2", "Shipping Tracker", "tracks parcels")
+	require.NoError(t, err)
+
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Q:       "quantum physics",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, prompts, "out-of-domain query should not match anything")
+}
+
+func TestListPrompts_FTS_Limit(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	for i := 0; i < 5; i++ {
+		_, err := store.CreatePrompt(ctx, tm.ID,
+			fmt.Sprintf("p%d", i), fmt.Sprintf("Database %d", i), "desc")
+		require.NoError(t, err)
+	}
+
+	limit := 2
+	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+		TeamIDs: []uuid.UUID{tm.ID},
+		Q:       "database",
+		Limit:   &limit,
+	})
+	require.NoError(t, err)
+	assert.Len(t, prompts, 2)
 }
 
 func TestGetPromptByID(t *testing.T) {
@@ -155,7 +294,7 @@ func TestArchivePrompt_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestListPrompts_Filters(t *testing.T) {
+func TestListPromptsByFilter_Filters(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 	tm, err := store.CreateTeam(ctx, "Test Team")
@@ -172,7 +311,7 @@ func TestListPrompts_Filters(t *testing.T) {
 
 	// Test Archived = false (Active only)
 	activeOnly := false
-	prompts, err := store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err := store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs:  []uuid.UUID{tm.ID},
 		Archived: &activeOnly,
 	})
@@ -182,7 +321,7 @@ func TestListPrompts_Filters(t *testing.T) {
 
 	// Test Archived = true (Archived only)
 	archivedOnly := true
-	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err = store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs:  []uuid.UUID{tm.ID},
 		Archived: &archivedOnly,
 	})
@@ -197,7 +336,7 @@ func TestListPrompts_Filters(t *testing.T) {
 	require.NoError(t, err)
 
 	// Filter by tag "prod"
-	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err = store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs: []uuid.UUID{tm.ID},
 		Tags:    []string{"prod"},
 	})
@@ -206,7 +345,7 @@ func TestListPrompts_Filters(t *testing.T) {
 	assert.Equal(t, pA.ID, prompts[0].ID)
 
 	// Filter by non-existent tag
-	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err = store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs: []uuid.UUID{tm.ID},
 		Tags:    []string{"nonexistent_tag"},
 	})
@@ -215,7 +354,7 @@ func TestListPrompts_Filters(t *testing.T) {
 
 	// Filter by Status = "active"
 	activeStatus := model.PromptStatusActive
-	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err = store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs: []uuid.UUID{tm.ID},
 		Status:  &activeStatus,
 	})
@@ -225,7 +364,7 @@ func TestListPrompts_Filters(t *testing.T) {
 
 	// Filter by Status = "archived"
 	archivedStatus := model.PromptStatusArchived
-	prompts, err = store.ListPrompts(ctx, store.PromptFilter{
+	prompts, err = store.ListPromptsByFilter(ctx, store.PromptFilter{
 		TeamIDs: []uuid.UUID{tm.ID},
 		Status:  &archivedStatus,
 	})

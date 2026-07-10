@@ -9,6 +9,7 @@ import (
 
 	"github.com/px0-ai/px0/internal/app"
 	"github.com/px0-ai/px0/internal/db"
+	"github.com/px0-ai/px0/internal/embedderfactory"
 	"github.com/px0-ai/px0/internal/rdb"
 	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/searchfactory"
@@ -43,11 +44,26 @@ func main() {
 	}
 	defer rdb.Close()
 
-	if p, err := searchfactory.NewProvider(ctx); err != nil {
-		log.Printf("warn: search provider unavailable, search is disabled: %v", err)
-	} else {
-		search.Init(p)
+	// 3. Initialize embedder provider
+	embedder, err := embedderfactory.NewEmbedder()
+	if err != nil {
+		log.Printf("warn: embedder provider unavailable: %v", err)
+	} else if embedder != nil {
+		search.SetEmbedder(embedder)
 	}
+
+	// 4. Initialize search providers (FTS and vector, independent).
+	ftsProvider, err := searchfactory.NewFTSProvider(ctx)
+	if err != nil {
+		log.Printf("warn: FTS search provider unavailable, FTS search is disabled: %v", err)
+		ftsProvider = search.NoopProvider{}
+	}
+	vectorProvider, err := searchfactory.NewVectorProvider(ctx)
+	if err != nil {
+		log.Printf("warn: vector search provider unavailable, vector search is disabled: %v", err)
+		vectorProvider = search.NoopProvider{}
+	}
+	search.Init(ftsProvider, vectorProvider)
 
 	port := os.Getenv("PORT")
 	if port == "" {

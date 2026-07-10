@@ -46,7 +46,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	t.Setenv("RESEND_API_KEY", "")
 	testutil.SetupDB(t)
-	search.Init(search.NoopProvider{})
+	search.Init(search.NoopProvider{}, search.NoopProvider{})
 	return &testApp{
 		App: app.New(),
 		t:   t,
