@@ -97,6 +97,64 @@ func TestListProjectsForTeam(t *testing.T) {
 	assert.Empty(t, projects)
 }
 
+func TestListAccessibleProjectIDs(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+
+	owner, err := store.CreateTeam(ctx, "Owner Team")
+	require.NoError(t, err)
+	grantee, err := store.CreateTeam(ctx, "Grantee Team")
+	require.NoError(t, err)
+	stranger, err := store.CreateTeam(ctx, "Stranger Team")
+	require.NoError(t, err)
+
+	owned, err := store.CreateProject(ctx, owner.ID, "owned", "Owned")
+	require.NoError(t, err)
+	shared, err := store.CreateProject(ctx, owner.ID, "shared", "Shared")
+	require.NoError(t, err)
+	require.NoError(t, store.GrantProjectAccess(ctx, shared.ID, grantee.ID))
+
+	idSet := func(ids []uuid.UUID) map[uuid.UUID]bool {
+		m := make(map[uuid.UUID]bool, len(ids))
+		for _, id := range ids {
+			m[id] = true
+		}
+		return m
+	}
+
+	// Owned-only: the owner reaches both its projects (owned + one it also shares).
+	ids, err := store.ListAccessibleProjectIDs(ctx, []uuid.UUID{owner.ID})
+	require.NoError(t, err)
+	set := idSet(ids)
+	assert.Len(t, ids, 2)
+	assert.True(t, set[owned.ID])
+	assert.True(t, set[shared.ID])
+
+	// Granted-only: the grantee reaches only the shared project.
+	ids, err = store.ListAccessibleProjectIDs(ctx, []uuid.UUID{grantee.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{shared.ID}, ids)
+
+	// Both: a requester in both owner and grantee teams reaches both projects
+	// with no duplicates.
+	ids, err = store.ListAccessibleProjectIDs(ctx, []uuid.UUID{owner.ID, grantee.ID})
+	require.NoError(t, err)
+	set = idSet(ids)
+	assert.Len(t, ids, 2)
+	assert.True(t, set[owned.ID])
+	assert.True(t, set[shared.ID])
+
+	// None: a team that neither owns nor is granted anything reaches nothing.
+	ids, err = store.ListAccessibleProjectIDs(ctx, []uuid.UUID{stranger.ID})
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+
+	// Empty team set reaches nothing.
+	ids, err = store.ListAccessibleProjectIDs(ctx, []uuid.UUID{})
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}
+
 func TestGrantProjectAccess(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()

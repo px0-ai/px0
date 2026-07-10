@@ -76,6 +76,35 @@ func ListProjectsForTeam(ctx context.Context, teamID uuid.UUID) ([]*model.Projec
 	return projects, rows.Err()
 }
 
+// ListAccessibleProjectIDs returns the IDs of all projects reachable by the
+// given teams — those the teams own plus those granted to them. This is the
+// single expansion point from a requester's teams to the projects (and thus
+// prompts) they can reach; the capability the requester holds is determined by
+// which team-role set (viewer/editor/admin) the team IDs were drawn from.
+func ListAccessibleProjectIDs(ctx context.Context, teamIDs []uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT DISTINCT p.id
+		 FROM projects p
+		 LEFT JOIN project_team_access pta ON pta.project_id = p.id
+		 WHERE p.owning_team_id = ANY($1) OR pta.team_id = ANY($1)`,
+		teamIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list accessible project ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // GrantProjectAccess records that teamID may work with the project's prompts.
 // It is idempotent (re-granting is a no-op) and returns ErrNotFound if the
 // project or team does not exist.
