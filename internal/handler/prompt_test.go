@@ -17,9 +17,9 @@ import (
 func TestCreatePrompt_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"My Prompt","description":"Useful prompt"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -30,16 +30,16 @@ func TestCreatePrompt_Success(t *testing.T) {
 	assert.NotEmpty(t, prompt["id"])
 	assert.Equal(t, "My Prompt", prompt["name"])
 	assert.Equal(t, "my_prompt", prompt["slug"])
-	assert.Equal(t, teamID, prompt["team_id"])
+	assert.Equal(t, projectID, prompt["project_id"])
 	assert.Equal(t, "Useful prompt", prompt["description"])
 }
 
 func TestCreatePrompt_CustomSlug(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"My Prompt","slug":"My-Custom_Slug!","description":"Useful prompt"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -53,10 +53,9 @@ func TestCreatePrompt_CustomSlug(t *testing.T) {
 func TestCreatePrompt_Conflict(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	// Create first prompt
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Unique Name","description":"desc"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -64,7 +63,7 @@ func TestCreatePrompt_Conflict(t *testing.T) {
 	resp.Body.Close()
 
 	// 1. Conflict on name
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Unique Name","description":"different"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -74,7 +73,7 @@ func TestCreatePrompt_Conflict(t *testing.T) {
 	resp.Body.Close()
 
 	// 2. Conflict on slug
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Other Name","slug":"unique_name"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -87,9 +86,9 @@ func TestCreatePrompt_Conflict(t *testing.T) {
 func TestCreatePrompt_MissingName(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"description":"no name"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -97,9 +96,34 @@ func TestCreatePrompt_MissingName(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestCreatePrompt_ForbiddenForViewer(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	projectID := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
+		`{"name":"Blocked"}`, r.viewerToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestCreatePrompt_UnknownProject(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", uuid.New().String()),
+		`{"name":"Orphan"}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
 func TestCreatePrompt_Unauthorized(t *testing.T) {
 	a := newTestApp(t)
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", uuid.New().String()),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", uuid.New().String()),
 		`{"name":"p"}`, "")
 
 	resp, err := a.Test(req)
@@ -111,12 +135,12 @@ func TestCreatePrompt_Unauthorized(t *testing.T) {
 func TestListPrompts(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	setupPrompt(t, a, token)
-	setupPrompt(t, a, token)
+	setupPromptInProject(t, a, token, projectID)
+	setupPromptInProject(t, a, token, projectID)
 
-	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/projects/%s/prompts", projectID), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -129,9 +153,9 @@ func TestListPrompts(t *testing.T) {
 func TestListPrompts_Empty(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", token)
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/projects/%s/prompts", projectID), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -164,7 +188,7 @@ func TestGetPrompt_BySlugAndVersion(t *testing.T) {
 
 	// Create a version and tag it
 	setupVersion(t, a, token, id, "Hello {{.name}}")
-	
+
 	// Set tag "prod" on Version 1
 	reqTag := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/tags", id),
 		`{"tag":"prod"}`, token)
@@ -267,29 +291,30 @@ func TestPrompts_APIKeyAuth(t *testing.T) {
 	token := setupUser(t, a)
 	apiKey := setupAPIKey(t, a, token)
 
-	// API key works for listing prompts
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))
-	ctx := context.Background()
-	apiKeyModel, err := store.GetAPIKeyByHash(ctx, hash)
-	require.NoError(t, err)
-	teamID := apiKeyModel.TeamID.String()
+	// A project owned by the API key's team, reachable by the key.
+	projectID := setupProject(t, a, token)
 
-	req := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamID), "", apiKey)
+	req := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/projects/%s/prompts", projectID), "", apiKey)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
+
+	// Sanity: the API key model is scoped to a team (unchanged).
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))
+	apiKeyModel, err := store.GetAPIKeyByHash(context.Background(), hash)
+	require.NoError(t, err)
+	assert.NotNil(t, apiKeyModel.TeamID)
 }
 
 func TestListAllPrompts(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
-	// Create a prompt
-	setupPrompt(t, a, token)
+	setupPromptInProject(t, a, token, projectID)
 
-	// 1. By default with no team_id, nothing is shown
+	// 1. By default with no project, nothing is shown
 	req := newReq(t, http.MethodGet, "/v1/prompts", "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -299,8 +324,8 @@ func TestListAllPrompts(t *testing.T) {
 	assert.Empty(t, prompts)
 	resp.Body.Close()
 
-	// 2. With allowed team_id query parameter, matching prompts are shown
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s", teamID), "", token)
+	// 2. With allowed project_id query parameter, matching prompts are shown
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?project_id=%s", projectID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -309,9 +334,9 @@ func TestListAllPrompts(t *testing.T) {
 	assert.Len(t, prompts, 1)
 	resp.Body.Close()
 
-	// 3. With unallowed team_id query parameter, 403 Forbidden is returned
-	unallowedTeamID := uuid.New().String()
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s", unallowedTeamID), "", token)
+	// 3. With unallowed project_id query parameter, 403 Forbidden is returned
+	unallowedProjectID := uuid.New().String()
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?project_id=%s", unallowedProjectID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
@@ -333,7 +358,6 @@ func TestArchivePrompt_Permissions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, teams)
 	teamID := teams[0].ID
-	teamIDStr := teamID.String()
 
 	// 2. Setup Editor User
 	editorUser, err := store.CreateVerifiedUser(ctx, "prompteditor@px0.dev", "Password123!")
@@ -359,9 +383,10 @@ func TestArchivePrompt_Permissions(t *testing.T) {
 	require.NoError(t, err)
 	viewerToken := viewerSession.Token
 
-	// 4. Create prompt as editor
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr),
-		`{"name":"Shared Prompt","description":"Prompt to test delete"}`, editorToken)
+	// A project owned by the team, plus a prompt created by the editor.
+	projectID := setupProject(t, a, adminToken)
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
+		`{"name":"Shared Prompt","description":"Prompt to test archive"}`, editorToken)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -369,21 +394,21 @@ func TestArchivePrompt_Permissions(t *testing.T) {
 	promptID := body["prompt"].(map[string]any)["id"].(string)
 	resp.Body.Close()
 
-	// 5. Viewer (Reader) cannot archive the prompt
+	// 5. Viewer cannot archive the prompt
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
-	// 6. Editor (Collaborator) cannot archive the prompt
+	// 6. Editor cannot archive the prompt
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode) // Only Admins can archive prompts!
 	resp.Body.Close()
 
-	// 7. Admin (Owner) can archive the prompt
+	// 7. Admin can archive the prompt
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", adminToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -397,10 +422,10 @@ func TestArchivePrompt_Permissions(t *testing.T) {
 func TestListAllPrompts_Filters(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	teamID := setupUserTeam(t, token)
+	projectID := setupProject(t, a, token)
 
 	// Create prompt A
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Prompt Alpha","description":"First test prompt"}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -410,7 +435,7 @@ func TestListAllPrompts_Filters(t *testing.T) {
 	resp.Body.Close()
 
 	// Create prompt B
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Prompt Beta","description":"Second test prompt"}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
@@ -441,8 +466,8 @@ func TestListAllPrompts_Filters(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// Test 1: Query with team and archived=false
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team=%s&archived=false", teamID), "", token)
+	// Test 1: Query with project and archived=false
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?project=%s&archived=false", projectID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -452,8 +477,8 @@ func TestListAllPrompts_Filters(t *testing.T) {
 	assert.Equal(t, pAID, prompts[0].(map[string]any)["id"].(string))
 	resp.Body.Close()
 
-	// Test 2: Query with team_id and archived=true
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?team_id=%s&archived=true", teamID), "", token)
+	// Test 2: Query with project_id and archived=true
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts?project_id=%s&archived=true", projectID), "", token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -473,7 +498,6 @@ func TestUpdatePrompt_Handler(t *testing.T) {
 	teamIDStr := setupUserTeam(t, adminToken)
 	teamID := uuid.MustParse(teamIDStr)
 
-	// Get admin session to match expiration
 	adminSession, err := store.GetSessionByToken(ctx, adminToken)
 	require.NoError(t, err)
 
@@ -501,8 +525,9 @@ func TestUpdatePrompt_Handler(t *testing.T) {
 	require.NoError(t, err)
 	viewerToken := viewerSession.Token
 
-	// 4. Create prompt as editor
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr),
+	// 4. Create project and prompt as editor
+	projectID := setupProject(t, a, adminToken)
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		`{"name":"Shared Test Prompt","description":"Initial description"}`, editorToken)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -568,37 +593,47 @@ func TestRestorePrompt(t *testing.T) {
 func TestMovePrompt(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
 
-	// Let's create a new team under the user's organization.
-	reqOrgs := newReq(t, http.MethodGet, "/v1/me/orgs", "", token)
-	respOrgs, err := a.Test(reqOrgs)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respOrgs.StatusCode)
-	bodyOrgs := decodeBody(t, respOrgs)
-	orgs := bodyOrgs["organizations"].([]any)
-	require.NotEmpty(t, orgs)
-	orgID := orgs[0].(map[string]any)["id"].(string)
-	respOrgs.Body.Close()
+	sourceProjectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, sourceProjectID)
+	targetProjectID := setupProject(t, a, token)
 
-	// Create a new target team under that org
-	reqTeam := newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgID), `{"name":"Target Team"}`, token)
-	respTeam, err := a.Test(reqTeam)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusCreated, respTeam.StatusCode)
-	bodyTeam := decodeBody(t, respTeam)
-	targetTeamID := bodyTeam["team"].(map[string]any)["id"].(string)
-	respTeam.Body.Close()
-
-	// Move prompt to the target team
-	reqMove := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/move", id), fmt.Sprintf(`{"team_id":"%s"}`, targetTeamID), token)
+	reqMove := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/move", id),
+		fmt.Sprintf(`{"project_id":%q}`, targetProjectID), token)
 	respMove, err := a.Test(reqMove)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, respMove.StatusCode)
 	bodyMove := decodeBody(t, respMove)
 	pMove := bodyMove["prompt"].(map[string]any)
-	assert.Equal(t, targetTeamID, pMove["team_id"].(string))
+	assert.Equal(t, targetProjectID, pMove["project_id"].(string))
 	respMove.Body.Close()
+}
+
+func TestMovePrompt_TargetCollision(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	sourceProjectID := setupProject(t, a, token)
+	targetProjectID := setupProject(t, a, token)
+
+	// Same name/slug in both projects.
+	makePrompt := func(projectID string) string {
+		req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
+			`{"name":"Greeting"}`, token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		return decodeBody(t, resp)["prompt"].(map[string]any)["id"].(string)
+	}
+	id := makePrompt(sourceProjectID)
+	makePrompt(targetProjectID)
+
+	reqMove := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/move", id),
+		fmt.Sprintf(`{"project_id":%q}`, targetProjectID), token)
+	resp, err := a.Test(reqMove)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	resp.Body.Close()
 }
 
 func TestDiffVersions(t *testing.T) {

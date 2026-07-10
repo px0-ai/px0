@@ -55,16 +55,16 @@ func New() *fiber.App {
 	orgs.Get("/:orgID/people", handler.ListOrgPeople)
 	orgs.Delete("/:orgID/members/:userID", handler.RemoveOrgMember)
 
-	teamPrompts := v1.Group("/teams/:teamID/prompts", middleware.RequireAuth)
-	teamPrompts.Post("", handler.CreatePrompt)
-	teamPrompts.Get("", handler.ListPrompts)
-
 	projects := v1.Group("/projects", middleware.RequireAuth)
 	projects.Post("", handler.CreateProject)
-	projects.Get("/:id", handler.GetProject)
-	projects.Delete("/:id", handler.DeleteProject)
-	projects.Post("/:id/access", handler.GrantProjectAccess)
-	projects.Delete("/:id/access/:teamID", handler.RevokeProjectAccess)
+	projects.Get("/:projectID", handler.GetProject)
+	projects.Delete("/:projectID", handler.DeleteProject)
+	projects.Post("/:projectID/access", handler.GrantProjectAccess)
+	projects.Delete("/:projectID/access/:teamID", handler.RevokeProjectAccess)
+	projects.Post("/:projectID/prompts", handler.CreatePrompt)
+	projects.Get("/:projectID/prompts", handler.ListPrompts)
+	projects.Post("/:projectID/prompts/:slug/render", handler.RenderLive)
+	projects.Post("/:projectID/prompts/:slug/versions/:version/render", handler.RenderVersion)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", handler.ListTeamProjects)
@@ -93,8 +93,6 @@ func New() *fiber.App {
 	prompts.Post("/:id/move", handler.MovePrompt)
 	prompts.Get("/:id/versions/diff", handler.DiffVersions)
 
-	prompts.Post("/:slug/render", handler.RenderLive)
-
 	prompts.Post("/:id/versions", handler.CreateVersion)
 	prompts.Get("/:id/versions", handler.ListVersions)
 	prompts.Get("/:id/versions/:version", handler.GetVersion)
@@ -104,7 +102,6 @@ func New() *fiber.App {
 	prompts.Post("/:id/versions/:version/demote", handler.DemoteVersion)
 	prompts.Post("/:id/versions/:version/archive", handler.ArchiveVersion)
 	prompts.Post("/:id/versions/:version/duplicate", handler.DuplicateVersion)
-	prompts.Post("/:slug/versions/:version/render", handler.RenderVersion)
 	prompts.Post("/:id/versions/:version/tags", handler.SetTag)
 	prompts.Delete("/:id/tags/:tag", handler.RemoveTag)
 	prompts.Get("/:id/tags", handler.ListTags)

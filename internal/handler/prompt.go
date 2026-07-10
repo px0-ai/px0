@@ -12,7 +12,6 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/px0-ai/px0/internal/apierr"
-	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
 	"github.com/px0-ai/px0/internal/store"
 )
@@ -48,26 +47,38 @@ func NormalizeSlug(s string) string {
 	return res
 }
 
+// authorizeProject verifies the project is reachable by the requester at the
+// given capability (allowedIDs is the set of project IDs at that capability).
+// When it returns false it has already written a 404 (unknown project) or 403
+// (project exists but not accessible at this capability) response.
+func authorizeProject(c *fiber.Ctx, projectID uuid.UUID, allowedIDs []uuid.UUID) bool {
+	if containsUUID(allowedIDs, projectID) {
+		return true
+	}
+	if _, err := store.GetProjectByID(c.Context(), projectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			_ = apierr.ErrProjectNotFound.Respond(c)
+		} else {
+			_ = apierr.ErrInternalError.Respond(c, err)
+		}
+		return false
+	}
+	_ = apierr.ErrForbidden.Respond(c)
+	return false
+}
+
 func CreatePrompt(c *fiber.Ctx) error {
-	teamID, err := uuid.Parse(c.Params("teamID"))
+	projectID, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	allowedIDs, err := getRequestEditorTeamIDs(c)
+	editorIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-
-	isAllowed := false
-	for _, id := range allowedIDs {
-		if id == teamID {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
-		return apierr.ErrForbidden.Respond(c)
+	if !authorizeProject(c, projectID, editorIDs) {
+		return nil
 	}
 
 	var req createPromptRequest
@@ -85,7 +96,7 @@ func CreatePrompt(c *fiber.Ctx) error {
 	}
 	slug = NormalizeSlug(slug)
 
-	prompt, err := store.CreatePrompt(c.Context(), teamID, slug, req.Name, req.Description)
+	prompt, err := store.CreatePrompt(c.Context(), projectID, slug, req.Name, req.Description)
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
 			return apierr.NewAPIError(fiber.StatusConflict, "prompt with this name or slug already exists; please provide a unique name").Respond(c)
@@ -96,25 +107,17 @@ func CreatePrompt(c *fiber.Ctx) error {
 }
 
 func ListPrompts(c *fiber.Ctx) error {
-	teamID, err := uuid.Parse(c.Params("teamID"))
+	projectID, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	allowedIDs, err := getRequestTeamIDs(c)
+	viewerIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-
-	isAllowed := false
-	for _, id := range allowedIDs {
-		if id == teamID {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
-		return apierr.ErrForbidden.Respond(c)
+	if !authorizeProject(c, projectID, viewerIDs) {
+		return nil
 	}
 
 	var status *string
@@ -132,9 +135,9 @@ func ListPrompts(c *fiber.Ctx) error {
 	}
 
 	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
-		TeamIDs:  []uuid.UUID{teamID},
-		Archived: archived,
-		Status:   status,
+		ProjectIDs: []uuid.UUID{projectID},
+		Archived:   archived,
+		Status:     status,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -150,16 +153,16 @@ func GetPrompt(c *fiber.Ctx) error {
 	var prompt *model.Prompt
 	var err error
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	id, err := uuid.Parse(param)
 	if err == nil {
-		prompt, err = store.GetPromptByID(c.Context(), id, teamIDs)
+		prompt, err = store.GetPromptByID(c.Context(), id, projectIDs)
 	} else {
-		prompt, err = store.GetPromptBySlug(c.Context(), param, teamIDs)
+		prompt, err = store.GetPromptBySlug(c.Context(), param, projectIDs)
 	}
 
 	if err != nil {
@@ -206,31 +209,31 @@ func ArchivePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	adminTeamIDs, err := getRequestAdminTeamIDs(c)
+	adminProjectIDs, err := getRequestAdminProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if err := store.ArchivePrompt(c.Context(), id, adminTeamIDs); err != nil {
+	if err := store.ArchivePrompt(c.Context(), id, adminProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	prompt, err := store.GetPromptByID(c.Context(), id, projectIDs)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -238,34 +241,26 @@ func ArchivePrompt(c *fiber.Ctx) error {
 }
 
 func ListAllPrompts(c *fiber.Ctx) error {
-	teamIDStr := c.Query("team")
-	if teamIDStr == "" {
-		teamIDStr = c.Query("team_id")
+	projectIDStr := c.Query("project")
+	if projectIDStr == "" {
+		projectIDStr = c.Query("project_id")
 	}
 
-	if teamIDStr == "" {
+	if projectIDStr == "" {
 		// By default nothing is shown as per backwards-compatible test requirements
 		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
 	}
 
-	teamID, err := uuid.Parse(teamIDStr)
+	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	allowedIDs, err := getRequestTeamIDs(c)
+	allowedIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-
-	isAllowed := false
-	for _, id := range allowedIDs {
-		if id == teamID {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
+	if !containsUUID(allowedIDs, projectID) {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
@@ -284,9 +279,9 @@ func ListAllPrompts(c *fiber.Ctx) error {
 	}
 
 	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
-		TeamIDs:  []uuid.UUID{teamID},
-		Archived: archived,
-		Status:   status,
+		ProjectIDs: []uuid.UUID{projectID},
+		Archived:   archived,
+		Status:     status,
 	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -307,13 +302,13 @@ func UpdatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// First verify that the prompt exists and the user has basic team access
-	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+	// First verify that the prompt exists and the requester has read access
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
@@ -321,7 +316,7 @@ func UpdatePrompt(c *fiber.Ctx) error {
 	}
 
 	// Verify editor permissions
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -331,7 +326,7 @@ func UpdatePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 
-	prompt, err := store.UpdatePrompt(c.Context(), id, editorTeamIDs, req.Description)
+	prompt, err := store.UpdatePrompt(c.Context(), id, editorProjectIDs, req.Description)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
@@ -348,31 +343,31 @@ func RestorePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	adminTeamIDs, err := getRequestAdminTeamIDs(c)
+	adminProjectIDs, err := getRequestAdminProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if err := store.RestorePrompt(c.Context(), id, adminTeamIDs); err != nil {
+	if err := store.RestorePrompt(c.Context(), id, adminProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	prompt, err := store.GetPromptByID(c.Context(), id, projectIDs)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -380,7 +375,7 @@ func RestorePrompt(c *fiber.Ctx) error {
 }
 
 type movePromptRequest struct {
-	TeamID string `json:"team_id"`
+	ProjectID string `json:"project_id"`
 }
 
 func MovePrompt(c *fiber.Ctx) error {
@@ -394,32 +389,17 @@ func MovePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
 
-	targetTeamID, err := uuid.Parse(req.TeamID)
+	targetProjectID, err := uuid.Parse(req.ProjectID)
 	if err != nil {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid target team_id").Respond(c)
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid target project_id").Respond(c)
 	}
 
-	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		return apierr.ErrUnauthorized.Respond(c)
-	}
-
-	// 1. Get the target team to find its OrgID
-	targetTeam, err := store.GetTeamByID(c.Context(), targetTeamID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "target team not found").Respond(c)
-		}
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	// 2. Fetch the prompt to find its current team (we check basic read access)
-	teamIDs, err := getRequestTeamIDs(c)
+	// Fetch the prompt to find its current project (basic read access first).
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-
-	prompt, err := store.GetPromptByID(c.Context(), id, teamIDs)
+	prompt, err := store.GetPromptByID(c.Context(), id, projectIDs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
@@ -427,64 +407,35 @@ func MovePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Get current team details
-	currentTeam, err := store.GetTeamByID(c.Context(), prompt.TeamID)
+	// The target project must exist.
+	if _, err := store.GetProjectByID(c.Context(), targetProjectID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "target project not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// Require admin capability on BOTH the source and the target project.
+	adminProjectIDs, err := getRequestAdminProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-
-	// 3. Verify Admin permission on BOTH current team and target team
-	currentTeamAdmin := false
-	if currentTeam.OrgID != nil {
-		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, *currentTeam.OrgID)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-		if isOrgAdmin {
-			currentTeamAdmin = true
-		}
-	}
-	if !currentTeamAdmin {
-		isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, currentTeam.ID)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-		if isTeamAdmin {
-			currentTeamAdmin = true
-		}
-	}
-
-	targetTeamAdmin := false
-	if targetTeam.OrgID != nil {
-		isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, *targetTeam.OrgID)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-		if isOrgAdmin {
-			targetTeamAdmin = true
-		}
-	}
-	if !targetTeamAdmin {
-		isTeamAdmin, err := store.IsTeamAdmin(c.Context(), userID, targetTeam.ID)
-		if err != nil {
-			return apierr.ErrInternalError.Respond(c, err)
-		}
-		if isTeamAdmin {
-			targetTeamAdmin = true
-		}
-	}
-
-	if !currentTeamAdmin || !targetTeamAdmin {
+	if !containsUUID(adminProjectIDs, prompt.ProjectID) || !containsUUID(adminProjectIDs, targetProjectID) {
 		return apierr.ErrForbidden.Respond(c)
 	}
 
-	// Move the prompt
-	if err := store.MovePrompt(c.Context(), id, []uuid.UUID{currentTeam.ID}, targetTeamID); err != nil {
+	if err := store.MovePrompt(c.Context(), id, adminProjectIDs, targetProjectID); err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			return apierr.NewAPIError(fiber.StatusConflict, "a prompt with this name or slug already exists in the target project").Respond(c)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Retrieve updated prompt
-	prompt, err = store.GetPromptByID(c.Context(), id, []uuid.UUID{targetTeamID})
+	// Retrieve updated prompt from the target project.
+	prompt, err = store.GetPromptByID(c.Context(), id, []uuid.UUID{targetProjectID})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -513,13 +464,13 @@ func DiffVersions(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
 	// Verify read access to the prompt
-	if _, err := store.GetPromptByID(c.Context(), id, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}

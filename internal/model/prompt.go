@@ -14,7 +14,7 @@ const (
 
 type Prompt struct {
 	ID          uuid.UUID `json:"id"`
-	TeamID      uuid.UUID `json:"team_id"`
+	ProjectID   uuid.UUID `json:"project_id"`
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`

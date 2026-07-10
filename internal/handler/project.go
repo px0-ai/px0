@@ -96,7 +96,7 @@ func CreateProject(c *fiber.Ctx) error {
 }
 
 func GetProject(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
@@ -194,7 +194,7 @@ func requireProjectAdmin(c *fiber.Ctx, projectID uuid.UUID) (project *model.Proj
 }
 
 func GrantProjectAccess(c *fiber.Ctx) error {
-	projectID, err := uuid.Parse(c.Params("id"))
+	projectID, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
@@ -246,7 +246,7 @@ func GrantProjectAccess(c *fiber.Ctx) error {
 }
 
 func RevokeProjectAccess(c *fiber.Ctx) error {
-	projectID, err := uuid.Parse(c.Params("id"))
+	projectID, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
@@ -269,7 +269,7 @@ func RevokeProjectAccess(c *fiber.Ctx) error {
 }
 
 func DeleteProject(c *fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}

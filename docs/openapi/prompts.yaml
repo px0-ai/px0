@@ -3,26 +3,31 @@ info:
   title: Prompts & Rendering API
   version: 1.0.0
 paths:
-  /v1/teams/{teamID}/prompts:
+  /v1/projects/{projectID}/prompts:
     post:
       summary: Create a Prompt
-      description: Creates a new prompt container.
+      description: Creates a new prompt inside a project. The requester must be an editor-or-above on the project (via the owning team or a granted team).
       operationId: createPrompt
       tags:
         - Prompts
       security:
         - BearerAuth: []
       parameters:
-        - name: teamID
+        - name: projectID
           in: path
           required: true
           schema:
             type: string
             format: uuid
-          description: The ID of the team.
+          description: The ID of the project.
+      x-edge-cases:
+        - "A viewer of the project is refused with 403; an unknown project returns 404."
+        - "Slug uniqueness is scoped to the project, so the same slug may exist in another project."
       x-test-coverage:
         - "TestCreatePrompt_Success: Verifies prompt creation and response payload."
         - "TestCreatePrompt_MissingName: Verifies that missing name returns 400 and 'name is required'."
+        - "TestCreatePrompt_ForbiddenForViewer: Verifies a viewer cannot create a prompt (403)."
+        - "TestCreatePrompt_UnknownProject: Verifies an unknown project returns 404."
         - "TestCreatePrompt_Unauthorized: Verifies that unauthenticated request returns 401."
       requestBody:
         required: true
@@ -61,6 +66,24 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "unauthorized"
+        "403":
+          description: Forbidden (requester is not an editor of the project)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "409":
+          description: A prompt with this name or slug already exists in the project
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
         "500":
           description: Internal Server Error
           content:
@@ -72,20 +95,20 @@ paths:
 
     get:
       summary: List Prompts
-      description: Lists all available prompt containers.
+      description: Lists the prompts inside a project. The requester must be able to reach the project.
       operationId: listPrompts
       tags:
         - Prompts
       security:
         - BearerAuth: []
       parameters:
-        - name: teamID
+        - name: projectID
           in: path
           required: true
           schema:
             type: string
             format: uuid
-          description: The ID of the team.
+          description: The ID of the project.
         - name: archived
           in: query
           required: false
@@ -117,6 +140,18 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "unauthorized"
+        "403":
+          description: Forbidden (requester cannot reach the project)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
         "500":
           description: Internal Server Error
           content:
@@ -128,25 +163,25 @@ paths:
 
   /v1/prompts:
     get:
-      summary: List all prompts with team filter
-      description: Returns a list of prompts. If team_id query parameter is not provided, returns an empty list by default. Users can filter by a team they are a member of.
+      summary: List all prompts with project filter
+      description: Returns a list of prompts. If the project_id query parameter is not provided, returns an empty list by default. Users can filter by a project they can reach.
       operationId: listAllPrompts
       tags:
         - Prompts
       security:
         - BearerAuth: []
       parameters:
-        - name: team_id
+        - name: project_id
           in: query
           required: false
-          description: Optional UUID of the team to filter prompts (alias of team).
+          description: Optional UUID of the project to filter prompts (alias of project).
           schema:
             type: string
             format: uuid
-        - name: team
+        - name: project
           in: query
           required: false
-          description: Optional UUID of the team to filter prompts (alias of team_id).
+          description: Optional UUID of the project to filter prompts (alias of project_id).
           schema:
             type: string
             format: uuid
@@ -157,12 +192,12 @@ paths:
           schema:
             type: boolean
       x-edge-cases:
-        - "By default with no team_id query parameter, returns an empty list of prompts."
-        - "If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden."
+        - "By default with no project_id query parameter, returns an empty list of prompts."
+        - "If a project_id is provided, checks the requester can reach that project, otherwise returns 403 Forbidden."
       x-test-coverage:
-        - "TestListAllPrompts: Verifies that no team_id returns 200 with an empty list."
-        - "TestListAllPrompts: Verifies that a valid team_id returns 200 with prompts of that team."
-        - "TestListAllPrompts: Verifies that an unallowed team_id returns 403 Forbidden."
+        - "TestListAllPrompts: Verifies that no project_id returns 200 with an empty list."
+        - "TestListAllPrompts: Verifies that a valid project_id returns 200 with prompts of that project."
+        - "TestListAllPrompts: Verifies that an unallowed project_id returns 403 Forbidden."
       responses:
         "200":
           description: A list of prompts
@@ -485,7 +520,7 @@ paths:
   /v1/prompts/{id}/move:
     post:
       summary: Move a Prompt
-      description: Moves a prompt from its current team to another team. Requires admin privileges on both teams.
+      description: Moves a prompt from its current project to another project. Requires admin capability on both the source and target project (owning-team or org admin).
       operationId: movePrompt
       tags:
         - Prompts
@@ -498,6 +533,13 @@ paths:
           schema:
             type: string
             format: uuid
+      x-edge-cases:
+        - "Requires admin on both source and target project; a non-admin on either side is refused with 403."
+        - "A move into a project where the prompt's name or slug already exists is rejected with 409."
+        - "An unknown prompt or an unknown target project returns 404."
+      x-test-coverage:
+        - "TestMovePrompt: Verifies an admin moves a prompt between projects (200)."
+        - "TestMovePrompt_TargetCollision: Verifies a name/slug collision in the target project returns 409."
       requestBody:
         required: true
         content:
@@ -505,11 +547,12 @@ paths:
             schema:
               type: object
               required:
-                - team_id
+                - project_id
               properties:
-                team_id:
+                project_id:
                   type: string
                   format: uuid
+                  description: The target project to move the prompt into.
       responses:
         "200":
           description: Prompt successfully moved
@@ -523,7 +566,7 @@ paths:
                 required:
                   - prompt
         "400":
-          description: Invalid UUID format or team_id
+          description: Invalid UUID format or project_id
           content:
             application/json:
               schema:
@@ -535,13 +578,19 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "403":
-          description: Forbidden
+          description: Forbidden (not an admin on the source or target project)
           content:
             application/json:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
         "404":
-          description: Prompt not found
+          description: Prompt or target project not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "409":
+          description: A prompt with this name or slug already exists in the target project
           content:
             application/json:
               schema:
@@ -556,13 +605,13 @@ components:
           type: string
           format: uuid
           description: Unique identifier.
-        team_id:
+        project_id:
           type: string
           format: uuid
-          description: Unique identifier of the team.
+          description: Unique identifier of the project the prompt belongs to.
         slug:
           type: string
-          description: Unique slug within the team.
+          description: Unique slug within the project.
         name:
           type: string
           description: Name of the prompt container.
@@ -581,7 +630,7 @@ components:
           format: date-time
       required:
         - id
-        - team_id
+        - project_id
         - slug
         - name
         - description

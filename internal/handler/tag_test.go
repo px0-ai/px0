@@ -12,7 +12,8 @@ import (
 func TestTags_HandlerLifecycle(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hello, {{.name}}!") // Creates Version 1
 
@@ -49,7 +50,7 @@ func TestTags_HandlerLifecycle(t *testing.T) {
 	assert.Contains(t, vGet["tags"].([]any), "prod")
 
 	// 4. Render version using tag "prod"
-	reqRenderByTag := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/prod/render", slug),
+	reqRenderByTag := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts/%s/versions/prod/render", projectID, slug),
 		`{"variables":{"name":"Arpit"}}`, token)
 	respRenderByTag, err := a.Test(reqRenderByTag)
 	require.NoError(t, err)

@@ -123,20 +123,26 @@ func setupUser(t *testing.T, a *testApp) string {
 	return body["token"].(string)
 }
 
-// setupPrompt creates a prompt and returns its ID.
-func setupPrompt(t *testing.T, a *testApp, token string) string {
+// setupProject creates a project owned by the user's first team and returns its ID.
+func setupProject(t *testing.T, a *testApp, token string) string {
 	t.Helper()
-	ctx := context.Background()
-	session, err := store.GetSessionByToken(ctx, token)
+	teamID := setupUserTeam(t, token)
+	name := fmt.Sprintf("Test Project %s", uuid.New().String())
+	req := newReq(t, http.MethodPost, "/v1/projects",
+		fmt.Sprintf(`{"team_id":%q,"name":%q}`, teamID, name), token)
+	resp, err := a.Test(req)
 	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "create project failed")
 
-	teams, err := store.GetUserTeams(ctx, session.UserID)
-	require.NoError(t, err)
-	require.NotEmpty(t, teams, "User has no teams")
-	teamID := teams[0].ID
+	body := decodeBody(t, resp)
+	return body["project"].(map[string]any)["id"].(string)
+}
 
+// setupPromptInProject creates a prompt inside the given project and returns its ID.
+func setupPromptInProject(t *testing.T, a *testApp, token, projectID string) string {
+	t.Helper()
 	uniqueName := fmt.Sprintf("Test Prompt %s", uuid.New().String())
-	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
 		fmt.Sprintf(`{"name":%q,"description":"A test prompt"}`, uniqueName), token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -144,6 +150,13 @@ func setupPrompt(t *testing.T, a *testApp, token string) string {
 
 	body := decodeBody(t, resp)
 	return body["prompt"].(map[string]any)["id"].(string)
+}
+
+// setupPrompt creates a project and a prompt inside it, returning the prompt ID.
+func setupPrompt(t *testing.T, a *testApp, token string) string {
+	t.Helper()
+	projectID := setupProject(t, a, token)
+	return setupPromptInProject(t, a, token, projectID)
 }
 
 // setupVersion creates a draft version and returns its version number.
