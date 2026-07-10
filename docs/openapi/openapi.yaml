@@ -64,6 +64,10 @@ paths:
     $ref: "./projects.yaml#/paths/~1v1~1projects"
   /v1/projects/{id}:
     $ref: "./projects.yaml#/paths/~1v1~1projects~1{id}"
+  /v1/projects/{id}/access:
+    $ref: "./projects.yaml#/paths/~1v1~1projects~1{id}~1access"
+  /v1/projects/{id}/access/{teamID}:
+    $ref: "./projects.yaml#/paths/~1v1~1projects~1{id}~1access~1{teamID}"
   /v1/teams/{teamID}/projects:
     $ref: "./projects.yaml#/paths/~1v1~1teams~1{teamID}~1projects"
   /v1/teams/{teamID}/prompts:

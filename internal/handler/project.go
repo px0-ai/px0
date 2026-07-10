@@ -156,31 +156,126 @@ func ListTeamProjects(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"projects": projects})
 }
 
+type grantProjectAccessRequest struct {
+	TeamID string `json:"team_id"`
+}
+
+// requireProjectAdmin loads the project and its owning team and verifies the
+// requester is an admin of the owning team (or its org). When it returns
+// ok == false it has already written the appropriate error response to c, and
+// the caller should return nil.
+func requireProjectAdmin(c *fiber.Ctx, projectID uuid.UUID) (project *model.Project, team *model.Team, ok bool) {
+	project, err := store.GetProjectByID(c.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			_ = apierr.ErrProjectNotFound.Respond(c)
+		} else {
+			_ = apierr.ErrInternalError.Respond(c, err)
+		}
+		return nil, nil, false
+	}
+
+	team, err = store.GetTeamByID(c.Context(), project.OwningTeamID)
+	if err != nil {
+		_ = apierr.ErrInternalError.Respond(c, err)
+		return nil, nil, false
+	}
+
+	allowed, err := isProjectAdmin(c, team)
+	if err != nil {
+		_ = apierr.ErrInternalError.Respond(c, err)
+		return nil, nil, false
+	}
+	if !allowed {
+		_ = apierr.ErrForbidden.Respond(c)
+		return nil, nil, false
+	}
+	return project, team, true
+}
+
+func GrantProjectAccess(c *fiber.Ctx) error {
+	projectID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	var req grantProjectAccessRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+	granteeID, err := uuid.Parse(req.TeamID)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid team_id").Respond(c)
+	}
+
+	project, owningTeam, ok := requireProjectAdmin(c, projectID)
+	if !ok {
+		return nil
+	}
+
+	// Sharing is bounded to the owning team's organization; an org-less team
+	// may hold a private project but cannot share it.
+	if owningTeam.OrgID == nil {
+		return apierr.NewAPIError(fiber.StatusForbidden, "the project's owning team has no organization; sharing is not available").Respond(c)
+	}
+
+	if granteeID == project.OwningTeamID {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "the owning team already has implicit access").Respond(c)
+	}
+
+	grantee, err := store.GetTeamByID(c.Context(), granteeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "team not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if grantee.OrgID == nil || *grantee.OrgID != *owningTeam.OrgID {
+		return apierr.NewAPIError(fiber.StatusForbidden, "grantee team must belong to the owning team's organization").Respond(c)
+	}
+
+	if err := store.GrantProjectAccess(c.Context(), projectID, granteeID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrProjectNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"access": fiber.Map{"project_id": projectID, "team_id": granteeID},
+	})
+}
+
+func RevokeProjectAccess(c *fiber.Ctx) error {
+	projectID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+	granteeID, err := uuid.Parse(c.Params("teamID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	if _, _, ok := requireProjectAdmin(c, projectID); !ok {
+		return nil
+	}
+
+	if err := store.RevokeProjectAccess(c.Context(), projectID, granteeID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "access grant not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func DeleteProject(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	project, err := store.GetProjectByID(c.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return apierr.ErrProjectNotFound.Respond(c)
-		}
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	team, err := store.GetTeamByID(c.Context(), project.OwningTeamID)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	allowed, err := isProjectAdmin(c, team)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-	if !allowed {
-		return apierr.ErrForbidden.Respond(c)
+	if _, _, ok := requireProjectAdmin(c, id); !ok {
+		return nil
 	}
 
 	if err := store.DeleteProject(c.Context(), id); err != nil {

@@ -63,6 +63,8 @@ func New() *fiber.App {
 	projects.Post("", handler.CreateProject)
 	projects.Get("/:id", handler.GetProject)
 	projects.Delete("/:id", handler.DeleteProject)
+	projects.Post("/:id/access", handler.GrantProjectAccess)
+	projects.Delete("/:id/access/:teamID", handler.RevokeProjectAccess)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", handler.ListTeamProjects)

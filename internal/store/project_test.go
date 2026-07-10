@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -94,6 +95,78 @@ func TestListProjectsForTeam(t *testing.T) {
 	projects, err = store.ListProjectsForTeam(ctx, empty.ID)
 	require.NoError(t, err)
 	assert.Empty(t, projects)
+}
+
+func TestGrantProjectAccess(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	owner, err := store.CreateTeam(ctx, "Owner Team")
+	require.NoError(t, err)
+	grantee, err := store.CreateTeam(ctx, "Grantee Team")
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, owner.ID, "shared", "Shared")
+	require.NoError(t, err)
+
+	require.NoError(t, store.GrantProjectAccess(ctx, project.ID, grantee.ID))
+
+	// Re-granting is a no-op, not an error.
+	require.NoError(t, store.GrantProjectAccess(ctx, project.ID, grantee.ID))
+
+	accessible, err := store.IsProjectAccessibleByTeams(ctx, project.ID, []uuid.UUID{grantee.ID})
+	require.NoError(t, err)
+	assert.True(t, accessible)
+
+	// The grantee now sees the project in its list.
+	projects, err := store.ListProjectsForTeam(ctx, grantee.ID)
+	require.NoError(t, err)
+	assert.Len(t, projects, 1)
+}
+
+func TestGrantProjectAccess_UnknownProjectOrTeam(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	owner, err := store.CreateTeam(ctx, "Owner Team")
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, owner.ID, "shared", "Shared")
+	require.NoError(t, err)
+
+	err = store.GrantProjectAccess(ctx, nonExistentUUID(), owner.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	err = store.GrantProjectAccess(ctx, project.ID, nonExistentUUID())
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestRevokeProjectAccess(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	owner, err := store.CreateTeam(ctx, "Owner Team")
+	require.NoError(t, err)
+	grantee, err := store.CreateTeam(ctx, "Grantee Team")
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, owner.ID, "shared", "Shared")
+	require.NoError(t, err)
+
+	require.NoError(t, store.GrantProjectAccess(ctx, project.ID, grantee.ID))
+	require.NoError(t, store.RevokeProjectAccess(ctx, project.ID, grantee.ID))
+
+	accessible, err := store.IsProjectAccessibleByTeams(ctx, project.ID, []uuid.UUID{grantee.ID})
+	require.NoError(t, err)
+	assert.False(t, accessible)
+}
+
+func TestRevokeProjectAccess_NotFound(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	owner, err := store.CreateTeam(ctx, "Owner Team")
+	require.NoError(t, err)
+	grantee, err := store.CreateTeam(ctx, "Grantee Team")
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, owner.ID, "shared", "Shared")
+	require.NoError(t, err)
+
+	err = store.RevokeProjectAccess(ctx, project.ID, grantee.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestDeleteProject(t *testing.T) {

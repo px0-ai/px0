@@ -76,6 +76,42 @@ func ListProjectsForTeam(ctx context.Context, teamID uuid.UUID) ([]*model.Projec
 	return projects, rows.Err()
 }
 
+// GrantProjectAccess records that teamID may work with the project's prompts.
+// It is idempotent (re-granting is a no-op) and returns ErrNotFound if the
+// project or team does not exist.
+func GrantProjectAccess(ctx context.Context, projectID, teamID uuid.UUID) error {
+	_, err := db.Pool.Exec(ctx,
+		`INSERT INTO project_team_access (project_id, team_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT DO NOTHING`,
+		projectID, teamID,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrNotFound
+		}
+		return fmt.Errorf("grant project access: %w", err)
+	}
+	return nil
+}
+
+// RevokeProjectAccess removes a team's access grant. Returns ErrNotFound if no
+// such grant existed.
+func RevokeProjectAccess(ctx context.Context, projectID, teamID uuid.UUID) error {
+	result, err := db.Pool.Exec(ctx,
+		`DELETE FROM project_team_access WHERE project_id = $1 AND team_id = $2`,
+		projectID, teamID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke project access: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // IsProjectAccessibleByTeams reports whether the project is reachable by any of
 // the given teams — either as the owning team or via an access grant.
 func IsProjectAccessibleByTeams(ctx context.Context, projectID uuid.UUID, teamIDs []uuid.UUID) (bool, error) {

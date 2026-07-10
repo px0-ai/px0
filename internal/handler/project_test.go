@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,7 @@ type projectRoles struct {
 	viewerToken   string
 	outsiderToken string
 	teamID        string
+	orgID         uuid.UUID
 }
 
 // setupProjectRoles builds a team (via the admin from setupUser) with an editor,
@@ -38,6 +40,8 @@ func setupProjectRoles(t *testing.T, a *testApp) projectRoles {
 	require.NoError(t, err)
 	require.NotEmpty(t, teams)
 	teamID := teams[0].ID
+	require.NotNil(t, teams[0].OrgID)
+	orgID := *teams[0].OrgID
 
 	newMember := func(email, role string, join bool) string {
 		hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
@@ -61,7 +65,30 @@ func setupProjectRoles(t *testing.T, a *testApp) projectRoles {
 		viewerToken:   newMember("proj-viewer@px0.dev", "viewer", true),
 		outsiderToken: newMember("proj-outsider@px0.dev", "", false),
 		teamID:        teamID.String(),
+		orgID:         orgID,
 	}
+}
+
+// makeTeamMember creates a verified user in the given team (defaulting to the
+// role AddTeamMember assigns) and returns a session token for them.
+func makeTeamMember(t *testing.T, teamID uuid.UUID, email string, expiresAt time.Time) string {
+	t.Helper()
+	ctx := context.Background()
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	u, err := store.CreateVerifiedUser(ctx, email, string(hash))
+	require.NoError(t, err)
+	require.NoError(t, store.AddTeamMember(ctx, teamID, u.ID))
+	sess, err := store.CreateSession(ctx, u.ID, "sess_"+uuid.NewString(), expiresAt)
+	require.NoError(t, err)
+	return sess.Token
+}
+
+func sessionExpiry(t *testing.T, token string) time.Time {
+	t.Helper()
+	sess, err := store.GetSessionByToken(context.Background(), token)
+	require.NoError(t, err)
+	return sess.ExpiresAt
 }
 
 func createProjectBody(teamID, name string) string {
@@ -242,4 +269,147 @@ func TestListTeamProjects_ForbiddenForNonMember(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func grantAccessBody(teamID string) string {
+	return fmt.Sprintf(`{"team_id":%q}`, teamID)
+}
+
+func TestGrantProjectAccess_Success(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	ctx := context.Background()
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	// A second team in the same org, with a member who is not on the owning team.
+	grantee, err := store.CreateTeamWithOrg(ctx, "Grantee Team", r.orgID)
+	require.NoError(t, err)
+	granteeToken := makeTeamMember(t, grantee.ID, "grantee-member@px0.dev", sessionExpiry(t, r.adminToken))
+
+	// Before the grant, the grantee member cannot reach the project.
+	resp, err := a.Test(newReq(t, http.MethodGet, "/v1/projects/"+id, "", granteeToken))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	// Owning-team admin grants access.
+	resp, err = a.Test(newReq(t, http.MethodPost, "/v1/projects/"+id+"/access", grantAccessBody(grantee.ID.String()), r.adminToken))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	// Now the grantee member can reach the project.
+	resp, err = a.Test(newReq(t, http.MethodGet, "/v1/projects/"+id, "", granteeToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestGrantProjectAccess_ForbiddenForNonAdmin(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	ctx := context.Background()
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	grantee, err := store.CreateTeamWithOrg(ctx, "Grantee Team", r.orgID)
+	require.NoError(t, err)
+
+	resp, err := a.Test(newReq(t, http.MethodPost, "/v1/projects/"+id+"/access", grantAccessBody(grantee.ID.String()), r.editorToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestGrantProjectAccess_RejectsTeamOutsideOrg(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	ctx := context.Background()
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	// A team in a different organization.
+	foreignOrg, err := store.CreateOrganization(ctx, "Foreign Org")
+	require.NoError(t, err)
+	foreign, err := store.CreateTeamWithOrg(ctx, "Foreign Team", foreignOrg.ID)
+	require.NoError(t, err)
+
+	resp, err := a.Test(newReq(t, http.MethodPost, "/v1/projects/"+id+"/access", grantAccessBody(foreign.ID.String()), r.adminToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestGrantProjectAccess_RejectsOrgLessOwner(t *testing.T) {
+	a := newTestApp(t)
+	setupProjectRoles(t, a) // establishes an admin/session baseline
+	ctx := context.Background()
+
+	// An org-less owning team with an admin member and a private project.
+	orgLess, err := store.CreateTeam(ctx, "Org-less Team")
+	require.NoError(t, err)
+	ownerToken := makeTeamMember(t, orgLess.ID, "orgless-admin@px0.dev", time.Now().Add(time.Hour))
+	project, err := store.CreateProject(ctx, orgLess.ID, "private", "Private")
+	require.NoError(t, err)
+
+	// Some other team to attempt to share with.
+	other, err := store.CreateTeam(ctx, "Some Other Team")
+	require.NoError(t, err)
+
+	resp, err := a.Test(newReq(t, http.MethodPost, "/v1/projects/"+project.ID.String()+"/access", grantAccessBody(other.ID.String()), ownerToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestGrantProjectAccess_UnknownProject(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+
+	resp, err := a.Test(newReq(t, http.MethodPost, "/v1/projects/"+uuid.NewString()+"/access", grantAccessBody(r.teamID), r.adminToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestRevokeProjectAccess_Success(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	ctx := context.Background()
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	grantee, err := store.CreateTeamWithOrg(ctx, "Grantee Team", r.orgID)
+	require.NoError(t, err)
+	granteeToken := makeTeamMember(t, grantee.ID, "grantee-member@px0.dev", sessionExpiry(t, r.adminToken))
+
+	require.NoError(t, store.GrantProjectAccess(ctx, uuid.MustParse(id), grantee.ID))
+
+	// Revoke, then the grantee loses reachability.
+	resp, err := a.Test(newReq(t, http.MethodDelete, fmt.Sprintf("/v1/projects/%s/access/%s", id, grantee.ID), "", r.adminToken))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp.Body.Close()
+
+	resp, err = a.Test(newReq(t, http.MethodGet, "/v1/projects/"+id, "", granteeToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestRevokeProjectAccess_ForbiddenForNonAdmin(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	ctx := context.Background()
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	grantee, err := store.CreateTeamWithOrg(ctx, "Grantee Team", r.orgID)
+	require.NoError(t, err)
+	require.NoError(t, store.GrantProjectAccess(ctx, uuid.MustParse(id), grantee.ID))
+
+	resp, err := a.Test(newReq(t, http.MethodDelete, fmt.Sprintf("/v1/projects/%s/access/%s", id, grantee.ID), "", r.editorToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestRevokeProjectAccess_NotFound(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	// No grant exists for this team.
+	resp, err := a.Test(newReq(t, http.MethodDelete, fmt.Sprintf("/v1/projects/%s/access/%s", id, uuid.NewString()), "", r.adminToken))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
