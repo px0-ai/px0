@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -1056,6 +1057,132 @@ func TestListPrompts_FTSMode_DoesNotAutoEmbed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body := decodeBody(t, resp)
 	assert.Equal(t, "fts", body["engine"])
+}
+
+// TestListPrompts_FTS_ORSemantics verifies that the Postgres FTS provider
+// uses OR semantics (any term match) with a minimum ts_rank threshold,
+// replacing the previous AND semantics that made multi-word natural-language
+// queries return zero results when not every token appeared in the document.
+func TestListPrompts_FTS_ORSemantics(t *testing.T) {
+	// Wire the real Postgres FTS provider so search.GetFTS() is not Noop.
+	t.Setenv("SEARCH_FTS_PROVIDER", "postgres")
+	t.Setenv("SEARCH_VECTOR_PROVIDER", "noop")
+	t.Setenv("EMBEDDER_PROVIDER", "")
+
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	ctx := context.Background()
+	fts, err := searchfactory.NewFTSProvider(ctx)
+	require.NoError(t, err)
+	vec, err := searchfactory.NewVectorProvider(ctx)
+	require.NoError(t, err)
+	search.Init(fts, vec)
+	t.Cleanup(func() {
+		search.Init(search.NoopProvider{}, search.NoopProvider{})
+	})
+
+	create := func(name, desc string) string {
+		req := newReq(t, http.MethodPost,
+			fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+			fmt.Sprintf(`{"name":%q,"description":%q}`, name, desc), token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		body := decodeBody(t, resp)
+		return body["prompt"].(map[string]any)["id"].(string)
+	}
+
+	create("Bug Tracker", "Helps users report software bugs, app crashes, and installation issues.")
+	create("Crash Reporter", "Collects details on app crashes, bugs, and failed installs.")
+	create("Glossary Lookup", "Defines technical terms, APIs, and acronyms used across the platform.")
+	create("Leave Assistant", "Answers questions about sick leave, vacation days, and sick day policy.")
+	create("Billing Support", "Assists customers with billing errors, payment failures, and refund requests.")
+	create("Weather Widget", "Shows current temperature and forecast for the user location.")
+
+	searchAndAssert := func(query string, wantNames ...string) {
+		u := fmt.Sprintf("/v1/teams/%s/prompts?mode=fts&q=%s", teamID, url.QueryEscape(query))
+		req := newReq(t, http.MethodGet, u, "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body := decodeBody(t, resp)
+		assert.Equal(t, "fts", body["engine"])
+
+		prompts := body["prompts"].([]any)
+		got := make(map[string]bool)
+		for _, p := range prompts {
+			name := p.(map[string]any)["name"].(string)
+			got[name] = true
+		}
+		for _, want := range wantNames {
+			assert.True(t, got[want], "query %q: expected %q in results", query, want)
+		}
+	}
+
+	searchAndAssert("app keeps crashing", "Bug Tracker", "Crash Reporter")
+	searchAndAssert("define API", "Glossary Lookup")
+	searchAndAssert("vacation days remaining", "Leave Assistant")
+	searchAndAssert("refund for a failed payment", "Billing Support")
+}
+
+// TestListPrompts_FTS_ORSemantics_RegressionGuard verifies that OR
+// semantics do not produce false positives for out-of-domain queries.
+func TestListPrompts_FTS_ORSemantics_RegressionGuard(t *testing.T) {
+	t.Setenv("SEARCH_FTS_PROVIDER", "postgres")
+	t.Setenv("SEARCH_VECTOR_PROVIDER", "noop")
+	t.Setenv("EMBEDDER_PROVIDER", "")
+
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	teamID := setupUserTeam(t, token)
+
+	ctx := context.Background()
+	fts, err := searchfactory.NewFTSProvider(ctx)
+	require.NoError(t, err)
+	vec, err := searchfactory.NewVectorProvider(ctx)
+	require.NoError(t, err)
+	search.Init(fts, vec)
+	t.Cleanup(func() {
+		search.Init(search.NoopProvider{}, search.NoopProvider{})
+	})
+
+	create := func(name, desc string) {
+		req := newReq(t, http.MethodPost,
+			fmt.Sprintf("/v1/teams/%s/prompts", teamID),
+			fmt.Sprintf(`{"name":%q,"description":%q}`, name, desc), token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		resp.Body.Close()
+	}
+
+	create("Bug Tracker", "Helps users report software bugs, app crashes, and installation issues.")
+	create("Leave Assistant", "Answers questions about sick leave, vacation days, and sick day policy.")
+
+	// "quantum physics homework help" must return no results.
+	req := newReq(t, http.MethodGet,
+		fmt.Sprintf("/v1/teams/%s/prompts?mode=fts&q=%s", teamID,
+			url.QueryEscape("quantum physics homework help")), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body := decodeBody(t, resp)
+	prompts := body["prompts"].([]any)
+	assert.Empty(t, prompts, "quantum physics homework help should return no results")
+
+	// "crshing" (typo) — FTS dictionary cannot stem "crshing" to "crash".
+	// Expected: no results. Typo-tolerance is out of scope.
+	req = newReq(t, http.MethodGet,
+		fmt.Sprintf("/v1/teams/%s/prompts?mode=fts&q=%s", teamID,
+			url.QueryEscape("crshing")), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	prompts = body["prompts"].([]any)
+	assert.Empty(t, prompts, "crshing (typo) should return no results — typo tolerance out of scope")
 }
 
 // TestListPrompts_VectorMode_StillRequiresEmbedder confirms that the
