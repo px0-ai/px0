@@ -2147,9 +2147,14 @@ paths:
           description: Optional boolean to filter prompts by archive state.
           schema:
             type: boolean
+      x-edge-cases:
+        - An API key reaches the prompts of every project its teams can access — owned or granted — and loses that reach when the grant is revoked.
       x-test-coverage:
         - 'TestListPrompts: Verifies listing populated prompt containers.'
         - 'TestListPrompts_Empty: Verifies that listing when empty returns an empty array.'
+        - 'TestPrompts_APIKeyAuth: Verifies an API key lists a project owned by its team.'
+        - 'TestAPIKey_ReachesGrantedProject: Verifies an API key reaches a granted project''s prompts and is denied after revoke.'
+        - 'TestAPIKey_DeniedForeignProject: Verifies an API key is denied a project its teams cannot access.'
       responses:
         '200':
           description: List of prompts
