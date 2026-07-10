@@ -59,7 +59,13 @@ func New() *fiber.App {
 	teamPrompts.Post("", handler.CreatePrompt)
 	teamPrompts.Get("", handler.ListPrompts)
 
+	projects := v1.Group("/projects", middleware.RequireAuth)
+	projects.Post("", handler.CreateProject)
+	projects.Get("/:id", handler.GetProject)
+	projects.Delete("/:id", handler.DeleteProject)
+
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
+	teams.Get("/:teamID/projects", handler.ListTeamProjects)
 	teams.Put("/:id", handler.UpdateTeam)
 	teams.Post("/:id/members", handler.AddTeamMember)
 	teams.Delete("/:id/members/:userID", handler.RemoveTeamMember)
