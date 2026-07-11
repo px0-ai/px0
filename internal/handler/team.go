@@ -68,12 +68,8 @@ func CreateTeam(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusConflict, "team name already exists under this organization").Respond(c)
 	}
 
-	team, err := store.CreateTeamWithOrg(c.Context(), req.Name, orgID)
+	team, err := store.CreateTeamWithAdmin(c.Context(), req.Name, orgID, userID)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	if err := store.AddTeamMember(c.Context(), team.ID, userID); err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 

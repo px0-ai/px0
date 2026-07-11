@@ -314,9 +314,11 @@ paths:
       x-edge-cases:
         - "Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template)."
         - "Allows updating model configuration without changing the template while the version is still a draft."
+        - "Allows clearing model and model parameters explicitly by passing JSON null values."
       x-test-coverage:
         - "TestUpdateVersion_Draft: Verifies modification updates template content and returns 200."
         - "TestUpdateVersion_ModelConfigOnly: Verifies model configuration updates on draft versions without changing the template."
+        - "TestUpdateVersion_ClearModelConfig: Verifies model and model parameters can be cleared by explicitly sending null."
         - "TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and 'only draft versions can be modified'."
       requestBody:
         required: true

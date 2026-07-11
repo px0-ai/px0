@@ -71,3 +71,46 @@ func TestLeaveTeam(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, isMember)
 }
+
+func TestCreateTeam_Success(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	adminToken := setupUser(t, a) // verified admin user on Default Test Org & Test Setup Team
+
+	// Get organization ID
+	session, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := session.UserID
+
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	require.NotNil(t, orgID)
+
+	// Create a new team
+	reqBody := `{"name":"New Engineering Team"}`
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgID.String()), reqBody, adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	teamData := body["team"].(map[string]any)
+	assert.Equal(t, "New Engineering Team", teamData["name"])
+	teamIDStr := teamData["id"].(string)
+	teamID, err := uuid.Parse(teamIDStr)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	// Verify the creator (adminUserID) is automatically added as an admin of the new team
+	members, err := store.GetTeamMembers(ctx, teamID)
+	require.NoError(t, err)
+	require.Len(t, members, 1)
+	assert.Equal(t, adminUserID, members[0].ID)
+
+	// Verify their role is 'admin' (by checking that IsTeamViewer returns true)
+	isViewer, err := store.IsTeamViewer(ctx, adminUserID, teamID)
+	require.NoError(t, err)
+	assert.True(t, isViewer)
+}

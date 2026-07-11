@@ -17,9 +17,11 @@ paths:
         - "Team admins or editors of other custom teams are forbidden from creating teams."
         - "Fails with 400 if name is empty."
         - "Fails with 409 if the team name already exists under the target organization."
+        - "The team creator is automatically and atomically added as an admin member of the newly created team."
       x-test-coverage:
         - "TestRolesAndPermissions: Verifies that a Team Admin of a custom team is forbidden from creating a team (returns 403 Forbidden)."
         - "TestRolesAndPermissions: Verifies that an Org Admin (admin of Default Team) can create a team (returns 201 Created)."
+        - "TestCreateTeam_Success: Verifies that a team is successfully created and the creator is automatically assigned as an admin."
       parameters:
         - name: orgID
           in: path

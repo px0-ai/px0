@@ -39,6 +39,38 @@ func CreateTeamWithOrg(ctx context.Context, name string, orgID uuid.UUID) (*mode
 	return t, nil
 }
 
+func CreateTeamWithAdmin(ctx context.Context, name string, orgID, userID uuid.UUID) (*model.Team, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	t := &model.Team{}
+	err = tx.QueryRow(ctx,
+		`INSERT INTO teams (name, org_id) VALUES ($1, $2)
+		 RETURNING id, org_id, name, created_at`,
+		name, orgID,
+	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("create team: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'admin') ON CONFLICT DO NOTHING`,
+		t.ID, userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("add team admin member: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return t, nil
+}
+
 func UpdateTeam(ctx context.Context, id uuid.UUID, name string, orgID *uuid.UUID) (*model.Team, error) {
 	t := &model.Team{}
 	err := db.Pool.QueryRow(ctx,

@@ -889,9 +889,11 @@ paths:
         - Team admins or editors of other custom teams are forbidden from creating teams.
         - Fails with 400 if name is empty.
         - Fails with 409 if the team name already exists under the target organization.
+        - The team creator is automatically and atomically added as an admin member of the newly created team.
       x-test-coverage:
         - 'TestRolesAndPermissions: Verifies that a Team Admin of a custom team is forbidden from creating a team (returns 403 Forbidden).'
         - 'TestRolesAndPermissions: Verifies that an Org Admin (admin of Default Team) can create a team (returns 201 Created).'
+        - 'TestCreateTeam_Success: Verifies that a team is successfully created and the creator is automatically assigned as an admin.'
       parameters:
         - name: orgID
           in: path
@@ -2585,9 +2587,11 @@ paths:
       x-edge-cases:
         - Fails with 422 Unprocessable Entity if the version status is not 'draft' (e.g. attempting to update a live/archived template).
         - Allows updating model configuration without changing the template while the version is still a draft.
+        - Allows clearing model and model parameters explicitly by passing JSON null values.
       x-test-coverage:
         - 'TestUpdateVersion_Draft: Verifies modification updates template content and returns 200.'
         - 'TestUpdateVersion_ModelConfigOnly: Verifies model configuration updates on draft versions without changing the template.'
+        - 'TestUpdateVersion_ClearModelConfig: Verifies model and model parameters can be cleared by explicitly sending null.'
         - 'TestUpdateVersion_LiveVersionRejected: Verifies that updating a published live template version fails with 422 and ''only draft versions can be modified''.'
       requestBody:
         required: true

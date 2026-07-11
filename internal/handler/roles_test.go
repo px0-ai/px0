@@ -24,7 +24,6 @@ func TestRolesAndPermissions(t *testing.T) {
 
 	adminSession, err := store.GetSessionByToken(ctx, adminToken)
 	require.NoError(t, err)
-	adminUserID := adminSession.UserID
 
 	// Create Organization
 	req := newReq(t, http.MethodPost, "/v1/orgs", `{"name":"Duplicate Org Name"}`, adminToken)
@@ -63,10 +62,6 @@ func TestRolesAndPermissions(t *testing.T) {
 	bodyTeam := decodeBody(t, resp)
 	teamIDStr := bodyTeam["team"].(map[string]any)["id"].(string)
 	teamID, _ := uuid.Parse(teamIDStr)
-
-	// Since we created the team, let's join it. First member added automatically becomes 'admin'.
-	err = store.AddTeamMember(ctx, teamID, adminUserID)
-	require.NoError(t, err)
 
 	// 3. Check duplicate team name creation in same org
 	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/orgs/%s/teams", orgIDStr), `{"name":"Engineering"}`, adminToken)

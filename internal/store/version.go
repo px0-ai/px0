@@ -22,9 +22,11 @@ type CreateVersionParams struct {
 }
 
 type UpdateVersionParams struct {
-	Template    *string
-	Model       *string
-	ModelParams json.RawMessage
+	Template          *string
+	Model             *string
+	UpdateModel       bool
+	ModelParams       json.RawMessage
+	UpdateModelParams bool
 }
 
 func CreateVersion(ctx context.Context, promptID uuid.UUID, params CreateVersionParams) (*model.PromptVersion, error) {
@@ -180,13 +182,21 @@ func UpdateVersion(ctx context.Context, id uuid.UUID, params UpdateVersionParams
 		args = append(args, *params.Template)
 		setClauses = append(setClauses, fmt.Sprintf("template = $%d", len(args)))
 	}
-	if params.Model != nil {
-		args = append(args, *params.Model)
-		setClauses = append(setClauses, fmt.Sprintf("model = $%d", len(args)))
+	if params.UpdateModel {
+		if params.Model == nil {
+			setClauses = append(setClauses, "model = NULL")
+		} else {
+			args = append(args, *params.Model)
+			setClauses = append(setClauses, fmt.Sprintf("model = $%d", len(args)))
+		}
 	}
-	if len(params.ModelParams) > 0 {
-		args = append(args, params.ModelParams)
-		setClauses = append(setClauses, fmt.Sprintf("model_params = $%d", len(args)))
+	if params.UpdateModelParams {
+		if len(params.ModelParams) == 0 || string(params.ModelParams) == "null" {
+			setClauses = append(setClauses, "model_params = NULL")
+		} else {
+			args = append(args, params.ModelParams)
+			setClauses = append(setClauses, fmt.Sprintf("model_params = $%d", len(args)))
+		}
 	}
 	if len(setClauses) == 0 {
 		return nil, ErrConflict

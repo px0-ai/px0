@@ -231,6 +231,35 @@ func TestUpdateVersion_ModelConfigOnly(t *testing.T) {
 	assert.Equal(t, map[string]any{"temperature": 0.5}, v["model_params"])
 }
 
+func TestUpdateVersion_ClearModelConfig(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "original template")
+
+	// 1. Set some model and model parameters
+	req := newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/1", id),
+		`{"model":"openai/gpt-4.1-mini","model_params":{"temperature":0.5}}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 2. Clear model and model parameters explicitly by passing null
+	reqClear := newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/1", id),
+		`{"model":null,"model_params":null}`, token)
+	respClear, err := a.Test(reqClear)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respClear.StatusCode)
+
+	body := decodeBody(t, respClear)
+	v := body["version"].(map[string]any)
+	assert.Equal(t, "original template", v["template"])
+	assert.Nil(t, v["model"])
+	assert.Nil(t, v["model_params"])
+	respClear.Body.Close()
+}
+
 func TestUpdateVersion_NonDraftRejected(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
