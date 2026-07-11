@@ -125,7 +125,7 @@ func TestRenderLive_MissingVariable(t *testing.T) {
 	assert.Contains(t, errMsg, "template execution failed")
 }
 
-func TestRenderLive_IncludesModel(t *testing.T) {
+func TestRenderLive_IncludesModelConfig(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
@@ -133,7 +133,7 @@ func TestRenderLive_IncludesModel(t *testing.T) {
 
 	req := newReq(t, http.MethodPost,
 		fmt.Sprintf("/v1/prompts/%s/versions", id),
-		`{"template":"Hi {{.user}}!","model":"gpt-4.1"}`, token)
+		`{"template":"Hi {{.user}}!","model":"openai/gpt-4.1","model_params":{"temperature":0.2}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -160,7 +160,8 @@ func TestRenderLive_IncludesModel(t *testing.T) {
 
 	body := decodeBody(t, resp)
 	assert.Equal(t, "Hi Alice!", body["rendered"])
-	assert.Equal(t, "gpt-4.1", body["model"])
+	assert.Equal(t, "openai/gpt-4.1", body["model"])
+	assert.Equal(t, map[string]any{"temperature": 0.2}, body["model_params"])
 }
 
 func TestRenderVersion_Draft(t *testing.T) {

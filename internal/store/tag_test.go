@@ -16,10 +16,10 @@ func TestTags_StoreLifecycle(t *testing.T) {
 	ctx := context.Background()
 	p := newPrompt(t, ctx)
 
-	v1, err := store.CreateVersion(ctx, p.ID, "v1 template")
+	v1, err := store.CreateVersion(ctx, p.ID, store.CreateVersionParams{Template: "v1 template"})
 	require.NoError(t, err)
 
-	v2, err := store.CreateVersion(ctx, p.ID, "v2 template")
+	v2, err := store.CreateVersion(ctx, p.ID, store.CreateVersionParams{Template: "v2 template"})
 	require.NoError(t, err)
 
 	// 1. SetTag

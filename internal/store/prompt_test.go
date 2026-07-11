@@ -191,7 +191,7 @@ func TestListPrompts_Filters(t *testing.T) {
 	assert.Equal(t, pB.ID, prompts[0].ID)
 
 	// 2. Create version and tag for pA
-	v, err := store.CreateVersion(ctx, pA.ID, "template")
+	v, err := store.CreateVersion(ctx, pA.ID, store.CreateVersionParams{Template: "template"})
 	require.NoError(t, err)
 	err = store.SetTag(ctx, pA.ID, v.Version, "prod")
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestUpdatePrompt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p.ID, updated.ID)
 	assert.Equal(t, "my_prompt", updated.Slug) // slug remains unchanged
-	assert.Equal(t, "My Prompt", updated.Name)  // name remains unchanged
+	assert.Equal(t, "My Prompt", updated.Name) // name remains unchanged
 	assert.Equal(t, "Updated description", updated.Description)
 
 	// 2. Not found / Unauthorized team update

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -16,13 +17,15 @@ import (
 )
 
 type createVersionRequest struct {
-	Template string `json:"template"`
-	Model    string `json:"model"`
+	Template    string          `json:"template"`
+	Model       string          `json:"model"`
+	ModelParams json.RawMessage `json:"model_params"`
 }
 
 type updateVersionRequest struct {
-	Template *string `json:"template"`
-	Model    *string `json:"model"`
+	Template    *string         `json:"template"`
+	Model       *string         `json:"model"`
+	ModelParams json.RawMessage `json:"model_params"`
 }
 
 func CreateVersion(c *fiber.Ctx) error {
@@ -70,7 +73,15 @@ func CreateVersion(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
 	}
 
-	version, err := store.CreateVersionWithModel(c.Context(), promptID, req.Template, versionModel)
+	if err := validateModelParams(req.ModelParams); err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
+	}
+
+	version, err := store.CreateVersion(c.Context(), promptID, store.CreateVersionParams{
+		Template:    req.Template,
+		Model:       versionModel,
+		ModelParams: req.ModelParams,
+	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -199,8 +210,8 @@ func UpdateVersion(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return apierr.ErrInvalidRequestBody.Respond(c)
 	}
-	if req.Template == nil && req.Model == nil {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "template or model is required").Respond(c)
+	if req.Template == nil && req.Model == nil && len(req.ModelParams) == 0 {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "template, model, or model_params is required").Respond(c)
 	}
 	if req.Template != nil {
 		if *req.Template == "" {
@@ -215,7 +226,15 @@ func UpdateVersion(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
 	}
 
-	updated, err := store.UpdateVersionDraft(c.Context(), existing.ID, req.Template, versionModel)
+	if err := validateModelParams(req.ModelParams); err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
+	}
+
+	updated, err := store.UpdateVersion(c.Context(), existing.ID, store.UpdateVersionParams{
+		Template:    req.Template,
+		Model:       versionModel,
+		ModelParams: req.ModelParams,
+	})
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -498,4 +517,15 @@ func normalizeVersionModelPtr(modelName *string) (*string, error) {
 		return nil, errors.New("model must not be empty")
 	}
 	return &trimmed, nil
+}
+
+func validateModelParams(params json.RawMessage) error {
+	if len(params) == 0 {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(params, &object); err != nil || object == nil {
+		return errors.New("model_params must be a JSON object")
+	}
+	return nil
 }

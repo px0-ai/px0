@@ -27,13 +27,13 @@ func TestCreateVersion_Success(t *testing.T) {
 	assert.Equal(t, "Hello, {{.name}}!", v["template"])
 }
 
-func TestCreateVersion_WithModel(t *testing.T) {
+func TestCreateVersion_WithModelConfig(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 
 	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", id),
-		`{"template":"Hello, {{.name}}!","model":"gpt-4.1"}`, token)
+		`{"template":"Hello, {{.name}}!","model":"openai/gpt-4.1","model_params":{"temperature":0.2,"response_format":{"type":"json_object"}}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -41,7 +41,11 @@ func TestCreateVersion_WithModel(t *testing.T) {
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
 	assert.Equal(t, "Hello, {{.name}}!", v["template"])
-	assert.Equal(t, "gpt-4.1", v["model"])
+	assert.Equal(t, "openai/gpt-4.1", v["model"])
+	assert.Equal(t, map[string]any{
+		"temperature":     0.2,
+		"response_format": map[string]any{"type": "json_object"},
+	}, v["model_params"])
 }
 
 func TestCreateVersion_BlankModel(t *testing.T) {
@@ -51,6 +55,19 @@ func TestCreateVersion_BlankModel(t *testing.T) {
 
 	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", id),
 		`{"template":"Hello","model":"  "}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+}
+
+func TestCreateVersion_InvalidModelParams(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions", id),
+		`{"template":"Hello","model_params":["invalid"]}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -195,14 +212,14 @@ func TestUpdateVersion_Success(t *testing.T) {
 	assert.Equal(t, "updated template", v["template"])
 }
 
-func TestUpdateVersion_ModelOnly(t *testing.T) {
+func TestUpdateVersion_ModelConfigOnly(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	id := setupPrompt(t, a, token)
 	setupVersion(t, a, token, id, "original template")
 
 	req := newReq(t, http.MethodPut, fmt.Sprintf("/v1/prompts/%s/versions/1", id),
-		`{"model":"gpt-4.1-mini"}`, token)
+		`{"model":"openai/gpt-4.1-mini","model_params":{"temperature":0.5}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -210,7 +227,8 @@ func TestUpdateVersion_ModelOnly(t *testing.T) {
 	body := decodeBody(t, resp)
 	v := body["version"].(map[string]any)
 	assert.Equal(t, "original template", v["template"])
-	assert.Equal(t, "gpt-4.1-mini", v["model"])
+	assert.Equal(t, "openai/gpt-4.1-mini", v["model"])
+	assert.Equal(t, map[string]any{"temperature": 0.5}, v["model_params"])
 }
 
 func TestUpdateVersion_NonDraftRejected(t *testing.T) {
