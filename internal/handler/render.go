@@ -96,9 +96,11 @@ func executeRender(c *fiber.Ctx, prompt *model.Prompt, version *model.PromptVers
 	}
 
 	return c.JSON(fiber.Map{
-		"rendered": buf.String(),
-		"version":  version.Version,
-		"slug":     prompt.Slug,
-		"tags":     version.Tags,
+		"rendered":     buf.String(),
+		"version":      version.Version,
+		"slug":         prompt.Slug,
+		"tags":         version.Tags,
+		"model":        version.Model,
+		"model_params": version.ModelParams,
 	})
 }

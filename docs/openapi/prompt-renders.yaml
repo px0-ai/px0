@@ -28,6 +28,7 @@ paths:
         - "TestRenderLive_NoLiveVersion: Verifies that requesting a render with only 'draft' versions fails with 404 and 'no live version found for this prompt'."
         - "TestRenderLive_NoVariables: Verifies static templates render correctly when empty variables are supplied."
         - "TestRenderLive_MissingVariable: Verifies missing template variables fail with 422 instead of rendering placeholder text."
+        - "TestRenderLive_IncludesModelConfig: Verifies render responses include the prompt version model and parameters."
       requestBody:
         required: true
         content:
@@ -189,8 +190,23 @@ components:
           items:
             type: string
           description: List of tag strings assigned to this version.
+        model:
+          type: string
+          nullable: true
+          description: Optional `provider/model` identifier intended to execute this prompt version.
+          example: anthropic/claude-opus-4-6
+        model_params:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Optional provider-specific model parameters. Nested values are supported.
+          example:
+            temperature: 0.7
+            max_tokens: 1024
       required:
         - rendered
         - version
         - slug
         - tags
+        - model
+        - model_params

@@ -125,6 +125,45 @@ func TestRenderLive_MissingVariable(t *testing.T) {
 	assert.Contains(t, errMsg, "template execution failed")
 }
 
+func TestRenderLive_IncludesModelConfig(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	slug := getPromptSlug(t, a, id, token)
+
+	req := newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions", id),
+		`{"template":"Hi {{.user}}!","model":"openai/gpt-4.1","model_params":{"temperature":0.2}}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	req = newReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		`{"variables":{"user":"Alice"}}`, token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	assert.Equal(t, "Hi Alice!", body["rendered"])
+	assert.Equal(t, "openai/gpt-4.1", body["model"])
+	assert.Equal(t, map[string]any{"temperature": 0.2}, body["model_params"])
+}
+
 func TestRenderVersion_Draft(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)

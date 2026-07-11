@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,12 +31,14 @@ const (
 )
 
 type PromptVersion struct {
-	ID          uuid.UUID  `json:"id"`
-	PromptID    uuid.UUID  `json:"prompt_id"`
-	Version     int        `json:"version"`
-	Template    string     `json:"template"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	PublishedAt *time.Time `json:"published_at"`
-	Tags        []string   `json:"tags"`
+	ID          uuid.UUID       `json:"id"`
+	PromptID    uuid.UUID       `json:"prompt_id"`
+	Version     int             `json:"version"`
+	Template    string          `json:"template"`
+	Status      string          `json:"status"`
+	Model       *string         `json:"model"`
+	ModelParams json.RawMessage `json:"model_params"`
+	CreatedAt   time.Time       `json:"created_at"`
+	PublishedAt *time.Time      `json:"published_at"`
+	Tags        []string        `json:"tags"`
 }
