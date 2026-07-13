@@ -58,24 +58,24 @@ func CreateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -118,12 +118,12 @@ func ListVersions(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
@@ -167,12 +167,12 @@ func GetVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
@@ -195,24 +195,24 @@ func UpdateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -278,24 +278,24 @@ func PromoteVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -329,24 +329,24 @@ func DemoteVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -380,24 +380,24 @@ func ArchiveVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -431,24 +431,24 @@ func DeleteVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}
@@ -483,24 +483,24 @@ func DuplicateVersion(c *fiber.Ctx) error {
 		return apierr.ErrInvalidPromptID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, teamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrPromptNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	editorTeamIDs, err := getRequestEditorTeamIDs(c)
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	if _, err := store.GetPromptByID(c.Context(), promptID, editorTeamIDs); err != nil {
+	if _, err := store.GetPromptByID(c.Context(), promptID, editorProjectIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.ErrForbidden.Respond(c)
 		}

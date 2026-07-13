@@ -60,8 +60,18 @@ paths:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1people"
   /v1/orgs/{orgID}/members/{userID}:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1members~1{userID}"
-  /v1/teams/{teamID}/prompts:
-    $ref: "./prompts.yaml#/paths/~1v1~1teams~1{teamID}~1prompts"
+  /v1/projects:
+    $ref: "./projects.yaml#/paths/~1v1~1projects"
+  /v1/projects/{projectID}:
+    $ref: "./projects.yaml#/paths/~1v1~1projects~1{projectID}"
+  /v1/projects/{projectID}/access:
+    $ref: "./projects.yaml#/paths/~1v1~1projects~1{projectID}~1access"
+  /v1/projects/{projectID}/access/{teamID}:
+    $ref: "./projects.yaml#/paths/~1v1~1projects~1{projectID}~1access~1{teamID}"
+  /v1/teams/{teamID}/projects:
+    $ref: "./projects.yaml#/paths/~1v1~1teams~1{teamID}~1projects"
+  /v1/projects/{projectID}/prompts:
+    $ref: "./prompts.yaml#/paths/~1v1~1projects~1{projectID}~1prompts"
   /v1/prompts:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
@@ -74,8 +84,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
   /v1/prompts/{id}/versions/diff:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
-  /v1/prompts/{slug}/render:
-    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{slug}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/render:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1render"
   /v1/prompts/{id}/versions:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
@@ -88,8 +98,8 @@ paths:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1archive"
   /v1/prompts/{id}/versions/{version}/duplicate:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
-  /v1/prompts/{slug}/versions/{version}/render:
-    $ref: "./prompt-renders.yaml#/paths/~1v1~1prompts~1{slug}~1versions~1{version}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/render:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1versions~1{version}~1render"
   /v1/prompts/{id}/versions/{version}/tags:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
   /v1/prompts/{id}/tags:

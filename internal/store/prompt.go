@@ -15,20 +15,20 @@ import (
 )
 
 type PromptFilter struct {
-	TeamIDs  []uuid.UUID
-	Tags     []string
-	Archived *bool
-	Status   *string
+	ProjectIDs []uuid.UUID
+	Tags       []string
+	Archived   *bool
+	Status     *string
 }
 
-func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description string) (*model.Prompt, error) {
+func CreatePrompt(ctx context.Context, projectID uuid.UUID, slug, name, description string) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO prompts (team_id, slug, name, description)
+		`INSERT INTO prompts (project_id, slug, name, description)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, team_id, slug, name, description, status, created_at, updated_at`,
-		teamID, slug, name, description,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		 RETURNING id, project_id, slug, name, description, status, created_at, updated_at`,
+		projectID, slug, name, description,
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -40,7 +40,7 @@ func CreatePrompt(ctx context.Context, teamID uuid.UUID, slug, name, description
 }
 
 func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, error) {
-	query := `SELECT DISTINCT p.id, p.team_id, p.slug, p.name, p.description, p.status, p.created_at, p.updated_at
+	query := `SELECT DISTINCT p.id, p.project_id, p.slug, p.name, p.description, p.status, p.created_at, p.updated_at
 			  FROM prompts p`
 	args := []any{}
 	joins := ""
@@ -52,9 +52,9 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 		whereClauses = append(whereClauses, fmt.Sprintf("pt.tag = ANY($%d)", len(args)))
 	}
 
-	if len(filter.TeamIDs) > 0 {
-		args = append(args, filter.TeamIDs)
-		whereClauses = append(whereClauses, fmt.Sprintf("p.team_id = ANY($%d)", len(args)))
+	if len(filter.ProjectIDs) > 0 {
+		args = append(args, filter.ProjectIDs)
+		whereClauses = append(whereClauses, fmt.Sprintf("p.project_id = ANY($%d)", len(args)))
 	}
 
 	if filter.Status != nil {
@@ -84,7 +84,7 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 	var prompts []*model.Prompt
 	for rows.Next() {
 		p := &model.Prompt{}
-		if err := rows.Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		prompts = append(prompts, p)
@@ -92,14 +92,14 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 	return prompts, rows.Err()
 }
 
-func GetPromptByID(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) (*model.Prompt, error) {
+func GetPromptByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, team_id, slug, name, description, status, created_at, updated_at
+		`SELECT id, project_id, slug, name, description, status, created_at, updated_at
 		 FROM prompts
-		 WHERE id = $1 AND team_id = ANY($2)`,
-		id, teamIDs,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		 WHERE id = $1 AND project_id = ANY($2)`,
+		id, projectIDs,
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -109,14 +109,14 @@ func GetPromptByID(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) (*mod
 	return p, nil
 }
 
-func GetPromptBySlug(ctx context.Context, slug string, teamIDs []uuid.UUID) (*model.Prompt, error) {
+func GetPromptBySlug(ctx context.Context, slug string, projectIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, team_id, slug, name, description, status, created_at, updated_at
+		`SELECT id, project_id, slug, name, description, status, created_at, updated_at
 		 FROM prompts
-		 WHERE slug = $1 AND team_id = ANY($2)`,
-		slug, teamIDs,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		 WHERE slug = $1 AND project_id = ANY($2)`,
+		slug, projectIDs,
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -126,9 +126,9 @@ func GetPromptBySlug(ctx context.Context, slug string, teamIDs []uuid.UUID) (*mo
 	return p, nil
 }
 
-func ArchivePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error {
-	// First check if the prompt belongs to one of the provided teams
-	_, err := GetPromptByID(ctx, id, teamIDs)
+func ArchivePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) error {
+	// First check if the prompt belongs to one of the provided projects
+	_, err := GetPromptByID(ctx, id, projectIDs)
 	if err != nil {
 		return err // ErrNotFound if not found or no access
 	}
@@ -143,9 +143,9 @@ func ArchivePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error
 	return nil
 }
 
-func UpdatePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, description string) (*model.Prompt, error) {
-	// First check if the prompt belongs to one of the allowed teams
-	_, err := GetPromptByID(ctx, id, teamIDs)
+func UpdatePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, description string) (*model.Prompt, error) {
+	// First check if the prompt belongs to one of the allowed projects
+	_, err := GetPromptByID(ctx, id, projectIDs)
 	if err != nil {
 		return nil, err // ErrNotFound if not found or no access
 	}
@@ -155,9 +155,9 @@ func UpdatePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, descri
 		`UPDATE prompts
 		 SET description = $1, updated_at = NOW()
 		 WHERE id = $2
-		 RETURNING id, team_id, slug, name, description, status, created_at, updated_at`,
+		 RETURNING id, project_id, slug, name, description, status, created_at, updated_at`,
 		description, id,
-	).Scan(&p.ID, &p.TeamID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -167,8 +167,8 @@ func UpdatePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, descri
 	return p, nil
 }
 
-func RestorePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error {
-	_, err := GetPromptByID(ctx, id, teamIDs)
+func RestorePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) error {
+	_, err := GetPromptByID(ctx, id, projectIDs)
 	if err != nil {
 		return err // ErrNotFound if not found or no access
 	}
@@ -183,14 +183,22 @@ func RestorePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID) error
 	return nil
 }
 
-func MovePrompt(ctx context.Context, id uuid.UUID, teamIDs []uuid.UUID, targetTeamID uuid.UUID) error {
-	_, err := GetPromptByID(ctx, id, teamIDs)
+// MovePrompt relocates a prompt to the target project. The caller must have
+// already authorized the move; projectIDs scopes which projects the prompt may
+// currently belong to. A name or slug collision in the target project is
+// rejected with ErrDuplicate.
+func MovePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, targetProjectID uuid.UUID) error {
+	_, err := GetPromptByID(ctx, id, projectIDs)
 	if err != nil {
 		return err // ErrNotFound if not found or no access
 	}
 
-	_, err = db.Pool.Exec(ctx, "UPDATE prompts SET team_id = $1, updated_at = NOW() WHERE id = $2", targetTeamID, id)
+	_, err = db.Pool.Exec(ctx, "UPDATE prompts SET project_id = $1, updated_at = NOW() WHERE id = $2", targetProjectID, id)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrDuplicate
+		}
 		return fmt.Errorf("move prompt: %w", err)
 	}
 	return nil

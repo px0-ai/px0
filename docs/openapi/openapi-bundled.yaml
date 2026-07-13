@@ -1644,26 +1644,421 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/teams/{teamID}/prompts:
+  /v1/projects:
     post:
-      summary: Create a Prompt
-      description: Creates a new prompt container.
-      operationId: createPrompt
+      summary: Create a Project
+      description: |
+        Creates a project owned by a team. The requester must be an
+        editor-or-above member of the owning team, or an admin of that team's
+        organization. The project name and slug must each be unique within the
+        owning team.
+      operationId: createProject
       tags:
-        - Prompts
+        - Projects
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - A viewer of the owning team, or a non-member, is refused with 403.
+        - An org admin can create a project for any team in their org without being a member of that team.
+        - A duplicate name or slug within the same owning team returns 409; the same name/slug under a different team is allowed.
+        - If slug is omitted it is derived from the name and normalized.
+      x-test-coverage:
+        - 'TestCreateProject_Success: editor creates a project (201).'
+        - 'TestCreateProject_ForbiddenForViewer: a viewer is refused (403).'
+        - 'TestCreateProject_MissingName: missing name returns 400.'
+        - 'TestCreateProject_Duplicate: duplicate name/slug in the same team returns 409.'
+        - 'TestCreateProject_Unauthorized: unauthenticated request returns 401.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: Invalid request (invalid body, invalid team_id, or missing name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not an editor of the team or an org admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Owning team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: A project with this name or slug already exists in the team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}:
+    get:
+      summary: Get a Project
+      description: |
+        Fetches a project by ID. The requester must be able to reach the
+        project — as a member of the owning team or of a team granted access.
+        Projects the requester cannot reach are reported as not found.
+      operationId: getProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - An unknown project id, or one the requester cannot reach, returns 404.
+      x-test-coverage:
+        - 'TestGetProject_Success: owning-team member fetches the project (200).'
+        - 'TestGetProject_NotFoundForNonMember: a non-member gets 404.'
+        - 'TestGetProject_NotFound: an unknown id returns 404.'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: Invalid project id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found or not reachable by the requester
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+    delete:
+      summary: Delete a Project
+      description: |
+        Hard-deletes a project, cascading to its prompts (and their versions,
+        tags, and payloads) and dropping its access grants. The requester must
+        be an admin of the owning team or an admin of that team's organization.
+      operationId: deleteProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - A non-admin member of the owning team is refused with 403.
+        - An unknown project id returns 404.
+      x-test-coverage:
+        - 'TestDeleteProject_Success: an owning-team admin deletes the project (204).'
+        - 'TestDeleteProject_ForbiddenForNonAdmin: a non-admin is refused (403).'
+        - 'TestDeleteProject_NotFound: an unknown id returns 404.'
+      responses:
+        '204':
+          description: Project deleted successfully (No Content)
+        '400':
+          description: Invalid project id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not an admin of the owning team or org)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/access:
+    post:
+      summary: Grant Project Access
+      description: |
+        Grants another team access to the project's prompts. The requester must
+        be an admin of the owning team or an admin of its organization. The
+        grantee team must belong to the same organization as the owning team.
+        An org-less owning team cannot share its projects.
+      operationId: grantProjectAccess
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - A non-admin of the owning team is refused with 403.
+        - A grantee team in a different organization is refused with 403.
+        - An org-less owning team cannot share; the grant is refused with 403.
+        - Granting to the owning team is rejected with 400 (it already has implicit access).
+        - Re-granting an existing access is idempotent and returns 201.
+        - An unknown project returns 404; an unknown grantee team returns 404.
+      x-test-coverage:
+        - 'TestGrantProjectAccess_Success: owning-team admin grants same-org team (201) and the grantee reaches the project.'
+        - 'TestGrantProjectAccess_ForbiddenForNonAdmin: an editor is refused (403).'
+        - 'TestGrantProjectAccess_RejectsTeamOutsideOrg: a foreign-org grantee is refused (403).'
+        - 'TestGrantProjectAccess_RejectsOrgLessOwner: an org-less owning team cannot share (403).'
+        - 'TestGrantProjectAccess_UnknownProject: an unknown project returns 404.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantProjectAccessRequest'
+      responses:
+        '201':
+          description: Access granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectAccessResponse'
+        '400':
+          description: Invalid request (invalid body/team_id, or grantee is the owning team)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (non-admin, org-less owner, or grantee outside org)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project or grantee team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/access/{teamID}:
+    delete:
+      summary: Revoke Project Access
+      description: |
+        Revokes a team's access to the project. The requester must be an admin
+        of the owning team or an admin of its organization. The owning team's
+        implicit access cannot be revoked through this endpoint.
+      operationId: revokeProjectAccess
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+        - name: teamID
+          in: path
+          required: true
+          description: The ID of the team whose access is being revoked.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - A non-admin of the owning team is refused with 403.
+        - Revoking an access that does not exist returns 404.
+        - An unknown project returns 404.
+      x-test-coverage:
+        - 'TestRevokeProjectAccess_Success: an admin revokes access (204) and the grantee loses reachability.'
+        - 'TestRevokeProjectAccess_ForbiddenForNonAdmin: an editor is refused (403).'
+        - 'TestRevokeProjectAccess_NotFound: revoking a non-existent grant returns 404.'
+      responses:
+        '204':
+          description: Access revoked successfully (No Content)
+        '400':
+          description: Invalid project or team id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not an admin of the owning team or org)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project or access grant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/teams/{teamID}/projects:
+    get:
+      summary: List a Team's Projects
+      description: |
+        Lists the projects a team owns plus those granted to it. The requester
+        must be a member of the team.
+      operationId: listTeamProjects
+      tags:
+        - Projects
       security:
         - BearerAuth: []
       parameters:
         - name: teamID
           in: path
           required: true
+          description: The ID of the team.
           schema:
             type: string
             format: uuid
-          description: The ID of the team.
+      x-edge-cases:
+        - A non-member of the team is refused with 403.
+        - A team owning and granted nothing returns an empty array.
+      x-test-coverage:
+        - 'TestListTeamProjects_Success: a member lists the team''s owned projects (200).'
+        - 'TestListTeamProjects_ForbiddenForNonMember: a non-member gets 403.'
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '400':
+          description: Invalid team id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not a member of the team)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/prompts:
+    post:
+      summary: Create a Prompt
+      description: Creates a new prompt inside a project. The requester must be an editor-or-above on the project (via the owning team or a granted team).
+      operationId: createPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      x-edge-cases:
+        - A viewer of the project is refused with 403; an unknown project returns 404.
+        - Slug uniqueness is scoped to the project, so the same slug may exist in another project.
       x-test-coverage:
         - 'TestCreatePrompt_Success: Verifies prompt creation and response payload.'
         - 'TestCreatePrompt_MissingName: Verifies that missing name returns 400 and ''name is required''.'
+        - 'TestCreatePrompt_ForbiddenForViewer: Verifies a viewer cannot create a prompt (403).'
+        - 'TestCreatePrompt_UnknownProject: Verifies an unknown project returns 404.'
         - 'TestCreatePrompt_Unauthorized: Verifies that unauthenticated request returns 401.'
       requestBody:
         required: true
@@ -1704,6 +2099,24 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: unauthorized
+        '403':
+          description: Forbidden (requester is not an editor of the project)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: A prompt with this name or slug already exists in the project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
         '500':
           description: Internal Server Error
           content:
@@ -1714,29 +2127,34 @@ paths:
                 error: internal error
     get:
       summary: List Prompts
-      description: Lists all available prompt containers.
+      description: Lists the prompts inside a project. The requester must be able to reach the project.
       operationId: listPrompts
       tags:
         - Prompts
       security:
         - BearerAuth: []
       parameters:
-        - name: teamID
+        - name: projectID
           in: path
           required: true
           schema:
             type: string
             format: uuid
-          description: The ID of the team.
+          description: The ID of the project.
         - name: archived
           in: query
           required: false
           description: Optional boolean to filter prompts by archive state.
           schema:
             type: boolean
+      x-edge-cases:
+        - An API key reaches the prompts of every project its teams can access — owned or granted — and loses that reach when the grant is revoked.
       x-test-coverage:
         - 'TestListPrompts: Verifies listing populated prompt containers.'
         - 'TestListPrompts_Empty: Verifies that listing when empty returns an empty array.'
+        - 'TestPrompts_APIKeyAuth: Verifies an API key lists a project owned by its team.'
+        - 'TestAPIKey_ReachesGrantedProject: Verifies an API key reaches a granted project''s prompts and is denied after revoke.'
+        - 'TestAPIKey_DeniedForeignProject: Verifies an API key is denied a project its teams cannot access.'
       responses:
         '200':
           description: List of prompts
@@ -1759,6 +2177,18 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: unauthorized
+        '403':
+          description: Forbidden (requester cannot reach the project)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
         '500':
           description: Internal Server Error
           content:
@@ -1769,25 +2199,25 @@ paths:
                 error: internal error
   /v1/prompts:
     get:
-      summary: List all prompts with team filter
-      description: Returns a list of prompts. If team_id query parameter is not provided, returns an empty list by default. Users can filter by a team they are a member of.
+      summary: List all prompts with project filter
+      description: Returns a list of prompts. If the project_id query parameter is not provided, returns an empty list by default. Users can filter by a project they can reach.
       operationId: listAllPrompts
       tags:
         - Prompts
       security:
         - BearerAuth: []
       parameters:
-        - name: team_id
+        - name: project_id
           in: query
           required: false
-          description: Optional UUID of the team to filter prompts (alias of team).
+          description: Optional UUID of the project to filter prompts (alias of project).
           schema:
             type: string
             format: uuid
-        - name: team
+        - name: project
           in: query
           required: false
-          description: Optional UUID of the team to filter prompts (alias of team_id).
+          description: Optional UUID of the project to filter prompts (alias of project_id).
           schema:
             type: string
             format: uuid
@@ -1798,12 +2228,12 @@ paths:
           schema:
             type: boolean
       x-edge-cases:
-        - By default with no team_id query parameter, returns an empty list of prompts.
-        - If a team_id is provided, checks if the user is a member of that team, otherwise returns 403 Forbidden.
+        - By default with no project_id query parameter, returns an empty list of prompts.
+        - If a project_id is provided, checks the requester can reach that project, otherwise returns 403 Forbidden.
       x-test-coverage:
-        - 'TestListAllPrompts: Verifies that no team_id returns 200 with an empty list.'
-        - 'TestListAllPrompts: Verifies that a valid team_id returns 200 with prompts of that team.'
-        - 'TestListAllPrompts: Verifies that an unallowed team_id returns 403 Forbidden.'
+        - 'TestListAllPrompts: Verifies that no project_id returns 200 with an empty list.'
+        - 'TestListAllPrompts: Verifies that a valid project_id returns 200 with prompts of that project.'
+        - 'TestListAllPrompts: Verifies that an unallowed project_id returns 403 Forbidden.'
       responses:
         '200':
           description: A list of prompts
@@ -2122,7 +2552,7 @@ paths:
   /v1/prompts/{id}/move:
     post:
       summary: Move a Prompt
-      description: Moves a prompt from its current team to another team. Requires admin privileges on both teams.
+      description: Moves a prompt from its current project to another project. Requires admin capability on both the source and target project (owning-team or org admin).
       operationId: movePrompt
       tags:
         - Prompts
@@ -2135,6 +2565,13 @@ paths:
           schema:
             type: string
             format: uuid
+      x-edge-cases:
+        - Requires admin on both source and target project; a non-admin on either side is refused with 403.
+        - A move into a project where the prompt's name or slug already exists is rejected with 409.
+        - An unknown prompt or an unknown target project returns 404.
+      x-test-coverage:
+        - 'TestMovePrompt: Verifies an admin moves a prompt between projects (200).'
+        - 'TestMovePrompt_TargetCollision: Verifies a name/slug collision in the target project returns 409.'
       requestBody:
         required: true
         content:
@@ -2142,11 +2579,12 @@ paths:
             schema:
               type: object
               required:
-                - team_id
+                - project_id
               properties:
-                team_id:
+                project_id:
                   type: string
                   format: uuid
+                  description: The target project to move the prompt into.
       responses:
         '200':
           description: Prompt successfully moved
@@ -2160,7 +2598,7 @@ paths:
                 required:
                   - prompt
         '400':
-          description: Invalid UUID format or team_id
+          description: Invalid UUID format or project_id
           content:
             application/json:
               schema:
@@ -2172,13 +2610,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
         '403':
-          description: Forbidden
+          description: Forbidden (not an admin on the source or target project)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
         '404':
-          description: Prompt not found
+          description: Prompt or target project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: A prompt with this name or slug already exists in the target project
           content:
             application/json:
               schema:
@@ -2266,20 +2710,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
-  /v1/prompts/{slug}/render:
+  /v1/projects/{projectID}/prompts/{slug}/render:
     post:
       summary: Render Live Prompt Version
-      description: Renders the active 'live' template version of a prompt using supplied variables.
+      description: Renders the active 'live' template version of a prompt using supplied variables. The prompt is resolved by slug within the given project, so the same slug may be reused across projects.
       operationId: renderLive
       tags:
         - Prompt Renders
       security:
         - BearerAuth: []
       parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
         - name: slug
           in: path
           required: true
-          description: Unique prompt slug.
+          description: Prompt slug, unique within the project.
           schema:
             type: string
       x-edge-cases:
@@ -2993,20 +3444,27 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: version not found
-  /v1/prompts/{slug}/versions/{version}/render:
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/render:
     post:
       summary: Render Specific Prompt Version
-      description: Renders a specific template version of a prompt (even draft status) using supplied variables.
+      description: Renders a specific template version of a prompt (even draft status) using supplied variables. The prompt is resolved by slug within the given project.
       operationId: renderVersion
       tags:
         - Prompt Renders
       security:
         - BearerAuth: []
       parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
         - name: slug
           in: path
           required: true
-          description: Unique prompt slug.
+          description: Prompt slug, unique within the project.
           schema:
             type: string
         - name: version
@@ -3714,13 +4172,13 @@ components:
           type: string
           format: uuid
           description: Unique identifier.
-        team_id:
+        project_id:
           type: string
           format: uuid
-          description: Unique identifier of the team.
+          description: Unique identifier of the project the prompt belongs to.
         slug:
           type: string
-          description: Unique slug within the team.
+          description: Unique slug within the project.
         name:
           type: string
           description: Name of the prompt container.
@@ -3741,7 +4199,7 @@ components:
           format: date-time
       required:
         - id
-        - team_id
+        - project_id
         - slug
         - name
         - description
@@ -4087,6 +4545,91 @@ components:
         created_at:
           type: string
           format: date-time
+    CreateProjectRequest:
+      type: object
+      required:
+        - team_id
+        - name
+      properties:
+        team_id:
+          type: string
+          format: uuid
+          description: The team that will own the project.
+        name:
+          type: string
+          description: Human-readable project name.
+        slug:
+          type: string
+          description: Optional normalized slug; derived from the name when omitted.
+    Project:
+      type: object
+      required:
+        - id
+        - owning_team_id
+        - name
+        - slug
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        owning_team_id:
+          type: string
+          format: uuid
+          description: The team that owns the project.
+        name:
+          type: string
+          description: Human-readable project name, unique within the owning team.
+        slug:
+          type: string
+          description: Normalized identifier, unique within the owning team.
+        created_at:
+          type: string
+          format: date-time
+    ProjectResponse:
+      type: object
+      required:
+        - project
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+    GrantProjectAccessRequest:
+      type: object
+      required:
+        - team_id
+      properties:
+        team_id:
+          type: string
+          format: uuid
+          description: The team to grant access to. Must be in the owning team's organization.
+    ProjectAccess:
+      type: object
+      required:
+        - project_id
+        - team_id
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+    ProjectAccessResponse:
+      type: object
+      required:
+        - access
+      properties:
+        access:
+          $ref: '#/components/schemas/ProjectAccess'
+    ProjectListResponse:
+      type: object
+      required:
+        - projects
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
     CreatePromptRequest:
       type: object
       properties:

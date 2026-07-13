@@ -16,10 +16,9 @@ func TestPromptPayloadCRUD(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()
 
-	tm, err := store.CreateTeam(ctx, "Test Team")
-	require.NoError(t, err)
+	proj := newProject(t, ctx, "Test")
 
-	p, err := store.CreatePrompt(ctx, tm.ID, "greeting", "Greeting", "A greeting prompt")
+	p, err := store.CreatePrompt(ctx, proj.ID, "greeting", "Greeting", "A greeting prompt")
 	require.NoError(t, err)
 
 	// 1. Create Payload

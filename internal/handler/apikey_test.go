@@ -272,8 +272,11 @@ func TestCreateAPIKey_GlobalScope(t *testing.T) {
 	apiKey := body["key"].(string)
 	resp.Body.Close()
 
-	// 2. Use the Global API key to list prompts (should succeed and resolve teams globally)
-	reqPrompts := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teams[0].ID.String()), "", apiKey)
+	// 2. Use the Global API key to list a project's prompts (should succeed and
+	//    resolve teams globally to reach the project owned by teams[0]).
+	project, err := store.CreateProject(context.Background(), teams[0].ID, "global_scope", "Global Scope")
+	require.NoError(t, err)
+	reqPrompts := newAPIKeyReq(t, http.MethodGet, fmt.Sprintf("/v1/projects/%s/prompts", project.ID.String()), "", apiKey)
 	respPrompts, err := a.Test(reqPrompts)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, respPrompts.StatusCode)

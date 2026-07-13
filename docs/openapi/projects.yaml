@@ -1,0 +1,487 @@
+openapi: 3.1.0
+info:
+  title: Projects API
+  version: 1.0.0
+paths:
+  /v1/projects:
+    post:
+      summary: Create a Project
+      description: |
+        Creates a project owned by a team. The requester must be an
+        editor-or-above member of the owning team, or an admin of that team's
+        organization. The project name and slug must each be unique within the
+        owning team.
+      operationId: createProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "A viewer of the owning team, or a non-member, is refused with 403."
+        - "An org admin can create a project for any team in their org without being a member of that team."
+        - "A duplicate name or slug within the same owning team returns 409; the same name/slug under a different team is allowed."
+        - "If slug is omitted it is derived from the name and normalized."
+      x-test-coverage:
+        - "TestCreateProject_Success: editor creates a project (201)."
+        - "TestCreateProject_ForbiddenForViewer: a viewer is refused (403)."
+        - "TestCreateProject_MissingName: missing name returns 400."
+        - "TestCreateProject_Duplicate: duplicate name/slug in the same team returns 409."
+        - "TestCreateProject_Unauthorized: unauthenticated request returns 401."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectResponse"
+        "400":
+          description: Invalid request (invalid body, invalid team_id, or missing name)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (requester is not an editor of the team or an org admin)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Owning team not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "409":
+          description: A project with this name or slug already exists in the team
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/projects/{projectID}:
+    get:
+      summary: Get a Project
+      description: |
+        Fetches a project by ID. The requester must be able to reach the
+        project — as a member of the owning team or of a team granted access.
+        Projects the requester cannot reach are reported as not found.
+      operationId: getProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "An unknown project id, or one the requester cannot reach, returns 404."
+      x-test-coverage:
+        - "TestGetProject_Success: owning-team member fetches the project (200)."
+        - "TestGetProject_NotFoundForNonMember: a non-member gets 404."
+        - "TestGetProject_NotFound: an unknown id returns 404."
+      responses:
+        "200":
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectResponse"
+        "400":
+          description: Invalid project id
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project not found or not reachable by the requester
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+    delete:
+      summary: Delete a Project
+      description: |
+        Hard-deletes a project, cascading to its prompts (and their versions,
+        tags, and payloads) and dropping its access grants. The requester must
+        be an admin of the owning team or an admin of that team's organization.
+      operationId: deleteProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "A non-admin member of the owning team is refused with 403."
+        - "An unknown project id returns 404."
+      x-test-coverage:
+        - "TestDeleteProject_Success: an owning-team admin deletes the project (204)."
+        - "TestDeleteProject_ForbiddenForNonAdmin: a non-admin is refused (403)."
+        - "TestDeleteProject_NotFound: an unknown id returns 404."
+      responses:
+        "204":
+          description: Project deleted successfully (No Content)
+        "400":
+          description: Invalid project id
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (requester is not an admin of the owning team or org)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/projects/{projectID}/access:
+    post:
+      summary: Grant Project Access
+      description: |
+        Grants another team access to the project's prompts. The requester must
+        be an admin of the owning team or an admin of its organization. The
+        grantee team must belong to the same organization as the owning team.
+        An org-less owning team cannot share its projects.
+      operationId: grantProjectAccess
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "A non-admin of the owning team is refused with 403."
+        - "A grantee team in a different organization is refused with 403."
+        - "An org-less owning team cannot share; the grant is refused with 403."
+        - "Granting to the owning team is rejected with 400 (it already has implicit access)."
+        - "Re-granting an existing access is idempotent and returns 201."
+        - "An unknown project returns 404; an unknown grantee team returns 404."
+      x-test-coverage:
+        - "TestGrantProjectAccess_Success: owning-team admin grants same-org team (201) and the grantee reaches the project."
+        - "TestGrantProjectAccess_ForbiddenForNonAdmin: an editor is refused (403)."
+        - "TestGrantProjectAccess_RejectsTeamOutsideOrg: a foreign-org grantee is refused (403)."
+        - "TestGrantProjectAccess_RejectsOrgLessOwner: an org-less owning team cannot share (403)."
+        - "TestGrantProjectAccess_UnknownProject: an unknown project returns 404."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantProjectAccessRequest"
+      responses:
+        "201":
+          description: Access granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAccessResponse"
+        "400":
+          description: Invalid request (invalid body/team_id, or grantee is the owning team)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (non-admin, org-less owner, or grantee outside org)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project or grantee team not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/projects/{projectID}/access/{teamID}:
+    delete:
+      summary: Revoke Project Access
+      description: |
+        Revokes a team's access to the project. The requester must be an admin
+        of the owning team or an admin of its organization. The owning team's
+        implicit access cannot be revoked through this endpoint.
+      operationId: revokeProjectAccess
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+        - name: teamID
+          in: path
+          required: true
+          description: The ID of the team whose access is being revoked.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "A non-admin of the owning team is refused with 403."
+        - "Revoking an access that does not exist returns 404."
+        - "An unknown project returns 404."
+      x-test-coverage:
+        - "TestRevokeProjectAccess_Success: an admin revokes access (204) and the grantee loses reachability."
+        - "TestRevokeProjectAccess_ForbiddenForNonAdmin: an editor is refused (403)."
+        - "TestRevokeProjectAccess_NotFound: revoking a non-existent grant returns 404."
+      responses:
+        "204":
+          description: Access revoked successfully (No Content)
+        "400":
+          description: Invalid project or team id
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (requester is not an admin of the owning team or org)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project or access grant not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/teams/{teamID}/projects:
+    get:
+      summary: List a Team's Projects
+      description: |
+        Lists the projects a team owns plus those granted to it. The requester
+        must be a member of the team.
+      operationId: listTeamProjects
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: teamID
+          in: path
+          required: true
+          description: The ID of the team.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "A non-member of the team is refused with 403."
+        - "A team owning and granted nothing returns an empty array."
+      x-test-coverage:
+        - "TestListTeamProjects_Success: a member lists the team's owned projects (200)."
+        - "TestListTeamProjects_ForbiddenForNonMember: a non-member gets 403."
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+        "400":
+          description: Invalid team id
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (requester is not a member of the team)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+components:
+  schemas:
+    Project:
+      type: object
+      required:
+        - id
+        - owning_team_id
+        - name
+        - slug
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        owning_team_id:
+          type: string
+          format: uuid
+          description: The team that owns the project.
+        name:
+          type: string
+          description: Human-readable project name, unique within the owning team.
+        slug:
+          type: string
+          description: Normalized identifier, unique within the owning team.
+        created_at:
+          type: string
+          format: date-time
+    CreateProjectRequest:
+      type: object
+      required:
+        - team_id
+        - name
+      properties:
+        team_id:
+          type: string
+          format: uuid
+          description: The team that will own the project.
+        name:
+          type: string
+          description: Human-readable project name.
+        slug:
+          type: string
+          description: Optional normalized slug; derived from the name when omitted.
+    GrantProjectAccessRequest:
+      type: object
+      required:
+        - team_id
+      properties:
+        team_id:
+          type: string
+          format: uuid
+          description: The team to grant access to. Must be in the owning team's organization.
+    ProjectAccess:
+      type: object
+      required:
+        - project_id
+        - team_id
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+    ProjectAccessResponse:
+      type: object
+      required:
+        - access
+      properties:
+        access:
+          $ref: "#/components/schemas/ProjectAccess"
+    ProjectResponse:
+      type: object
+      required:
+        - project
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+    ProjectListResponse:
+      type: object
+      required:
+        - projects
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"

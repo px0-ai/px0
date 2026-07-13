@@ -106,6 +106,46 @@ func getRequestAdminTeamIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
 	return teamIDs, nil
 }
 
+// containsUUID reports whether target is present in ids.
+func containsUUID(ids []uuid.UUID, target uuid.UUID) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+// getRequestViewerProjectIDs returns the IDs of every project the requester can
+// reach at viewer-or-above capability — their teams (owned + granted projects).
+func getRequestViewerProjectIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
+	teamIDs, err := getRequestTeamIDs(c)
+	if err != nil {
+		return nil, err
+	}
+	return store.ListAccessibleProjectIDs(c.Context(), teamIDs)
+}
+
+// getRequestEditorProjectIDs returns the IDs of projects the requester can reach
+// with editor-or-above capability.
+func getRequestEditorProjectIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
+	teamIDs, err := getRequestEditorTeamIDs(c)
+	if err != nil {
+		return nil, err
+	}
+	return store.ListAccessibleProjectIDs(c.Context(), teamIDs)
+}
+
+// getRequestAdminProjectIDs returns the IDs of projects the requester can reach
+// with admin capability.
+func getRequestAdminProjectIDs(c *fiber.Ctx) ([]uuid.UUID, error) {
+	teamIDs, err := getRequestAdminTeamIDs(c)
+	if err != nil {
+		return nil, err
+	}
+	return store.ListAccessibleProjectIDs(c.Context(), teamIDs)
+}
+
 func IsOrgAdmin(c *fiber.Ctx, orgID uuid.UUID) (bool, error) {
 	if op, ok := c.Locals("apiKeyOperation").(string); ok {
 		if op == "admin" || op == "all" {

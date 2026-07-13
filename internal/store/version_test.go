@@ -14,9 +14,8 @@ import (
 )
 
 func newPrompt(t *testing.T, ctx context.Context) *model.Prompt {
-	tm, err := store.CreateTeam(ctx, "Test Team")
-	require.NoError(t, err)
-	p, err := store.CreatePrompt(ctx, tm.ID, "my-prompt", "My Prompt", "Desc")
+	proj := newProject(t, ctx, "Test")
+	p, err := store.CreatePrompt(ctx, proj.ID, "my-prompt", "My Prompt", "Desc")
 	require.NoError(t, err)
 	return p
 }

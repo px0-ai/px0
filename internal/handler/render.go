@@ -6,6 +6,7 @@ import (
 	"text/template"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/model"
@@ -16,23 +17,56 @@ type renderRequest struct {
 	Variables map[string]any `json:"variables"`
 }
 
-func RenderLive(c *fiber.Ctx) error {
+// resolveProjectPromptBySlug loads the prompt identified by the :slug path
+// parameter within the :projectID project, enforcing that the requester can
+// reach that project. When it returns ok == false it has already written the
+// appropriate error response to c and the caller should return nil.
+func resolveProjectPromptBySlug(c *fiber.Ctx) (prompt *model.Prompt, ok bool) {
+	projectID, err := uuid.Parse(c.Params("projectID"))
+	if err != nil {
+		_ = apierr.ErrInvalidID.Respond(c)
+		return nil, false
+	}
 	slug := c.Params("slug")
 	if slug == "" {
-		return apierr.ErrPromptNotFound.Respond(c)
+		_ = apierr.ErrPromptNotFound.Respond(c)
+		return nil, false
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
+	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
+		_ = apierr.ErrInternalError.Respond(c, err)
+		return nil, false
 	}
 
-	prompt, err := store.GetPromptBySlug(c.Context(), slug, teamIDs)
+	accessible := false
+	for _, id := range projectIDs {
+		if id == projectID {
+			accessible = true
+			break
+		}
+	}
+	if !accessible {
+		_ = apierr.ErrPromptNotFound.Respond(c)
+		return nil, false
+	}
+
+	prompt, err = store.GetPromptBySlug(c.Context(), slug, []uuid.UUID{projectID})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return apierr.ErrPromptNotFound.Respond(c)
+			_ = apierr.ErrPromptNotFound.Respond(c)
+		} else {
+			_ = apierr.ErrInternalError.Respond(c, err)
 		}
-		return apierr.ErrInternalError.Respond(c, err)
+		return nil, false
+	}
+	return prompt, true
+}
+
+func RenderLive(c *fiber.Ctx) error {
+	prompt, ok := resolveProjectPromptBySlug(c)
+	if !ok {
+		return nil
 	}
 
 	version, err := store.GetLiveVersion(c.Context(), prompt.ID)
@@ -47,22 +81,9 @@ func RenderLive(c *fiber.Ctx) error {
 }
 
 func RenderVersion(c *fiber.Ctx) error {
-	slug := c.Params("slug")
-	if slug == "" {
-		return apierr.ErrPromptNotFound.Respond(c)
-	}
-
-	teamIDs, err := getRequestTeamIDs(c)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	prompt, err := store.GetPromptBySlug(c.Context(), slug, teamIDs)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return apierr.ErrPromptNotFound.Respond(c)
-		}
-		return apierr.ErrInternalError.Respond(c, err)
+	prompt, ok := resolveProjectPromptBySlug(c)
+	if !ok {
+		return nil
 	}
 
 	version, err := resolveVersion(c.Context(), prompt.ID, c.Params("version"))

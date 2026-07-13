@@ -19,26 +19,29 @@ func getPromptSlug(t *testing.T, a *testApp, id string, token string) string {
 	return body["prompt"].(map[string]any)["slug"].(string)
 }
 
+// promoteToLive promotes version 1 of the prompt from draft to live (draft ->
+// stable -> live) using two promote calls.
+func promoteToLive(t *testing.T, a *testApp, token, id string) {
+	t.Helper()
+	for i := 0; i < 2; i++ {
+		req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+}
+
 func TestRenderLive_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hello, {{.name}}! Count: {{.count}}.")
+	promoteToLive(t, a, token, id)
 
-	// promote version 1 to stable and then live
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ := a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ = a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{"variables":{"name":"Alice","count":5}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -52,12 +55,13 @@ func TestRenderLive_Success(t *testing.T) {
 func TestRenderLive_NoLiveVersion(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "draft only") // not published
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{"variables":{}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -68,22 +72,14 @@ func TestRenderLive_NoLiveVersion(t *testing.T) {
 func TestRenderLive_NoVariables(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Static prompt with no variables.")
+	promoteToLive(t, a, token, id)
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ := a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ = a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -96,26 +92,16 @@ func TestRenderLive_NoVariables(t *testing.T) {
 func TestRenderLive_MissingVariable(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hello, {{.name}}!")
+	promoteToLive(t, a, token, id)
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, err := a.Test(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{"variables":{}}`, token)
-	resp, err = a.Test(req)
+	resp, err := a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 
@@ -167,12 +153,13 @@ func TestRenderLive_IncludesModelConfig(t *testing.T) {
 func TestRenderVersion_Draft(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Draft: {{.msg}}")
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/versions/1/render", projectID, slug),
 		`{"variables":{"msg":"hello"}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -185,12 +172,13 @@ func TestRenderVersion_Draft(t *testing.T) {
 func TestRenderVersion_MissingVariable(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Draft: {{.msg}}")
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/versions/1/render", projectID, slug),
 		`{"variables":{}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -205,11 +193,12 @@ func TestRenderVersion_MissingVariable(t *testing.T) {
 func TestRenderVersion_NotFound(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 
 	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/99/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/versions/99/render", projectID, slug),
 		`{"variables":{}}`, token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -221,23 +210,15 @@ func TestRenderLive_WithAPIKey(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
 	apiKey := setupAPIKey(t, a, token)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 	setupVersion(t, a, token, id, "Hi {{.user}}!")
-
-	req := newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ := a.Test(req)
-	resp.Body.Close()
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, _ = a.Test(req)
-	resp.Body.Close()
+	promoteToLive(t, a, token, id)
 
 	// render using API key (not session)
-	req = newAPIKeyReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+	req := newAPIKeyReq(t, http.MethodPost,
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{"variables":{"user":"Bob"}}`, apiKey)
 	resp, err := a.Test(req)
 	require.NoError(t, err)

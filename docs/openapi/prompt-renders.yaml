@@ -3,20 +3,27 @@ info:
   title: Prompt Rendering API
   version: 1.0.0
 paths:
-  /v1/prompts/{slug}/render:
+  /v1/projects/{projectID}/prompts/{slug}/render:
     post:
       summary: Render Live Prompt Version
-      description: Renders the active 'live' template version of a prompt using supplied variables.
+      description: Renders the active 'live' template version of a prompt using supplied variables. The prompt is resolved by slug within the given project, so the same slug may be reused across projects.
       operationId: renderLive
       tags:
         - Prompt Renders
       security:
         - BearerAuth: []
       parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
         - name: slug
           in: path
           required: true
-          description: Unique prompt slug.
+          description: Prompt slug, unique within the project.
           schema:
             type: string
       x-edge-cases:
@@ -86,20 +93,27 @@ paths:
               example:
                 error: "internal error"
 
-  /v1/prompts/{slug}/versions/{version}/render:
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/render:
     post:
       summary: Render Specific Prompt Version
-      description: Renders a specific template version of a prompt (even draft status) using supplied variables.
+      description: Renders a specific template version of a prompt (even draft status) using supplied variables. The prompt is resolved by slug within the given project.
       operationId: renderVersion
       tags:
         - Prompt Renders
       security:
         - BearerAuth: []
       parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
         - name: slug
           in: path
           required: true
-          description: Unique prompt slug.
+          description: Prompt slug, unique within the project.
           schema:
             type: string
         - name: version

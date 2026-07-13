@@ -155,8 +155,13 @@ func TestRolesAndPermissions(t *testing.T) {
 	assert.True(t, foundViewer)
 
 	// 5. Test Permissions on Prompt Actions
+	// A project owned by the team; capability on its prompts is the team role.
+	promptProject, err := store.CreateProject(ctx, teamID, "roles_project", "Roles Project")
+	require.NoError(t, err)
+	projectIDStr := promptProject.ID.String()
+
 	// A. Editor can Create Prompt
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), `{"name":"Editor Prompt","description":"Prompt by editor"}`, editorToken)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectIDStr), `{"name":"Editor Prompt","description":"Prompt by editor"}`, editorToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -166,14 +171,14 @@ func TestRolesAndPermissions(t *testing.T) {
 	promptID, _ := uuid.Parse(promptIDStr)
 
 	// B. Viewer cannot Create Prompt
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), `{"name":"Viewer Prompt","description":"Prompt by viewer"}`, viewerToken)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectIDStr), `{"name":"Viewer Prompt","description":"Prompt by viewer"}`, viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp.Body.Close()
 
 	// C. Viewer can List Prompts
-	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/teams/%s/prompts", teamIDStr), "", viewerToken)
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/projects/%s/prompts", projectIDStr), "", viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -233,7 +238,7 @@ func TestRolesAndPermissions(t *testing.T) {
 	resp.Body.Close()
 
 	// J. Viewer can Render Live
-	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/render", promptSlugStr), `{"variables":{"name":"John"}}`, viewerToken)
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectIDStr, promptSlugStr), `{"variables":{"name":"John"}}`, viewerToken)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -277,7 +282,7 @@ func TestRolesAndPermissions(t *testing.T) {
 	resp.Body.Close()
 
 	// Verify prompt is archived
-	gotPrompt, err := store.GetPromptByID(ctx, promptID, []uuid.UUID{teamID})
+	gotPrompt, err := store.GetPromptByID(ctx, promptID, []uuid.UUID{promptProject.ID})
 	require.NoError(t, err)
 	assert.Equal(t, model.PromptStatusArchived, gotPrompt.Status)
 
