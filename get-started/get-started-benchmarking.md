@@ -55,9 +55,9 @@ When you execute the load test script, the tool performs the following actions a
 
 - Establishes a connection to the PostgreSQL database specified in your environment or via the flags.
 - Redacts sensitive credentials in the terminal logs when printing the database connection parameters.
-- Creates transient test records including a mock organization, a team, a scoped API key, a parent prompt, and a live prompt template version.
+- Creates transient test records including a mock organization, a team, a project, a scoped API key, a parent prompt, and a live prompt template version.
 - Executes a pre-flight request to the prompt rendering API using the newly generated API key to verify that the API server is reachable and active.
-- Spawns parallel worker goroutines that send concurrent HTTP POST requests to the `/v1/prompts/{id}/render` endpoint.
+- Spawns parallel worker goroutines that send concurrent HTTP POST requests to the `/v1/projects/{projectID}/prompts/{slug}/render` endpoint.
 - Accumulates response durations and success states in thread-safe memory buffers.
 - Restores the database to its original state by removing all transient test records in a cleanup phase.
 - Calculates and displays latency percentiles and throughput figures.

@@ -82,17 +82,29 @@ func main() {
 	hashBytes := sha256.Sum256([]byte(rawKey))
 	keyHash := fmt.Sprintf("%x", hashBytes)
 	apiKeyID := uuid.New()
+
+	projectID := uuid.New()
+	projectName := "loadtest-project-" + runID
+	projectSlug := "loadtest_project_" + runID
+	_, err = conn.Exec(ctx, "INSERT INTO projects (id, owning_team_id, name, slug) VALUES ($1, $2, $3, $4)",
+		projectID, teamID, projectName, projectSlug)
+	if err != nil {
+		cleanUp(ctx, conn, orgID, teamID, uuid.Nil, uuid.Nil, uuid.Nil, uuid.Nil)
+		fmt.Printf("Error: failed to create mock project: %v\n", err)
+		os.Exit(1)
+	}
+
 	_, err = conn.Exec(ctx, "INSERT INTO api_keys (id, name, key_hash, org_id, operation) VALUES ($1, $2, $3, $4, $5)",
 		apiKeyID, "loadtest-key-"+runID, keyHash, orgID, "read_render")
 	if err != nil {
-		cleanUp(ctx, conn, orgID, teamID, uuid.Nil, uuid.Nil, uuid.Nil)
+		cleanUp(ctx, conn, orgID, teamID, projectID, uuid.Nil, uuid.Nil, uuid.Nil)
 		fmt.Printf("Error: failed to create mock API key: %v\n", err)
 		os.Exit(1)
 	}
 
 	_, err = conn.Exec(ctx, "INSERT INTO api_key_teams (api_key_id, team_id) VALUES ($1, $2)", apiKeyID, teamID)
 	if err != nil {
-		cleanUp(ctx, conn, orgID, teamID, apiKeyID, uuid.Nil, uuid.Nil)
+		cleanUp(ctx, conn, orgID, teamID, projectID, apiKeyID, uuid.Nil, uuid.Nil)
 		fmt.Printf("Error: failed to associate API key with team: %v\n", err)
 		os.Exit(1)
 	}
@@ -100,10 +112,10 @@ func main() {
 	promptID := uuid.New()
 	promptName := "loadtest-prompt-" + runID
 	promptSlug := "loadtest_prompt_" + runID
-	_, err = conn.Exec(ctx, "INSERT INTO prompts (id, name, description, team_id, slug) VALUES ($1, $2, $3, $4, $5)",
-		promptID, promptName, "Mock prompt for load testing", teamID, promptSlug)
+	_, err = conn.Exec(ctx, "INSERT INTO prompts (id, name, description, project_id, slug) VALUES ($1, $2, $3, $4, $5)",
+		promptID, promptName, "Mock prompt for load testing", projectID, promptSlug)
 	if err != nil {
-		cleanUp(ctx, conn, orgID, teamID, apiKeyID, uuid.Nil, uuid.Nil)
+		cleanUp(ctx, conn, orgID, teamID, projectID, apiKeyID, uuid.Nil, uuid.Nil)
 		fmt.Printf("Error: failed to create mock prompt: %v\n", err)
 		os.Exit(1)
 	}
@@ -113,15 +125,15 @@ func main() {
 	_, err = conn.Exec(ctx, "INSERT INTO prompt_versions (id, prompt_id, version, template, status) VALUES ($1, $2, $3, $4, $5)",
 		versionID, promptID, 1, templateStr, "live")
 	if err != nil {
-		cleanUp(ctx, conn, orgID, teamID, apiKeyID, promptID, uuid.Nil)
+		cleanUp(ctx, conn, orgID, teamID, projectID, apiKeyID, promptID, uuid.Nil)
 		fmt.Printf("Error: failed to create mock live prompt version: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Defer final cleanup of all entities
-	defer cleanUp(ctx, conn, orgID, teamID, apiKeyID, promptID, versionID)
+	defer cleanUp(ctx, conn, orgID, teamID, projectID, apiKeyID, promptID, versionID)
 
-	targetURL := fmt.Sprintf("%s/v1/prompts/%s/render", *apiEndpoint, promptSlug)
+	targetURL := fmt.Sprintf("%s/v1/projects/%s/prompts/%s/render", *apiEndpoint, projectID.String(), promptSlug)
 	fmt.Printf("Target live prompt render endpoint: %s\n", targetURL)
 
 	// 3. Pre-flight Check
@@ -316,13 +328,17 @@ func maskDSN(dsn string) string {
 	return dsn
 }
 
-func cleanUp(ctx context.Context, conn *pgx.Conn, orgID, teamID, apiKeyID, promptID, versionID uuid.UUID) {
+func cleanUp(ctx context.Context, conn *pgx.Conn, orgID, teamID, projectID, apiKeyID, promptID, versionID uuid.UUID) {
 	fmt.Println("Cleaning up temporary mock data...")
 	if versionID != uuid.Nil {
 		_, _ = conn.Exec(ctx, "DELETE FROM prompt_versions WHERE id = $1", versionID)
 	}
 	if promptID != uuid.Nil {
 		_, _ = conn.Exec(ctx, "DELETE FROM prompts WHERE id = $1", promptID)
+	}
+	if projectID != uuid.Nil {
+		_, _ = conn.Exec(ctx, "DELETE FROM project_team_access WHERE project_id = $1", projectID)
+		_, _ = conn.Exec(ctx, "DELETE FROM projects WHERE id = $1", projectID)
 	}
 	if apiKeyID != uuid.Nil {
 		_, _ = conn.Exec(ctx, "DELETE FROM api_key_teams WHERE api_key_id = $1", apiKeyID)

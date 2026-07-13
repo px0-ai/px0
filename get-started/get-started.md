@@ -124,7 +124,21 @@ curl -s -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
 export PX0_TEAM_ID=team-id
 ```
 
-#### 2. Create a Programmatic API Key (Token)
+#### 2. Create a Project
+Create a project under your team. A project is a named container for your prompts:
+
+```bash
+curl -i -X POST http://localhost:8000/v1/projects \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "'"${PX0_TEAM_ID}"'", "name": "Main Project", "slug": "main"}'
+```
+
+```bash
+export PX0_PROJECT_ID=project-id
+```
+
+#### 3. Create a Programmatic API Key (Token)
 Create a programmatic key with `all` or `read_render` operations. This acts as a machine/application token for rendering templates programmatically:
 
 ```bash
@@ -145,12 +159,12 @@ EOF
 export PX0_API_KEY=api-key
 ```
 
-#### 3. Create a Prompt
+#### 4. Create a Prompt
 
-Create a prompt container under your team. Note that passing a `slug` is optional; if omitted, the API will automatically generate and normalize a slug from the prompt's `name` (e.g. "Greeting Prompt" becomes `greeting_prompt`). Here, we explicitly define the slug as `greeting`:
+Create a prompt container under your project. Note that passing a `slug` is optional; if omitted, the API will automatically generate and normalize a slug from the prompt's `name` (e.g. "Greeting Prompt" becomes `greeting_prompt`). Here, we explicitly define the slug as `greeting`:
 
 ```bash
-curl -i -X POST http://localhost:8000/v1/teams/${PX0_TEAM_ID}/prompts \
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts \
   -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"name": "Greeting Prompt", "slug": "greeting"}'
@@ -160,7 +174,7 @@ curl -i -X POST http://localhost:8000/v1/teams/${PX0_TEAM_ID}/prompts \
 export PX0_PROMPT_ID=prompt-id
 ```
 
-#### 4. Create a Prompt Version (Template)
+#### 5. Create a Prompt Version (Template)
 
 Create a draft template version ([template syntax](https://docs.px0.ai/template-syntax)):
 
@@ -177,14 +191,14 @@ Note: We are making a note of integer version number and not prompt version ID b
 export PX0_PROMPT_VERSION_NUM=1
 ```
 
-#### 5. Render Your Prompt Template
+#### 6. Render Your Prompt Template
 Now, render your template by providing variables. You can render any version directly (even in draft status) or promote it to live and hit the live render endpoint.
 
 ##### Option A: Render a specific version directly (works on drafts)
 Use your programmatic API key (or session token) to render version 1:
 
 ```bash
-curl -i -X POST http://localhost:8000/v1/prompts/greeting/versions/${PX0_PROMPT_VERSION_NUM}/render \
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/greeting/versions/${PX0_PROMPT_VERSION_NUM}/render \
   -H "Authorization: Bearer ${PX0_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"variables": {"name": "Alice"}}'
@@ -206,7 +220,7 @@ curl -i -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions/${PX0
 Once live, anyone with the API key can render the current live prompt template without specifying a version number:
 
 ```bash
-curl -i -X POST http://localhost:8000/v1/prompts/greeting/render \
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/greeting/render \
   -H "Authorization: Bearer ${PX0_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"variables": {"name": "Bob"}}'

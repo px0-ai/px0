@@ -74,7 +74,7 @@ go run cmd/loadtest/main.go -concurrency 20 -duration 15
 The script performs the following actions:
 
 - Connects directly to the PostgreSQL database.
-- Registers a temporary test organization, team, scoped API Key, prompt, and a live prompt template version.
+- Registers a temporary test organization, team, project, scoped API Key, prompt, and a live prompt template version.
 - Conducts a pre-flight sanity check on the rendering API endpoint.
 - Launches concurrent worker goroutines that send high-throughput parallel POST requests to render the live prompt template.
 - Safely cleans up and truncates all temporary test records upon completion.
