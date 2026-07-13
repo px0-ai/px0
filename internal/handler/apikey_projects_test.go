@@ -106,3 +106,54 @@ func TestAPIKey_DeniedForeignProject(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
+
+// createAPIKeyForTeamWithOp creates an API key scoped to a single team with a custom operation and
+// returns the raw key.
+func createAPIKeyForTeamWithOp(t *testing.T, a *testApp, token, orgID, teamID, operation string) string {
+	t.Helper()
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"scoped-key","org_id":%q,"operation":%q,"team_ids":[%q]}`, orgID, operation, teamID), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	return decodeBody(t, resp)["key"].(string)
+}
+
+// TestAPIKey_AdminOperationCapabilities verifies that an API key with operation 'admin'
+// can perform editor/admin operations on prompts (create, list, and archive) for its scoped project.
+func TestAPIKey_AdminOperationCapabilities(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+
+	adminToken := setupUser(t, a)
+	adminSession, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	teams, err := store.GetUserTeams(ctx, adminSession.UserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	team := teams[0]
+	orgID := *team.OrgID
+
+	// Create a project
+	project, err := store.CreateProject(ctx, team.ID, "admin_test_project", "Admin Test Project")
+	require.NoError(t, err)
+
+	// Create an 'admin'-scoped API Key for this team
+	apiKey := createAPIKeyForTeamWithOp(t, a, adminToken, orgID.String(), team.ID.String(), "admin")
+
+	// 1. Create Prompt (Requires editor capability on the project)
+	reqCreate := newAPIKeyReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", project.ID), `{"name":"Greeting","description":"A greet"}`, apiKey)
+	respCreate, err := a.Test(reqCreate)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, respCreate.StatusCode)
+	bodyCreate := decodeBody(t, respCreate)
+	promptID := bodyCreate["prompt"].(map[string]any)["id"].(string)
+	respCreate.Body.Close()
+
+	// 2. Archive Prompt (Requires admin capability on the project)
+	reqArchive := newAPIKeyReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/archive", promptID), "", apiKey)
+	respArchive, err := a.Test(reqArchive)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respArchive.StatusCode)
+	respArchive.Body.Close()
+}

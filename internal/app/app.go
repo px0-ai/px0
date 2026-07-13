@@ -7,6 +7,7 @@ import (
 
 	"github.com/px0-ai/px0/internal/handler"
 	"github.com/px0-ai/px0/internal/middleware"
+	"github.com/px0-ai/px0/internal/model"
 )
 
 func New() *fiber.App {
@@ -57,17 +58,17 @@ func New() *fiber.App {
 
 	projects := v1.Group("/projects", middleware.RequireAuth)
 	projects.Post("", handler.CreateProject)
-	projects.Get("/:projectID", handler.GetProject)
-	projects.Delete("/:projectID", handler.DeleteProject)
-	projects.Post("/:projectID/access", handler.GrantProjectAccess)
-	projects.Delete("/:projectID/access/:teamID", handler.RevokeProjectAccess)
-	projects.Post("/:projectID/prompts", handler.CreatePrompt)
-	projects.Get("/:projectID/prompts", handler.ListPrompts)
-	projects.Post("/:projectID/prompts/:slug/render", handler.RenderLive)
-	projects.Post("/:projectID/prompts/:slug/versions/:version/render", handler.RenderVersion)
+	projects.Get("/:projectID", middleware.RequireProjectRole(model.RoleViewer), handler.GetProject)
+	projects.Delete("/:projectID", middleware.RequireProjectRole(model.RoleAdmin), handler.DeleteProject)
+	projects.Post("/:projectID/access", middleware.RequireProjectRole(model.RoleAdmin), handler.GrantProjectAccess)
+	projects.Delete("/:projectID/access/:teamID", middleware.RequireProjectRole(model.RoleAdmin), handler.RevokeProjectAccess)
+	projects.Post("/:projectID/prompts", middleware.RequireProjectRole(model.RoleEditor), handler.CreatePrompt)
+	projects.Get("/:projectID/prompts", middleware.RequireProjectRole(model.RoleViewer), handler.ListPrompts)
+	projects.Post("/:projectID/prompts/:slug/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderLive)
+	projects.Post("/:projectID/prompts/:slug/versions/:version/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderVersion)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
-	teams.Get("/:teamID/projects", handler.ListTeamProjects)
+	teams.Get("/:teamID/projects", middleware.RequireTeamRole(model.RoleViewer), handler.ListTeamProjects)
 	teams.Put("/:id", handler.UpdateTeam)
 	teams.Post("/:id/members", handler.AddTeamMember)
 	teams.Delete("/:id/members/:userID", handler.RemoveTeamMember)

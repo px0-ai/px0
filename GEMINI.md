@@ -158,3 +158,40 @@ Maintain the following standards in all OpenAPI documents to ensure correct code
 - Rich Descriptions: Provide descriptive explanations for all path variables, query parameters, and schema fields. These are parsed into CLI flag help menus and MCP server instructions.
 - Custom Metadata Extensions: Always write natural language boundary conditions under `x-edge-cases`, and document the verifying tests under `x-test-coverage`.
 - Test-Driven Specification Alignment: When new tests or test cases are added or updated to verify edge cases/scenarios, you must update the OpenAPI specification's `x-edge-cases` and `x-test-coverage` metadata to document those scenarios.
+
+## Authorization & Access Control Architecture
+
+The project implements a centralized, declarative Role-Based Access Control (RBAC) architecture that unifies User Sessions and programmatic API Keys under a single paradigm.
+
+### 1. The Unified `Subject` Principal
+Upon successful authentication, the authentication middleware (`internal/middleware/auth.go`) constructs a unified `*model.Subject` struct and attaches it to `c.Locals("subject")`.
+
+```go
+type Subject struct {
+	UserID         uuid.UUID
+	IsUserAdmin    bool
+	IsUserVerified bool
+
+	IsAPIKey bool
+	OrgID    *uuid.UUID
+	IsOrgAdmin bool
+
+	// TeamRoles maps team IDs to the role ("viewer", "editor", "admin")
+	TeamRoles map[uuid.UUID]string
+}
+```
+
+This unifies Users and API Keys:
+- **Users**: Fetches actual team membership roles from `team_members` and determines org-admin capabilities.
+- **API Keys**: Synthesizes roles for their scoped teams based on the key's operation (`read_render` -> `viewer`, `all` -> `editor`, `admin` -> `admin`).
+
+### 2. Declarative RBAC Middleware
+Authorization checks are handled at the router layer (`internal/app/app.go`) rather than inline within handlers. This is implemented via parameterized middlewares in `internal/middleware/rbac.go`:
+
+- `RequireOrgAdmin()`: Asserts that the subject has Org Admin or system admin privileges.
+- `RequireTeamRole(minRole string)`: Extracts `:teamID` from the path and asserts that the subject holds at least `minRole` on that team.
+- `RequireProjectRole(minRole string)`: Extracts `:projectID` from the path, resolves the project's ownership and sharing grants from the database, and asserts that the subject holds at least `minRole` on any authorized team.
+
+### 3. Database-Level RLS / Scoping
+To prevent data leaks, store functions are designed to accept explicitly scoped project/team ID slices (e.g. resolved from `GetSubjectProjectIDs(ctx, subject, role)`). This acts as a "hard shell" around database queries, ensuring that handlers never fetch or modify unauthorized entities.
+

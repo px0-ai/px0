@@ -605,3 +605,25 @@ func GetOrgAdminUserID(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) 
 	}
 	return userID, nil
 }
+
+func GetUserTeamRoles(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT team_id, role FROM team_members WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get user team roles: %w", err)
+	}
+	defer rows.Close()
+
+	roles := make(map[uuid.UUID]string)
+	for rows.Next() {
+		var teamID uuid.UUID
+		var role string
+		if err := rows.Scan(&teamID, &role); err != nil {
+			return nil, err
+		}
+		roles[teamID] = role
+	}
+	return roles, rows.Err()
+}

@@ -11,38 +11,6 @@ import (
 	"github.com/px0-ai/px0/internal/store"
 )
 
-// isProjectEditor reports whether the requester may create projects owned by the
-// given team: an editor-or-above member of the team, or an admin of its org.
-func isProjectEditor(c *fiber.Ctx, team *model.Team) (bool, error) {
-	isEditor, err := IsTeamEditor(c, team.ID)
-	if err != nil {
-		return false, err
-	}
-	if isEditor {
-		return true, nil
-	}
-	if team.OrgID != nil {
-		return IsOrgAdmin(c, *team.OrgID)
-	}
-	return false, nil
-}
-
-// isProjectAdmin reports whether the requester may administer the given team's
-// projects (delete, grant, revoke): an admin of the team, or an admin of its org.
-func isProjectAdmin(c *fiber.Ctx, team *model.Team) (bool, error) {
-	isAdmin, err := IsTeamAdmin(c, team.ID)
-	if err != nil {
-		return false, err
-	}
-	if isAdmin {
-		return true, nil
-	}
-	if team.OrgID != nil {
-		return IsOrgAdmin(c, *team.OrgID)
-	}
-	return false, nil
-}
-
 type createProjectRequest struct {
 	TeamID string `json:"team_id"`
 	Name   string `json:"name"`
@@ -71,10 +39,22 @@ func CreateProject(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	allowed, err := isProjectEditor(c, team)
+	subj, err := getRequestSubject(c)
 	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
+		return apierr.ErrUnauthorized.Respond(c)
 	}
+
+	allowed := false
+	if subj.IsUserAdmin {
+		allowed = true
+	} else if subj.IsOrgAdmin && team.OrgID != nil && subj.OrgID != nil && *team.OrgID == *subj.OrgID {
+		allowed = true
+	} else {
+		if role, ok := subj.TeamRoles[teamID]; ok && hasRequiredRole(role, model.RoleEditor) {
+			allowed = true
+		}
+	}
+
 	if !allowed {
 		return apierr.ErrForbidden.Respond(c)
 	}
@@ -101,19 +81,6 @@ func GetProject(c *fiber.Ctx) error {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	teamIDs, err := getRequestTeamIDs(c)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	accessible, err := store.IsProjectAccessibleByTeams(c.Context(), id, teamIDs)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-	if !accessible {
-		return apierr.ErrProjectNotFound.Respond(c)
-	}
-
 	project, err := store.GetProjectByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -130,21 +97,7 @@ func ListTeamProjects(c *fiber.Ctx) error {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	allowedIDs, err := getRequestTeamIDs(c)
-	if err != nil {
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	isMember := false
-	for _, tid := range allowedIDs {
-		if tid == teamID {
-			isMember = true
-			break
-		}
-	}
-	if !isMember {
-		return apierr.ErrForbidden.Respond(c)
-	}
+	// Will be protected by RequireTeamRole(model.RoleViewer) on the route
 
 	projects, err := store.ListProjectsForTeam(c.Context(), teamID)
 	if err != nil {
@@ -158,39 +111,6 @@ func ListTeamProjects(c *fiber.Ctx) error {
 
 type grantProjectAccessRequest struct {
 	TeamID string `json:"team_id"`
-}
-
-// requireProjectAdmin loads the project and its owning team and verifies the
-// requester is an admin of the owning team (or its org). When it returns
-// ok == false it has already written the appropriate error response to c, and
-// the caller should return nil.
-func requireProjectAdmin(c *fiber.Ctx, projectID uuid.UUID) (project *model.Project, team *model.Team, ok bool) {
-	project, err := store.GetProjectByID(c.Context(), projectID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			_ = apierr.ErrProjectNotFound.Respond(c)
-		} else {
-			_ = apierr.ErrInternalError.Respond(c, err)
-		}
-		return nil, nil, false
-	}
-
-	team, err = store.GetTeamByID(c.Context(), project.OwningTeamID)
-	if err != nil {
-		_ = apierr.ErrInternalError.Respond(c, err)
-		return nil, nil, false
-	}
-
-	allowed, err := isProjectAdmin(c, team)
-	if err != nil {
-		_ = apierr.ErrInternalError.Respond(c, err)
-		return nil, nil, false
-	}
-	if !allowed {
-		_ = apierr.ErrForbidden.Respond(c)
-		return nil, nil, false
-	}
-	return project, team, true
 }
 
 func GrantProjectAccess(c *fiber.Ctx) error {
@@ -208,13 +128,19 @@ func GrantProjectAccess(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid team_id").Respond(c)
 	}
 
-	project, owningTeam, ok := requireProjectAdmin(c, projectID)
-	if !ok {
-		return nil
+	project, err := store.GetProjectByID(c.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrProjectNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	// Sharing is bounded to the owning team's organization; an org-less team
-	// may hold a private project but cannot share it.
+	owningTeam, err := store.GetTeamByID(c.Context(), project.OwningTeamID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
 	if owningTeam.OrgID == nil {
 		return apierr.NewAPIError(fiber.StatusForbidden, "the project's owning team has no organization; sharing is not available").Respond(c)
 	}
@@ -255,10 +181,6 @@ func RevokeProjectAccess(c *fiber.Ctx) error {
 		return apierr.ErrInvalidID.Respond(c)
 	}
 
-	if _, _, ok := requireProjectAdmin(c, projectID); !ok {
-		return nil
-	}
-
 	if err := store.RevokeProjectAccess(c.Context(), projectID, granteeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return apierr.NewAPIError(fiber.StatusNotFound, "access grant not found").Respond(c)
@@ -272,10 +194,6 @@ func DeleteProject(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {
 		return apierr.ErrInvalidID.Respond(c)
-	}
-
-	if _, _, ok := requireProjectAdmin(c, id); !ok {
-		return nil
 	}
 
 	if err := store.DeleteProject(c.Context(), id); err != nil {

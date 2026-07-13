@@ -20,14 +20,14 @@ const LocalsUserID = "userID"
 // which can be either a user session token (sess_...) or an API Key (ak_...).
 func RequireAuth(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
-		userVal := c.Locals("currentUser")
-		if userVal != nil {
-			user := userVal.(*model.User)
-			if !user.IsVerified {
+		subjVal := c.Locals("subject")
+		if subjVal != nil {
+			subj := subjVal.(*model.Subject)
+			if !subj.IsAPIKey && !subj.IsUserVerified {
 				return apierr.ErrUserNotVerified.Respond(c)
 			}
+			return c.Next()
 		}
-		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
@@ -35,19 +35,31 @@ func RequireAuth(c *fiber.Ctx) error {
 // RequireAccessToken accepts either a user session access token or an API key with 'all' or 'admin' operation.
 func RequireAccessToken(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
-		userVal := c.Locals("currentUser")
-		if userVal != nil {
-			user := userVal.(*model.User)
-			if !user.IsVerified {
-				return apierr.ErrUserNotVerified.Respond(c)
+		subjVal := c.Locals("subject")
+		if subjVal != nil {
+			subj := subjVal.(*model.Subject)
+			if !subj.IsAPIKey {
+				if !subj.IsUserVerified {
+					return apierr.ErrUserNotVerified.Respond(c)
+				}
+				return c.Next()
 			}
-		}
-		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
-			if operation != "all" && operation != "admin" {
+			
+			// For API Key: must have some Editor/Admin capability or IsOrgAdmin
+			hasAccess := subj.IsOrgAdmin
+			if !hasAccess {
+				for _, role := range subj.TeamRoles {
+					if role == model.RoleEditor || role == model.RoleAdmin {
+						hasAccess = true
+						break
+					}
+				}
+			}
+			if !hasAccess {
 				return apierr.ErrForbidden.Respond(c)
 			}
+			return c.Next()
 		}
-		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
@@ -55,19 +67,14 @@ func RequireAccessToken(c *fiber.Ctx) error {
 // RequireSessionToken accepts only standard user session tokens (not API Keys).
 func RequireSessionToken(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
-		// Reject if authenticated via an API Key
-		if _, isAPIKey := c.Locals("apiKeyOperation").(string); isAPIKey {
-			return apierr.ErrUnauthorized.Respond(c)
-		}
-
-		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
-		if ok && userID != uuid.Nil {
-			userVal := c.Locals("currentUser")
-			if userVal != nil {
-				user := userVal.(*model.User)
-				if !user.IsVerified {
-					return apierr.ErrUserNotVerified.Respond(c)
-				}
+		subjVal := c.Locals("subject")
+		if subjVal != nil {
+			subj := subjVal.(*model.Subject)
+			if subj.IsAPIKey {
+				return apierr.ErrUnauthorized.Respond(c)
+			}
+			if !subj.IsUserVerified {
+				return apierr.ErrUserNotVerified.Respond(c)
 			}
 			return c.Next()
 		}
@@ -75,34 +82,38 @@ func RequireSessionToken(c *fiber.Ctx) error {
 	return apierr.ErrUnauthorized.Respond(c)
 }
 
+// RequireAdmin accepts an API key with 'all'/'admin' or a system admin user.
 func RequireAdmin(c *fiber.Ctx) error {
 	if tryAccessTokenAuth(c) {
-		// Is it an API Key?
-		if operation, ok := c.Locals("apiKeyOperation").(string); ok {
-			if operation != "all" && operation != "admin" {
+		subjVal := c.Locals("subject")
+		if subjVal != nil {
+			subj := subjVal.(*model.Subject)
+			if subj.IsAPIKey {
+				// API Key admin equivalent
+				hasAccess := subj.IsOrgAdmin
+				if !hasAccess {
+					for _, role := range subj.TeamRoles {
+						if role == model.RoleEditor || role == model.RoleAdmin {
+							hasAccess = true
+							break
+						}
+					}
+				}
+				if !hasAccess {
+					return apierr.ErrForbidden.Respond(c)
+				}
+				return c.Next()
+			}
+
+			// User session
+			if !subj.IsUserVerified {
+				return apierr.ErrUserNotVerified.Respond(c)
+			}
+			if !subj.IsUserAdmin {
 				return apierr.ErrForbidden.Respond(c)
 			}
 			return c.Next()
 		}
-
-		// Otherwise standard user session
-		userID, ok := c.Locals(LocalsUserID).(uuid.UUID)
-		if !ok || userID == uuid.Nil {
-			return apierr.ErrUnauthorized.Respond(c)
-		}
-
-		userVal := c.Locals("currentUser")
-		if userVal == nil {
-			return apierr.ErrUnauthorized.Respond(c)
-		}
-		user := userVal.(*model.User)
-		if !user.IsVerified {
-			return apierr.ErrUserNotVerified.Respond(c)
-		}
-		if !user.IsAdmin {
-			return apierr.ErrForbidden.Respond(c)
-		}
-		return c.Next()
 	}
 	return apierr.ErrUnauthorized.Respond(c)
 }
@@ -130,13 +141,45 @@ func tryAccessTokenAuth(c *fiber.Ctx) bool {
 		return false
 	}
 
-	// Fetch user
 	user, err := store.GetUserByID(c.Context(), session.UserID)
 	if err != nil {
 		return false
 	}
 
-	c.Locals(LocalsUserID, session.UserID)
+	teamRoles, err := store.GetUserTeamRoles(c.Context(), user.ID)
+	if err != nil {
+		return false
+	}
+
+	var orgID *uuid.UUID
+	isOrgAdmin := false
+
+	// Compute OrgID and IsOrgAdmin
+	teams, err := store.GetUserTeams(c.Context(), user.ID)
+	if err == nil && len(teams) > 0 {
+		// Use the first team's org as primary, if it exists
+		for _, t := range teams {
+			if t.OrgID != nil {
+				orgID = t.OrgID
+				admin, _ := store.IsOrgAdmin(c.Context(), user.ID, *orgID)
+				isOrgAdmin = admin
+				break
+			}
+		}
+	}
+
+	subj := &model.Subject{
+		UserID:         user.ID,
+		IsUserAdmin:    user.IsAdmin,
+		IsUserVerified: user.IsVerified,
+		IsAPIKey:       false,
+		OrgID:          orgID,
+		IsOrgAdmin:     isOrgAdmin,
+		TeamRoles:      teamRoles,
+	}
+
+	c.Locals("subject", subj)
+	c.Locals(LocalsUserID, user.ID)
 	c.Locals("currentUser", user)
 	return true
 }
@@ -173,8 +216,18 @@ func tryAPIKeyWithRawKey(c *fiber.Ctx, key string) bool {
 		}
 	}
 
-	// For admin or all scope API keys, resolve the actual Org Admin user ID of that organization
-	// to allow seamless execution of downstream handlers that require a logged-in user.
+	role := model.RoleViewer
+	if apiKey.Operation == "all" {
+		role = model.RoleEditor
+	} else if apiKey.Operation == "admin" {
+		role = model.RoleAdmin
+	}
+
+	teamRoles := make(map[uuid.UUID]string)
+	for _, id := range teamIDs {
+		teamRoles[id] = role
+	}
+
 	userID := uuid.Nil
 	if apiKey.Operation == "admin" || apiKey.Operation == "all" {
 		adminUserID, err := store.GetOrgAdminUserID(c.Context(), apiKey.OrgID)
@@ -183,9 +236,16 @@ func tryAPIKeyWithRawKey(c *fiber.Ctx, key string) bool {
 		}
 	}
 
-	c.Locals("apiKeyTeamIDs", teamIDs)
-	c.Locals("apiKeyOrgID", apiKey.OrgID)
-	c.Locals("apiKeyOperation", apiKey.Operation)
+	subj := &model.Subject{
+		UserID:      userID,
+		IsUserAdmin: false, // API Keys are not system admins
+		IsAPIKey:    true,
+		OrgID:       &apiKey.OrgID,
+		IsOrgAdmin:  apiKey.Operation == "admin",
+		TeamRoles:   teamRoles,
+	}
+
+	c.Locals("subject", subj)
 	c.Locals(LocalsUserID, userID)
 	return true
 }
