@@ -646,7 +646,21 @@ func TestDiffVersions(t *testing.T) {
 	// Create version 2
 	v2 := setupVersion(t, a, token, id, "Hello {{ .name }}!\nWelcome to px0.")
 
-	// Request diff
+	// Set tag "prod" on version 1
+	reqTag1 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/tags", id, v1), `{"tag":"prod"}`, token)
+	respTag1, err := a.Test(reqTag1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respTag1.StatusCode)
+	respTag1.Body.Close()
+
+	// Set tag "dev" on version 2
+	reqTag2 := newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/versions/%d/tags", id, v2), `{"tag":"dev"}`, token)
+	respTag2, err := a.Test(reqTag2)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respTag2.StatusCode)
+	respTag2.Body.Close()
+
+	// 1. Request diff via numeric versions
 	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=%d&to=%d", id, v1, v2), "", token)
 	resp, err := a.Test(req)
 	require.NoError(t, err)
@@ -656,5 +670,48 @@ func TestDiffVersions(t *testing.T) {
 	assert.Equal(t, float64(v2), body["to_version"])
 	assert.Contains(t, body["diff"].(string), "Hello {{ .name }}")
 	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
+	resp.Body.Close()
+
+	// 2. Request diff with from as tag ("prod") and to as number
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=prod&to=%d", id, v2), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, float64(v1), body["from_version"])
+	assert.Equal(t, float64(v2), body["to_version"])
+	assert.Contains(t, body["diff"].(string), "Hello {{ .name }}")
+	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
+	resp.Body.Close()
+
+	// 3. Request diff with from as number and to as tag ("dev")
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=%d&to=dev", id, v1), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, float64(v1), body["from_version"])
+	assert.Equal(t, float64(v2), body["to_version"])
+	assert.Contains(t, body["diff"].(string), "Hello {{ .name }}")
+	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
+	resp.Body.Close()
+
+	// 4. Request diff with both as tags ("prod" and "dev")
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=prod&to=dev", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	assert.Equal(t, float64(v1), body["from_version"])
+	assert.Equal(t, float64(v2), body["to_version"])
+	assert.Contains(t, body["diff"].(string), "Hello {{ .name }}")
+	assert.Contains(t, body["diff"].(string), "Welcome to px0.")
+	resp.Body.Close()
+
+	// 5. Request diff with non-existent tag
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/diff?from=prod&to=nonexistent", id), "", token)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }

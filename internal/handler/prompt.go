@@ -454,16 +454,6 @@ func DiffVersions(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, "from and to query parameters are required").Respond(c)
 	}
 
-	from, err := strconv.Atoi(fromVal)
-	if err != nil || from <= 0 {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid from version").Respond(c)
-	}
-
-	to, err := strconv.Atoi(toVal)
-	if err != nil || to <= 0 {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
-	}
-
 	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -477,18 +467,18 @@ func DiffVersions(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	fromVersion, err := store.GetVersion(c.Context(), id, from)
+	fromVersion, err := resolveVersion(c.Context(), id, fromVal)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "from version not found").Respond(c)
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	toVersion, err := store.GetVersion(c.Context(), id, to)
+	toVersion, err := resolveVersion(c.Context(), id, toVal)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "to version not found").Respond(c)
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -496,8 +486,8 @@ func DiffVersions(c *fiber.Ctx) error {
 	diff := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(fromVersion.Template),
 		B:        difflib.SplitLines(toVersion.Template),
-		FromFile: fmt.Sprintf("v%d", from),
-		ToFile:   fmt.Sprintf("v%d", to),
+		FromFile: fmt.Sprintf("v%d", fromVersion.Version),
+		ToFile:   fmt.Sprintf("v%d", toVersion.Version),
 		Context:  3,
 	}
 	diffText, err := difflib.GetUnifiedDiffString(diff)
@@ -506,8 +496,8 @@ func DiffVersions(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"from_version":  from,
-		"to_version":    to,
+		"from_version":  fromVersion.Version,
+		"to_version":    toVersion.Version,
 		"from_template": fromVersion.Template,
 		"to_template":   toVersion.Template,
 		"diff":          diffText,

@@ -157,6 +157,12 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Accepts either a version sequence number or a tag (e.g. 'prod', 'dev') for both 'from' and 'to' query parameters."
+        - "Returns 404 Not Found if either the 'from' or 'to' version/tag does not exist."
+        - "Fails with 400 Bad Request if 'from' or 'to' query parameters are missing."
+      x-test-coverage:
+        - "TestDiffVersions: Verifies diffing via numeric sequence numbers, diffing via tags, and verifying a nonexistent tag returns 404."
       parameters:
         - name: id
           in: path
@@ -168,14 +174,14 @@ paths:
           in: query
           required: true
           schema:
-            type: integer
-          description: The source version number to compare from.
+            type: string
+          description: The source version number (integer) or version tag (string) to compare from.
         - name: to
           in: query
           required: true
           schema:
-            type: integer
-          description: The target version number to compare to.
+            type: string
+          description: The target version number (integer) or version tag (string) to compare to.
       responses:
         "200":
           description: Versions compared successfully
