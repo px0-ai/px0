@@ -1,0 +1,237 @@
+openapi: 3.1.0
+info:
+  title: Skills Registry File Asset Management API
+  version: 1.0.0
+paths:
+  /v1/skills/{id}/versions/{version}/upload:
+    post:
+      summary: Upload a ZIP Archive
+      description: Uploads a ZIP file containing files to replace the existing ones in a draft version.
+      operationId: uploadSkillZip
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        "200":
+          description: ZIP file processed and replaced successfully
+
+  /v1/skills/{id}/versions/{version}/download:
+    get:
+      summary: Download ZIP Archive
+      description: Packs and downloads all files of this version as a ZIP file.
+      operationId: downloadSkillZip
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: The packed ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
+  /v1/skills/{id}/versions/{version}/files:
+    get:
+      summary: List Files in Version
+      description: Lists metadata of all files in this version.
+      operationId: listSkillFiles
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: List of files metadata
+
+    post:
+      summary: Upsert an Individual File
+      description: Creates or updates an individual file inside a draft version.
+      operationId: upsertSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertFileRequest"
+      responses:
+        "200":
+          description: File saved successfully
+
+    put:
+      summary: Update an Individual File
+      description: Updates an individual file inside a draft version.
+      operationId: updateSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertFileRequest"
+      responses:
+        "200":
+          description: File saved successfully
+
+    delete:
+      summary: Delete an Individual File
+      description: Deletes an individual file from a draft version.
+      operationId: deleteSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file to delete.
+      responses:
+        "200":
+          description: File deleted successfully
+
+  /v1/skills/{id}/versions/{version}/files/content:
+    get:
+      summary: Get File Content
+      description: Retrieves the path and raw text content of an individual file.
+      operationId: getSkillFileContent
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file.
+      responses:
+        "200":
+          description: File content details
+
+components:
+  schemas:
+    UpsertFileRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+        content:
+          type: string
+      required:
+        - file_path
+        - content

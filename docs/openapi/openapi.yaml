@@ -117,25 +117,25 @@ paths:
   /v1/skills/{id}:
     $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}"
   /v1/skills/{id}/versions:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions"
   /v1/skills/{id}/versions/{version}:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}"
   /v1/skills/{id}/versions/{version}/promote:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1promote"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1promote"
   /v1/skills/{id}/versions/{version}/demote:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1demote"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1demote"
   /v1/skills/{id}/versions/{version}/archive:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1archive"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1archive"
   /v1/skills/{id}/versions/{version}/duplicate:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1duplicate"
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1duplicate"
   /v1/skills/{id}/versions/{version}/upload:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1upload"
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1upload"
   /v1/skills/{id}/versions/{version}/download:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1download"
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1download"
   /v1/skills/{id}/versions/{version}/files:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files"
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files"
   /v1/skills/{id}/versions/{version}/files/content:
-    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files~1content"
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files~1content"
 
 components:
   securitySchemes:
@@ -183,10 +183,10 @@ components:
     Skill:
       $ref: "./skills.yaml#/components/schemas/Skill"
     SkillVersion:
-      $ref: "./skills.yaml#/components/schemas/SkillVersion"
+      $ref: "./skill-versions.yaml#/components/schemas/SkillVersion"
     CreateSkillRequest:
       $ref: "./skills.yaml#/components/schemas/CreateSkillRequest"
     UpdateSkillRequest:
       $ref: "./skills.yaml#/components/schemas/UpdateSkillRequest"
     UpsertFileRequest:
-      $ref: "./skills.yaml#/components/schemas/UpsertFileRequest"
+      $ref: "./skill-files.yaml#/components/schemas/UpsertFileRequest"

@@ -1,0 +1,229 @@
+openapi: 3.1.0
+info:
+  title: Skills Registry Version Management API
+  version: 1.0.0
+paths:
+  /v1/skills/{id}/versions:
+    get:
+      summary: List Skill Versions
+      description: Lists all versions of a skill.
+      operationId: listSkillVersions
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        "200":
+          description: List of versions
+
+    post:
+      summary: Create a Skill Version
+      description: Creates a new empty draft version.
+      operationId: createSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        "201":
+          description: Version created successfully
+
+  /v1/skills/{id}/versions/{version}:
+    get:
+      summary: Get a Skill Version
+      description: Retrieves details of a specific skill version.
+      operationId: getSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version details
+        "404":
+          description: Version not found
+
+    delete:
+      summary: Delete a Skill Version
+      description: Deletes a draft version.
+      operationId: deleteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version deleted successfully
+        "409":
+          description: Only draft versions can be deleted
+
+  /v1/skills/{id}/versions/{version}/promote:
+    post:
+      summary: Promote a Skill Version
+      description: Promotes a version status (draft -> stable -> live).
+      operationId: promoteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version promoted successfully
+
+  /v1/skills/{id}/versions/{version}/demote:
+    post:
+      summary: Demote a Skill Version
+      description: Demotes a live version back to stable.
+      operationId: demoteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version demoted successfully
+
+  /v1/skills/{id}/versions/{version}/archive:
+    post:
+      summary: Archive a Skill Version
+      description: Archives a version.
+      operationId: archiveSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version archived successfully
+
+  /v1/skills/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate a Skill Version
+      description: Creates a new draft version by duplicating this version's files.
+      operationId: duplicateSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "201":
+          description: Version duplicated successfully
+
+components:
+  schemas:
+    SkillVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        skill_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - skill_id
+        - version
+        - status
