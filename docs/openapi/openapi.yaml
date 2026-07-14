@@ -128,8 +128,6 @@ paths:
     $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1archive"
   /v1/skills/{id}/versions/{version}/duplicate:
     $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1duplicate"
-  /v1/skills/{id}/versions/{version}/upload:
-    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1upload"
   /v1/skills/{id}/versions/{version}/download:
     $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1download"
   /v1/skills/{id}/versions/{version}/files:

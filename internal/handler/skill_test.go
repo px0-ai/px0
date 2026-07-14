@@ -301,14 +301,19 @@ func TestSkillZip_UploadAndDownload(t *testing.T) {
 		"config.yml": "port: 8080",
 	})
 
-	// Upload zip to draft version 1
-	reqUpload := createMultipartReq(t, http.MethodPost, fmt.Sprintf("/v1/skills/%s/versions/1/upload", skillID), token, nil, zipBytes)
+	// Upload zip to create a new draft version (version 2)
+	reqUpload := createMultipartReq(t, http.MethodPut, fmt.Sprintf("/v1/skills/%s/versions", skillID), token, nil, zipBytes)
 	respUpload, err := a.Test(reqUpload)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, respUpload.StatusCode)
+	assert.Equal(t, http.StatusCreated, respUpload.StatusCode)
+
+	bodyUpload := decodeBody(t, respUpload)
+	versionObj := bodyUpload["version"].(map[string]any)
+	versionNum := int(versionObj["version"].(float64))
+	assert.Equal(t, 2, versionNum)
 
 	// Download zip
-	reqDownload := newReq(t, http.MethodGet, fmt.Sprintf("/v1/skills/%s/versions/1/download", skillID), "", token)
+	reqDownload := newReq(t, http.MethodGet, fmt.Sprintf("/v1/skills/%s/versions/%d/download", skillID, versionNum), "", token)
 	respDownload, err := a.Test(reqDownload)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, respDownload.StatusCode)
@@ -335,4 +340,77 @@ func TestSkillZip_UploadAndDownload(t *testing.T) {
 
 	assert.Equal(t, "console.log('running')", filesFound["main.js"])
 	assert.Equal(t, "port: 8080", filesFound["config.yml"])
+}
+
+func TestSkillZip_TemplatizedDownloadAndGetFileContent(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	projectID := setupProject(t, a, token)
+
+	// Create skill
+	reqCreate := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/skills", projectID),
+		`{"name":"Template Skill"}`, token)
+	respCreate, err := a.Test(reqCreate)
+	require.NoError(t, err)
+	bodyCreate := decodeBody(t, respCreate)
+	skill := bodyCreate["skill"].(map[string]any)
+	skillID := skill["id"].(string)
+
+	// We upload a ZIP with template files
+	zipBytes := createSkillZipBytes(t, map[string]string{
+		"config.json": `{"env": "{{.Env}}", "debug": {{.Debug}}}`,
+		"binary.bin":  string([]byte{0x00, 0x01, 0x02, 0x03}), // Should not be rendered (binary)
+	})
+
+	// Upload zip to create version 2
+	reqUpload := createMultipartReq(t, http.MethodPut, fmt.Sprintf("/v1/skills/%s/versions", skillID), token, nil, zipBytes)
+	respUpload, err := a.Test(reqUpload)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, respUpload.StatusCode)
+
+	bodyUpload := decodeBody(t, respUpload)
+	versionObj := bodyUpload["version"].(map[string]any)
+	versionNum := int(versionObj["version"].(float64))
+	assert.Equal(t, 2, versionNum)
+
+	// 1. Test GetSkillFileContent (Individual File) with variables via query parameters
+	reqGetFile := newReq(t, http.MethodGet, fmt.Sprintf("/v1/skills/%s/versions/%d/files/content?file_path=config.json&Env=Production&Debug=true", skillID, versionNum), "", token)
+	respGetFile, err := a.Test(reqGetFile)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respGetFile.StatusCode)
+	bodyGetFile := decodeBody(t, respGetFile)
+	assert.Equal(t, `{"env": "Production", "debug": true}`, bodyGetFile["content"].(string))
+
+	// 2. Test GetSkillFileContent (Individual File) - Failure Path (Missing Variable with missingkey=error)
+	reqGetFileFail := newReq(t, http.MethodGet, fmt.Sprintf("/v1/skills/%s/versions/%d/files/content?file_path=config.json&Env=Production", skillID, versionNum), "", token)
+	respGetFileFail, err := a.Test(reqGetFileFail)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, respGetFileFail.StatusCode)
+
+	// 3. Test DownloadSkillZip (Zipped Archive) with variables via query parameters
+	reqDownload := newReq(t, http.MethodGet, fmt.Sprintf("/v1/skills/%s/versions/%d/download?Env=Staging&Debug=false", skillID, versionNum), "", token)
+	respDownload, err := a.Test(reqDownload)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respDownload.StatusCode)
+
+	downloadedBytes, err := io.ReadAll(respDownload.Body)
+	require.NoError(t, err)
+	respDownload.Body.Close()
+
+	reader, err := zip.NewReader(bytes.NewReader(downloadedBytes), int64(len(downloadedBytes)))
+	require.NoError(t, err)
+	assert.Len(t, reader.File, 2)
+
+	filesFound := map[string]string{}
+	for _, f := range reader.File {
+		rc, err := f.Open()
+		require.NoError(t, err)
+		fc, err := io.ReadAll(rc)
+		require.NoError(t, err)
+		rc.Close()
+		filesFound[f.Name] = string(fc)
+	}
+
+	assert.Equal(t, `{"env": "Staging", "debug": false}`, filesFound["config.json"])
+	assert.Equal(t, string([]byte{0x00, 0x01, 0x02, 0x03}), filesFound["binary.bin"])
 }

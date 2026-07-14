@@ -3,48 +3,10 @@ info:
   title: Skills Registry File Asset Management API
   version: 1.0.0
 paths:
-  /v1/skills/{id}/versions/{version}/upload:
-    post:
-      summary: Upload a ZIP Archive
-      description: Uploads a ZIP file containing files to replace the existing ones in a draft version.
-      operationId: uploadSkillZip
-      tags:
-        - Skill Files
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: The ID or slug of the skill.
-        - name: version
-          in: path
-          required: true
-          schema:
-            type: integer
-          description: The version number.
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-              required:
-                - file
-      responses:
-        "200":
-          description: ZIP file processed and replaced successfully
-
   /v1/skills/{id}/versions/{version}/download:
     get:
       summary: Download ZIP Archive
-      description: Packs and downloads all files of this version as a ZIP file.
+      description: Packs, renders with Go text/template engine, and downloads all files of this version as a ZIP file. Any query parameters, request body variables, or a 'variables' JSON string parameter will be parsed as template context.
       operationId: downloadSkillZip
       tags:
         - Skill Files
@@ -194,7 +156,7 @@ paths:
   /v1/skills/{id}/versions/{version}/files/content:
     get:
       summary: Get File Content
-      description: Retrieves the path and raw text content of an individual file.
+      description: Retrieves the path and raw text content of an individual file, rendered with Go text/template using variables passed in query parameters or request body.
       operationId: getSkillFileContent
       tags:
         - Skill Files

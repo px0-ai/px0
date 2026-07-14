@@ -3,11 +3,14 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"text/template"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -95,6 +98,75 @@ func unzipBytes(zipBytes []byte, skillID uuid.UUID, versionID uuid.UUID) ([]mode
 		})
 	}
 	return files, nil
+}
+
+// Helper to parse variables from query parameters and JSON request body.
+func parseVariables(c *fiber.Ctx) map[string]any {
+	vars := make(map[string]any)
+
+	// 1. Read query parameters
+	c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
+		vars[string(key)] = string(value)
+	})
+
+	// 2. Read "variables" query parameter as a JSON string (if present)
+	if jsonStr, ok := vars["variables"].(string); ok && jsonStr != "" {
+		var customVars map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &customVars); err == nil {
+			for k, v := range customVars {
+				vars[k] = v
+			}
+		}
+	}
+
+	// 3. Try parsing variables from JSON body
+	if len(c.Body()) > 0 {
+		var bodyReq struct {
+			Variables map[string]any `json:"variables"`
+		}
+		if err := c.BodyParser(&bodyReq); err == nil && bodyReq.Variables != nil {
+			for k, v := range bodyReq.Variables {
+				vars[k] = v
+			}
+		} else {
+			// fallback: parse directly as a flat map
+			var flatBody map[string]any
+			if err := c.BodyParser(&flatBody); err == nil {
+				for k, v := range flatBody {
+					vars[k] = v
+				}
+			}
+		}
+	}
+
+	return vars
+}
+
+// Helper to render file content with variables.
+func renderSkillFileContent(content []byte, vars map[string]any) ([]byte, error) {
+	// If variables map is empty, or content is not valid UTF-8 (binary file), return as-is.
+	if len(vars) == 0 || !utf8.Valid(content) {
+		return content, nil
+	}
+
+	tmpl, err := template.New("skill_file").Option("missingkey=error").Parse(string(content))
+	if err != nil {
+		// If template parsing fails, but the file was just standard text that does not use 
+		// Go's template syntax (e.g. standard Javascript or JSON), we should return it unmodified.
+		// Go's text/template parser will only fail if it encounters double-braces "{{" that are 
+		// syntactically incorrect (e.g., incomplete actions like "{{foo").
+		// If there is no "{{" in the content, Parse will ALWAYS succeed.
+		// So if there's a parse error, it means there are indeed "{{" template blocks, but they are malformed.
+		// Returning the parse error is correct in this case.
+		return nil, fmt.Errorf("template parse error: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, vars); err != nil {
+		return nil, fmt.Errorf("template execution error: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 type createSkillRequest struct {
@@ -560,7 +632,7 @@ func ArchiveSkillVersion(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"version": v})
 }
 
-// UploadSkillZip handles uploading a zip to a draft version.
+// UploadSkillZip handles uploading a zip to create a new draft version.
 func UploadSkillZip(c *fiber.Ctx) error {
 	skill, err := resolveSkill(c)
 	if err != nil {
@@ -576,23 +648,6 @@ func UploadSkillZip(c *fiber.Ctx) error {
 	}
 	if !isEditor {
 		return apierr.ErrForbidden.Respond(c)
-	}
-
-	ver, err := parseVersionNum(c)
-	if err != nil {
-		return apierr.ErrInvalidVersionNumber.Respond(c)
-	}
-
-	v, err := store.GetSkillVersion(c.Context(), skill.ID, ver)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return apierr.ErrVersionNotFound.Respond(c)
-		}
-		return apierr.ErrInternalError.Respond(c, err)
-	}
-
-	if v.Status != "draft" {
-		return apierr.ErrOnlyDraftsModifiable.Respond(c)
 	}
 
 	fileHeader, err := c.FormFile("file")
@@ -611,16 +666,24 @@ func UploadSkillZip(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	// Create a new version
+	v, err := store.CreateSkillVersion(c.Context(), skill.ID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
 	files, err := unzipBytes(buf.Bytes(), skill.ID, v.ID)
 	if err != nil {
+		_ = store.DeleteSkillVersion(c.Context(), skill.ID, v.Version)
 		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid zip file: "+err.Error()).Respond(c)
 	}
 
 	if err := store.ReplaceSkillFiles(c.Context(), v.ID, skill.ID, files); err != nil {
+		_ = store.DeleteSkillVersion(c.Context(), skill.ID, v.Version)
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	return c.JSON(fiber.Map{"message": "files uploaded and replaced successfully"})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"version": v})
 }
 
 // DownloadSkillZip packs all files in a version into a zip and sends it.
@@ -651,6 +714,8 @@ func DownloadSkillZip(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	vars := parseVariables(c)
+
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
 
@@ -659,7 +724,13 @@ func DownloadSkillZip(c *fiber.Ctx) error {
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
 		}
-		_, err = f.Write(file.Content)
+
+		renderedContent, err := renderSkillFileContent(file.Content, vars)
+		if err != nil {
+			return apierr.ErrTemplateExecutionFailed.WithDetails(err.Error()).Respond(c, err)
+		}
+
+		_, err = f.Write(renderedContent)
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
 		}
@@ -746,9 +817,15 @@ func GetSkillFileContent(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
+	vars := parseVariables(c)
+	renderedContent, err := renderSkillFileContent(file.Content, vars)
+	if err != nil {
+		return apierr.ErrTemplateExecutionFailed.WithDetails(err.Error()).Respond(c, err)
+	}
+
 	return c.JSON(fiber.Map{
 		"file_path":  file.FilePath,
-		"content":    string(file.Content),
+		"content":    string(renderedContent),
 		"created_at": file.CreatedAt,
 		"updated_at": file.UpdatedAt,
 	})

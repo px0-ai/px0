@@ -42,6 +42,44 @@ paths:
         "201":
           description: Version created successfully
 
+    put:
+      summary: Upload a ZIP Archive as a New Version
+      description: Creates a new draft version by uploading a ZIP file containing the version's files.
+      operationId: uploadSkillZip
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        "201":
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/SkillVersion"
+
   /v1/skills/{id}/versions/{version}:
     get:
       summary: Get a Skill Version
