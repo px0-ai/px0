@@ -151,9 +151,9 @@ func renderSkillFileContent(content []byte, vars map[string]any) ([]byte, error)
 
 	tmpl, err := template.New("skill_file").Option("missingkey=error").Parse(string(content))
 	if err != nil {
-		// If template parsing fails, but the file was just standard text that does not use 
+		// If template parsing fails, but the file was just standard text that does not use
 		// Go's template syntax (e.g. standard Javascript or JSON), we should return it unmodified.
-		// Go's text/template parser will only fail if it encounters double-braces "{{" that are 
+		// Go's text/template parser will only fail if it encounters double-braces "{{" that are
 		// syntactically incorrect (e.g., incomplete actions like "{{foo").
 		// If there is no "{{" in the content, Parse will ALWAYS succeed.
 		// So if there's a parse error, it means there are indeed "{{" template blocks, but they are malformed.

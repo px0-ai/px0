@@ -88,9 +88,9 @@ var (
 	ErrTagNotFound              = &APIError{Status: fiber.StatusNotFound, Message: "tag not found"}
 
 	// Skill Registry Errors
-	ErrSkillNotFound            = &APIError{Status: fiber.StatusNotFound, Message: "skill not found"}
-	ErrInvalidSkillID           = &APIError{Status: fiber.StatusBadRequest, Message: "invalid skill id"}
-	ErrFileNotFound             = &APIError{Status: fiber.StatusNotFound, Message: "file not found"}
-	ErrFilePathRequired         = &APIError{Status: fiber.StatusBadRequest, Message: "file path is required"}
-	ErrFileAlreadyExists        = &APIError{Status: fiber.StatusConflict, Message: "file already exists"}
+	ErrSkillNotFound     = &APIError{Status: fiber.StatusNotFound, Message: "skill not found"}
+	ErrInvalidSkillID    = &APIError{Status: fiber.StatusBadRequest, Message: "invalid skill id"}
+	ErrFileNotFound      = &APIError{Status: fiber.StatusNotFound, Message: "file not found"}
+	ErrFilePathRequired  = &APIError{Status: fiber.StatusBadRequest, Message: "file path is required"}
+	ErrFileAlreadyExists = &APIError{Status: fiber.StatusConflict, Message: "file already exists"}
 )

@@ -1,4 +1,4 @@
-.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down spec-bundle
+.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down spec-bundle destroy
 
 install:
 	go mod download
@@ -15,6 +15,10 @@ run:
 
 build:
 	go build -o bin/server ./cmd/server
+
+destroy:
+	go run ./cmd/destroy
+
 
 # Run all tests (unit + integration). Requires a running postgres.
 # Set TEST_DATABASE_URL to override the default test database connection.
