@@ -111,6 +111,32 @@ paths:
   /v1/prompts/{id}/payloads/{payloadID}:
     $ref: "./prompt-payloads.yaml#/paths/~1v1~1prompts~1{id}~1payloads~1{payloadID}"
 
+  # Skills Registry paths
+  /v1/projects/{projectID}/skills:
+    $ref: "./skills.yaml#/paths/~1v1~1projects~1{projectID}~1skills"
+  /v1/skills/{id}:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}"
+  /v1/skills/{id}/versions:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions"
+  /v1/skills/{id}/versions/{version}:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}"
+  /v1/skills/{id}/versions/{version}/promote:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1promote"
+  /v1/skills/{id}/versions/{version}/demote:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1demote"
+  /v1/skills/{id}/versions/{version}/archive:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1archive"
+  /v1/skills/{id}/versions/{version}/duplicate:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1duplicate"
+  /v1/skills/{id}/versions/{version}/upload:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1upload"
+  /v1/skills/{id}/versions/{version}/download:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1download"
+  /v1/skills/{id}/versions/{version}/files:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files"
+  /v1/skills/{id}/versions/{version}/files/content:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files~1content"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -152,3 +178,15 @@ components:
       $ref: "./prompt-payloads.yaml#/components/schemas/UpdatePromptPayloadRequest"
     UpdatePromptRequest:
       $ref: "./prompts.yaml#/components/schemas/UpdatePromptRequest"
+
+    # Skills Registry schemas
+    Skill:
+      $ref: "./skills.yaml#/components/schemas/Skill"
+    SkillVersion:
+      $ref: "./skills.yaml#/components/schemas/SkillVersion"
+    CreateSkillRequest:
+      $ref: "./skills.yaml#/components/schemas/CreateSkillRequest"
+    UpdateSkillRequest:
+      $ref: "./skills.yaml#/components/schemas/UpdateSkillRequest"
+    UpsertFileRequest:
+      $ref: "./skills.yaml#/components/schemas/UpsertFileRequest"

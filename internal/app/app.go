@@ -66,6 +66,8 @@ func New() *fiber.App {
 	projects.Get("/:projectID/prompts", middleware.RequireProjectRole(model.RoleViewer), handler.ListPrompts)
 	projects.Post("/:projectID/prompts/:slug/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderLive)
 	projects.Post("/:projectID/prompts/:slug/versions/:version/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderVersion)
+	projects.Post("/:projectID/skills", middleware.RequireProjectRole(model.RoleEditor), handler.CreateSkill)
+	projects.Get("/:projectID/skills", middleware.RequireProjectRole(model.RoleViewer), handler.ListSkills)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", middleware.RequireTeamRole(model.RoleViewer), handler.ListTeamProjects)
@@ -112,6 +114,26 @@ func New() *fiber.App {
 	prompts.Get("/:id/payloads/:payloadID", handler.GetPromptPayload)
 	prompts.Put("/:id/payloads/:payloadID", handler.UpdatePromptPayload)
 	prompts.Delete("/:id/payloads/:payloadID", handler.DeletePromptPayload)
+
+	skills := v1.Group("/skills", middleware.RequireAuth)
+	skills.Get("/:id", handler.GetSkill)
+	skills.Put("/:id", handler.UpdateSkill)
+	skills.Delete("/:id", handler.DeleteSkill)
+	skills.Post("/:id/versions", handler.CreateSkillVersion)
+	skills.Get("/:id/versions", handler.ListSkillVersions)
+	skills.Get("/:id/versions/:version", handler.GetSkillVersion)
+	skills.Delete("/:id/versions/:version", handler.DeleteSkillVersion)
+	skills.Post("/:id/versions/:version/promote", handler.PromoteSkillVersion)
+	skills.Post("/:id/versions/:version/demote", handler.DemoteSkillVersion)
+	skills.Post("/:id/versions/:version/archive", handler.ArchiveSkillVersion)
+	skills.Post("/:id/versions/:version/duplicate", handler.DuplicateSkillVersion)
+	skills.Post("/:id/versions/:version/upload", handler.UploadSkillZip)
+	skills.Get("/:id/versions/:version/download", handler.DownloadSkillZip)
+	skills.Get("/:id/versions/:version/files", handler.ListSkillFiles)
+	skills.Get("/:id/versions/:version/files/content", handler.GetSkillFileContent)
+	skills.Post("/:id/versions/:version/files", handler.UpsertSkillFile)
+	skills.Put("/:id/versions/:version/files", handler.UpsertSkillFile)
+	skills.Delete("/:id/versions/:version/files", handler.DeleteSkillFile)
 
 	return app
 }

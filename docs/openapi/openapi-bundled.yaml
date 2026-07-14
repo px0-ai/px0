@@ -3944,6 +3944,564 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/skills:
+    post:
+      summary: Create a Skill
+      description: Creates a new skill inside a project. Accepts JSON or multipart/form-data with a zip file.
+      operationId: createSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+                description:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+              required:
+                - name
+      responses:
+        '201':
+          description: Skill created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:
+                    $ref: '#/components/schemas/Skill'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Project not found
+        '409':
+          description: Duplicate skill name or slug
+    get:
+      summary: List Skills
+      description: Lists the skills inside a project.
+      operationId: listSkills
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      responses:
+        '200':
+          description: List of skills
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Skill'
+  /v1/skills/{id}:
+    get:
+      summary: Get a Skill
+      description: Retrieves details of a specific skill by ID or slug.
+      operationId: getSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the skill.
+      responses:
+        '200':
+          description: Skill details
+        '404':
+          description: Skill not found
+    put:
+      summary: Update a Skill
+      description: Updates the metadata of a specific skill.
+      operationId: updateSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the skill.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillRequest'
+      responses:
+        '200':
+          description: Skill updated successfully
+        '404':
+          description: Skill not found
+    delete:
+      summary: Delete a Skill
+      description: Deletes a specific skill and all its versions/files.
+      operationId: deleteSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the skill.
+      responses:
+        '200':
+          description: Skill deleted successfully
+        '404':
+          description: Skill not found
+  /v1/skills/{id}/versions:
+    get:
+      summary: List Skill Versions
+      description: Lists all versions of a skill.
+      operationId: listSkillVersions
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        '200':
+          description: List of versions
+    post:
+      summary: Create a Skill Version
+      description: Creates a new empty draft version.
+      operationId: createSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        '201':
+          description: Version created successfully
+  /v1/skills/{id}/versions/{version}:
+    get:
+      summary: Get a Skill Version
+      description: Retrieves details of a specific skill version.
+      operationId: getSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version details
+        '404':
+          description: Version not found
+    delete:
+      summary: Delete a Skill Version
+      description: Deletes a draft version.
+      operationId: deleteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version deleted successfully
+        '409':
+          description: Only draft versions can be deleted
+  /v1/skills/{id}/versions/{version}/promote:
+    post:
+      summary: Promote a Skill Version
+      description: Promotes a version status (draft -> stable -> live).
+      operationId: promoteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version promoted successfully
+  /v1/skills/{id}/versions/{version}/demote:
+    post:
+      summary: Demote a Skill Version
+      description: Demotes a live version back to stable.
+      operationId: demoteSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version demoted successfully
+  /v1/skills/{id}/versions/{version}/archive:
+    post:
+      summary: Archive a Skill Version
+      description: Archives a version.
+      operationId: archiveSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version archived successfully
+  /v1/skills/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate a Skill Version
+      description: Creates a new draft version by duplicating this version's files.
+      operationId: duplicateSkillVersion
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '201':
+          description: Version duplicated successfully
+  /v1/skills/{id}/versions/{version}/upload:
+    post:
+      summary: Upload a ZIP Archive
+      description: Uploads a ZIP file containing files to replace the existing ones in a draft version.
+      operationId: uploadSkillZip
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '200':
+          description: ZIP file processed and replaced successfully
+  /v1/skills/{id}/versions/{version}/download:
+    get:
+      summary: Download ZIP Archive
+      description: Packs and downloads all files of this version as a ZIP file.
+      operationId: downloadSkillZip
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: The packed ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+  /v1/skills/{id}/versions/{version}/files:
+    get:
+      summary: List Files in Version
+      description: Lists metadata of all files in this version.
+      operationId: listSkillFiles
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: List of files metadata
+    post:
+      summary: Upsert an Individual File
+      description: Creates or updates an individual file inside a draft version.
+      operationId: upsertSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertFileRequest'
+      responses:
+        '200':
+          description: File saved successfully
+    put:
+      summary: Update an Individual File
+      description: Updates an individual file inside a draft version.
+      operationId: updateSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertFileRequest'
+      responses:
+        '200':
+          description: File saved successfully
+    delete:
+      summary: Delete an Individual File
+      description: Deletes an individual file from a draft version.
+      operationId: deleteSkillFile
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file to delete.
+      responses:
+        '200':
+          description: File deleted successfully
+  /v1/skills/{id}/versions/{version}/files/content:
+    get:
+      summary: Get File Content
+      description: Retrieves the path and raw text content of an individual file.
+      operationId: getSkillFileContent
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file.
+      responses:
+        '200':
+          description: File content details
 components:
   securitySchemes:
     BearerAuth:
@@ -4386,6 +4944,86 @@ components:
           type: string
           description: Brief summary explaining the prompt purpose.
           example: Useful greeting prompt
+    Skill:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - name
+        - slug
+    SkillVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        skill_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - skill_id
+        - version
+        - status
+    CreateSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+    UpdateSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+    UpsertFileRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+        content:
+          type: string
+      required:
+        - file_path
+        - content
     RegisterRequest:
       type: object
       properties:

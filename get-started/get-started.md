@@ -230,6 +230,7 @@ curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/gree
 
 ## Next Steps
 
-Now that you have successfully set up local services and rendered a prompt template, you are ready to explore telemetry, visualize system behavior, and run high-concurrency benchmarks:
+Now that you have successfully set up local services and rendered a prompt template, you are ready to explore other registry capabilities, telemetry, and benchmarks:
 
+- **[Getting Started with the Skills Registry](get-started-skills.md):** Learn how to package, upload, download, and edit individual files inside full, versioned code and asset packages.
 - **[Telemetry and Benchmarking Guide](get-started-telemetry.md):** Learn how to observe system metrics (App, PostgreSQL, and Redis) in Prometheus and Grafana, configure dashboard provisioning, and run concurrent load tests.
