@@ -9,7 +9,7 @@ paths:
       description: Lists all versions of a skill.
       operationId: listSkillVersions
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -28,7 +28,7 @@ paths:
       description: Creates a new empty draft version.
       operationId: createSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -48,7 +48,7 @@ paths:
       description: Retrieves details of a specific skill version.
       operationId: getSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -75,7 +75,7 @@ paths:
       description: Deletes a draft version.
       operationId: deleteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -103,7 +103,7 @@ paths:
       description: Promotes a version status (draft -> stable -> live).
       operationId: promoteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -129,7 +129,7 @@ paths:
       description: Demotes a live version back to stable.
       operationId: demoteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -155,7 +155,7 @@ paths:
       description: Archives a version.
       operationId: archiveSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -181,7 +181,7 @@ paths:
       description: Creates a new draft version by duplicating this version's files.
       operationId: duplicateSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:

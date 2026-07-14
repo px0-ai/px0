@@ -4111,7 +4111,7 @@ paths:
       description: Lists all versions of a skill.
       operationId: listSkillVersions
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4129,7 +4129,7 @@ paths:
       description: Creates a new empty draft version.
       operationId: createSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4148,7 +4148,7 @@ paths:
       description: Retrieves details of a specific skill version.
       operationId: getSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4174,7 +4174,7 @@ paths:
       description: Deletes a draft version.
       operationId: deleteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4201,7 +4201,7 @@ paths:
       description: Promotes a version status (draft -> stable -> live).
       operationId: promoteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4226,7 +4226,7 @@ paths:
       description: Demotes a live version back to stable.
       operationId: demoteSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4251,7 +4251,7 @@ paths:
       description: Archives a version.
       operationId: archiveSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4276,7 +4276,7 @@ paths:
       description: Creates a new draft version by duplicating this version's files.
       operationId: duplicateSkillVersion
       tags:
-        - Skills
+        - Skill Versions
       security:
         - BearerAuth: []
       parameters:
@@ -4301,7 +4301,7 @@ paths:
       description: Uploads a ZIP file containing files to replace the existing ones in a draft version.
       operationId: uploadSkillZip
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4338,7 +4338,7 @@ paths:
       description: Packs and downloads all files of this version as a ZIP file.
       operationId: downloadSkillZip
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4368,7 +4368,7 @@ paths:
       description: Lists metadata of all files in this version.
       operationId: listSkillFiles
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4392,7 +4392,7 @@ paths:
       description: Creates or updates an individual file inside a draft version.
       operationId: upsertSkillFile
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4422,7 +4422,7 @@ paths:
       description: Updates an individual file inside a draft version.
       operationId: updateSkillFile
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4452,7 +4452,7 @@ paths:
       description: Deletes an individual file from a draft version.
       operationId: deleteSkillFile
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
@@ -4483,7 +4483,7 @@ paths:
       description: Retrieves the path and raw text content of an individual file.
       operationId: getSkillFileContent
       tags:
-        - Skills
+        - Skill Files
       security:
         - BearerAuth: []
       parameters:
