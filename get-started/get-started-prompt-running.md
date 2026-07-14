@@ -1,0 +1,201 @@
+# Getting Started with Prompt Running & LLM Gateways
+
+This guide provides step-by-step instructions to use **Prompt Running** to execute your prompt templates directly against major LLM providers (including `OpenAI`, `Anthropic`, `Google Gemini`, `DeepSeek`, `Groq`, and `OpenRouter`).
+
+Unlike standard rendering—which simply compiles your template into raw text—the **Run API** interpolates your variables, retrieves the configured model and parameters, calls the upstream LLM, parses the response, and supports unified real-time token streaming.
+
+---
+
+## Prerequisites
+
+Before starting, ensure you have:
+1. Spun up the local services with `docker compose up -d` (see [Getting Started Guide](get-started.md)).
+2. Registered, verified, and logged in to obtain an **Access Token** (`sess_...`) or created a programmatic **API Key** (`ak_...`).
+3. Retrieved your `PX0_PROJECT_ID` (see [Getting Started Guide](get-started.md#1-retrieve-your-organization-and-team-id)).
+
+```bash
+export PX0_ACCESS_TOKEN=<your_session_token_or_api_key>
+export PX0_PROJECT_ID=<your_project_id>
+export PX0_API_KEY=<your_programmatic_api_key>
+```
+
+---
+
+## Supported Model Providers and Routing
+
+Model routing in px0 is defined by the prefix of the `model` identifier. The platform supports **6 major providers**, using standard OpenAI-compatibility protocols under-the-hood where applicable:
+
+| Provider Name | Model Prefix | Default Base URL | Environment Variable | Custom Request Header |
+| --- | --- | --- | --- | --- |
+| **OpenAI** | `openai/` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `X-OpenAI-Key` / `X-OpenAI-Base` |
+| **Anthropic** | `anthropic/` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `X-Anthropic-Key` / `X-Anthropic-Base` |
+| **Google Gemini** | `gemini/` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | `X-Gemini-Key` / `X-Gemini-Base` |
+| **DeepSeek** | `deepseek/` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `X-DeepSeek-Key` / `X-DeepSeek-Base` |
+| **Groq** | `groq/` | `https://api.groq.com/openapi/v1` | `GROQ_API_KEY` | `X-Groq-Key` / `X-Groq-Base` |
+| **OpenRouter** | `openrouter/` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `X-OpenRouter-Key` / `X-OpenRouter-Base` |
+
+### Setting Up Credentials
+You have two flexible options for configuring API keys and base URLs:
+
+* **Option A: System Environment Variables (Centralized):** Set keys directly on the `px0` server machine (e.g. `GEMINI_API_KEY=AIzaSy...` in your `.env` file). Best for shared team configurations.
+* **Option B: Request Headers (Bring Your Own Key / BYOK):** Pass credentials dynamically on every API request. Best for frontends, client-scoped accounts, or pointing to local instances (like **Ollama** or **vLLM** via `X-OpenAI-Base`).
+
+---
+
+## Step 1: Create a Scoped Prompt and Version
+
+To run a prompt, create a prompt template and supply the default model identifier and parameters inside the version payload:
+
+```bash
+# 1. Create prompt container (slug: translator)
+curl -s -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Translator Agent", "slug": "translator"}'
+```
+
+```bash
+export PX0_PROMPT_ID=<retrieved_prompt_id>
+```
+
+```bash
+# 2. Create version 1 with template, model, and parameter defaults
+curl -s -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions \
+  -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template": "Translate this sentence to {{.language}}: {{.text}}",
+    "model": "gemini/gemini-2.5-flash",
+    "model_params": {
+      "temperature": 0.3
+    }
+  }'
+```
+
+```bash
+# 3. Promote version 1 from draft -> stable -> live
+curl -s -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions/1/promote -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}"
+curl -s -X POST http://localhost:8000/v1/prompts/${PX0_PROMPT_ID}/versions/1/promote -H "Authorization: Bearer ${PX0_ACCESS_TOKEN}"
+```
+
+---
+
+## Step 2: Execute Prompt (Block / Non-Streaming Mode)
+
+Execute the live version of the prompt by passing your template variables in the request body. If the API key is not stored on the server, supply it via custom headers (e.g., `X-Gemini-Key` if using Gemini):
+
+```bash
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/translator/run \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "X-Gemini-Key: <your_gemini_api_key_if_not_in_env>" \
+  -H "Content-Type: application/json" \
+  -d '{"variables": {"language": "French", "text": "Hello world, what a beautiful day!"}}'
+```
+
+### Sample Response
+```json
+{
+  "response": "Bonjour tout le monde, quelle belle journée !",
+  "model": "gemini/gemini-2.5-flash",
+  "version": 1,
+  "slug": "translator"
+}
+```
+
+---
+
+## Step 3: Real-Time Stream Execution (SSE Mode)
+
+To receive response tokens in real-time as they are being generated by the model, set `"stream": true` in the payload. 
+
+px0 parses the provider's native stream and converts it into a **unified, provider-agnostic Server-Sent Events (SSE) format**. Each chunk line starts with `data: ` and contains a thread-safe JSON envelope:
+
+```bash
+curl -N -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/translator/run \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "variables": { "language": "Spanish", "text": "Welcome to px0!" },
+    "stream": true
+  }'
+```
+
+### Sample Stream Outputs
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+Transfer-Encoding: chunked
+
+data: {"delta": "¡Bi", "done": false}
+
+data: {"delta": "en", "done": false}
+
+data: {"delta": "ve", "done": false}
+
+data: {"delta": "nido", "done": false}
+
+data: {"delta": " a", "done": false}
+
+data: {"delta": " px0!", "done": false}
+
+data: {"delta": "", "done": true}
+```
+
+This single unified client protocol means your frontends only need to write **one streaming parser** regardless of whether the backend model is Anthropic, OpenAI, or Gemini!
+
+---
+
+## Step 4: Ad-Hoc Model and Parameter Overrides
+
+You can easily prototype, compare, and debug different models or hyperparameters **in-flight** without editing your database-saved prompt versions. 
+
+Any `model` or `model_params` supplied in the request body will take strict precedence and override the prompt's database configurations:
+
+```bash
+# Run the prompt, but override the model to DeepSeek and raise temperature for creative translations
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/translator/run \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "X-DeepSeek-Key: <your_deepseek_api_key_if_not_in_env>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "variables": { "language": "Pirate English", "text": "Please login to your account." },
+    "model": "deepseek/deepseek-chat",
+    "model_params": {
+      "temperature": 0.9
+    }
+  }'
+```
+
+### Sample Response
+```json
+{
+  "response": "Ahoy matey! Cast yer eyes here and climb aboard by loggin' into yer account!",
+  "model": "deepseek/deepseek-chat",
+  "version": 1,
+  "slug": "translator"
+}
+```
+
+---
+
+## Running Specific Draft or Non-Live Versions
+
+If you are developing a prompt template and want to execute a specific version or tag (even if it's currently in `draft` status), specify the version number in the URL:
+
+```bash
+curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/translator/versions/1/run \
+  -H "Authorization: Bearer ${PX0_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"variables": {"language": "German", "text": "Goodbye!"}}'
+```
+
+---
+
+## Summary of REST Endpoints
+
+| HTTP Method | Route | Description | Role Requirement |
+| --- | --- | --- | --- |
+| `POST` | `/v1/projects/:projectID/prompts/:slug/run` | Executes the active **live** version of a prompt | Viewer / Editor / Admin |
+| `POST` | `/v1/projects/:projectID/prompts/:slug/versions/:version/run` | Executes a **specific version** or version tag of a prompt | Viewer / Editor / Admin |

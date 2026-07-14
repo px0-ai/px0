@@ -66,6 +66,8 @@ func New() *fiber.App {
 	projects.Get("/:projectID/prompts", middleware.RequireProjectRole(model.RoleViewer), handler.ListPrompts)
 	projects.Post("/:projectID/prompts/:slug/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderLive)
 	projects.Post("/:projectID/prompts/:slug/versions/:version/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderVersion)
+	projects.Post("/:projectID/prompts/:slug/run", middleware.RequireProjectRole(model.RoleViewer), handler.RunLive)
+	projects.Post("/:projectID/prompts/:slug/versions/:version/run", middleware.RequireProjectRole(model.RoleViewer), handler.RunVersion)
 	projects.Post("/:projectID/skills", middleware.RequireProjectRole(model.RoleEditor), handler.CreateSkill)
 	projects.Get("/:projectID/skills", middleware.RequireProjectRole(model.RoleViewer), handler.ListSkills)
 

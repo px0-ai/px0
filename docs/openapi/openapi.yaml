@@ -86,6 +86,8 @@ paths:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
   /v1/projects/{projectID}/prompts/{slug}/render:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1run"
   /v1/prompts/{id}/versions:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
@@ -100,6 +102,8 @@ paths:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
   /v1/projects/{projectID}/prompts/{slug}/versions/{version}/render:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1versions~1{version}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1versions~1{version}~1run"
   /v1/prompts/{id}/versions/{version}/tags:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
   /v1/prompts/{id}/tags:
@@ -168,6 +172,10 @@ components:
       $ref: "./prompt-renders.yaml#/components/schemas/RenderRequest"
     RenderResponse:
       $ref: "./prompt-renders.yaml#/components/schemas/RenderResponse"
+    RunRequest:
+      $ref: "./prompt-renders.yaml#/components/schemas/RunRequest"
+    RunResponse:
+      $ref: "./prompt-renders.yaml#/components/schemas/RunResponse"
     PromptPayload:
       $ref: "./prompt-payloads.yaml#/components/schemas/PromptPayload"
     CreatePromptPayloadRequest:

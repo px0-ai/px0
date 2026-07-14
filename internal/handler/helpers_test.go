@@ -273,7 +273,11 @@ func AssertContract(t *testing.T, resp *http.Response) {
 		resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
 	}
 
-	// Validate Response
+	// Validate Response (skip body validation for SSE streams as kin-openapi does not support decoding them)
+	if resp.Header.Get("Content-Type") == "text/event-stream" {
+		return
+	}
+
 	respInput := &openapi3filter.ResponseValidationInput{
 		RequestValidationInput: reqInput,
 		Status:                 resp.StatusCode,
