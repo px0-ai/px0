@@ -13,6 +13,7 @@ import (
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/store"
 )
 
@@ -240,28 +241,44 @@ func ArchivePrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
-func ListAllPrompts(c *fiber.Ctx) error {
+func ListAllPrompts(searcher search.Searcher) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return listAllPrompts(c, searcher)
+	}
+}
+
+func listAllPrompts(c *fiber.Ctx, searcher search.Searcher) error {
 	projectIDStr := c.Query("project")
 	if projectIDStr == "" {
 		projectIDStr = c.Query("project_id")
 	}
 
-	if projectIDStr == "" {
-		// By default nothing is shown as per backwards-compatible test requirements
-		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
+	queryProvided := c.Context().QueryArgs().Has("q")
+	query := strings.TrimSpace(c.Query("q"))
+	if queryProvided && query == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "q query parameter must not be empty").Respond(c)
 	}
 
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		return apierr.ErrInvalidID.Respond(c)
+	if projectIDStr == "" && !queryProvided {
+		// By default nothing is shown as per backwards-compatible test requirements
+		return c.JSON(fiber.Map{"prompts": []*model.Prompt{}})
 	}
 
 	allowedIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
-	if !containsUUID(allowedIDs, projectID) {
-		return apierr.ErrForbidden.Respond(c)
+
+	projectIDs := allowedIDs
+	if projectIDStr != "" {
+		projectID, err := uuid.Parse(projectIDStr)
+		if err != nil {
+			return apierr.ErrInvalidID.Respond(c)
+		}
+		if !containsUUID(allowedIDs, projectID) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		projectIDs = []uuid.UUID{projectID}
 	}
 
 	var status *string
@@ -278,8 +295,32 @@ func ListAllPrompts(c *fiber.Ctx) error {
 		}
 	}
 
+	if queryProvided {
+		searchStatus := model.PromptStatusActive
+		if status != nil {
+			searchStatus = *status
+		} else if archived != nil && *archived {
+			searchStatus = model.PromptStatusArchived
+		}
+
+		ids, err := searcher.Search(c.Context(), search.Request{
+			Text:       query,
+			ProjectIDs: projectIDs,
+			Status:     searchStatus,
+			Limit:      search.DefaultLimit,
+		})
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		prompts, err := store.GetPromptsByIDs(c.Context(), ids, projectIDs, searchStatus)
+		if err != nil {
+			return apierr.ErrInternalError.Respond(c, err)
+		}
+		return c.JSON(fiber.Map{"prompts": prompts})
+	}
+
 	prompts, err := store.ListPrompts(c.Context(), store.PromptFilter{
-		ProjectIDs: []uuid.UUID{projectID},
+		ProjectIDs: projectIDs,
 		Archived:   archived,
 		Status:     status,
 	})

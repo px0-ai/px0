@@ -84,6 +84,40 @@ func TestListPrompts_Empty(t *testing.T) {
 	assert.Empty(t, prompts)
 }
 
+func TestGetPromptsByIDsPreservesRankAndEnforcesScope(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	project := newProject(t, ctx, "Search")
+	otherProject := newProject(t, ctx, "Private")
+
+	first, err := store.CreatePrompt(ctx, project.ID, "first", "First", "")
+	require.NoError(t, err)
+	second, err := store.CreatePrompt(ctx, project.ID, "second", "Second", "")
+	require.NoError(t, err)
+	private, err := store.CreatePrompt(ctx, otherProject.ID, "private", "Private", "")
+	require.NoError(t, err)
+
+	prompts, err := store.GetPromptsByIDs(ctx,
+		[]uuid.UUID{second.ID, private.ID, first.ID},
+		[]uuid.UUID{project.ID},
+		model.PromptStatusActive,
+	)
+	require.NoError(t, err)
+	require.Len(t, prompts, 2)
+	assert.Equal(t, second.ID, prompts[0].ID)
+	assert.Equal(t, first.ID, prompts[1].ID)
+
+	require.NoError(t, store.ArchivePrompt(ctx, first.ID, []uuid.UUID{project.ID}))
+	prompts, err = store.GetPromptsByIDs(ctx,
+		[]uuid.UUID{first.ID, second.ID},
+		[]uuid.UUID{project.ID},
+		model.PromptStatusActive,
+	)
+	require.NoError(t, err)
+	require.Len(t, prompts, 1)
+	assert.Equal(t, second.ID, prompts[0].ID)
+}
+
 func TestGetPromptByID(t *testing.T) {
 	testutil.SetupDB(t)
 	ctx := context.Background()

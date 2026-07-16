@@ -8,9 +8,17 @@ import (
 	"github.com/px0-ai/px0/internal/handler"
 	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/search"
 )
 
 func New() *fiber.App {
+	return NewWithSearch(search.NewDefault())
+}
+
+func NewWithSearch(promptSearch search.Searcher) *fiber.App {
+	if promptSearch == nil {
+		promptSearch = search.NewDefault()
+	}
 	app := fiber.New(fiber.Config{AppName: "px0"})
 
 	app.Use(cors.New(cors.Config{
@@ -92,7 +100,7 @@ func New() *fiber.App {
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)
 
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
-	prompts.Get("", handler.ListAllPrompts)
+	prompts.Get("", handler.ListAllPrompts(promptSearch))
 	prompts.Get("/:id", handler.GetPrompt)
 	prompts.Put("/:id", handler.UpdatePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
