@@ -2199,8 +2199,8 @@ paths:
                 error: internal error
   /v1/prompts:
     get:
-      summary: List all prompts with project filter
-      description: Returns a list of prompts. If the project_id query parameter is not provided, returns an empty list by default. Users can filter by a project they can reach.
+      summary: List or Search Prompts
+      description: Returns prompts from projects the requester can reach. Supplying q performs hybrid search from one natural-language query; the server retrieves lexical and semantic candidates, reranks them, and returns only authorized prompts. Without q, the existing project-filtered listing behavior is preserved.
       operationId: listAllPrompts
       tags:
         - Prompts
@@ -2227,13 +2227,34 @@ paths:
           description: Optional boolean to filter prompts by archive state.
           schema:
             type: boolean
+        - name: q
+          in: query
+          required: false
+          description: Natural-language search text. The server—not the client—handles lexical retrieval, semantic retrieval, and reranking. Raw vectors and provider selection are never accepted by the API.
+          schema:
+            type: string
+            minLength: 1
+            example: Find a prompt that handles customer refunds
       x-edge-cases:
-        - By default with no project_id query parameter, returns an empty list of prompts.
+        - With neither q nor project_id, returns an empty list to preserve existing behavior.
         - If a project_id is provided, checks the requester can reach that project, otherwise returns 403 Forbidden.
+        - A q search without project_id spans every project the requester can view, including projects granted to the requester's teams.
+        - A q search with project_id is restricted to that authorized project.
+        - An empty or whitespace-only q returns 400 instead of running an unbounded search.
+        - Search defaults to active prompts; archived=true searches archived prompts instead.
+        - Search results never include prompts from inaccessible projects, even if a retriever returns their IDs.
+        - Provider-specific scores, modes, and vectors are internal and are not exposed in the request or response.
       x-test-coverage:
         - 'TestListAllPrompts: Verifies that no project_id returns 200 with an empty list.'
         - 'TestListAllPrompts: Verifies that a valid project_id returns 200 with prompts of that project.'
         - 'TestListAllPrompts: Verifies that an unallowed project_id returns 403 Forbidden.'
+        - 'TestSearchPromptsAcrossAccessibleProjects: Verifies natural-language search spans accessible projects, preserves relevance order, and excludes an inaccessible project.'
+        - 'TestSearchPromptsRejectsEmptyQuery: Verifies whitespace-only q returns 400.'
+        - 'TestSearchPromptsExcludesArchivedByDefault: Verifies archived prompts are excluded by default and searchable only with archived=true.'
+        - 'TestAPIKey_ReachesGrantedProject: Verifies API-key search includes prompts from granted projects and stops returning them immediately after access is revoked.'
+        - 'TestPostgresRetrieverSearchesFieldsAndEnforcesScope: Verifies weighted FTS across prompt fields and project isolation.'
+        - 'TestPostgresRetrieverReflectsPromptUpdates: Verifies the generated FTS document tracks prompt updates without a separate indexing job.'
+        - 'TestEngineSearchRetrievesAndReranksBothSources: Verifies lexical and semantic candidates are both retrieved and deterministically fused.'
       responses:
         '200':
           description: A list of prompts
@@ -2246,6 +2267,14 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Prompt'
+        '400':
+          description: Invalid or empty search query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+              example:
+                error: q query parameter must not be empty
         '401':
           description: Unauthorized
           content:

@@ -10,6 +10,7 @@ import (
 	"github.com/px0-ai/px0/internal/app"
 	"github.com/px0-ai/px0/internal/db"
 	"github.com/px0-ai/px0/internal/rdb"
+	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/telemetry"
 )
 
@@ -41,10 +42,15 @@ func main() {
 	}
 	defer rdb.Close()
 
+	promptSearch, err := search.NewFromEnv()
+	if err != nil {
+		log.Fatalf("configure prompt search: %v", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8000"
 	}
 
-	log.Fatal(app.New().Listen(":" + port))
+	log.Fatal(app.NewWithSearch(promptSearch).Listen(":" + port))
 }
