@@ -5,14 +5,28 @@
   </picture>
 </p>
 
-px0 is an open-source prompt infrastructure toolkit that lets you version, update, and govern prompts in production, eliminating the need to hardcode prompts or redeploy your application for prompt changes.
+px0 is an open-source prompt infrastructure and LLM agent registry platform. It provides a unified control plane to version, update, execute, and govern prompt templates, multi-file agent skills, and structured tool schemas in production - completely decoupling prompt engineering and agentic logic from your core application deployment cycle.
 
-## Benefits
+## Core Capabilities
+### Prompt Registry
 
-- Decouple prompt strings from codebase definitions to manage templates in a single control plane.
-- Promote new prompt versions instantly with zero CI/CD overhead or application redeployments.
-- Share standardized prompt templates across teams to align engineering practices.
-- Govern production environments by restricting version promotion to authorized administrators.
+- Decouple prompts from code using versioned Jinja templates with sandboxed rendering.
+- Push instant, deploy-free prompt updates and rollbacks with visual diff tracking and granular team-level role-based access control.
+
+### Prompt Execution
+
+- Run prompts natively with automated routing to OpenAI, Anthropic, DeepSeek, Gemini, and other providers.
+- Stream responses using a unified server-sent events format and support dynamic, in-flight model overrides.
+
+### Skill Registry
+
+- Package and version complex multi-file agent logic and assets in structured workspaces.
+- Promote skills through draft, stable, and live pipelines with absolute execution safety and zero behavioral drift.
+
+### Tool Registry
+
+- Model, validate, and govern structured tool schemas with full JSON Schema compliance.
+- Expose metadata for LLM orchestration and perform single-click atomic schema updates.
 
 ## Getting Started
 
@@ -61,4 +75,3 @@ You can find examples in the [px0 examples repository](https://github.com/px0-ai
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-
