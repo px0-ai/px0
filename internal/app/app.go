@@ -8,9 +8,17 @@ import (
 	"github.com/px0-ai/px0/internal/handler"
 	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/search"
 )
 
 func New() *fiber.App {
+	return NewWithSearch(search.NewDefault())
+}
+
+func NewWithSearch(entitySearch search.Searcher) *fiber.App {
+	if entitySearch == nil {
+		entitySearch = search.NewDefault()
+	}
 	app := fiber.New(fiber.Config{AppName: "px0"})
 
 	app.Use(cors.New(cors.Config{
@@ -27,6 +35,7 @@ func New() *fiber.App {
 
 	v1 := app.Group("/v1")
 	v1.Get("/health", handler.Health)
+	v1.Get("/search", middleware.RequireAuth, handler.Search(entitySearch))
 
 	auth := v1.Group("/auth")
 	auth.Post("/register", handler.Register)

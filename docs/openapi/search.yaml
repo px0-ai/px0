@@ -1,0 +1,128 @@
+openapi: 3.1.0
+info:
+  title: Search API
+  version: 1.0.0
+paths:
+  /v1/search:
+    get:
+      summary: Search Registry Entities
+      description: Searches prompts, skills, and tools across every project the requester can view. The server retrieves lexical and semantic candidates from the natural-language query, reranks them, and reapplies project access before returning common entity metadata.
+      operationId: searchRegistry
+      tags:
+        - Search
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Natural-language text describing the desired prompt, skill, or tool. Provider names, modes, scores, and embedding vectors are internal and cannot be supplied by clients.
+          schema:
+            type: string
+            minLength: 1
+            example: Find something that handles customer refunds
+        - name: type
+          in: query
+          required: false
+          description: Restricts the search to one entity type. When omitted, all registered entity types are searched together.
+          schema:
+            $ref: "#/components/schemas/SearchEntityType"
+      x-edge-cases:
+        - "Missing, empty, or whitespace-only q returns 400 and never runs an unbounded search."
+        - "An unsupported type returns 400 with the complete list of accepted values."
+        - "Omitting type searches prompts, skills, and tools and returns one globally reranked result list."
+        - "Every retriever receives only project IDs the requester can view; hydration reapplies the same scope as a defense-in-depth boundary."
+        - "Archived prompts are excluded. Skills and tools currently have no container archive state."
+        - "A project grant makes its entities searchable by the granted team's API keys; revocation removes them immediately."
+        - "Provider-specific scores, selection, and vectors are never exposed in the public request or response."
+      x-test-coverage:
+        - "TestSearchAcrossAllEntityTypesAndAccessibleProjects: Verifies unfiltered search returns prompts, skills, and tools while excluding an inaccessible project."
+        - "TestSearchFiltersByEntityType: Verifies type=tool returns only matching tools."
+        - "TestSearchRejectsMissingQueryAndInvalidType: Verifies missing/blank q and unknown types return 400."
+        - "TestSearchExcludesArchivedPrompts: Verifies archived prompt containers are not searchable."
+        - "TestSearchRequiresAuthentication: Verifies unauthenticated requests return 401."
+        - "TestAPIKey_ReachesGrantedProject: Verifies search honors API-key project grants and revocations."
+        - "TestPostgresRetrieverSearchesAllEntityTypesAndEnforcesScope: Verifies PostgreSQL FTS covers all current registry entities with project isolation."
+        - "TestPostgresRetrieverHonorsEntityTypeFilter: Verifies the retriever applies the requested entity type."
+        - "TestPostgresRetrieverReflectsEntityUpdates: Verifies generated search documents update transactionally with entity metadata."
+        - "TestGetSearchResultsPreservesRankAndEnforcesScope: Verifies hydration preserves fused rank while dropping archived or unauthorized references."
+        - "TestEngineSearchRetrievesAndReranksBothSources: Verifies lexical and semantic candidates are deterministically fused."
+      responses:
+        "200":
+          description: Ranked registry search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Missing query or unsupported entity type
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Search provider or internal failure
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+components:
+  schemas:
+    SearchEntityType:
+      type: string
+      enum:
+        - prompt
+        - skill
+        - tool
+      example: prompt
+
+    SearchResult:
+      type: object
+      description: Common searchable metadata. Use type and id with the corresponding registry endpoint to retrieve the full entity.
+      properties:
+        type:
+          $ref: "#/components/schemas/SearchEntityType"
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - type
+        - id
+        - project_id
+        - slug
+        - name
+        - description
+        - created_at
+        - updated_at
+
+    SearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+      required:
+        - results

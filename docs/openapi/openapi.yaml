@@ -10,6 +10,8 @@ servers:
 paths:
   /v1/health:
     $ref: "./health.yaml#/paths/~1v1~1health"
+  /v1/search:
+    $ref: "./search.yaml#/paths/~1v1~1search"
   /v1/auth/register:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1register"
   /v1/auth/login:
