@@ -233,5 +233,6 @@ curl -i -X POST http://localhost:8000/v1/projects/${PX0_PROJECT_ID}/prompts/gree
 Now that you have successfully set up local services and rendered a prompt template, you are ready to explore other registry capabilities, telemetry, and benchmarks:
 
 - **[Getting Started with the Skills Registry](get-started-skills.md):** Learn how to package, upload, download, and edit individual files inside full, versioned code and asset packages.
+- **[Getting Started with the Tools Registry](get-started-tools.md):** Learn how to create tools, define input and output JSON Schema specifications, and manage tool version lifecycles.
 - **[Getting Started with Prompt Running & LLM Gateways](get-started-prompt-running.md):** Learn how to execute prompt templates directly against major model providers (OpenAI, Anthropic, Gemini, DeepSeek, Groq, OpenRouter) with unified real-time streaming and parameter overrides.
 - **[Telemetry and Benchmarking Guide](get-started-telemetry.md):** Learn how to observe system metrics (App, PostgreSQL, and Redis) in Prometheus and Grafana, configure dashboard provisioning, and run concurrent load tests.

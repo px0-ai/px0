@@ -139,6 +139,26 @@ paths:
   /v1/skills/{id}/versions/{version}/files/content:
     $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files~1content"
 
+  # Tools Registry paths
+  /v1/projects/{projectID}/tools:
+    $ref: "./tools.yaml#/paths/~1v1~1projects~1{projectID}~1tools"
+  /v1/tools:
+    $ref: "./tools.yaml#/paths/~1v1~1tools"
+  /v1/tools/{id}:
+    $ref: "./tools.yaml#/paths/~1v1~1tools~1{id}"
+  /v1/tools/{id}/versions:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions"
+  /v1/tools/{id}/versions/{version}:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}"
+  /v1/tools/{id}/versions/{version}/promote:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1promote"
+  /v1/tools/{id}/versions/{version}/demote:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1demote"
+  /v1/tools/{id}/versions/{version}/archive:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1archive"
+  /v1/tools/{id}/versions/{version}/duplicate:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1duplicate"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -196,3 +216,17 @@ components:
       $ref: "./skills.yaml#/components/schemas/UpdateSkillRequest"
     UpsertFileRequest:
       $ref: "./skill-files.yaml#/components/schemas/UpsertFileRequest"
+
+    # Tools Registry schemas
+    Tool:
+      $ref: "./tools.yaml#/components/schemas/Tool"
+    ToolVersion:
+      $ref: "./tool-versions.yaml#/components/schemas/ToolVersion"
+    CreateToolRequest:
+      $ref: "./tools.yaml#/components/schemas/CreateToolRequest"
+    UpdateToolRequest:
+      $ref: "./tools.yaml#/components/schemas/UpdateToolRequest"
+    CreateToolVersionRequest:
+      $ref: "./tool-versions.yaml#/components/schemas/CreateToolVersionRequest"
+    UpdateToolVersionRequest:
+      $ref: "./tool-versions.yaml#/components/schemas/UpdateToolVersionRequest"

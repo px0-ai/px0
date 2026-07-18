@@ -1,0 +1,363 @@
+openapi: 3.1.0
+info:
+  title: Tool Registry Version Management API
+  version: 1.0.0
+paths:
+  /v1/tools/{id}/versions:
+    get:
+      summary: List Tool Versions
+      description: Lists all versions of a tool.
+      operationId: listToolVersions
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+      responses:
+        "200":
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ToolVersion"
+
+    post:
+      summary: Create a Tool Version
+      description: Creates a new empty draft version.
+      operationId: createToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateToolVersionRequest"
+      responses:
+        "201":
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+
+  /v1/tools/{id}/versions/{version}:
+    get:
+      summary: Get a Tool Version
+      description: Retrieves details of a specific tool version.
+      operationId: getToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+
+    put:
+      summary: Update a Tool Version
+      description: Updates the schemas of a draft tool version.
+      operationId: updateToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolVersionRequest"
+      responses:
+        "200":
+          description: Version updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+        "422":
+          description: Only draft versions can be modified
+
+    delete:
+      summary: Delete or Archive a Tool Version
+      description: Deletes a specific tool version if it is in draft status, otherwise archives it.
+      operationId: deleteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "204":
+          description: Version deleted successfully
+        "404":
+          description: Version not found
+
+  /v1/tools/{id}/versions/{version}/promote:
+    post:
+      summary: Promote a Tool Version
+      description: "Promotes version status: draft -> stable -> live."
+      operationId: promoteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version promoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+
+  /v1/tools/{id}/versions/{version}/demote:
+    post:
+      summary: Demote a Tool Version
+      description: "Demotes version status: live -> stable."
+      operationId: demoteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version demoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+
+  /v1/tools/{id}/versions/{version}/archive:
+    post:
+      summary: Archive a Tool Version
+      description: Archives a specific tool version.
+      operationId: archiveToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        "200":
+          description: Version archived successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+
+  /v1/tools/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate a Tool Version
+      description: Creates a new draft version by duplicating the schemas of an existing tool version.
+      operationId: duplicateToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number to duplicate.
+      responses:
+        "201":
+          description: Version duplicated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "#/components/schemas/ToolVersion"
+        "404":
+          description: Version not found
+
+components:
+  schemas:
+    ToolVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tool_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        input_schema:
+          type: object
+          description: JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: JSON Schema for tool outputs.
+        status:
+          type: string
+          enum: [draft, stable, live, archived]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tool_id
+        - version
+        - input_schema
+        - output_schema
+        - status
+    CreateToolVersionRequest:
+      type: object
+      properties:
+        input_schema:
+          type: object
+          description: Optional JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: Optional JSON Schema for tool outputs.
+    UpdateToolVersionRequest:
+      type: object
+      properties:
+        input_schema:
+          type: object
+          description: Optional JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: Optional JSON Schema for tool outputs.
