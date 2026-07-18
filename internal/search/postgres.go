@@ -27,18 +27,18 @@ func (PostgresRetriever) Retrieve(ctx context.Context, req Request) ([]Match, er
 			SELECT 'prompt'::text AS entity_type, p.id,
 			       ts_rank_cd(p.search_vector, q.value) AS score, p.updated_at
 			FROM prompts p, q
-			WHERE p.project_id = ANY($2) AND p.status = 'active'
+			WHERE 'prompt' = ANY($3) AND p.project_id = ANY($2) AND p.status = 'active'
 			  AND p.search_vector @@ q.value
 			UNION ALL
 			SELECT 'skill'::text, s.id,
 			       ts_rank_cd(s.search_vector, q.value), s.updated_at
 			FROM skills s, q
-			WHERE s.project_id = ANY($2) AND s.search_vector @@ q.value
+			WHERE 'skill' = ANY($3) AND s.project_id = ANY($2) AND s.search_vector @@ q.value
 			UNION ALL
 			SELECT 'tool'::text, t.id,
 			       ts_rank_cd(t.search_vector, q.value), t.updated_at
 			FROM tools t, q
-			WHERE t.project_id = ANY($2) AND t.search_vector @@ q.value
+			WHERE 'tool' = ANY($3) AND t.project_id = ANY($2) AND t.search_vector @@ q.value
 		)
 		SELECT entity_type, id, score
 		FROM matches
