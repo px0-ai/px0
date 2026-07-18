@@ -1,0 +1,248 @@
+openapi: 3.1.0
+info:
+  title: Tools Registry Core API
+  version: 1.0.0
+paths:
+  /v1/projects/{projectID}/tools:
+    post:
+      summary: Create a Tool
+      description: Creates a new tool inside a project.
+      operationId: createTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateToolRequest"
+      responses:
+        "201":
+          description: Tool created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Project not found
+        "409":
+          description: Duplicate tool name or slug
+    get:
+      summary: List Tools
+      description: Lists the tools inside a project.
+      operationId: listTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      responses:
+        "200":
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tool"
+
+  /v1/tools:
+    get:
+      summary: List All Tools (global, with filtering)
+      description: Lists tools globally, optionally filtered by an explicit project ID query parameter.
+      operationId: listAllTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project to filter by.
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Alternate query parameter for filtering by project ID.
+      responses:
+        "200":
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tool"
+
+  /v1/tools/{id}:
+    get:
+      summary: Get a Tool
+      description: Retrieves details of a specific tool by ID or slug.
+      operationId: getTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        "200":
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "404":
+          description: Tool not found
+
+    put:
+      summary: Update a Tool
+      description: Updates the metadata of a specific tool.
+      operationId: updateTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolRequest"
+      responses:
+        "200":
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "404":
+          description: Tool not found
+
+    delete:
+      summary: Delete a Tool
+      description: Deletes a specific tool and all its versions.
+      operationId: deleteTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        "204":
+          description: Tool deleted successfully
+        "404":
+          description: Tool not found
+
+components:
+  schemas:
+    Tool:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - slug
+        - name
+    CreateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+    UpdateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+      required:
+        - name

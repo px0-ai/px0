@@ -70,6 +70,8 @@ func New() *fiber.App {
 	projects.Post("/:projectID/prompts/:slug/versions/:version/run", middleware.RequireProjectRole(model.RoleViewer), handler.RunVersion)
 	projects.Post("/:projectID/skills", middleware.RequireProjectRole(model.RoleEditor), handler.CreateSkill)
 	projects.Get("/:projectID/skills", middleware.RequireProjectRole(model.RoleViewer), handler.ListSkills)
+	projects.Post("/:projectID/tools", middleware.RequireProjectRole(model.RoleEditor), handler.CreateTool)
+	projects.Get("/:projectID/tools", middleware.RequireProjectRole(model.RoleViewer), handler.ListTools)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", middleware.RequireTeamRole(model.RoleViewer), handler.ListTeamProjects)
@@ -136,6 +138,21 @@ func New() *fiber.App {
 	skills.Post("/:id/versions/:version/files", handler.UpsertSkillFile)
 	skills.Put("/:id/versions/:version/files", handler.UpsertSkillFile)
 	skills.Delete("/:id/versions/:version/files", handler.DeleteSkillFile)
+
+	tools := v1.Group("/tools", middleware.RequireAuth)
+	tools.Get("", handler.ListAllTools)
+	tools.Get("/:id", handler.GetTool)
+	tools.Put("/:id", handler.UpdateTool)
+	tools.Delete("/:id", handler.DeleteTool)
+	tools.Post("/:id/versions", handler.CreateToolVersion)
+	tools.Get("/:id/versions", handler.ListToolVersions)
+	tools.Get("/:id/versions/:version", handler.GetToolVersion)
+	tools.Put("/:id/versions/:version", handler.UpdateToolVersion)
+	tools.Delete("/:id/versions/:version", handler.DeleteToolVersion)
+	tools.Post("/:id/versions/:version/promote", handler.PromoteToolVersion)
+	tools.Post("/:id/versions/:version/demote", handler.DemoteToolVersion)
+	tools.Post("/:id/versions/:version/archive", handler.ArchiveToolVersion)
+	tools.Post("/:id/versions/:version/duplicate", handler.DuplicateToolVersion)
 
 	return app
 }
