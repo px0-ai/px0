@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/px0-ai/px0/internal/model"
 )
 
 const (
@@ -14,21 +16,21 @@ const (
 	rrfConstant  = 60
 )
 
-// Request is the complete, authorization-scoped input supplied to every
-// retriever. Providers must honor ProjectIDs and Status before returning a
-// match; the handler applies the same scope again while hydrating results.
+// Request is the authorization-scoped input supplied to every retriever.
+// Providers must honor ProjectIDs and Types before returning a match; the
+// handler applies the project scope again while hydrating results.
 type Request struct {
 	Text       string
 	ProjectIDs []uuid.UUID
-	Status     string
+	Types      []model.SearchEntityType
 	Limit      int
 }
 
-// Match identifies a prompt and its provider-specific relevance score.
+// Match identifies a registry entity and its provider-specific relevance score.
 // Retrievers must return matches ordered from most to least relevant.
 type Match struct {
-	PromptID uuid.UUID
-	Score    float64
+	Reference model.SearchReference
+	Score     float64
 }
 
 // Retriever is implemented by lexical and semantic search backends. Keeping
@@ -40,7 +42,7 @@ type Retriever interface {
 
 // Searcher is the handler-facing hybrid search contract.
 type Searcher interface {
-	Search(context.Context, Request) ([]uuid.UUID, error)
+	Search(context.Context, Request) ([]model.SearchReference, error)
 }
 
 // Engine retrieves lexical and semantic candidates concurrently and reranks
@@ -65,10 +67,13 @@ func NewDefault() *Engine {
 	return NewEngine(PostgresRetriever{}, NoopRetriever{})
 }
 
-func (e *Engine) Search(ctx context.Context, req Request) ([]uuid.UUID, error) {
+func (e *Engine) Search(ctx context.Context, req Request) ([]model.SearchReference, error) {
 	req.Text = strings.TrimSpace(req.Text)
 	if req.Text == "" || len(req.ProjectIDs) == 0 {
-		return []uuid.UUID{}, nil
+		return []model.SearchReference{}, nil
+	}
+	if len(req.Types) == 0 {
+		req.Types = model.AllSearchEntityTypes()
 	}
 	if req.Limit <= 0 {
 		req.Limit = DefaultLimit
@@ -109,34 +114,37 @@ func (e *Engine) Search(ctx context.Context, req Request) ([]uuid.UUID, error) {
 }
 
 type fusedMatch struct {
-	id    uuid.UUID
-	score float64
+	reference model.SearchReference
+	score     float64
 }
 
-func fuse(lexical, semantic []Match, limit int) []uuid.UUID {
-	scores := make(map[uuid.UUID]float64)
+func fuse(lexical, semantic []Match, limit int) []model.SearchReference {
+	scores := make(map[model.SearchReference]float64)
 
 	for _, matches := range [][]Match{lexical, semantic} {
-		seen := make(map[uuid.UUID]struct{}, len(matches))
+		seen := make(map[model.SearchReference]struct{}, len(matches))
 		for rank, match := range matches {
-			if match.PromptID == uuid.Nil {
+			if match.Reference.ID == uuid.Nil {
 				continue
 			}
-			if _, duplicate := seen[match.PromptID]; duplicate {
+			if _, duplicate := seen[match.Reference]; duplicate {
 				continue
 			}
-			seen[match.PromptID] = struct{}{}
-			scores[match.PromptID] += 1 / float64(rrfConstant+rank+1)
+			seen[match.Reference] = struct{}{}
+			scores[match.Reference] += 1 / float64(rrfConstant+rank+1)
 		}
 	}
 
 	ranked := make([]fusedMatch, 0, len(scores))
-	for id, score := range scores {
-		ranked = append(ranked, fusedMatch{id: id, score: score})
+	for reference, score := range scores {
+		ranked = append(ranked, fusedMatch{reference: reference, score: score})
 	}
 	sort.Slice(ranked, func(i, j int) bool {
 		if ranked[i].score == ranked[j].score {
-			return ranked[i].id.String() < ranked[j].id.String()
+			if ranked[i].reference.Type == ranked[j].reference.Type {
+				return ranked[i].reference.ID.String() < ranked[j].reference.ID.String()
+			}
+			return ranked[i].reference.Type < ranked[j].reference.Type
 		}
 		return ranked[i].score > ranked[j].score
 	})
@@ -144,9 +152,9 @@ func fuse(lexical, semantic []Match, limit int) []uuid.UUID {
 		ranked = ranked[:limit]
 	}
 
-	ids := make([]uuid.UUID, len(ranked))
+	references := make([]model.SearchReference, len(ranked))
 	for i, match := range ranked {
-		ids[i] = match.id
+		references[i] = match.reference
 	}
-	return ids
+	return references
 }

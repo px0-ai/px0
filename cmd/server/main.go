@@ -42,9 +42,9 @@ func main() {
 	}
 	defer rdb.Close()
 
-	promptSearch, err := search.NewFromEnv()
+	entitySearch, err := search.NewFromEnv()
 	if err != nil {
-		log.Fatalf("configure prompt search: %v", err)
+		log.Fatalf("configure search: %v", err)
 	}
 
 	port := os.Getenv("PORT")
@@ -52,5 +52,5 @@ func main() {
 		port = "8000"
 	}
 
-	log.Fatal(app.NewWithSearch(promptSearch).Listen(":" + port))
+	log.Fatal(app.NewWithSearch(entitySearch).Listen(":" + port))
 }

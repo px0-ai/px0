@@ -74,21 +74,21 @@ func TestAPIKey_ReachesGrantedProject(t *testing.T) {
 
 	// Search uses the same expanded project scope and never requires clients
 	// to submit provider-specific vectors or modes.
-	searchReq := newAPIKeyReq(t, http.MethodGet, "/v1/prompts?q=greeting", "", apiKey)
+	searchReq := newAPIKeyReq(t, http.MethodGet, "/v1/search?q=greeting&type=prompt", "", apiKey)
 	searchResp, err := a.Test(searchReq)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, searchResp.StatusCode)
-	searchResults := decodeBody(t, searchResp)["prompts"].([]any)
+	searchResults := decodeBody(t, searchResp)["results"].([]any)
 	assert.Len(t, searchResults, 1)
 
 	// 3. After revoking the grant, reach is lost again.
 	require.NoError(t, store.RevokeProjectAccess(ctx, project.ID, granteeTeam.ID))
 	assert.Equal(t, http.StatusForbidden, listWithKey())
-	searchReq = newAPIKeyReq(t, http.MethodGet, "/v1/prompts?q=greeting", "", apiKey)
+	searchReq = newAPIKeyReq(t, http.MethodGet, "/v1/search?q=greeting&type=prompt", "", apiKey)
 	searchResp, err = a.Test(searchReq)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, searchResp.StatusCode)
-	searchResults = decodeBody(t, searchResp)["prompts"].([]any)
+	searchResults = decodeBody(t, searchResp)["results"].([]any)
 	assert.Empty(t, searchResults)
 }
 

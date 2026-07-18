@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/model"
 )
 
 type fakeRetriever struct {
@@ -31,27 +33,46 @@ func (f *fakeRetriever) callCount() int {
 	return len(f.calls)
 }
 
-func TestEngineSearchRetrievesAndReranksBothSources(t *testing.T) {
-	a := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	b := uuid.MustParse("00000000-0000-0000-0000-000000000002")
-	c := uuid.MustParse("00000000-0000-0000-0000-000000000003")
-	projectID := uuid.New()
-	lexical := &fakeRetriever{matches: []Match{{PromptID: a, Score: 0.9}, {PromptID: b, Score: 0.8}}}
-	semantic := &fakeRetriever{matches: []Match{{PromptID: b, Score: 0.7}, {PromptID: c, Score: 0.6}}}
+func reference(entityType model.SearchEntityType, id string) model.SearchReference {
+	return model.SearchReference{Type: entityType, ID: uuid.MustParse(id)}
+}
 
-	ids, err := NewEngine(lexical, semantic).Search(context.Background(), Request{
+func TestEngineSearchRetrievesAndReranksBothSources(t *testing.T) {
+	a := reference(model.SearchEntityPrompt, "00000000-0000-0000-0000-000000000001")
+	b := reference(model.SearchEntitySkill, "00000000-0000-0000-0000-000000000002")
+	c := reference(model.SearchEntityTool, "00000000-0000-0000-0000-000000000003")
+	projectID := uuid.New()
+	lexical := &fakeRetriever{matches: []Match{{Reference: a, Score: 0.9}, {Reference: b, Score: 0.8}}}
+	semantic := &fakeRetriever{matches: []Match{{Reference: b, Score: 0.7}, {Reference: c, Score: 0.6}}}
+
+	references, err := NewEngine(lexical, semantic).Search(context.Background(), Request{
 		Text:       "  refund policy  ",
 		ProjectIDs: []uuid.UUID{projectID},
-		Status:     "active",
+		Types:      model.AllSearchEntityTypes(),
 		Limit:      3,
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, []uuid.UUID{b, a, c}, ids)
+	assert.Equal(t, []model.SearchReference{b, a, c}, references)
 	require.Len(t, lexical.calls, 1)
 	require.Len(t, semantic.calls, 1)
 	assert.Equal(t, "refund policy", lexical.calls[0].Text)
 	assert.Equal(t, []uuid.UUID{projectID}, semantic.calls[0].ProjectIDs)
+	assert.Equal(t, model.AllSearchEntityTypes(), semantic.calls[0].Types)
+}
+
+func TestEngineSearchDefaultsToAllEntityTypes(t *testing.T) {
+	lexical := &fakeRetriever{}
+	semantic := &fakeRetriever{}
+
+	_, err := NewEngine(lexical, semantic).Search(context.Background(), Request{
+		Text:       "refund",
+		ProjectIDs: []uuid.UUID{uuid.New()},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, lexical.calls, 1)
+	assert.Equal(t, model.AllSearchEntityTypes(), lexical.calls[0].Types)
 }
 
 func TestEngineSearchRejectsRetrieverFailure(t *testing.T) {
@@ -61,7 +82,6 @@ func TestEngineSearchRejectsRetrieverFailure(t *testing.T) {
 	_, err := NewEngine(lexical, semantic).Search(context.Background(), Request{
 		Text:       "refund",
 		ProjectIDs: []uuid.UUID{uuid.New()},
-		Status:     "active",
 	})
 
 	require.Error(t, err)
@@ -73,28 +93,28 @@ func TestEngineSearchSkipsRetrieversWithoutQueryOrScope(t *testing.T) {
 	semantic := &fakeRetriever{}
 	engine := NewEngine(lexical, semantic)
 
-	ids, err := engine.Search(context.Background(), Request{Text: "   ", ProjectIDs: []uuid.UUID{uuid.New()}})
+	references, err := engine.Search(context.Background(), Request{Text: "   ", ProjectIDs: []uuid.UUID{uuid.New()}})
 	require.NoError(t, err)
-	assert.Empty(t, ids)
+	assert.Empty(t, references)
 
-	ids, err = engine.Search(context.Background(), Request{Text: "refund"})
+	references, err = engine.Search(context.Background(), Request{Text: "refund"})
 	require.NoError(t, err)
-	assert.Empty(t, ids)
+	assert.Empty(t, references)
 	assert.Zero(t, lexical.callCount())
 	assert.Zero(t, semantic.callCount())
 }
 
 func TestFuseDeduplicatesProviderResultsAndAppliesLimit(t *testing.T) {
-	a := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	b := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	a := reference(model.SearchEntityPrompt, "00000000-0000-0000-0000-000000000001")
+	b := reference(model.SearchEntityTool, "00000000-0000-0000-0000-000000000002")
 
-	ids := fuse(
-		[]Match{{PromptID: a}, {PromptID: a}, {PromptID: b}, {PromptID: uuid.Nil}},
-		[]Match{{PromptID: b}},
+	references := fuse(
+		[]Match{{Reference: a}, {Reference: a}, {Reference: b}, {Reference: model.SearchReference{Type: model.SearchEntitySkill}}},
+		[]Match{{Reference: b}},
 		1,
 	)
 
-	assert.Equal(t, []uuid.UUID{b}, ids)
+	assert.Equal(t, []model.SearchReference{b}, references)
 }
 
 func TestNewFromEnvValidatesConfiguredProviders(t *testing.T) {

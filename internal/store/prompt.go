@@ -92,43 +92,6 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 	return prompts, rows.Err()
 }
 
-// GetPromptsByIDs hydrates ranked search results while enforcing project and
-// status scope again at the data boundary. The returned order matches ids.
-func GetPromptsByIDs(ctx context.Context, ids, projectIDs []uuid.UUID, status string) ([]*model.Prompt, error) {
-	if len(ids) == 0 || len(projectIDs) == 0 {
-		return []*model.Prompt{}, nil
-	}
-
-	rows, err := db.Pool.Query(ctx, `
-		SELECT id, project_id, slug, name, description, status, created_at, updated_at
-		FROM prompts
-		WHERE id = ANY($1) AND project_id = ANY($2) AND status = $3`, ids, projectIDs, status)
-	if err != nil {
-		return nil, fmt.Errorf("get prompts by ids: %w", err)
-	}
-	defer rows.Close()
-
-	byID := make(map[uuid.UUID]*model.Prompt, len(ids))
-	for rows.Next() {
-		p := &model.Prompt{}
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan prompt search result: %w", err)
-		}
-		byID[p.ID] = p
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate prompt search results: %w", err)
-	}
-
-	prompts := make([]*model.Prompt, 0, len(byID))
-	for _, id := range ids {
-		if prompt, ok := byID[id]; ok {
-			prompts = append(prompts, prompt)
-		}
-	}
-	return prompts, nil
-}
-
 func GetPromptByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
