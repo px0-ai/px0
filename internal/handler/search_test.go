@@ -115,3 +115,65 @@ func TestSearchRequiresAuthentication(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	require.NoError(t, resp.Body.Close())
 }
+
+func TestSearchInlineTypeFilters(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	projectID := uuid.MustParse(setupProject(t, a, token))
+	ctx := context.Background()
+
+	prompt, err := store.CreatePrompt(ctx, projectID, "refund-prompt", "Refund Prompt", "Handles support")
+	require.NoError(t, err)
+	skill, err := store.CreateSkill(ctx, projectID, "refund-skill", "Refund Skill", "Handles support")
+	require.NoError(t, err)
+	tool, err := store.CreateTool(ctx, projectID, "refund-tool", "Refund Tool", "Handles support")
+	require.NoError(t, err)
+
+	// Case 1: type:prompt prefix
+	{
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:prompt refund", "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		results := decodeBody(t, resp)["results"].([]any)
+		require.Len(t, results, 1)
+		result := results[0].(map[string]any)
+		assert.Equal(t, "prompt", result["type"])
+		assert.Equal(t, prompt.ID.String(), result["id"])
+	}
+
+	// Case 2: type:tool suffix
+	{
+		req := newReq(t, http.MethodGet, "/v1/search?q=refund type:tool", "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		results := decodeBody(t, resp)["results"].([]any)
+		require.Len(t, results, 1)
+		result := results[0].(map[string]any)
+		assert.Equal(t, "tool", result["type"])
+		assert.Equal(t, tool.ID.String(), result["id"])
+	}
+
+	// Case 3: type:skill case insensitivity and spacing
+	{
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:   SKILL refund", "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		results := decodeBody(t, resp)["results"].([]any)
+		require.Len(t, results, 1)
+		result := results[0].(map[string]any)
+		assert.Equal(t, "skill", result["type"])
+		assert.Equal(t, skill.ID.String(), result["id"])
+	}
+
+	// Case 4: invalid type filter
+	{
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:unknown refund", "", token)
+		resp, err := a.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.Equal(t, "type must be one of: prompt, skill, tool", decodeBody(t, resp)["error"])
+	}
+}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -11,6 +12,8 @@ import (
 	"github.com/px0-ai/px0/internal/search"
 	"github.com/px0-ai/px0/internal/store"
 )
+
+var typeFilterRegex = regexp.MustCompile(`(?i)\btype:\s*(\w+)\b`)
 
 func Search(searcher search.Searcher) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -23,6 +26,28 @@ func Search(searcher search.Searcher) fiber.Handler {
 		if err != nil {
 			return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
 		}
+
+		// Parse inline type: filter if present in query
+		if matches := typeFilterRegex.FindStringSubmatch(query); len(matches) > 0 {
+			fullMatch := matches[0]
+			typeStr := strings.ToLower(matches[1])
+
+			var parsedType model.SearchEntityType
+			switch typeStr {
+			case "prompt":
+				parsedType = model.SearchEntityPrompt
+			case "skill":
+				parsedType = model.SearchEntitySkill
+			case "tool":
+				parsedType = model.SearchEntityTool
+			default:
+				return apierr.NewAPIError(fiber.StatusBadRequest, "type must be one of: prompt, skill, tool").Respond(c)
+			}
+
+			types = []model.SearchEntityType{parsedType}
+			query = strings.TrimSpace(strings.Replace(query, fullMatch, "", 1))
+		}
+
 		projectIDs, err := getRequestViewerProjectIDs(c)
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
