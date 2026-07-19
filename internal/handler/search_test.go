@@ -23,14 +23,14 @@ func TestSearchAcrossAllEntityTypesAndAccessibleProjects(t *testing.T) {
 	require.NoError(t, err)
 	skill, err := store.CreateSkill(ctx, projectB, "refund-skill", "Refund Skill", "Handles support")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, projectA, "refund-tool", "Refund Tool", "Handles support")
+	tool, err := store.CreateTool(ctx, projectA, "refund-tool", "Refund Tool", "Handles support", "")
 	require.NoError(t, err)
 
 	foreignTeam, err := store.CreateTeam(ctx, "Foreign Search Team")
 	require.NoError(t, err)
 	foreignProject, err := store.CreateProject(ctx, foreignTeam.ID, "foreign-search", "Foreign Search")
 	require.NoError(t, err)
-	_, err = store.CreateTool(ctx, foreignProject.ID, "private-refund", "Private Refund", "Must not leak")
+	_, err = store.CreateTool(ctx, foreignProject.ID, "private-refund", "Private Refund", "Must not leak", "")
 	require.NoError(t, err)
 
 	req := newReq(t, http.MethodGet, "/v1/search?q=refund", "", roles.viewerToken)
@@ -58,7 +58,7 @@ func TestSearchFiltersByEntityType(t *testing.T) {
 
 	_, err := store.CreatePrompt(ctx, projectID, "refund-prompt", "Refund Prompt", "")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, projectID, "refund-tool", "Refund Tool", "")
+	tool, err := store.CreateTool(ctx, projectID, "refund-tool", "Refund Tool", "", "")
 	require.NoError(t, err)
 
 	req := newReq(t, http.MethodGet, "/v1/search?q=refund&type=tool", "", token)
@@ -126,7 +126,7 @@ func TestSearchInlineTypeFilters(t *testing.T) {
 	require.NoError(t, err)
 	skill, err := store.CreateSkill(ctx, projectID, "refund-skill", "Refund Skill", "Handles support")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, projectID, "refund-tool", "Refund Tool", "Handles support")
+	tool, err := store.CreateTool(ctx, projectID, "refund-tool", "Refund Tool", "Handles support", "")
 	require.NoError(t, err)
 
 	// Case 1: type:prompt prefix

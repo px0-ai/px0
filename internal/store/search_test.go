@@ -23,9 +23,9 @@ func TestGetSearchResultsPreservesRankAndEnforcesScope(t *testing.T) {
 	require.NoError(t, err)
 	skill, err := store.CreateSkill(ctx, project.ID, "skill", "Skill", "")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, project.ID, "tool", "Tool", "")
+	tool, err := store.CreateTool(ctx, project.ID, "tool", "Tool", "", "")
 	require.NoError(t, err)
-	foreign, err := store.CreateTool(ctx, foreignProject.ID, "foreign", "Foreign", "")
+	foreign, err := store.CreateTool(ctx, foreignProject.ID, "foreign", "Foreign", "", "")
 	require.NoError(t, err)
 	require.NoError(t, store.ArchivePrompt(ctx, prompt.ID, []uuid.UUID{project.ID}))
 

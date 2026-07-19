@@ -13,6 +13,7 @@ type Tool struct {
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	URL         string    `json:"url"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -26,4 +27,15 @@ type ToolVersion struct {
 	Status       string          `json:"status"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+type ToolInvocation struct {
+	ID              int64            `json:"id"`
+	ToolID          uuid.UUID        `json:"tool_id"`
+	ToolVersion     int              `json:"tool_version"`
+	RequestPayload  json.RawMessage  `json:"request_payload"`
+	ResponsePayload *json.RawMessage `json:"response_payload,omitempty"`
+	Error           *string          `json:"error,omitempty"`
+	StatusCode      *int             `json:"status_code,omitempty"`
+	CreatedAt       time.Time        `json:"created_at"`
 }

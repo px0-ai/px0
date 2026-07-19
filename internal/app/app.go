@@ -81,6 +81,8 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	projects.Get("/:projectID/skills", middleware.RequireProjectRole(model.RoleViewer), handler.ListSkills)
 	projects.Post("/:projectID/tools", middleware.RequireProjectRole(model.RoleEditor), handler.CreateTool)
 	projects.Get("/:projectID/tools", middleware.RequireProjectRole(model.RoleViewer), handler.ListTools)
+	projects.Post("/:projectID/tools/:id/invoke", middleware.RequireProjectRole(model.RoleViewer), handler.InvokeLive)
+	projects.Post("/:projectID/tools/:id/versions/:version/invoke", middleware.RequireProjectRole(model.RoleViewer), handler.InvokeVersion)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", middleware.RequireTeamRole(model.RoleViewer), handler.ListTeamProjects)
@@ -162,6 +164,7 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	tools.Post("/:id/versions/:version/demote", handler.DemoteToolVersion)
 	tools.Post("/:id/versions/:version/archive", handler.ArchiveToolVersion)
 	tools.Post("/:id/versions/:version/duplicate", handler.DuplicateToolVersion)
+	tools.Get("/:id/invocations", handler.ListToolInvocations)
 
 	return app
 }

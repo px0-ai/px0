@@ -14,14 +14,14 @@ import (
 	"github.com/px0-ai/px0/internal/model"
 )
 
-func CreateTool(ctx context.Context, projectID uuid.UUID, slug, name, description string) (*model.Tool, error) {
+func CreateTool(ctx context.Context, projectID uuid.UUID, slug, name, description, url string) (*model.Tool, error) {
 	t := &model.Tool{}
 	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO tools (project_id, slug, name, description)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, project_id, slug, name, description, created_at, updated_at
-	`, projectID, slug, name, description).Scan(
-		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		INSERT INTO tools (project_id, slug, name, description, url)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, project_id, slug, name, description, url, created_at, updated_at
+	`, projectID, slug, name, description, url).Scan(
+		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.URL, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "uq_") {
@@ -34,7 +34,7 @@ func CreateTool(ctx context.Context, projectID uuid.UUID, slug, name, descriptio
 
 func ListTools(ctx context.Context, projectIDs []uuid.UUID) ([]*model.Tool, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT id, project_id, slug, name, description, created_at, updated_at
+		SELECT id, project_id, slug, name, description, url, created_at, updated_at
 		FROM tools
 		WHERE project_id = ANY($1)
 		ORDER BY created_at DESC
@@ -47,7 +47,7 @@ func ListTools(ctx context.Context, projectIDs []uuid.UUID) ([]*model.Tool, erro
 	var tools []*model.Tool
 	for rows.Next() {
 		t := &model.Tool{}
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.URL, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		tools = append(tools, t)
@@ -58,11 +58,11 @@ func ListTools(ctx context.Context, projectIDs []uuid.UUID) ([]*model.Tool, erro
 func GetToolByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*model.Tool, error) {
 	t := &model.Tool{}
 	err := db.Pool.QueryRow(ctx, `
-		SELECT id, project_id, slug, name, description, created_at, updated_at
+		SELECT id, project_id, slug, name, description, url, created_at, updated_at
 		FROM tools
 		WHERE id = $1 AND project_id = ANY($2)
 	`, id, projectIDs).Scan(
-		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.URL, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -76,11 +76,11 @@ func GetToolByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*mo
 func GetToolBySlug(ctx context.Context, slug string, projectIDs []uuid.UUID) (*model.Tool, error) {
 	t := &model.Tool{}
 	err := db.Pool.QueryRow(ctx, `
-		SELECT id, project_id, slug, name, description, created_at, updated_at
+		SELECT id, project_id, slug, name, description, url, created_at, updated_at
 		FROM tools
 		WHERE slug = $1 AND project_id = ANY($2)
 	`, slug, projectIDs).Scan(
-		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.URL, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -91,15 +91,15 @@ func GetToolBySlug(ctx context.Context, slug string, projectIDs []uuid.UUID) (*m
 	return t, nil
 }
 
-func UpdateTool(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, slug, name, description string) (*model.Tool, error) {
+func UpdateTool(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, slug, name, description, url string) (*model.Tool, error) {
 	t := &model.Tool{}
 	err := db.Pool.QueryRow(ctx, `
 		UPDATE tools
-		SET slug = $1, name = $2, description = $3, updated_at = NOW()
-		WHERE id = $4 AND project_id = ANY($5)
-		RETURNING id, project_id, slug, name, description, created_at, updated_at
-	`, slug, name, description, id, projectIDs).Scan(
-		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		SET slug = $1, name = $2, description = $3, url = $4, updated_at = NOW()
+		WHERE id = $5 AND project_id = ANY($6)
+		RETURNING id, project_id, slug, name, description, url, created_at, updated_at
+	`, slug, name, description, url, id, projectIDs).Scan(
+		&t.ID, &t.ProjectID, &t.Slug, &t.Name, &t.Description, &t.URL, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -431,4 +431,64 @@ func ArchiveToolVersion(ctx context.Context, toolID uuid.UUID, versionNum int) (
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return v, nil
+}
+
+func LogToolInvocation(ctx context.Context, toolID uuid.UUID, version int, requestPayload json.RawMessage, responsePayload *json.RawMessage, errStr *string, statusCode *int) (*model.ToolInvocation, error) {
+	log := &model.ToolInvocation{}
+	err := db.Pool.QueryRow(ctx, `
+		INSERT INTO tool_invocations (tool_id, tool_version, request_payload, response_payload, error, status_code)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tool_id, tool_version, request_payload, response_payload, error, status_code, created_at
+	`, toolID, version, requestPayload, responsePayload, errStr, statusCode).Scan(
+		&log.ID, &log.ToolID, &log.ToolVersion, &log.RequestPayload, &log.ResponsePayload, &log.Error, &log.StatusCode, &log.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("log tool invocation: %w", err)
+	}
+	return log, nil
+}
+
+func ListToolInvocations(ctx context.Context, toolID uuid.UUID, cursor int64, limit int) ([]*model.ToolInvocation, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var rows pgx.Rows
+	var err error
+
+	if cursor > 0 {
+		rows, err = db.Pool.Query(ctx, `
+			SELECT id, tool_id, tool_version, request_payload, response_payload, error, status_code, created_at
+			FROM tool_invocations
+			WHERE tool_id = $1 AND id < $2
+			ORDER BY id DESC
+			LIMIT $3
+		`, toolID, cursor, limit)
+	} else {
+		rows, err = db.Pool.Query(ctx, `
+			SELECT id, tool_id, tool_version, request_payload, response_payload, error, status_code, created_at
+			FROM tool_invocations
+			WHERE tool_id = $1
+			ORDER BY id DESC
+			LIMIT $2
+		`, toolID, limit)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("list tool invocations: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*model.ToolInvocation
+	for rows.Next() {
+		log := &model.ToolInvocation{}
+		err := rows.Scan(
+			&log.ID, &log.ToolID, &log.ToolVersion, &log.RequestPayload, &log.ResponsePayload, &log.Error, &log.StatusCode, &log.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, rows.Err()
 }

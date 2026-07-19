@@ -196,6 +196,154 @@ paths:
         "404":
           description: Tool not found
 
+  /v1/projects/{projectID}/tools/{id}/invoke:
+    post:
+      summary: Invoke Live Tool Version
+      description: Invokes the active 'live' version of the tool by making a call to its configured HTTP URL, validating request/response schemas.
+      operationId: invokeLive
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      requestBody:
+        description: Ad-hoc JSON payload passed on the fly to the tool execution
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Tool invoked successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_code:
+                    type: integer
+                  response:
+                    type: object
+        "400":
+          description: Request schema validation failed or invalid request payload
+        "404":
+          description: Tool or live version not found
+        "422":
+          description: Response schema validation failed
+
+  /v1/projects/{projectID}/tools/{id}/versions/{version}/invoke:
+    post:
+      summary: Invoke Tool Version
+      description: Invokes a specific version of the tool by making a call to its configured HTTP URL, validating request/response schemas.
+      operationId: invokeVersion
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number of the tool.
+      requestBody:
+        description: Ad-hoc JSON payload passed on the fly to the tool execution
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Tool version invoked successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_code:
+                    type: integer
+                  response:
+                    type: object
+        "400":
+          description: Request schema validation failed or invalid request payload
+        "404":
+          description: Tool or version not found
+        "422":
+          description: Response schema validation failed
+
+  /v1/tools/{id}/invocations:
+    get:
+      summary: List Tool Invocations
+      description: Returns a cursor-paginated history of tool execution logs, including payloads and validation outcomes.
+      operationId: listToolInvocations
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: The pagination cursor (representing the sequence ID of the last item in previous page).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+          description: Maximum number of invocation records to return.
+      responses:
+        "200":
+          description: Paginated tool execution logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invocations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ToolInvocation"
+                  next_cursor:
+                    type: string
+
 components:
   schemas:
     Tool:
@@ -213,6 +361,9 @@ components:
           type: string
         description:
           type: string
+        url:
+          type: string
+          format: uri
         created_at:
           type: string
           format: date-time
@@ -233,6 +384,9 @@ components:
           type: string
         description:
           type: string
+        url:
+          type: string
+          format: uri
       required:
         - name
     UpdateToolRequest:
@@ -242,7 +396,39 @@ components:
           type: string
         slug:
           type: string
+          format: uri
         description:
           type: string
+        url:
+          type: string
+          format: uri
       required:
         - name
+    ToolInvocation:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tool_id:
+          type: string
+          format: uuid
+        tool_version:
+          type: integer
+        request_payload:
+          type: object
+        response_payload:
+          type: object
+        error:
+          type: string
+        status_code:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tool_id
+        - tool_version
+        - request_payload
+        - created_at

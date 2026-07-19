@@ -25,14 +25,14 @@ func TestPostgresRetrieverSearchesAllEntityTypesAndEnforcesScope(t *testing.T) {
 	require.NoError(t, err)
 	skill, err := store.CreateSkill(ctx, project.ID, "refund-skill", "Refund Skill", "Handles support")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, project.ID, "refund-tool", "Refund Tool", "Handles support")
+	tool, err := store.CreateTool(ctx, project.ID, "refund-tool", "Refund Tool", "Handles support", "")
 	require.NoError(t, err)
 
 	foreignTeam, err := store.CreateTeam(ctx, "Foreign Search Team")
 	require.NoError(t, err)
 	foreignProject, err := store.CreateProject(ctx, foreignTeam.ID, "foreign-search", "Foreign Search")
 	require.NoError(t, err)
-	_, err = store.CreateTool(ctx, foreignProject.ID, "private-refund", "Private Refund", "Must not leak")
+	_, err = store.CreateTool(ctx, foreignProject.ID, "private-refund", "Private Refund", "Must not leak", "")
 	require.NoError(t, err)
 
 	matches, err := (search.PostgresRetriever{}).Retrieve(ctx, search.Request{
@@ -62,7 +62,7 @@ func TestPostgresRetrieverHonorsEntityTypeFilter(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.CreatePrompt(ctx, project.ID, "refund-prompt", "Refund Prompt", "")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, project.ID, "refund-tool", "Refund Tool", "")
+	tool, err := store.CreateTool(ctx, project.ID, "refund-tool", "Refund Tool", "", "")
 	require.NoError(t, err)
 
 	matches, err := (search.PostgresRetriever{}).Retrieve(ctx, search.Request{
@@ -104,9 +104,9 @@ func TestPostgresRetrieverReflectsEntityUpdates(t *testing.T) {
 	require.NoError(t, err)
 	project, err := store.CreateProject(ctx, team.ID, "updated-search", "Updated Search")
 	require.NoError(t, err)
-	tool, err := store.CreateTool(ctx, project.ID, "assistant", "Support Assistant", "Handles billing")
+	tool, err := store.CreateTool(ctx, project.ID, "assistant", "Support Assistant", "Handles billing", "")
 	require.NoError(t, err)
-	_, err = store.UpdateTool(ctx, tool.ID, []uuid.UUID{project.ID}, "assistant", "Support Assistant", "Handles chargebacks")
+	_, err = store.UpdateTool(ctx, tool.ID, []uuid.UUID{project.ID}, "assistant", "Support Assistant", "Handles chargebacks", "")
 	require.NoError(t, err)
 
 	request := search.Request{

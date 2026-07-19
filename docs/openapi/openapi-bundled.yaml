@@ -5782,6 +5782,9 @@ components:
           type: string
         description:
           type: string
+        url:
+          type: string
+          format: uri
         created_at:
           type: string
           format: date-time
@@ -5839,6 +5842,9 @@ components:
           type: string
         description:
           type: string
+        url:
+          type: string
+          format: uri
       required:
         - name
     UpdateToolRequest:
@@ -5848,8 +5854,12 @@ components:
           type: string
         slug:
           type: string
+          format: uri
         description:
           type: string
+        url:
+          type: string
+          format: uri
       required:
         - name
     CreateToolVersionRequest:
