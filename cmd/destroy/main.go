@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -134,6 +135,11 @@ func main() {
 		}
 	}
 
+	err := destroySearch(ctx)
+	if err != nil {
+		fmt.Printf("[Search ERROR] Failed to clean search index: %v\n", err)
+	}
+
 	fmt.Println("\nCleanup completed.")
 }
 
@@ -256,5 +262,99 @@ func destroyRedis(ctx context.Context, url string) error {
 	}
 
 	fmt.Printf("[Redis] Successfully flushed all keys in Redis at %s\n", maskRedisURL(url))
+	return nil
+}
+
+func destroySearch(ctx context.Context) error {
+	ftsProvider := strings.ToLower(strings.TrimSpace(os.Getenv("SEARCH_FTS_PROVIDER")))
+	if ftsProvider == "opensearch" {
+		url := os.Getenv("OPENSEARCH_URL")
+		if url == "" {
+			url = "http://localhost:9201"
+		}
+		index := os.Getenv("OPENSEARCH_INDEX")
+		if index == "" {
+			index = "px0_search"
+		}
+
+		indexURL := fmt.Sprintf("%s/%s", strings.TrimSuffix(url, "/"), index)
+		req, err := http.NewRequestWithContext(ctx, "DELETE", indexURL, nil)
+		if err != nil {
+			return fmt.Errorf("create opensearch delete request: %w", err)
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("execute opensearch delete request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+			fmt.Printf("[OpenSearch] Successfully deleted index %q (status %d) at %s\n", index, resp.StatusCode, url)
+		} else {
+			return fmt.Errorf("opensearch delete returned status: %s", resp.Status)
+		}
+	} else if ftsProvider == "elasticsearch" {
+		url := os.Getenv("ELASTICSEARCH_URL")
+		if url == "" {
+			url = "http://localhost:9200"
+		}
+		index := os.Getenv("ELASTICSEARCH_INDEX")
+		if index == "" {
+			index = "px0_search"
+		}
+
+		indexURL := fmt.Sprintf("%s/%s", strings.TrimSuffix(url, "/"), index)
+		req, err := http.NewRequestWithContext(ctx, "DELETE", indexURL, nil)
+		if err != nil {
+			return fmt.Errorf("create elasticsearch delete request: %w", err)
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("execute elasticsearch delete request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+			fmt.Printf("[Elasticsearch] Successfully deleted index %q (status %d) at %s\n", index, resp.StatusCode, url)
+		} else {
+			return fmt.Errorf("elasticsearch delete returned status: %s", resp.Status)
+		}
+	}
+
+	vectorProvider := strings.ToLower(strings.TrimSpace(os.Getenv("SEARCH_VECTOR_PROVIDER")))
+	if vectorProvider == "qdrant" {
+		url := os.Getenv("QDRANT_URL")
+		if url == "" {
+			url = "http://localhost:6333"
+		}
+		collection := os.Getenv("QDRANT_COLLECTION")
+		if collection == "" {
+			collection = "px0_search"
+		}
+
+		collectionURL := fmt.Sprintf("%s/collections/%s", strings.TrimSuffix(url, "/"), collection)
+		req, err := http.NewRequestWithContext(ctx, "DELETE", collectionURL, nil)
+		if err != nil {
+			return fmt.Errorf("create qdrant delete request: %w", err)
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("execute qdrant delete request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+			fmt.Printf("[Qdrant] Successfully deleted collection %q (status %d) at %s\n", collection, resp.StatusCode, url)
+		} else {
+			return fmt.Errorf("qdrant delete returned status: %s", resp.Status)
+		}
+	}
+
 	return nil
 }

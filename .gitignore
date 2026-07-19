@@ -3,3 +3,4 @@ tmp/
 .env
 *.test
 *.out
+destroy
