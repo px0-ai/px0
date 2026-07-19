@@ -58,6 +58,19 @@ To add a registry entity without changing the public endpoint:
 
 ## Adding a provider
 
+The px0 codebase supports a variety of search providers out of the box, configured via environment variables.
+
+### Lexical Providers (`SEARCH_FTS_PROVIDER`)
+* `postgres` (default)
+* `elasticsearch`
+* `opensearch`
+* `algolia`
+
+### Semantic Providers (`SEARCH_VECTOR_PROVIDER`)
+* `none` (default)
+* `qdrant`
+* `pinecone`
+
 Implement the `search.Retriever` interface and wire the provider name in
 `internal/search/config.go`. Every implementation receives the permitted
 project IDs and requested entity types and must apply both filters at the

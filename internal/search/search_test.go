@@ -124,13 +124,13 @@ func TestNewFromEnvValidatesConfiguredProviders(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 
-	t.Setenv("SEARCH_VECTOR_PROVIDER", "qdrant")
-	_, err = NewFromEnv()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
-
 	t.Setenv("SEARCH_VECTOR_PROVIDER", "unknown")
 	_, err = NewFromEnv()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown vector search provider")
+
+	t.Setenv("SEARCH_FTS_PROVIDER", "unknown")
+	_, err = NewFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown FTS search provider")
 }

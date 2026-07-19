@@ -28,8 +28,12 @@ func lexicalRetriever(name string) (Retriever, error) {
 	switch name {
 	case "postgres":
 		return PostgresRetriever{}, nil
-	case "elasticsearch", "opensearch", "algolia":
-		return nil, fmt.Errorf("FTS search provider %q is configured but not implemented", name)
+	case "elasticsearch":
+		return NewElasticsearchRetriever()
+	case "opensearch":
+		return NewOpenSearchRetriever()
+	case "algolia":
+		return NewAlgoliaRetriever()
 	default:
 		return nil, fmt.Errorf("unknown FTS search provider %q", name)
 	}
@@ -39,8 +43,10 @@ func semanticRetriever(name string) (Retriever, error) {
 	switch name {
 	case "", "none":
 		return NoopRetriever{}, nil
-	case "qdrant", "pinecone":
-		return nil, fmt.Errorf("vector search provider %q is configured but not implemented", name)
+	case "qdrant":
+		return NewQdrantRetriever()
+	case "pinecone":
+		return NewPineconeRetriever()
 	default:
 		return nil, fmt.Errorf("unknown vector search provider %q", name)
 	}
