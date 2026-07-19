@@ -601,6 +601,75 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
+  /v1/prompts/{id}/rollback:
+    post:
+      summary: Rollback a Prompt
+      description: Instantly demotes the active live version and promotes a target historical version in a single atomic transaction.
+      operationId: rollbackPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - target_version
+                - rollback_reason
+              properties:
+                target_version:
+                  type: integer
+                  description: The historical version number to promote to live.
+                rollback_reason:
+                  type: string
+                  description: The reason for rolling back.
+      responses:
+        "200":
+          description: Prompt successfully rolled back
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: "./prompt-versions.yaml#/components/schemas/PromptVersion"
+                required:
+                  - version
+        "400":
+          description: Invalid UUID format or request body
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or target version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
 components:
   schemas:
     Prompt:

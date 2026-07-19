@@ -1,12 +1,15 @@
 package handler_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/store"
 )
 
 func TestToolHandlers(t *testing.T) {
@@ -179,4 +182,42 @@ func TestToolHandlers(t *testing.T) {
 	respGetFail, err := a.App.Test(reqGet)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, respGetFail.StatusCode)
+}
+
+func TestDiffToolVersions_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	// Create tool
+	ctx := context.Background()
+	session, _ := store.GetSessionByToken(ctx, token)
+	teams, _ := store.GetUserTeams(ctx, session.UserID)
+	project, _ := store.CreateProject(ctx, teams[0].ID, "dt-project", "DT Project")
+
+	req := newReq(t, http.MethodPost, "/v1/projects/"+project.ID.String()+"/tools", `{"name":"Diff Tool","url":"http://localhost"}`, token)
+	resp, _ := a.Test(req)
+	body := decodeBody(t, resp)
+	tool := body["tool"].(map[string]any)
+	toolID := tool["id"].(string)
+
+	// V1
+	reqV1 := newReq(t, http.MethodPost, "/v1/tools/"+toolID+"/versions", `{"input_schema":{"type":"object","properties":{"a":{"type":"string"}}}}`, token)
+	a.Test(reqV1)
+
+	// V2
+	reqV2 := newReq(t, http.MethodPost, "/v1/tools/"+toolID+"/versions", `{"input_schema":{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"number"}}}}`, token)
+	a.Test(reqV2)
+
+	// Diff V1 and V2
+	reqDiff := newReq(t, http.MethodGet, "/v1/tools/"+toolID+"/versions/diff?from=1&to=2", "", token)
+	respDiff, err := a.Test(reqDiff)
+	require.NoError(t, err)
+	AssertContract(t, respDiff)
+	assert.Equal(t, http.StatusOK, respDiff.StatusCode)
+
+	bodyDiff := decodeBody(t, respDiff)
+	assert.Equal(t, float64(1), bodyDiff["from_version"])
+	assert.Equal(t, float64(2), bodyDiff["to_version"])
+	diffText := bodyDiff["diff"].(string)
+	assert.Contains(t, diffText, `+    "b": {`)
 }

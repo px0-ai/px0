@@ -801,6 +801,48 @@ paths:
         '500':
           description: Internal Server Error
   /v1/api-keys/{id}:
+    put:
+      summary: Update an API Key
+      description: Update the name, operation, or scoped teams of an existing API key.
+      operationId: updateAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to update.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAPIKeyRequest'
+      responses:
+        '200':
+          description: API key updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    $ref: '#/components/schemas/APIKey'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: API key not found
+        '500':
+          description: Internal Server Error
     delete:
       summary: Delete an API Key
       description: Revokes and permanently deletes an API key by its unique UUID.
@@ -2621,6 +2663,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/prompts/{id}/rollback:
+    post:
+      summary: Rollback a Prompt
+      description: Instantly demotes the active live version and promotes a target historical version in a single atomic transaction.
+      operationId: rollbackPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - target_version
+                - rollback_reason
+              properties:
+                target_version:
+                  type: integer
+                  description: The historical version number to promote to live.
+                rollback_reason:
+                  type: string
+                  description: The reason for rolling back.
+      responses:
+        '200':
+          description: Prompt successfully rolled back
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Invalid UUID format or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or target version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/move:
     post:
       summary: Move a Prompt
@@ -4314,6 +4424,51 @@ paths:
           description: Skill deleted successfully
         '404':
           description: Skill not found
+  /v1/skills/{id}/versions/diff:
+    get:
+      summary: Diff Skill Versions
+      description: Compares the files of two skill versions and returns a unified diff.
+      operationId: diffSkillVersions
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                  to_version:
+                    type: integer
+                  diff:
+                    type: string
+        '400':
+          description: Missing or invalid parameters
+        '401':
+          description: Unauthorized
+        '404':
+          description: Skill or version not found
   /v1/skills/{id}/versions:
     get:
       summary: List Skill Versions
@@ -4905,6 +5060,51 @@ paths:
           description: Tool deleted successfully
         '404':
           description: Tool not found
+  /v1/tools/{id}/versions/diff:
+    get:
+      summary: Diff Tool Versions
+      description: Compares the schemas of two tool versions and returns a unified diff.
+      operationId: diffToolVersions
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                  to_version:
+                    type: integer
+                  diff:
+                    type: string
+        '400':
+          description: Missing or invalid parameters
+        '401':
+          description: Unauthorized
+        '404':
+          description: Tool or version not found
   /v1/tools/{id}/versions:
     get:
       summary: List Tool Versions
@@ -6070,6 +6270,24 @@ components:
         - key
         - operation
         - created_at
+    UpdateAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Descriptive name for the key.
+        team_ids:
+          type: array
+          description: Optional list of teams the key can access. Omit or pass an empty array for organization-wide access.
+          items:
+            type: string
+            format: uuid
+        operation:
+          type: string
+          enum:
+            - read_render
+            - all
+            - admin
     TeamMemberResponse:
       type: object
       required:
@@ -6214,10 +6432,12 @@ components:
           example: Hello, {{.name}}! Count is {{.count}}.
         model:
           type: string
+          nullable: true
           description: Optional `provider/model` identifier intended to execute this prompt version.
           example: openai/gpt-4.1-mini
         model_params:
           type: object
+          nullable: true
           additionalProperties: true
           description: Optional provider-specific model parameters. Nested values are supported.
           example:

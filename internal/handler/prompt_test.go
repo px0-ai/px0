@@ -715,3 +715,45 @@ func TestDiffVersions(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
+
+func TestRollbackPrompt_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	// Create prompt
+	ctx := context.Background()
+	session, _ := store.GetSessionByToken(ctx, token)
+	teams, _ := store.GetUserTeams(ctx, session.UserID)
+	project, _ := store.CreateProject(ctx, teams[0].ID, "rb-project", "RB Project")
+
+	req := newReq(t, http.MethodPost, "/v1/projects/"+project.ID.String()+"/prompts", `{"name":"Rollback Prompt"}`, token)
+	resp, _ := a.Test(req)
+	body := decodeBody(t, resp)
+	prompt := body["prompt"].(map[string]any)
+	promptID := prompt["id"].(string)
+
+	// Create a version and promote to stable
+	reqV1 := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/versions", `{"template":"V1"}`, token)
+	_, _ = a.Test(reqV1)
+	reqPromoteV1 := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/versions/1/promote", "", token)
+	a.Test(reqPromoteV1) // now V1 is stable
+
+	// Create a second version and promote to live
+	reqV2 := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/versions", `{"template":"V2"}`, token)
+	a.Test(reqV2)
+	reqPromoteV2_1 := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/versions/2/promote", "", token)
+	a.Test(reqPromoteV2_1) // now V2 is stable
+	reqPromoteV2_2 := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/versions/2/promote", "", token)
+	a.Test(reqPromoteV2_2) // now V2 is live
+
+	// Rollback to V1
+	reqRb := newReq(t, http.MethodPost, "/v1/prompts/"+promptID+"/rollback", `{"target_version":1,"rollback_reason":"V2 is broken"}`, token)
+	respRb, err := a.Test(reqRb)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respRb.StatusCode)
+
+	bodyRb := decodeBody(t, respRb)
+	version := bodyRb["version"].(map[string]any)
+	assert.Equal(t, float64(1), version["version"])
+	assert.Equal(t, "live", version["status"])
+}

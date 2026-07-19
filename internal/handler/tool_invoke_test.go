@@ -52,7 +52,7 @@ func TestToolInvokeAndHistory(t *testing.T) {
 
 	// 2. Create tool with URL configured
 	reqCreate := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools", projectID),
-		fmt.Sprintf(`{"name":"Invokable Tool","slug":"invokable-tool","description":"Test Invoke","url":"%s"}`, mockServer.URL), token)
+		fmt.Sprintf(`{"name":"Invokable Tool","slug":"invokable_tool","description":"Test Invoke","url":"%s"}`, mockServer.URL), token)
 	respCreate, err := a.App.Test(reqCreate)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, respCreate.StatusCode)
@@ -96,7 +96,7 @@ func TestToolInvokeAndHistory(t *testing.T) {
 	assert.Equal(t, http.StatusOK, respLive.StatusCode)
 
 	// 4. Test tool invoke with valid payload (conforming to schemas)
-	reqInvokeSuccess := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable-tool/invoke", projectID),
+	reqInvokeSuccess := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable_tool/invoke", projectID),
 		`{"query":"hello"}`, token)
 	respInvokeSuccess, err := a.App.Test(reqInvokeSuccess)
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestToolInvokeAndHistory(t *testing.T) {
 	assert.Equal(t, "http result 1", results[0])
 
 	// 5. Test tool invoke with request schema violation (missing required "query" property)
-	reqInvokeInvalidReq := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable-tool/invoke", projectID),
+	reqInvokeInvalidReq := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable_tool/invoke", projectID),
 		`{"other_key":"hello"}`, token)
 	respInvokeInvalidReq, err := a.App.Test(reqInvokeInvalidReq)
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestToolInvokeAndHistory(t *testing.T) {
 	assert.Contains(t, bodyInvalidReq["error"], "Request validation failed")
 
 	// 6. Test tool invoke with response schema violation (target returns error payload instead of results list)
-	reqInvokeInvalidResp := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable-tool/invoke", projectID),
+	reqInvokeInvalidResp := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/tools/invokable_tool/invoke", projectID),
 		`{"query":"bad"}`, token)
 	respInvokeInvalidResp, err := a.App.Test(reqInvokeInvalidResp)
 	require.NoError(t, err)

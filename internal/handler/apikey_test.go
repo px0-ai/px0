@@ -314,3 +314,36 @@ func TestCreateAPIKey_AdminScope(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, respTeam.StatusCode)
 	respTeam.Body.Close()
 }
+
+func TestUpdateAPIKey_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	ctx := context.Background()
+	session, err := store.GetSessionByToken(ctx, token)
+	require.NoError(t, err)
+
+	teams, err := store.GetUserTeams(ctx, session.UserID)
+	require.NoError(t, err)
+	team := teams[0]
+	orgID := team.OrgID
+
+	req := newReq(t, http.MethodPost, "/v1/api-keys",
+		fmt.Sprintf(`{"name":"original","org_id":%q,"team_ids":[%q],"operation":"read_render"}`, orgID.String(), team.ID.String()), token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	body := decodeBody(t, resp)
+	id := body["id"].(string)
+
+	reqUpdate := newReq(t, http.MethodPut, fmt.Sprintf("/v1/api-keys/%s", id),
+		`{"name":"updated","operation":"all"}`, token)
+	respUpdate, err := a.Test(reqUpdate)
+	require.NoError(t, err)
+	AssertContract(t, respUpdate)
+	assert.Equal(t, http.StatusOK, respUpdate.StatusCode)
+
+	bodyUpdate := decodeBody(t, respUpdate)
+	apiKey := bodyUpdate["api_key"].(map[string]any)
+	assert.Equal(t, "updated", apiKey["name"])
+	assert.Equal(t, "all", apiKey["operation"])
+}

@@ -82,6 +82,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1archive"
   /v1/prompts/{id}/restore:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1restore"
+  /v1/prompts/{id}/rollback:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1rollback"
   /v1/prompts/{id}/move:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
   /v1/prompts/{id}/versions/diff:
@@ -122,6 +124,9 @@ paths:
     $ref: "./skills.yaml#/paths/~1v1~1projects~1{projectID}~1skills"
   /v1/skills/{id}:
     $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}"
+
+  /v1/skills/{id}/versions/diff:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1diff"
   /v1/skills/{id}/versions:
     $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions"
   /v1/skills/{id}/versions/{version}:
@@ -148,6 +153,9 @@ paths:
     $ref: "./tools.yaml#/paths/~1v1~1tools"
   /v1/tools/{id}:
     $ref: "./tools.yaml#/paths/~1v1~1tools~1{id}"
+
+  /v1/tools/{id}/versions/diff:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1diff"
   /v1/tools/{id}/versions:
     $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions"
   /v1/tools/{id}/versions/{version}:

@@ -131,7 +131,7 @@ func TestSearchInlineTypeFilters(t *testing.T) {
 
 	// Case 1: type:prompt prefix
 	{
-		req := newReq(t, http.MethodGet, "/v1/search?q=type:prompt refund", "", token)
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:prompt%20refund", "", token)
 		resp, err := a.Test(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -144,7 +144,7 @@ func TestSearchInlineTypeFilters(t *testing.T) {
 
 	// Case 2: type:tool suffix
 	{
-		req := newReq(t, http.MethodGet, "/v1/search?q=refund type:tool", "", token)
+		req := newReq(t, http.MethodGet, "/v1/search?q=refund%20type:tool", "", token)
 		resp, err := a.Test(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -157,7 +157,7 @@ func TestSearchInlineTypeFilters(t *testing.T) {
 
 	// Case 3: type:skill case insensitivity and spacing
 	{
-		req := newReq(t, http.MethodGet, "/v1/search?q=type:   SKILL refund", "", token)
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:%20%20%20SKILL%20refund", "", token)
 		resp, err := a.Test(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -170,7 +170,7 @@ func TestSearchInlineTypeFilters(t *testing.T) {
 
 	// Case 4: invalid type filter
 	{
-		req := newReq(t, http.MethodGet, "/v1/search?q=type:unknown refund", "", token)
+		req := newReq(t, http.MethodGet, "/v1/search?q=type:unknown%20refund", "", token)
 		resp, err := a.Test(req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)

@@ -13,6 +13,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/model"
@@ -282,6 +283,96 @@ type createToolVersionRequest struct {
 }
 
 // CreateToolVersion creates a new tool version in 'draft' status (requires editor role).
+
+func DiffToolVersions(c *fiber.Ctx) error {
+	tool, err := resolveTool(c)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrToolNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	fromVal := c.Query("from")
+	toVal := c.Query("to")
+	if fromVal == "" || toVal == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "from and to query parameters are required").Respond(c)
+	}
+
+	fromNum, err := strconv.Atoi(fromVal)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid from version").Respond(c)
+	}
+	toNum, err := strconv.Atoi(toVal)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
+	}
+
+	fromVersion, err := store.GetToolVersion(c.Context(), tool.ID, fromNum)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	toVersion, err := store.GetToolVersion(c.Context(), tool.ID, toNum)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	formatJSON := func(raw json.RawMessage) string {
+		if len(raw) == 0 {
+			return "{}"
+		}
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err != nil {
+			return string(raw)
+		}
+		return buf.String()
+	}
+
+	fromInput := formatJSON(fromVersion.InputSchema)
+	toInput := formatJSON(toVersion.InputSchema)
+	fromOutput := formatJSON(fromVersion.OutputSchema)
+	toOutput := formatJSON(toVersion.OutputSchema)
+
+	diffInput := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(fromInput),
+		B:        difflib.SplitLines(toInput),
+		FromFile: fmt.Sprintf("v%d/input_schema.json", fromVersion.Version),
+		ToFile:   fmt.Sprintf("v%d/input_schema.json", toVersion.Version),
+		Context:  3,
+	}
+	diffInputText, _ := difflib.GetUnifiedDiffString(diffInput)
+
+	diffOutput := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(fromOutput),
+		B:        difflib.SplitLines(toOutput),
+		FromFile: fmt.Sprintf("v%d/output_schema.json", fromVersion.Version),
+		ToFile:   fmt.Sprintf("v%d/output_schema.json", toVersion.Version),
+		Context:  3,
+	}
+	diffOutputText, _ := difflib.GetUnifiedDiffString(diffOutput)
+
+	diffText := diffInputText
+	if diffOutputText != "" {
+		if diffText != "" {
+			diffText += "\n"
+		}
+		diffText += diffOutputText
+	}
+
+	return c.JSON(fiber.Map{
+		"from_version": fromVersion.Version,
+		"to_version":   toVersion.Version,
+		"diff":         diffText,
+	})
+}
+
 func CreateToolVersion(c *fiber.Ctx) error {
 	tool, err := resolveTool(c)
 	if err != nil {

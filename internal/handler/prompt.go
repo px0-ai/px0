@@ -374,6 +374,68 @@ func RestorePrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
+type rollbackPromptRequest struct {
+	TargetVersion int    `json:"target_version"`
+	RollbackReason string `json:"rollback_reason"`
+}
+
+func RollbackPrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	var req rollbackPromptRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+	if req.TargetVersion <= 0 {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "target_version must be greater than 0").Respond(c)
+	}
+	if req.RollbackReason == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "rollback_reason is required").Respond(c)
+	}
+
+	projectIDs, err := getRequestViewerProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// We require editor capability for rollback
+	prompt, err := store.GetPromptByID(c.Context(), id, editorProjectIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := store.RollbackVersion(c.Context(), prompt.ID, req.TargetVersion)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return apierr.NewAPIError(fiber.StatusConflict, err.Error()).Respond(c)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"version": version})
+}
+
 type movePromptRequest struct {
 	ProjectID string `json:"project_id"`
 }

@@ -3,14 +3,18 @@ package handler_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/px0-ai/px0/internal/store"
 )
 
 func createSkillZipBytes(t *testing.T, files map[string]string) []byte {
@@ -413,4 +417,53 @@ func TestSkillZip_TemplatizedDownloadAndGetFileContent(t *testing.T) {
 
 	assert.Equal(t, `{"env": "Staging", "debug": false}`, filesFound["config.json"])
 	assert.Equal(t, string([]byte{0x00, 0x01, 0x02, 0x03}), filesFound["binary.bin"])
+}
+
+func TestDiffSkillVersions_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+
+	ctx := context.Background()
+	session, _ := store.GetSessionByToken(ctx, token)
+	teams, _ := store.GetUserTeams(ctx, session.UserID)
+	project, _ := store.CreateProject(ctx, teams[0].ID, "dt-skill-project", "DT Skill Project")
+
+	req := newReq(t, http.MethodPost, "/v1/projects/"+project.ID.String()+"/skills", `{"name":"Diff Skill"}`, token)
+	resp, _ := a.Test(req)
+	body := decodeBody(t, resp)
+	skill := body["skill"].(map[string]any)
+	skillID := skill["id"].(string)
+
+	// Get version 1 (automatically created by CreateSkill)
+	version1, err := store.GetSkillVersion(ctx, uuid.MustParse(skillID), 1)
+	require.NoError(t, err)
+
+	err = store.UpsertSkillFile(ctx, version1.ID, uuid.MustParse(skillID), "main.go", []byte("v1"))
+	require.NoError(t, err)
+
+	// V2
+	reqV2 := newReq(t, http.MethodPost, "/v1/skills/"+skillID+"/versions", `{}`, token)
+	respV2, err := a.Test(reqV2)
+	require.NoError(t, err)
+	bodyV2 := decodeBody(t, respV2)
+	versionV2 := bodyV2["version"].(map[string]any)
+	versionV2ID := uuid.MustParse(versionV2["id"].(string))
+
+	err = store.UpsertSkillFile(ctx, versionV2ID, uuid.MustParse(skillID), "main.go", []byte("v2"))
+	require.NoError(t, err)
+
+	// Since we are mocking the Upsert directly to DB, let us use the API to do this properly
+	// Actually, just testing the API diff endpoint
+	
+	reqDiff := newReq(t, http.MethodGet, "/v1/skills/"+skillID+"/versions/diff?from=1&to=2", "", token)
+	respDiff, err := a.Test(reqDiff)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, respDiff.StatusCode)
+
+	bodyDiff := decodeBody(t, respDiff)
+	assert.Equal(t, float64(1), bodyDiff["from_version"])
+	assert.Equal(t, float64(2), bodyDiff["to_version"])
+	diffText := bodyDiff["diff"].(string)
+	assert.Contains(t, diffText, "-v1")
+	assert.Contains(t, diffText, "+v2")
 }

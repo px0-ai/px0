@@ -134,6 +134,54 @@ func GetAPIKeyByID(ctx context.Context, id uuid.UUID) (*model.APIKey, error) {
 	return k, nil
 }
 
+func UpdateAPIKey(ctx context.Context, id uuid.UUID, name string, teamIDs []uuid.UUID, operation string) (*model.APIKey, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var firstTeamID *uuid.UUID
+	if len(teamIDs) > 0 {
+		firstTeamID = &teamIDs[0]
+	}
+
+	k := &model.APIKey{}
+	err = tx.QueryRow(ctx,
+		`UPDATE api_keys SET name = $1, team_id = $2, operation = $3 WHERE id = $4
+		 RETURNING id, name, org_id, team_id, operation, key_hash, created_at, last_used_at`,
+		name, firstTeamID, operation, id,
+	).Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update api key: %w", err)
+	}
+
+	// Recreate team mappings
+	_, err = tx.Exec(ctx, "DELETE FROM api_key_teams WHERE api_key_id = $1", id)
+	if err != nil {
+		return nil, fmt.Errorf("delete old api key teams: %w", err)
+	}
+
+	for _, teamID := range teamIDs {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO api_key_teams (api_key_id, team_id) VALUES ($1, $2)`,
+			k.ID, teamID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create api key team mapping: %w", err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return k, nil
+}
+
 func DeleteAPIKey(ctx context.Context, id uuid.UUID) error {
 	result, err := db.Pool.Exec(ctx, "DELETE FROM api_keys WHERE id = $1", id)
 	if err != nil {

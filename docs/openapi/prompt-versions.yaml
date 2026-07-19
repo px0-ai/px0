@@ -988,10 +988,12 @@ components:
           example: "Hello, {{.name}}! Count is {{.count}}."
         model:
           type: string
+          nullable: true
           description: Optional `provider/model` identifier intended to execute this prompt version.
           example: openai/gpt-4.1-mini
         model_params:
           type: object
+          nullable: true
           additionalProperties: true
           description: Optional provider-specific model parameters. Nested values are supported.
           example:

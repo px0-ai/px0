@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/px0-ai/px0/internal/apierr"
 	"github.com/px0-ai/px0/internal/model"
@@ -384,6 +385,103 @@ func DeleteSkill(c *fiber.Ctx) error {
 }
 
 // CreateSkillVersion creates a new empty draft version.
+
+func DiffSkillVersions(c *fiber.Ctx) error {
+	skill, err := resolveSkill(c)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrSkillNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	fromVal := c.Query("from")
+	toVal := c.Query("to")
+	if fromVal == "" || toVal == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "from and to query parameters are required").Respond(c)
+	}
+
+	fromNum, err := strconv.Atoi(fromVal)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid from version").Respond(c)
+	}
+	toNum, err := strconv.Atoi(toVal)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
+	}
+
+	fromVersion, err := store.GetSkillVersion(c.Context(), skill.ID, fromNum)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	toVersion, err := store.GetSkillVersion(c.Context(), skill.ID, toNum)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	fromFiles, err := store.GetSkillFiles(c.Context(), fromVersion.ID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	toFiles, err := store.GetSkillFiles(c.Context(), toVersion.ID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	fromMap := make(map[string]string)
+	for _, f := range fromFiles {
+		fromMap[f.FilePath] = string(f.Content)
+	}
+
+	toMap := make(map[string]string)
+	for _, f := range toFiles {
+		toMap[f.FilePath] = string(f.Content)
+	}
+
+	allFiles := make(map[string]bool)
+	for k := range fromMap {
+		allFiles[k] = true
+	}
+	for k := range toMap {
+		allFiles[k] = true
+	}
+
+	var combinedDiff string
+	for filePath := range allFiles {
+		fromContent := fromMap[filePath]
+		toContent := toMap[filePath]
+
+		diff := difflib.UnifiedDiff{
+			A:        difflib.SplitLines(fromContent),
+			B:        difflib.SplitLines(toContent),
+			FromFile: fmt.Sprintf("v%d/%s", fromVersion.Version, filePath),
+			ToFile:   fmt.Sprintf("v%d/%s", toVersion.Version, filePath),
+			Context:  3,
+		}
+		diffText, _ := difflib.GetUnifiedDiffString(diff)
+		if diffText != "" {
+			if combinedDiff != "" {
+				combinedDiff += "\n"
+			}
+			combinedDiff += diffText
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"from_version": fromVersion.Version,
+		"to_version":   toVersion.Version,
+		"diff":         combinedDiff,
+	})
+}
+
 func CreateSkillVersion(c *fiber.Ctx) error {
 	skill, err := resolveSkill(c)
 	if err != nil {

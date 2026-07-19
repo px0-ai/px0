@@ -100,6 +100,7 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	apiKeys := v1.Group("/api-keys", middleware.RequireSessionToken)
 	apiKeys.Post("", handler.CreateAPIKey)
 	apiKeys.Get("", handler.ListAPIKeys)
+	apiKeys.Put("/:id", handler.UpdateAPIKey)
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)
 
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
@@ -108,6 +109,7 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	prompts.Put("/:id", handler.UpdatePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
 	prompts.Post("/:id/restore", handler.RestorePrompt)
+	prompts.Post("/:id/rollback", handler.RollbackPrompt)
 	prompts.Post("/:id/move", handler.MovePrompt)
 	prompts.Get("/:id/versions/diff", handler.DiffVersions)
 
@@ -134,6 +136,7 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	skills.Get("/:id", handler.GetSkill)
 	skills.Put("/:id", handler.UpdateSkill)
 	skills.Delete("/:id", handler.DeleteSkill)
+	skills.Get("/:id/versions/diff", handler.DiffSkillVersions)
 	skills.Post("/:id/versions", handler.CreateSkillVersion)
 	skills.Put("/:id/versions", handler.UploadSkillZip)
 	skills.Get("/:id/versions", handler.ListSkillVersions)
@@ -155,6 +158,7 @@ func NewWithSearch(entitySearch search.Searcher) *fiber.App {
 	tools.Get("/:id", handler.GetTool)
 	tools.Put("/:id", handler.UpdateTool)
 	tools.Delete("/:id", handler.DeleteTool)
+	tools.Get("/:id/versions/diff", handler.DiffToolVersions)
 	tools.Post("/:id/versions", handler.CreateToolVersion)
 	tools.Get("/:id/versions", handler.ListToolVersions)
 	tools.Get("/:id/versions/:version", handler.GetToolVersion)

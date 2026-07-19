@@ -3,6 +3,53 @@ info:
   title: Tool Registry Version Management API
   version: 1.0.0
 paths:
+
+  /v1/tools/{id}/versions/diff:
+    get:
+      summary: Diff Tool Versions
+      description: Compares the schemas of two tool versions and returns a unified diff.
+      operationId: diffToolVersions
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                  to_version:
+                    type: integer
+                  diff:
+                    type: string
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "404":
+          description: Tool or version not found
+
   /v1/tools/{id}/versions:
     get:
       summary: List Tool Versions

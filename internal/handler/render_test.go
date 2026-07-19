@@ -114,7 +114,8 @@ func TestRenderLive_MissingVariable(t *testing.T) {
 func TestRenderLive_IncludesModelConfig(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)
-	id := setupPrompt(t, a, token)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
 	slug := getPromptSlug(t, a, id, token)
 
 	req := newReq(t, http.MethodPost,
@@ -125,20 +126,10 @@ func TestRenderLive_IncludesModelConfig(t *testing.T) {
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	require.NoError(t, resp.Body.Close())
 
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
+	promoteToLive(t, a, token, id)
 
 	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/versions/1/promote", id), "", token)
-	resp, err = a.Test(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	req = newReq(t, http.MethodPost,
-		fmt.Sprintf("/v1/prompts/%s/render", slug),
+		fmt.Sprintf("/v1/projects/%s/prompts/%s/render", projectID, slug),
 		`{"variables":{"user":"Alice"}}`, token)
 	resp, err = a.Test(req)
 	require.NoError(t, err)
