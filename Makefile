@@ -1,4 +1,4 @@
-.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down spec-bundle destroy
+.PHONY: install dev run build test test-store test-handler test-coverage lint format vet check docker-up docker-down spec-bundle destroy migrate
 
 install:
 	go mod download
@@ -9,6 +9,9 @@ spec-bundle:
 
 dev:
 	go run ./cmd/server
+
+migrate:
+	go run ./cmd/migrate
 
 run:
 	go run ./cmd/server

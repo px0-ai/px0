@@ -41,6 +41,22 @@ Create the test database once against the dev container:
 docker exec px0-postgres psql -U px0 -c "CREATE DATABASE px0_test;"
 ```
 
+## Database Migration Guidelines
+
+To maintain data integrity and avoid application downtime, we strictly follow a **non-destructive database schema migration strategy**:
+
+- **Never perform destructive migrations:** Do not write SQL migrations containing `DROP TABLE`, `DROP COLUMN`, `ALTER TABLE ... DROP CONSTRAINT`, or column type modifications that break compatibility.
+- **Support blue-green/canary deployments:** Schema changes must always be backward-compatible with the currently running version of the application code. Use the "Expand and Contract" pattern for renaming columns/tables or changing data types:
+  1. *Expand:* Add the new column/table, write to both, read from the old.
+  2. *Backfill:* Copy/migrate historical data from the old to the new column/table.
+  3. *Transition:* Update code to read and write from the new column/table.
+  4. *Contract:* Drop the old column/table in a future, separate release after verifying stability.
+- **No automatic migrations at server startup:** Migrations must not be executed during server startup (e.g., in `main.go`). This decouples application deployments from database migrations, allowing for safe rollbacks and orderly sequencing.
+- **Run migrations explicitly:** Execute migrations manually or via your deployment pipeline using:
+  ```bash
+  make migrate
+  ```
+
 ## Where tests live
 
 ```
@@ -94,6 +110,7 @@ setupAPIKey(t, app, token)               // create API key, returns raw key
 | `make test-handler` | Handler tests only, verbose |
 | `make test-coverage` | Coverage report to coverage.html |
 | `make spec-bundle` | Bundles multi-file OpenAPI specification into a single self-contained file |
+| `make migrate` | Runs database migrations explicitly |
 | `make check` | lint + vet + test (required before PR) |
 
 ## API Development and Contract Testing

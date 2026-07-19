@@ -33,10 +33,6 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := db.Migrate(ctx); err != nil {
-		log.Fatalf("run migrations: %v", err)
-	}
-
 	if err := rdb.Connect(ctx); err != nil {
 		log.Printf("warn: redis unavailable, sessions will not be cached: %v", err)
 	}
