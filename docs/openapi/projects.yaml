@@ -78,6 +78,82 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
   /v1/projects/{projectID}:
+    put:
+      summary: Update a Project
+      description: |
+        Updates a project's metadata (e.g., name and/or slug). The requester
+        must be an editor-or-above of the owning team or an admin of its
+        organization.
+      operationId: updateProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "A duplicate name or slug within the same owning team returns 409."
+        - "A non-editor member is refused with 403."
+        - "An unknown project id returns 404."
+      x-test-coverage:
+        - "TestUpdateProject_Success: editor updates the project (200)."
+        - "TestUpdateProject_Duplicate: duplicate name/slug returns 409."
+        - "TestUpdateProject_Forbidden: a viewer is refused (403)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+      responses:
+        "200":
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectResponse"
+        "400":
+          description: Invalid project id or request body
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden (requester is not an editor of the owning team or org admin)
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "409":
+          description: Duplicate project name or slug in team
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
     get:
       summary: Get a Project
       description: |
@@ -441,6 +517,15 @@ components:
         slug:
           type: string
           description: Optional normalized slug; derived from the name when omitted.
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable project name.
+        slug:
+          type: string
+          description: Normalized identifier, unique within the owning team.
     GrantProjectAccessRequest:
       type: object
       required:

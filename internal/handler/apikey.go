@@ -243,3 +243,53 @@ func DeleteAPIKey(c *fiber.Ctx) error {
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+func RegenerateAPIKey(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	apiKey, err := store.GetAPIKeyByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrAPIKeyNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	isOrgAdmin, err := IsOrgAdmin(c, apiKey.OrgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isOrgAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	key := "ak_" + hex.EncodeToString(raw)
+	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+
+	updatedKey, err := store.RegenerateAPIKey(c.Context(), id, keyHash)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"id":         updatedKey.ID,
+		"name":       updatedKey.Name,
+		"key":        key,
+		"org_id":     updatedKey.OrgID,
+		"team_id":    updatedKey.TeamID,
+		"operation":  updatedKey.Operation,
+		"created_at": updatedKey.CreatedAt,
+	})
+}

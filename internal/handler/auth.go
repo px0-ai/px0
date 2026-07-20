@@ -370,6 +370,43 @@ func Logout(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+func ListSessions(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrAccessTokenRequired.Respond(c)
+	}
+
+	sessions, err := store.ListSessionsByUserID(c.Context(), userID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"sessions": sessions})
+}
+
+func DeleteSessionByID(c *fiber.Ctx) error {
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrAccessTokenRequired.Respond(c)
+	}
+
+	sessionIDStr := c.Params("sessionID")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	err = store.DeleteSessionByID(c.Context(), sessionID, userID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "session not found").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func Me(c *fiber.Ctx) error {
 	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
 	if !ok || userID == uuid.Nil {

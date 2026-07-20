@@ -210,6 +210,47 @@ func TestGetProject_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestUpdateProject_Success(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	body := `{"name":"Updated Name", "slug":"updated_slug"}`
+	req := newReq(t, http.MethodPut, "/v1/projects/"+id, body, r.editorToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	project := decodeBody(t, resp)["project"].(map[string]any)
+	assert.Equal(t, "Updated Name", project["name"])
+	assert.Equal(t, "updated_slug", project["slug"])
+}
+
+func TestUpdateProject_Duplicate(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	createProject(t, a, r.editorToken, r.teamID, "Evals 1")
+	id2 := createProject(t, a, r.editorToken, r.teamID, "Evals 2")
+
+	body := `{"name":"Evals 1"}`
+	req := newReq(t, http.MethodPut, "/v1/projects/"+id2, body, r.editorToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestUpdateProject_Forbidden(t *testing.T) {
+	a := newTestApp(t)
+	r := setupProjectRoles(t, a)
+	id := createProject(t, a, r.editorToken, r.teamID, "Evals")
+
+	body := `{"name":"Updated Name"}`
+	req := newReq(t, http.MethodPut, "/v1/projects/"+id, body, r.viewerToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
 func TestDeleteProject_Success(t *testing.T) {
 	a := newTestApp(t)
 	r := setupProjectRoles(t, a)

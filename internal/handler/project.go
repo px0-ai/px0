@@ -75,6 +75,40 @@ func CreateProject(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"project": project})
 }
 
+type updateProjectRequest struct {
+	Name *string `json:"name"`
+	Slug *string `json:"slug"`
+}
+
+func UpdateProject(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("projectID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	var req updateProjectRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Slug != nil {
+		normalized := NormalizeSlug(*req.Slug)
+		req.Slug = &normalized
+	}
+
+	project, err := store.UpdateProject(c.Context(), id, req.Name, req.Slug)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrProjectNotFound.Respond(c)
+		}
+		if errors.Is(err, store.ErrDuplicate) {
+			return apierr.NewAPIError(fiber.StatusConflict, "project with this name or slug already exists in the team; please provide a unique name").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	return c.JSON(fiber.Map{"project": project})
+}
+
 func GetProject(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("projectID"))
 	if err != nil {

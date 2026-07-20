@@ -392,6 +392,71 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
+  /v1/prompts/{id}/schema:
+    post:
+      summary: Update Prompt Schema
+      description: Stores or updates a JSON Schema at the prompt level to enforce presence and types of input variables before execution.
+      operationId: updatePromptSchema
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                schema:
+                  type: object
+                  additionalProperties: true
+                  description: The JSON Schema to store.
+      responses:
+        "200":
+          description: Schema updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: "#/components/schemas/Prompt"
+                required:
+                  - prompt
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
   /v1/prompts/{id}/archive:
     post:
       summary: Archive a Prompt

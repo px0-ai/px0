@@ -132,6 +132,56 @@ func RemoveOrgMember(ctx context.Context, orgID, userID uuid.UUID) error {
 	return nil
 }
 
+func UpdateOrgMemberRole(ctx context.Context, orgID, userID uuid.UUID, role string) error {
+	var exists bool
+	err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM team_members tm 
+			JOIN teams t ON t.id = tm.team_id 
+			WHERE tm.user_id = $1 AND t.org_id = $2
+		)`,
+		userID, orgID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check org membership: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+
+	var teamID uuid.UUID
+	err = db.Pool.QueryRow(ctx, `SELECT id FROM teams WHERE org_id = $1 AND name = 'Default Team'`, orgID).Scan(&teamID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("default team not found for org")
+		}
+		return fmt.Errorf("find default team: %w", err)
+	}
+
+	if role == "admin" {
+		_, err = db.Pool.Exec(ctx,
+			`INSERT INTO team_members (team_id, user_id, role) 
+			 VALUES ($1, $2, 'admin') 
+			 ON CONFLICT (team_id, user_id) 
+			 DO UPDATE SET role = 'admin'`,
+			teamID, userID,
+		)
+	} else if role == "member" {
+		_, err = db.Pool.Exec(ctx,
+			`UPDATE team_members SET role = 'editor' 
+			 WHERE team_id = $1 AND user_id = $2 AND role = 'admin'`,
+			teamID, userID,
+		)
+	} else {
+		return fmt.Errorf("invalid role: %s", role)
+	}
+
+	if err != nil {
+		return fmt.Errorf("update org member role: %w", err)
+	}
+	return nil
+}
+
 func DeleteOrganization(ctx context.Context, id uuid.UUID) error {
 	_, err := db.Pool.Exec(ctx, `DELETE FROM organizations WHERE id = $1`, id)
 	if err != nil {

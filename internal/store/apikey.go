@@ -200,3 +200,19 @@ func TouchAPIKey(ctx context.Context, id uuid.UUID) error {
 	)
 	return err
 }
+
+func RegenerateAPIKey(ctx context.Context, id uuid.UUID, newKeyHash string) (*model.APIKey, error) {
+	k := &model.APIKey{}
+	err := db.Pool.QueryRow(ctx,
+		`UPDATE api_keys SET key_hash = $1 WHERE id = $2
+		 RETURNING id, name, org_id, team_id, operation, key_hash, created_at, last_used_at`,
+		newKeyHash, id,
+	).Scan(&k.ID, &k.Name, &k.OrgID, &k.TeamID, &k.Operation, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("regenerate api key: %w", err)
+	}
+	return k, nil
+}

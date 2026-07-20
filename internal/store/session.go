@@ -70,6 +70,57 @@ func DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+// ListSessionsByUserID returns all active sessions for a user.
+func ListSessionsByUserID(ctx context.Context, userID uuid.UUID) ([]*model.Session, error) {
+	rows, err := db.Pool.Query(ctx,
+		`SELECT id, user_id, token, expires_at, created_at
+		 FROM sessions
+		 WHERE user_id = $1 AND expires_at > NOW()
+		 ORDER BY created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*model.Session
+	for rows.Next() {
+		s := &model.Session{}
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Token, &s.ExpiresAt, &s.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return sessions, nil
+}
+
+// DeleteSessionByID deletes a session by its ID for a specific user to ensure ownership.
+// It also evicts the session from the cache.
+func DeleteSessionByID(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID) error {
+	var token string
+	err := db.Pool.QueryRow(ctx,
+		"SELECT token FROM sessions WHERE id = $1 AND user_id = $2",
+		sessionID, userID,
+	).Scan(&token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("get session token for deletion: %w", err)
+	}
+
+	evictSession(ctx, token)
+	_, err = db.Pool.Exec(ctx, "DELETE FROM sessions WHERE id = $1 AND user_id = $2", sessionID, userID)
+	if err != nil {
+		return fmt.Errorf("delete session by id: %w", err)
+	}
+	return nil
+}
+
 // sessionFromCache returns a session from Redis or nil on any miss/error.
 func sessionFromCache(ctx context.Context, token string) *model.Session {
 	if rdb.Client == nil {

@@ -195,6 +195,25 @@ func TestGetVersion_Success(t *testing.T) {
 	assert.Equal(t, "template contents", v["template"])
 }
 
+func TestGetVersionVariables_Success(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	id := setupPrompt(t, a, token)
+	setupVersion(t, a, token, id, "{{.name}} is {{.age}} years old and {{.nested.val}}")
+
+	req := newReq(t, http.MethodGet, fmt.Sprintf("/v1/prompts/%s/versions/1/variables", id), "", token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	vars := body["variables"].([]any)
+	assert.Len(t, vars, 3)
+	assert.Contains(t, vars, "name")
+	assert.Contains(t, vars, "age")
+	assert.Contains(t, vars, "nested")
+}
+
 func TestUpdateVersion_Success(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)

@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/gofiber/fiber/v2"
@@ -241,6 +243,207 @@ func executeRun(c *fiber.Ctx, prompt *model.Prompt, version *model.PromptVersion
 		"model":    modelName,
 		"version":  version.Version,
 		"slug":     prompt.Slug,
+	})
+}
+
+type batchElement struct {
+	Variables map[string]any `json:"variables"`
+}
+
+type batchRunRequest struct {
+	Batch       []batchElement  `json:"batch"`
+	Model       *string         `json:"model"`
+	ModelParams json.RawMessage `json:"model_params"`
+}
+
+type batchResponseElement struct {
+	Response string `json:"response,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+func executeSinglePayloadCall(ctx context.Context, protocol, cleanModel, userPrompt, apiKey, baseURL string, modelParams json.RawMessage) (string, error) {
+	providerBody, err := prepareProviderRequestBody(protocol, cleanModel, userPrompt, false, modelParams)
+	if err != nil {
+		return "", fmt.Errorf("prepare request body: %w", err)
+	}
+
+	var reqURL string
+	if protocol == "openai" {
+		reqURL = fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(baseURL, "/"))
+	} else {
+		reqURL = fmt.Sprintf("%s/messages", strings.TrimSuffix(baseURL, "/"))
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(providerBody))
+	if err != nil {
+		return "", fmt.Errorf("create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	if protocol == "openai" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+	} else {
+		httpReq.Header.Set("x-api-key", apiKey)
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+	}
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("provider error (status %d): %s", resp.StatusCode, string(errBytes))
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	var completionText string
+	if protocol == "openai" {
+		var oaiResp struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(respBytes, &oaiResp); err != nil || len(oaiResp.Choices) == 0 {
+			return "", fmt.Errorf("failed to parse OpenAI response: %w", err)
+		}
+		completionText = oaiResp.Choices[0].Message.Content
+	} else {
+		var antResp struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(respBytes, &antResp); err != nil || len(antResp.Content) == 0 {
+			return "", fmt.Errorf("failed to parse Anthropic response: %w", err)
+		}
+		completionText = antResp.Content[0].Text
+	}
+
+	return completionText, nil
+}
+
+func BatchRun(c *fiber.Ctx) error {
+	prompt, ok := resolveProjectPromptBySlug(c)
+	if !ok {
+		return nil
+	}
+
+	version, err := store.GetLiveVersion(c.Context(), prompt.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrNoLiveVersionFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var req batchRunRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	tmpl, err := template.New("prompt").Option("missingkey=error").Parse(version.Template)
+	if err != nil {
+		return apierr.ErrTemplateParseError.Respond(c, err)
+	}
+
+	var modelName string
+	if req.Model != nil && strings.TrimSpace(*req.Model) != "" {
+		modelName = strings.TrimSpace(*req.Model)
+	} else if version.Model != nil && strings.TrimSpace(*version.Model) != "" {
+		modelName = strings.TrimSpace(*version.Model)
+	}
+
+	if modelName == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "no model configured for this prompt version and none provided in request").Respond(c)
+	}
+
+	var modelParams json.RawMessage
+	if len(req.ModelParams) > 0 && string(req.ModelParams) != "null" {
+		modelParams = req.ModelParams
+	} else {
+		modelParams = version.ModelParams
+	}
+
+	var provider string
+	var protocol string
+	var cleanModel string
+
+	if strings.HasPrefix(modelName, "openai/") {
+		provider = "openai"
+		protocol = "openai"
+		cleanModel = strings.TrimPrefix(modelName, "openai/")
+	} else if strings.HasPrefix(modelName, "anthropic/") {
+		provider = "anthropic"
+		protocol = "anthropic"
+		cleanModel = strings.TrimPrefix(modelName, "anthropic/")
+	} else if strings.HasPrefix(modelName, "gemini/") {
+		provider = "gemini"
+		protocol = "openai"
+		cleanModel = strings.TrimPrefix(modelName, "gemini/")
+	} else if strings.HasPrefix(modelName, "deepseek/") {
+		provider = "deepseek"
+		protocol = "openai"
+		cleanModel = strings.TrimPrefix(modelName, "deepseek/")
+	} else if strings.HasPrefix(modelName, "groq/") {
+		provider = "groq"
+		protocol = "openai"
+		cleanModel = strings.TrimPrefix(modelName, "groq/")
+	} else if strings.HasPrefix(modelName, "openrouter/") {
+		provider = "openrouter"
+		protocol = "openai"
+		cleanModel = strings.TrimPrefix(modelName, "openrouter/")
+	} else {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "unsupported model provider").Respond(c)
+	}
+
+	apiKey, baseURL, err := resolveProviderConfig(c, provider)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, err.Error()).Respond(c)
+	}
+
+	results := make([]batchResponseElement, len(req.Batch))
+	var wg sync.WaitGroup
+
+	for i, elem := range req.Batch {
+		wg.Add(1)
+		go func(idx int, vars map[string]any) {
+			defer wg.Done()
+			if vars == nil {
+				vars = map[string]any{}
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.Execute(&buf, vars); err != nil {
+				results[idx] = batchResponseElement{Error: fmt.Sprintf("template execution failed: %v", err)}
+				return
+			}
+			userPrompt := buf.String()
+
+			completion, err := executeSinglePayloadCall(context.Background(), protocol, cleanModel, userPrompt, apiKey, baseURL, modelParams)
+			if err != nil {
+				results[idx] = batchResponseElement{Error: err.Error()}
+			} else {
+				results[idx] = batchResponseElement{Response: completion}
+			}
+		}(i, elem.Variables)
+	}
+	wg.Wait()
+
+	return c.JSON(fiber.Map{
+		"results": results,
+		"model":   modelName,
+		"version": version.Version,
+		"slug":    prompt.Slug,
 	})
 }
 

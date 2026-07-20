@@ -270,6 +270,150 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
+  /v1/orgs/{orgID}/members/{userID}/role:
+    put:
+      summary: Update Organization Member Role
+      description: |
+        Promotes a standard user to an organization admin role or demotes them back to a standard member.
+        Requires Org Admin privileges.
+      operationId: updateOrgMemberRole
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the user whose role is being updated.
+      x-edge-cases:
+        - "Only Org Admins and system administrators can update member roles."
+        - "Returns 403 Forbidden if a standard user tries to update a member's role."
+        - "Returns 404 Not Found if the user is not a member of the organization."
+      x-test-coverage:
+        - "TestOrg_UpdateMemberRole: Verifies that an Org Admin can successfully promote and demote a member."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgMemberRoleRequest"
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: User or Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
+  /v1/orgs/{orgID}/audit-logs:
+    get:
+      summary: List Administrative Audit Logs
+      description: |
+        Returns a paginated event stream of administrative actions in the organization.
+        Requires Org Admin privileges.
+      operationId: listOrgAuditLogs
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      x-edge-cases:
+        - "Only Org Admins and system administrators can view audit logs."
+        - "Returns 403 Forbidden if a standard user tries to view audit logs."
+      x-test-coverage:
+        - "TestOrg_ListAuditLogs: Verifies that an Org Admin can successfully view audit logs, while a standard user cannot."
+      responses:
+        "200":
+          description: A paginated list of audit logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditLog"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
 components:
   schemas:
     Organization:
@@ -304,6 +448,49 @@ components:
           type: string
           enum: [ADMIN, MEMBER]
           example: ADMIN
+        created_at:
+          type: string
+          format: date-time
+    UpdateOrgMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [admin, member]
+          description: The new role for the member. 'admin' promotes to organization admin, 'member' demotes to standard member.
+    AuditLog:
+      type: object
+      required:
+        - id
+        - org_id
+        - action
+        - entity_type
+        - metadata
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
         created_at:
           type: string
           format: date-time

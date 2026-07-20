@@ -249,6 +249,66 @@ paths:
               schema:
                 $ref: "./auth.yaml#/components/schemas/APIError"
 
+  /v1/projects/{projectID}/prompts/{slug}/batch-run:
+    post:
+      summary: Batch Run Live Prompt Version
+      description: Renders the active 'live' template version and executes it concurrently against multiple variable payloads.
+      operationId: batchRunLive
+      tags:
+        - Prompt Runs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
+        - name: slug
+          in: path
+          required: true
+          description: Prompt slug, unique within the project.
+          schema:
+            type: string
+      x-edge-cases:
+        - "Executes multiple variable payloads concurrently."
+        - "Correlates completions or errors for each payload in the batch."
+      x-test-coverage:
+        - "TestBatchRun_Success_OpenAI: Verifies batch block completions for OpenAI."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRunRequest"
+      responses:
+        "200":
+          description: Correlated list of model completions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchRunResponse"
+        "400":
+          description: Missing keys or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
   /v1/projects/{projectID}/prompts/{slug}/versions/{version}/run:
     post:
       summary: Run Specific Prompt Version
@@ -406,6 +466,51 @@ components:
           example: my-prompt
       required:
         - response
+        - model
+        - version
+        - slug
+
+    BatchRunRequest:
+      type: object
+      properties:
+        batch:
+          type: array
+          items:
+            type: object
+            properties:
+              variables:
+                type: object
+                additionalProperties: true
+        model:
+          type: string
+          nullable: true
+        model_params:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required:
+        - batch
+
+    BatchRunResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              response:
+                type: string
+              error:
+                type: string
+        model:
+          type: string
+        version:
+          type: integer
+        slug:
+          type: string
+      required:
+        - results
         - model
         - version
         - slug

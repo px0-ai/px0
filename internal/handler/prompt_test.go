@@ -567,6 +567,30 @@ func TestUpdatePrompt_Handler(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestUpdatePromptSchema(t *testing.T) {
+	a := newTestApp(t)
+
+	adminToken := setupUser(t, a)
+	projectID := setupProject(t, a, adminToken)
+	
+	req := newReq(t, http.MethodPost, fmt.Sprintf("/v1/projects/%s/prompts", projectID),
+		`{"name":"Schema Test Prompt", "description":"test description"}`, adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	body := decodeBody(t, resp)
+	promptID := body["prompt"].(map[string]any)["id"].(string)
+
+	schemaStr := `{"schema": {"type": "object", "properties": {"name": {"type": "string"}}}}`
+	req = newReq(t, http.MethodPost, fmt.Sprintf("/v1/prompts/%s/schema", promptID), schemaStr, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body = decodeBody(t, resp)
+	schemaMap := body["prompt"].(map[string]any)["schema"].(map[string]any)
+	assert.Equal(t, "object", schemaMap["type"])
+}
+
 func TestRestorePrompt(t *testing.T) {
 	a := newTestApp(t)
 	token := setupUser(t, a)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -509,4 +510,74 @@ func TestRunLive_MissingAPIKey(t *testing.T) {
 
 	body := decodeBody(t, resp)
 	assert.Contains(t, body["error"], "missing API key for provider: openai")
-}
+	}
+
+	func TestBatchRun_Success_OpenAI(t *testing.T) {
+	a := newTestApp(t)
+	token := setupUser(t, a)
+	projectID := setupProject(t, a, token)
+	id := setupPromptInProject(t, a, token, projectID)
+	slug := getPromptSlug(t, a, id, token)
+
+	req := newReq(t, http.MethodPost,
+	fmt.Sprintf("/v1/prompts/%s/versions", id),
+	`{"template":"Tell {{.name}} a joke.","model":"openai/gpt-4o","model_params":{}}`, token)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+
+	promoteToLive(t, a, token, id)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var reqBody map[string]any
+	err := json.NewDecoder(r.Body).Decode(&reqBody)
+	require.NoError(t, err)
+
+	messages := reqBody["messages"].([]any)
+	content := messages[0].(map[string]any)["content"].(string)
+
+	var joke string
+	if strings.Contains(content, "Alice") {
+	joke = "Joke for Alice"
+	} else {
+	joke = "Joke for Bob"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(`{
+	"choices": [{
+	"index": 0,
+	"message": {
+	"role": "assistant",
+	"content": %q
+	}
+	}]
+	}`, joke)))
+	}))
+	defer mockServer.Close()
+
+	batchReqBody := `{
+	"batch": [
+	{"variables": {"name": "Alice"}},
+	{"variables": {"name": "Bob"}}
+	]
+	}`
+
+	batchReq := newReq(t, http.MethodPost,
+	fmt.Sprintf("/v1/projects/%s/prompts/%s/batch-run", projectID, slug),
+	batchReqBody, token)
+	batchReq.Header.Set("X-OpenAI-Base", mockServer.URL)
+	batchReq.Header.Set("X-OpenAI-Key", "oai-test-key")
+
+	resp, err = a.Test(batchReq)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	results := body["results"].([]any)
+	require.Len(t, results, 2)
+	assert.Equal(t, "Joke for Alice", results[0].(map[string]any)["response"])
+	assert.Equal(t, "Joke for Bob", results[1].(map[string]any)["response"])
+	}

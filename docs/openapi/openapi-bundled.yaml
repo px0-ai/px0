@@ -436,6 +436,74 @@ paths:
       responses:
         '204':
           description: Logged out successfully (No content)
+  /v1/auth/sessions:
+    get:
+      summary: List Active Sessions
+      description: Returns a list of all active login sessions for the currently authenticated user.
+      operationId: listSessions
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - Requires a valid session token.
+      x-test-coverage:
+        - 'TestListSessions_Success: Verifies list of active sessions is returned.'
+      responses:
+        '200':
+          description: List of active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/auth/sessions/{sessionID}:
+    delete:
+      summary: Revoke Session
+      description: Terminates and deletes a specific login session by ID.
+      operationId: revokeSession
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the session to terminate.
+      x-edge-cases:
+        - Requires a valid session token.
+        - Users can only delete their own sessions.
+      x-test-coverage:
+        - 'TestRevokeSession_Success: Verifies a user can terminate another session of theirs.'
+      responses:
+        '204':
+          description: Session terminated successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/auth/me:
     get:
       summary: Me
@@ -872,6 +940,130 @@ paths:
           description: API key not found
         '500':
           description: Internal Server Error
+  /v1/api-keys/{id}/regenerate:
+    post:
+      summary: Rotate/Regenerate an API Key
+      description: Generates and returns a new secure raw key string for an existing API Key while keeping metadata, scopes, and association unchanged.
+      operationId: regenerateAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to regenerate.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - Only Org Admins and system administrators can regenerate API keys.
+      x-test-coverage:
+        - 'TestRegenerateAPIKey: Verifies regeneration produces a new key.'
+      responses:
+        '200':
+          description: API key regenerated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreatedResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: API key not found
+        '500':
+          description: Internal Server Error
+  /v1/cache/purge:
+    post:
+      summary: Purge Global Cache
+      description: Clears all caches globally across the cluster.
+      operationId: purgeGlobalCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cache purged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '401':
+          description: Unauthorized
+  /v1/prompts/{id}/cache/purge:
+    post:
+      summary: Purge Prompt Cache
+      description: Clears the cache for a specific prompt by its ID.
+      operationId: purgePromptCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
+  /v1/skills/{id}/cache/purge:
+    post:
+      summary: Purge Skill Cache
+      description: Clears the cache for a specific skill by its ID.
+      operationId: purgeSkillCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
+  /v1/tools/{id}/cache/purge:
+    post:
+      summary: Purge Tool Cache
+      description: Clears the cache for a specific tool by its ID.
+      operationId: purgeToolCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
   /v1/me/teams:
     get:
       summary: List User Teams
@@ -1758,6 +1950,148 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/orgs/{orgID}/members/{userID}/role:
+    put:
+      summary: Update Organization Member Role
+      description: |
+        Promotes a standard user to an organization admin role or demotes them back to a standard member.
+        Requires Org Admin privileges.
+      operationId: updateOrgMemberRole
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the user whose role is being updated.
+      x-edge-cases:
+        - Only Org Admins and system administrators can update member roles.
+        - Returns 403 Forbidden if a standard user tries to update a member's role.
+        - Returns 404 Not Found if the user is not a member of the organization.
+      x-test-coverage:
+        - 'TestOrg_UpdateMemberRole: Verifies that an Org Admin can successfully promote and demote a member.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrgMemberRoleRequest'
+      responses:
+        '200':
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: User or Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/orgs/{orgID}/audit-logs:
+    get:
+      summary: List Administrative Audit Logs
+      description: |
+        Returns a paginated event stream of administrative actions in the organization.
+        Requires Org Admin privileges.
+      operationId: listOrgAuditLogs
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      x-edge-cases:
+        - Only Org Admins and system administrators can view audit logs.
+        - Returns 403 Forbidden if a standard user tries to view audit logs.
+      x-test-coverage:
+        - 'TestOrg_ListAuditLogs: Verifies that an Org Admin can successfully view audit logs, while a standard user cannot.'
+      responses:
+        '200':
+          description: A paginated list of audit logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/projects:
     post:
       summary: Create a Project
@@ -1832,6 +2166,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
   /v1/projects/{projectID}:
+    put:
+      summary: Update a Project
+      description: |
+        Updates a project's metadata (e.g., name and/or slug). The requester
+        must be an editor-or-above of the owning team or an admin of its
+        organization.
+      operationId: updateProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - A duplicate name or slug within the same owning team returns 409.
+        - A non-editor member is refused with 403.
+        - An unknown project id returns 404.
+      x-test-coverage:
+        - 'TestUpdateProject_Success: editor updates the project (200).'
+        - 'TestUpdateProject_Duplicate: duplicate name/slug returns 409.'
+        - 'TestUpdateProject_Forbidden: a viewer is refused (403).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: Invalid project id or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not an editor of the owning team or org admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: Duplicate project name or slug in team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
     get:
       summary: Get a Project
       description: |
@@ -2535,6 +2945,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/prompts/{id}/schema:
+    post:
+      summary: Update Prompt Schema
+      description: Stores or updates a JSON Schema at the prompt level to enforce presence and types of input variables before execution.
+      operationId: updatePromptSchema
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                schema:
+                  type: object
+                  additionalProperties: true
+                  description: The JSON Schema to store.
+      responses:
+        '200':
+          description: Schema updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: '#/components/schemas/Prompt'
+                required:
+                  - prompt
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/archive:
     post:
       summary: Archive a Prompt
@@ -3063,6 +3537,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/prompts/{slug}/batch-run:
+    post:
+      summary: Batch Run Live Prompt Version
+      description: Renders the active 'live' template version and executes it concurrently against multiple variable payloads.
+      operationId: batchRunLive
+      tags:
+        - Prompt Runs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
+        - name: slug
+          in: path
+          required: true
+          description: Prompt slug, unique within the project.
+          schema:
+            type: string
+      x-edge-cases:
+        - Executes multiple variable payloads concurrently.
+        - Correlates completions or errors for each payload in the batch.
+      x-test-coverage:
+        - 'TestBatchRun_Success_OpenAI: Verifies batch block completions for OpenAI.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRunRequest'
+      responses:
+        '200':
+          description: Correlated list of model completions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchRunResponse'
+        '400':
+          description: Missing keys or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/versions:
     post:
       summary: Create a Prompt Version
@@ -3420,6 +3953,53 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: only draft versions can be deleted
+  /v1/prompts/{id}/versions/{version}/variables:
+    get:
+      summary: Get Template Variables
+      description: Parses the version's Go text/template syntax and returns a list of extracted variables.
+      operationId: getVersionVariables
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The version number or status tag ('live', 'draft', 'stable').
+      responses:
+        '200':
+          description: Variables extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  variables:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/versions/{version}/promote:
     post:
       summary: Promote Prompt Version
@@ -5443,6 +6023,30 @@ components:
         - is_verified
         - is_admin
         - created_at
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: Session token string (partially masked in lists).
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - token
+        - expires_at
+        - created_at
     APIKey:
       type: object
       properties:
@@ -5820,6 +6424,49 @@ components:
           example: my-prompt
       required:
         - response
+        - model
+        - version
+        - slug
+    BatchRunRequest:
+      type: object
+      properties:
+        batch:
+          type: array
+          items:
+            type: object
+            properties:
+              variables:
+                type: object
+                additionalProperties: true
+        model:
+          type: string
+          nullable: true
+        model_params:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required:
+        - batch
+    BatchRunResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              response:
+                type: string
+              error:
+                type: string
+        model:
+          type: string
+        version:
+          type: integer
+        slug:
+          type: string
+      required:
+        - results
         - model
         - version
         - slug
@@ -6306,6 +6953,51 @@ components:
         created_at:
           type: string
           format: date-time
+    UpdateOrgMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum:
+            - admin
+            - member
+          description: The new role for the member. 'admin' promotes to organization admin, 'member' demotes to standard member.
+    AuditLog:
+      type: object
+      required:
+        - id
+        - org_id
+        - action
+        - entity_type
+        - metadata
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
     CreateProjectRequest:
       type: object
       required:
@@ -6354,6 +7046,15 @@ components:
       properties:
         project:
           $ref: '#/components/schemas/Project'
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable project name.
+        slug:
+          type: string
+          description: Normalized identifier, unique within the owning team.
     GrantProjectAccessRequest:
       type: object
       required:

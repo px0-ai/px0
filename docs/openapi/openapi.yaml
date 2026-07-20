@@ -20,6 +20,10 @@ paths:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1verify-email"
   /v1/auth/session:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
+  /v1/auth/sessions:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1sessions"
+  /v1/auth/sessions/{sessionID}:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1sessions~1{sessionID}"
   /v1/auth/me:
     $ref: "./profile.yaml#/paths/~1v1~1auth~1me"
   /v1/auth/me/change-password:
@@ -32,6 +36,16 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
   /v1/api-keys/{id}:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
+  /v1/api-keys/{id}/regenerate:
+    $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}~1regenerate"
+  /v1/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1cache~1purge"
+  /v1/prompts/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1prompts~1{id}~1cache~1purge"
+  /v1/skills/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1skills~1{id}~1cache~1purge"
+  /v1/tools/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1tools~1{id}~1cache~1purge"
   /v1/me/teams:
     $ref: "./profile.yaml#/paths/~1v1~1me~1teams"
   /v1/me/teams/{teamID}:
@@ -62,6 +76,10 @@ paths:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1people"
   /v1/orgs/{orgID}/members/{userID}:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1members~1{userID}"
+  /v1/orgs/{orgID}/members/{userID}/role:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1members~1{userID}~1role"
+  /v1/orgs/{orgID}/audit-logs:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1audit-logs"
   /v1/projects:
     $ref: "./projects.yaml#/paths/~1v1~1projects"
   /v1/projects/{projectID}:
@@ -78,6 +96,8 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
+  /v1/prompts/{id}/schema:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1schema"
   /v1/prompts/{id}/archive:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1archive"
   /v1/prompts/{id}/restore:
@@ -92,10 +112,14 @@ paths:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1render"
   /v1/projects/{projectID}/prompts/{slug}/run:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1run"
+  /v1/projects/{projectID}/prompts/{slug}/batch-run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1batch-run"
   /v1/prompts/{id}/versions:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}"
+  /v1/prompts/{id}/versions/{version}/variables:
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1variables"
   /v1/prompts/{id}/versions/{version}/promote:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1promote"
   /v1/prompts/{id}/versions/{version}/demote:
@@ -180,6 +204,8 @@ components:
       $ref: "./auth.yaml#/components/schemas/APIError"
     User:
       $ref: "./auth.yaml#/components/schemas/User"
+    Session:
+      $ref: "./auth.yaml#/components/schemas/Session"
     APIKey:
       $ref: "./api-keys.yaml#/components/schemas/APIKey"
     Organization:
@@ -206,6 +232,10 @@ components:
       $ref: "./prompt-renders.yaml#/components/schemas/RunRequest"
     RunResponse:
       $ref: "./prompt-renders.yaml#/components/schemas/RunResponse"
+    BatchRunRequest:
+      $ref: "./prompt-renders.yaml#/components/schemas/BatchRunRequest"
+    BatchRunResponse:
+      $ref: "./prompt-renders.yaml#/components/schemas/BatchRunResponse"
     PromptPayload:
       $ref: "./prompt-payloads.yaml#/components/schemas/PromptPayload"
     CreatePromptPayloadRequest:

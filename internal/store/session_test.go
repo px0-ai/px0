@@ -130,3 +130,45 @@ func TestDeleteSession_EvictsCache(t *testing.T) {
 	_, err = store.GetSessionByToken(ctx, "evicttok")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestListSessionsByUserID(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+
+	user, _ := store.CreateUser(ctx, "list-sess@test.com", "hash")
+	s1, err := store.CreateSession(ctx, user.ID, "tok1", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	s2, err := store.CreateSession(ctx, user.ID, "tok2", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	// expired session
+	_, err = store.CreateSession(ctx, user.ID, "tok3", time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+
+	sessions, err := store.ListSessionsByUserID(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Len(t, sessions, 2)
+	assert.Equal(t, s2.ID, sessions[0].ID) // LIFO
+	assert.Equal(t, s1.ID, sessions[1].ID)
+}
+
+func TestDeleteSessionByID(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+
+	user, _ := store.CreateUser(ctx, "del-by-id@test.com", "hash")
+	s1, err := store.CreateSession(ctx, user.ID, "tok1", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	user2, _ := store.CreateUser(ctx, "other@test.com", "hash")
+
+	// cannot delete other user's session
+	err = store.DeleteSessionByID(ctx, s1.ID, user2.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// can delete own session
+	err = store.DeleteSessionByID(ctx, s1.ID, user.ID)
+	require.NoError(t, err)
+
+	_, err = store.GetSessionByToken(ctx, "tok1")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}

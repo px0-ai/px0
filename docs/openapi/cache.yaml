@@ -1,0 +1,94 @@
+openapi: 3.1.0
+info:
+  title: Cache Invalidation API
+  version: 1.0.0
+paths:
+  /v1/cache/purge:
+    post:
+      summary: Purge Global Cache
+      description: Clears all caches globally across the cluster.
+      operationId: purgeGlobalCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Cache purged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "401":
+          description: Unauthorized
+
+  /v1/prompts/{id}/cache/purge:
+    post:
+      summary: Purge Prompt Cache
+      description: Clears the cache for a specific prompt by its ID.
+      operationId: purgePromptCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Cache purged successfully
+        "401":
+          description: Unauthorized
+
+  /v1/skills/{id}/cache/purge:
+    post:
+      summary: Purge Skill Cache
+      description: Clears the cache for a specific skill by its ID.
+      operationId: purgeSkillCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Cache purged successfully
+        "401":
+          description: Unauthorized
+
+  /v1/tools/{id}/cache/purge:
+    post:
+      summary: Purge Tool Cache
+      description: Clears the cache for a specific tool by its ID.
+      operationId: purgeToolCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Cache purged successfully
+        "401":
+          description: Unauthorized

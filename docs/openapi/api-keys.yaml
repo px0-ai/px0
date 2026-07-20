@@ -183,6 +183,45 @@ paths:
         "500":
           description: Internal Server Error
 
+  /v1/api-keys/{id}/regenerate:
+    post:
+      summary: Rotate/Regenerate an API Key
+      description: Generates and returns a new secure raw key string for an existing API Key while keeping metadata, scopes, and association unchanged.
+      operationId: regenerateAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to regenerate.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - "Only Org Admins and system administrators can regenerate API keys."
+      x-test-coverage:
+        - "TestRegenerateAPIKey: Verifies regeneration produces a new key."
+      responses:
+        "200":
+          description: API key regenerated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyCreatedResponse"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: API key not found
+        "500":
+          description: Internal Server Error
+
 components:
   schemas:
     APIKey:

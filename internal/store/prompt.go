@@ -24,11 +24,11 @@ type PromptFilter struct {
 func CreatePrompt(ctx context.Context, projectID uuid.UUID, slug, name, description string) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO prompts (project_id, slug, name, description)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, project_id, slug, name, description, status, created_at, updated_at`,
-		projectID, slug, name, description,
-	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		`INSERT INTO prompts (project_id, slug, name, description, status)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, project_id, slug, name, description, status, schema, created_at, updated_at`,
+		projectID, slug, name, description, model.PromptStatusActive,
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -40,7 +40,7 @@ func CreatePrompt(ctx context.Context, projectID uuid.UUID, slug, name, descript
 }
 
 func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, error) {
-	query := `SELECT DISTINCT p.id, p.project_id, p.slug, p.name, p.description, p.status, p.created_at, p.updated_at
+	query := `SELECT DISTINCT p.id, p.project_id, p.slug, p.name, p.description, p.status, p.schema, p.created_at, p.updated_at
 			  FROM prompts p`
 	args := []any{}
 	joins := ""
@@ -84,7 +84,7 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 	var prompts []*model.Prompt
 	for rows.Next() {
 		p := &model.Prompt{}
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		prompts = append(prompts, p)
@@ -95,11 +95,11 @@ func ListPrompts(ctx context.Context, filter PromptFilter) ([]*model.Prompt, err
 func GetPromptByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, project_id, slug, name, description, status, created_at, updated_at
+		`SELECT id, project_id, slug, name, description, status, schema, created_at, updated_at
 		 FROM prompts
 		 WHERE id = $1 AND project_id = ANY($2)`,
 		id, projectIDs,
-	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -112,11 +112,11 @@ func GetPromptByID(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) (*
 func GetPromptBySlug(ctx context.Context, slug string, projectIDs []uuid.UUID) (*model.Prompt, error) {
 	p := &model.Prompt{}
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, project_id, slug, name, description, status, created_at, updated_at
+		`SELECT id, project_id, slug, name, description, status, schema, created_at, updated_at
 		 FROM prompts
 		 WHERE slug = $1 AND project_id = ANY($2)`,
 		slug, projectIDs,
-	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -142,7 +142,6 @@ func ArchivePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID) er
 	}
 	return nil
 }
-
 func UpdatePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, description string) (*model.Prompt, error) {
 	// First check if the prompt belongs to one of the allowed projects
 	_, err := GetPromptByID(ctx, id, projectIDs)
@@ -152,17 +151,31 @@ func UpdatePrompt(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, des
 
 	p := &model.Prompt{}
 	err = db.Pool.QueryRow(ctx,
-		`UPDATE prompts
-		 SET description = $1, updated_at = NOW()
-		 WHERE id = $2
-		 RETURNING id, project_id, slug, name, description, status, created_at, updated_at`,
+		`UPDATE prompts SET description = $1, updated_at = NOW() WHERE id = $2
+		 RETURNING id, project_id, slug, name, description, status, schema, created_at, updated_at`,
 		description, id,
-	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
 		return nil, fmt.Errorf("update prompt: %w", err)
+	}
+	return p, nil
+}
+
+func UpdatePromptSchema(ctx context.Context, id uuid.UUID, projectIDs []uuid.UUID, schema map[string]any) (*model.Prompt, error) {
+	// First check if the prompt belongs to one of the allowed projects
+	_, err := GetPromptByID(ctx, id, projectIDs)
+	if err != nil {
+		return nil, err // ErrNotFound if not found or no access
+	}
+
+	p := &model.Prompt{}
+	err = db.Pool.QueryRow(ctx,
+		`UPDATE prompts SET schema = $1, updated_at = NOW() WHERE id = $2
+		 RETURNING id, project_id, slug, name, description, status, schema, created_at, updated_at`,
+		schema, id,
+	).Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Name, &p.Description, &p.Status, &p.Schema, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("update prompt schema: %w", err)
 	}
 	return p, nil
 }

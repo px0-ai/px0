@@ -337,6 +337,49 @@ func UpdatePrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
+type updatePromptSchemaRequest struct {
+	Schema map[string]any `json:"schema"`
+}
+
+func UpdatePromptSchema(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	projectIDs, err := getRequestViewerProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var req updatePromptSchemaRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	prompt, err := store.UpdatePromptSchema(c.Context(), id, editorProjectIDs, req.Schema)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
 func RestorePrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {

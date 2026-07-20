@@ -442,6 +442,54 @@ paths:
               example:
                 error: "only draft versions can be deleted"
 
+  /v1/prompts/{id}/versions/{version}/variables:
+    get:
+      summary: Get Template Variables
+      description: Parses the version's Go text/template syntax and returns a list of extracted variables.
+      operationId: getVersionVariables
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The version number or status tag ('live', 'draft', 'stable').
+      responses:
+        "200":
+          description: Variables extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  variables:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+
   /v1/prompts/{id}/versions/{version}/promote:
     post:
       summary: Promote Prompt Version
