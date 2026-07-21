@@ -50,6 +50,10 @@ px0 includes a built-in concurrent load testing utility located at `cmd/loadtest
 
 Refer to the [Benchmarking and Performance Guide](get-started/get-started-benchmarking.md) for execution flags, metric details, and latency percentiles.
 
+## MCP Server
+
+px0 ships an MCP (Model Context Protocol) server that exposes every documented API operation as an MCP tool, so AI assistants like Claude can manage prompts directly. Refer to the [MCP Server Guide](mcp-server/README.md) for startup instructions, per-client authentication, and testing with MCP Inspector.
+
 ## Examples and SDKs
 
 You can find examples in the [px0 examples repository](https://github.com/px0-ai/examples). Get started with our SDK-based hello worlds:
