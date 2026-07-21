@@ -3,3 +3,9 @@ tmp/
 .env
 *.test
 *.out
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
