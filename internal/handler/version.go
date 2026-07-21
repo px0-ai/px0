@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"text/template/parse"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -187,6 +188,90 @@ func GetVersion(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.JSON(fiber.Map{"version": version})
+}
+
+func extractVariables(node parse.Node, vars map[string]struct{}) {
+	if node == nil {
+		return
+	}
+	switch n := node.(type) {
+	case *parse.ListNode:
+		for _, node := range n.Nodes {
+			extractVariables(node, vars)
+		}
+	case *parse.ActionNode:
+		extractVariables(n.Pipe, vars)
+	case *parse.PipeNode:
+		for _, cmd := range n.Cmds {
+			extractVariables(cmd, vars)
+		}
+	case *parse.CommandNode:
+		for _, arg := range n.Args {
+			extractVariables(arg, vars)
+		}
+	case *parse.FieldNode:
+		if len(n.Ident) > 0 {
+			vars[n.Ident[0]] = struct{}{}
+		}
+	case *parse.IfNode:
+		extractVariables(n.Pipe, vars)
+		extractVariables(n.List, vars)
+		extractVariables(n.ElseList, vars)
+	case *parse.RangeNode:
+		extractVariables(n.Pipe, vars)
+		extractVariables(n.List, vars)
+		extractVariables(n.ElseList, vars)
+	case *parse.TemplateNode:
+		// Not supported yet
+	case *parse.WithNode:
+		extractVariables(n.Pipe, vars)
+		extractVariables(n.List, vars)
+		extractVariables(n.ElseList, vars)
+	}
+}
+
+func GetVersionVariables(c *fiber.Ctx) error {
+	promptID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	projectIDs, err := getRequestViewerProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), promptID, projectIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := resolveVersion(c.Context(), promptID, c.Params("version"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	trees, err := parse.Parse("test", version.Template, "", "", nil)
+	if err != nil {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "failed to parse template").Respond(c, err)
+	}
+
+	varsMap := make(map[string]struct{})
+	for _, tree := range trees {
+		extractVariables(tree.Root, varsMap)
+	}
+
+	variables := make([]string, 0, len(varsMap))
+	for v := range varsMap {
+		variables = append(variables, v)
+	}
+
+	return c.JSON(fiber.Map{"variables": variables})
 }
 
 func UpdateVersion(c *fiber.Ctx) error {

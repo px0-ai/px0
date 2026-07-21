@@ -171,3 +171,45 @@ func DeleteProject(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// UpdateProject updates a project's name or slug. It validates name and slug uniqueness within the owning team.
+func UpdateProject(ctx context.Context, id uuid.UUID, name, slug *string) (*model.Project, error) {
+	var query string
+	var args []interface{}
+
+	if name != nil && slug != nil {
+		query = `UPDATE projects
+		         SET name = $1, slug = $2
+		         WHERE id = $3
+		         RETURNING id, owning_team_id, slug, name, created_at`
+		args = []interface{}{*name, *slug, id}
+	} else if name != nil {
+		query = `UPDATE projects
+		         SET name = $1
+		         WHERE id = $2
+		         RETURNING id, owning_team_id, slug, name, created_at`
+		args = []interface{}{*name, id}
+	} else if slug != nil {
+		query = `UPDATE projects
+		         SET slug = $1
+		         WHERE id = $2
+		         RETURNING id, owning_team_id, slug, name, created_at`
+		args = []interface{}{*slug, id}
+	} else {
+		return GetProjectByID(ctx, id)
+	}
+
+	p := &model.Project{}
+	err := db.Pool.QueryRow(ctx, query, args...).Scan(&p.ID, &p.OwningTeamID, &p.Slug, &p.Name, &p.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrDuplicate
+		}
+		return nil, fmt.Errorf("update project: %w", err)
+	}
+	return p, nil
+}

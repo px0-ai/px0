@@ -215,6 +215,86 @@ func RemoveOrgMember(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+type updateOrgMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
+func UpdateOrgMemberRole(c *fiber.Ctx) error {
+	orgID, err := uuid.Parse(c.Params("orgID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+	targetUserID, err := uuid.Parse(c.Params("userID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isOrgAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	var req updateOrgMemberRoleRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	if req.Role != "admin" && req.Role != "member" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "role must be 'admin' or 'member'").Respond(c)
+	}
+
+	err = store.UpdateOrgMemberRole(c.Context(), orgID, targetUserID, req.Role)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.NewAPIError(fiber.StatusNotFound, "user is not a member of the organization").Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"success": true})
+}
+
+func ListOrgAuditLogs(c *fiber.Ctx) error {
+	orgID, err := uuid.Parse(c.Params("orgID"))
+	if err != nil {
+		return apierr.ErrInvalidID.Respond(c)
+	}
+
+	userID, ok := c.Locals(middleware.LocalsUserID).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		return apierr.ErrUnauthorized.Respond(c)
+	}
+
+	isOrgAdmin, err := store.IsOrgAdmin(c.Context(), userID, orgID)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if !isOrgAdmin {
+		return apierr.ErrForbidden.Respond(c)
+	}
+
+	limit := c.QueryInt("limit", 50)
+	offset := c.QueryInt("offset", 0)
+
+	logs, err := store.ListAuditLogsForOrg(c.Context(), orgID, limit, offset)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+	if logs == nil {
+		logs = []*model.AuditLog{}
+	}
+
+	return c.JSON(fiber.Map{"logs": logs})
+}
+
 func DeleteOrg(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {

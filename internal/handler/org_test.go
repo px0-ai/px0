@@ -303,3 +303,108 @@ func TestDeleteOrganization(t *testing.T) {
 	_, err = store.GetOrganizationByID(ctx, *orgID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestOrg_UpdateMemberRole(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	adminToken := setupUser(t, a)
+
+	session, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := session.UserID
+
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	teamID := teams[0].ID
+
+	// Ensure there is a Default Team for this org for the admin role mapping to work
+	_, err = store.CreateTeamWithOrg(ctx, "Default Team", *orgID)
+	require.NoError(t, err)
+
+	// Create standard user
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard2@test.com","password":"Password123!","team_id":%q}`, teamID.String()), adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	standardUserIDStr := body["user"].(map[string]any)["id"].(string)
+	standardUserID, err := uuid.Parse(standardUserIDStr)
+	require.NoError(t, err)
+
+	// Promote to admin
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/orgs/%s/members/%s/role", orgID.String(), standardUserIDStr), `{"role":"admin"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Verify is admin
+	isAdmin, err := store.IsOrgAdmin(ctx, standardUserID, *orgID)
+	require.NoError(t, err)
+	assert.True(t, isAdmin)
+
+	// Demote to member
+	req = newReq(t, http.MethodPut, fmt.Sprintf("/v1/orgs/%s/members/%s/role", orgID.String(), standardUserIDStr), `{"role":"member"}`, adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Verify no longer admin
+	isAdmin, err = store.IsOrgAdmin(ctx, standardUserID, *orgID)
+	require.NoError(t, err)
+	assert.False(t, isAdmin)
+}
+
+func TestOrg_ListAuditLogs(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	adminToken := setupUser(t, a)
+
+	session, err := store.GetSessionByToken(ctx, adminToken)
+	require.NoError(t, err)
+	adminUserID := session.UserID
+
+	teams, err := store.GetUserTeams(ctx, adminUserID)
+	require.NoError(t, err)
+	require.NotEmpty(t, teams)
+	orgID := teams[0].OrgID
+	teamID := teams[0].ID
+
+	// Create standard user
+	req := newReq(t, http.MethodPost, "/v1/auth/register",
+		fmt.Sprintf(`{"email":"standard3@test.com","password":"Password123!","team_id":%q}`, teamID.String()), adminToken)
+	resp, err := a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	// Log in as standard user to get token
+	req = newReq(t, http.MethodPost, "/v1/auth/login", `{"email":"standard3@test.com","password":"Password123!"}`, "")
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	standardToken := decodeBody(t, resp)["token"].(string)
+
+	// Insert some audit logs manually
+	err = store.InsertAuditLog(ctx, *orgID, &adminUserID, "CREATE", "project", nil, map[string]any{"name": "test"})
+	require.NoError(t, err)
+
+	// Admin requests audit logs
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/orgs/%s/audit-logs", orgID.String()), "", adminToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := decodeBody(t, resp)
+	logs := body["logs"].([]interface{})
+	require.NotEmpty(t, logs)
+	assert.Equal(t, "CREATE", logs[0].(map[string]any)["action"])
+
+	// Standard member requests audit logs
+	req = newReq(t, http.MethodGet, fmt.Sprintf("/v1/orgs/%s/audit-logs", orgID.String()), "", standardToken)
+	resp, err = a.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}

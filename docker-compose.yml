@@ -103,5 +103,15 @@ services:
       - prometheus
     restart: unless-stopped
 
+  opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Px0_SeCuRe_OpEnSeArCh_2026#
+    ports:
+      - "9201:9200"
+    restart: unless-stopped
+
 volumes:
   postgres_data:

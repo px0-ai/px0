@@ -118,25 +118,46 @@ func RequireProjectRole(minRole string) fiber.Handler {
 			}
 		}
 
-		// Gather all teams where the subject has at least minRole
-		var qualifyingTeams []uuid.UUID
+		// Gather all teams where the subject has at least viewer role to check reachability
+		var viewerTeams []uuid.UUID
 		for tID, r := range subj.TeamRoles {
-			if hasRequiredRole(r, minRole) {
-				qualifyingTeams = append(qualifyingTeams, tID)
+			if hasRequiredRole(r, model.RoleViewer) {
+				viewerTeams = append(viewerTeams, tID)
 			}
 		}
 
-		if len(qualifyingTeams) == 0 {
-			return apierr.ErrForbidden.Respond(c)
+		if len(viewerTeams) == 0 {
+			return apierr.ErrProjectNotFound.Respond(c)
 		}
 
-		accessible, err := store.IsProjectAccessibleByTeams(c.Context(), projectID, qualifyingTeams)
+		viewerAccessible, err := store.IsProjectAccessibleByTeams(c.Context(), projectID, viewerTeams)
 		if err != nil {
 			return apierr.ErrInternalError.Respond(c, err)
 		}
+		if !viewerAccessible {
+			return apierr.ErrProjectNotFound.Respond(c)
+		}
 
-		if !accessible {
-			return apierr.ErrForbidden.Respond(c)
+		// Now check if they have the actual requested minRole
+		if minRole != model.RoleViewer {
+			var qualifyingTeams []uuid.UUID
+			for tID, r := range subj.TeamRoles {
+				if hasRequiredRole(r, minRole) {
+					qualifyingTeams = append(qualifyingTeams, tID)
+				}
+			}
+
+			if len(qualifyingTeams) == 0 {
+				return apierr.ErrForbidden.Respond(c)
+			}
+
+			accessible, err := store.IsProjectAccessibleByTeams(c.Context(), projectID, qualifyingTeams)
+			if err != nil {
+				return apierr.ErrInternalError.Respond(c, err)
+			}
+			if !accessible {
+				return apierr.ErrForbidden.Respond(c)
+			}
 		}
 
 		return c.Next()

@@ -333,6 +333,76 @@ paths:
         "204":
           description: Logged out successfully (No content)
 
+  /v1/auth/sessions:
+    get:
+      summary: List Active Sessions
+      description: Returns a list of all active login sessions for the currently authenticated user.
+      operationId: listSessions
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - "Requires a valid session token."
+      x-test-coverage:
+        - "TestListSessions_Success: Verifies list of active sessions is returned."
+      responses:
+        "200":
+          description: List of active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Session"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+
+  /v1/auth/sessions/{sessionID}:
+    delete:
+      summary: Revoke Session
+      description: Terminates and deletes a specific login session by ID.
+      operationId: revokeSession
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the session to terminate.
+      x-edge-cases:
+        - "Requires a valid session token."
+        - "Users can only delete their own sessions."
+      x-test-coverage:
+        - "TestRevokeSession_Success: Verifies a user can terminate another session of theirs."
+      responses:
+        "204":
+          description: Session terminated successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+
   /v1/auth/password-reset/trigger:
     post:
       summary: Trigger Password Reset
@@ -557,3 +627,28 @@ components:
       required:
         - code
         - new_password
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: Session token string (partially masked in lists).
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - token
+        - expires_at
+        - created_at

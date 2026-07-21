@@ -337,6 +337,49 @@ func UpdatePrompt(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"prompt": prompt})
 }
 
+type updatePromptSchemaRequest struct {
+	Schema map[string]any `json:"schema"`
+}
+
+func UpdatePromptSchema(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	projectIDs, err := getRequestViewerProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	var req updatePromptSchemaRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+
+	prompt, err := store.UpdatePromptSchema(c.Context(), id, editorProjectIDs, req.Schema)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
 func RestorePrompt(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -372,6 +415,68 @@ func RestorePrompt(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 	return c.JSON(fiber.Map{"prompt": prompt})
+}
+
+type rollbackPromptRequest struct {
+	TargetVersion int    `json:"target_version"`
+	RollbackReason string `json:"rollback_reason"`
+}
+
+func RollbackPrompt(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return apierr.ErrInvalidPromptID.Respond(c)
+	}
+
+	var req rollbackPromptRequest
+	if err := c.BodyParser(&req); err != nil {
+		return apierr.ErrInvalidRequestBody.Respond(c)
+	}
+	if req.TargetVersion <= 0 {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "target_version must be greater than 0").Respond(c)
+	}
+	if req.RollbackReason == "" {
+		return apierr.NewAPIError(fiber.StatusBadRequest, "rollback_reason is required").Respond(c)
+	}
+
+	projectIDs, err := getRequestViewerProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	if _, err := store.GetPromptByID(c.Context(), id, projectIDs); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrPromptNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	editorProjectIDs, err := getRequestEditorProjectIDs(c)
+	if err != nil {
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	// We require editor capability for rollback
+	prompt, err := store.GetPromptByID(c.Context(), id, editorProjectIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrForbidden.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	version, err := store.RollbackVersion(c.Context(), prompt.ID, req.TargetVersion)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return apierr.NewAPIError(fiber.StatusConflict, err.Error()).Respond(c)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return apierr.ErrVersionNotFound.Respond(c)
+		}
+		return apierr.ErrInternalError.Respond(c, err)
+	}
+
+	return c.JSON(fiber.Map{"version": version})
 }
 
 type movePromptRequest struct {
@@ -454,16 +559,6 @@ func DiffVersions(c *fiber.Ctx) error {
 		return apierr.NewAPIError(fiber.StatusBadRequest, "from and to query parameters are required").Respond(c)
 	}
 
-	from, err := strconv.Atoi(fromVal)
-	if err != nil || from <= 0 {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid from version").Respond(c)
-	}
-
-	to, err := strconv.Atoi(toVal)
-	if err != nil || to <= 0 {
-		return apierr.NewAPIError(fiber.StatusBadRequest, "invalid to version").Respond(c)
-	}
-
 	projectIDs, err := getRequestViewerProjectIDs(c)
 	if err != nil {
 		return apierr.ErrInternalError.Respond(c, err)
@@ -477,18 +572,18 @@ func DiffVersions(c *fiber.Ctx) error {
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	fromVersion, err := store.GetVersion(c.Context(), id, from)
+	fromVersion, err := resolveVersion(c.Context(), id, fromVal)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "from version not found").Respond(c)
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
 
-	toVersion, err := store.GetVersion(c.Context(), id, to)
+	toVersion, err := resolveVersion(c.Context(), id, toVal)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return apierr.NewAPIError(fiber.StatusNotFound, "to version not found").Respond(c)
+			return apierr.ErrVersionNotFound.Respond(c)
 		}
 		return apierr.ErrInternalError.Respond(c, err)
 	}
@@ -496,8 +591,8 @@ func DiffVersions(c *fiber.Ctx) error {
 	diff := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(fromVersion.Template),
 		B:        difflib.SplitLines(toVersion.Template),
-		FromFile: fmt.Sprintf("v%d", from),
-		ToFile:   fmt.Sprintf("v%d", to),
+		FromFile: fmt.Sprintf("v%d", fromVersion.Version),
+		ToFile:   fmt.Sprintf("v%d", toVersion.Version),
 		Context:  3,
 	}
 	diffText, err := difflib.GetUnifiedDiffString(diff)
@@ -506,8 +601,8 @@ func DiffVersions(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"from_version":  from,
-		"to_version":    to,
+		"from_version":  fromVersion.Version,
+		"to_version":    toVersion.Version,
 		"from_template": fromVersion.Template,
 		"to_template":   toVersion.Template,
 		"diff":          diffText,

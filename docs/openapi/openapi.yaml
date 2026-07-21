@@ -10,6 +10,8 @@ servers:
 paths:
   /v1/health:
     $ref: "./health.yaml#/paths/~1v1~1health"
+  /v1/search:
+    $ref: "./search.yaml#/paths/~1v1~1search"
   /v1/auth/register:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1register"
   /v1/auth/login:
@@ -18,6 +20,10 @@ paths:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1verify-email"
   /v1/auth/session:
     $ref: "./auth.yaml#/paths/~1v1~1auth~1session"
+  /v1/auth/sessions:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1sessions"
+  /v1/auth/sessions/{sessionID}:
+    $ref: "./auth.yaml#/paths/~1v1~1auth~1sessions~1{sessionID}"
   /v1/auth/me:
     $ref: "./profile.yaml#/paths/~1v1~1auth~1me"
   /v1/auth/me/change-password:
@@ -30,6 +36,16 @@ paths:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys"
   /v1/api-keys/{id}:
     $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}"
+  /v1/api-keys/{id}/regenerate:
+    $ref: "./api-keys.yaml#/paths/~1v1~1api-keys~1{id}~1regenerate"
+  /v1/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1cache~1purge"
+  /v1/prompts/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1prompts~1{id}~1cache~1purge"
+  /v1/skills/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1skills~1{id}~1cache~1purge"
+  /v1/tools/{id}/cache/purge:
+    $ref: "./cache.yaml#/paths/~1v1~1tools~1{id}~1cache~1purge"
   /v1/me/teams:
     $ref: "./profile.yaml#/paths/~1v1~1me~1teams"
   /v1/me/teams/{teamID}:
@@ -60,6 +76,10 @@ paths:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1people"
   /v1/orgs/{orgID}/members/{userID}:
     $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1members~1{userID}"
+  /v1/orgs/{orgID}/members/{userID}/role:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1members~1{userID}~1role"
+  /v1/orgs/{orgID}/audit-logs:
+    $ref: "./orgs.yaml#/paths/~1v1~1orgs~1{orgID}~1audit-logs"
   /v1/projects:
     $ref: "./projects.yaml#/paths/~1v1~1projects"
   /v1/projects/{projectID}:
@@ -76,20 +96,30 @@ paths:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts"
   /v1/prompts/{id}:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}"
+  /v1/prompts/{id}/schema:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1schema"
   /v1/prompts/{id}/archive:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1archive"
   /v1/prompts/{id}/restore:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1restore"
+  /v1/prompts/{id}/rollback:
+    $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1rollback"
   /v1/prompts/{id}/move:
     $ref: "./prompts.yaml#/paths/~1v1~1prompts~1{id}~1move"
   /v1/prompts/{id}/versions/diff:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1diff"
   /v1/projects/{projectID}/prompts/{slug}/render:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1run"
+  /v1/projects/{projectID}/prompts/{slug}/batch-run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1batch-run"
   /v1/prompts/{id}/versions:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions"
   /v1/prompts/{id}/versions/{version}:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}"
+  /v1/prompts/{id}/versions/{version}/variables:
+    $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1variables"
   /v1/prompts/{id}/versions/{version}/promote:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1promote"
   /v1/prompts/{id}/versions/{version}/demote:
@@ -100,6 +130,8 @@ paths:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1duplicate"
   /v1/projects/{projectID}/prompts/{slug}/versions/{version}/render:
     $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1versions~1{version}~1render"
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/run:
+    $ref: "./prompt-renders.yaml#/paths/~1v1~1projects~1{projectID}~1prompts~1{slug}~1versions~1{version}~1run"
   /v1/prompts/{id}/versions/{version}/tags:
     $ref: "./prompt-versions.yaml#/paths/~1v1~1prompts~1{id}~1versions~1{version}~1tags"
   /v1/prompts/{id}/tags:
@@ -110,6 +142,56 @@ paths:
     $ref: "./prompt-payloads.yaml#/paths/~1v1~1prompts~1{id}~1payloads"
   /v1/prompts/{id}/payloads/{payloadID}:
     $ref: "./prompt-payloads.yaml#/paths/~1v1~1prompts~1{id}~1payloads~1{payloadID}"
+
+  # Skills Registry paths
+  /v1/projects/{projectID}/skills:
+    $ref: "./skills.yaml#/paths/~1v1~1projects~1{projectID}~1skills"
+  /v1/skills/{id}:
+    $ref: "./skills.yaml#/paths/~1v1~1skills~1{id}"
+
+  /v1/skills/{id}/versions/diff:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1diff"
+  /v1/skills/{id}/versions:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions"
+  /v1/skills/{id}/versions/{version}:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}"
+  /v1/skills/{id}/versions/{version}/promote:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1promote"
+  /v1/skills/{id}/versions/{version}/demote:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1demote"
+  /v1/skills/{id}/versions/{version}/archive:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1archive"
+  /v1/skills/{id}/versions/{version}/duplicate:
+    $ref: "./skill-versions.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1duplicate"
+  /v1/skills/{id}/versions/{version}/download:
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1download"
+  /v1/skills/{id}/versions/{version}/files:
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files"
+  /v1/skills/{id}/versions/{version}/files/content:
+    $ref: "./skill-files.yaml#/paths/~1v1~1skills~1{id}~1versions~1{version}~1files~1content"
+
+  # Tools Registry paths
+  /v1/projects/{projectID}/tools:
+    $ref: "./tools.yaml#/paths/~1v1~1projects~1{projectID}~1tools"
+  /v1/tools:
+    $ref: "./tools.yaml#/paths/~1v1~1tools"
+  /v1/tools/{id}:
+    $ref: "./tools.yaml#/paths/~1v1~1tools~1{id}"
+
+  /v1/tools/{id}/versions/diff:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1diff"
+  /v1/tools/{id}/versions:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions"
+  /v1/tools/{id}/versions/{version}:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}"
+  /v1/tools/{id}/versions/{version}/promote:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1promote"
+  /v1/tools/{id}/versions/{version}/demote:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1demote"
+  /v1/tools/{id}/versions/{version}/archive:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1archive"
+  /v1/tools/{id}/versions/{version}/duplicate:
+    $ref: "./tool-versions.yaml#/paths/~1v1~1tools~1{id}~1versions~1{version}~1duplicate"
 
 components:
   securitySchemes:
@@ -122,6 +204,8 @@ components:
       $ref: "./auth.yaml#/components/schemas/APIError"
     User:
       $ref: "./auth.yaml#/components/schemas/User"
+    Session:
+      $ref: "./auth.yaml#/components/schemas/Session"
     APIKey:
       $ref: "./api-keys.yaml#/components/schemas/APIKey"
     Organization:
@@ -144,6 +228,14 @@ components:
       $ref: "./prompt-renders.yaml#/components/schemas/RenderRequest"
     RenderResponse:
       $ref: "./prompt-renders.yaml#/components/schemas/RenderResponse"
+    RunRequest:
+      $ref: "./prompt-renders.yaml#/components/schemas/RunRequest"
+    RunResponse:
+      $ref: "./prompt-renders.yaml#/components/schemas/RunResponse"
+    BatchRunRequest:
+      $ref: "./prompt-renders.yaml#/components/schemas/BatchRunRequest"
+    BatchRunResponse:
+      $ref: "./prompt-renders.yaml#/components/schemas/BatchRunResponse"
     PromptPayload:
       $ref: "./prompt-payloads.yaml#/components/schemas/PromptPayload"
     CreatePromptPayloadRequest:
@@ -152,3 +244,29 @@ components:
       $ref: "./prompt-payloads.yaml#/components/schemas/UpdatePromptPayloadRequest"
     UpdatePromptRequest:
       $ref: "./prompts.yaml#/components/schemas/UpdatePromptRequest"
+
+    # Skills Registry schemas
+    Skill:
+      $ref: "./skills.yaml#/components/schemas/Skill"
+    SkillVersion:
+      $ref: "./skill-versions.yaml#/components/schemas/SkillVersion"
+    CreateSkillRequest:
+      $ref: "./skills.yaml#/components/schemas/CreateSkillRequest"
+    UpdateSkillRequest:
+      $ref: "./skills.yaml#/components/schemas/UpdateSkillRequest"
+    UpsertFileRequest:
+      $ref: "./skill-files.yaml#/components/schemas/UpsertFileRequest"
+
+    # Tools Registry schemas
+    Tool:
+      $ref: "./tools.yaml#/components/schemas/Tool"
+    ToolVersion:
+      $ref: "./tool-versions.yaml#/components/schemas/ToolVersion"
+    CreateToolRequest:
+      $ref: "./tools.yaml#/components/schemas/CreateToolRequest"
+    UpdateToolRequest:
+      $ref: "./tools.yaml#/components/schemas/UpdateToolRequest"
+    CreateToolVersionRequest:
+      $ref: "./tool-versions.yaml#/components/schemas/CreateToolVersionRequest"
+    UpdateToolVersionRequest:
+      $ref: "./tool-versions.yaml#/components/schemas/UpdateToolVersionRequest"

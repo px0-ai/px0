@@ -157,6 +157,12 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - "Accepts either a version sequence number or a tag (e.g. 'prod', 'dev') for both 'from' and 'to' query parameters."
+        - "Returns 404 Not Found if either the 'from' or 'to' version/tag does not exist."
+        - "Fails with 400 Bad Request if 'from' or 'to' query parameters are missing."
+      x-test-coverage:
+        - "TestDiffVersions: Verifies diffing via numeric sequence numbers, diffing via tags, and verifying a nonexistent tag returns 404."
       parameters:
         - name: id
           in: path
@@ -168,14 +174,14 @@ paths:
           in: query
           required: true
           schema:
-            type: integer
-          description: The source version number to compare from.
+            type: string
+          description: The source version number (integer) or version tag (string) to compare from.
         - name: to
           in: query
           required: true
           schema:
-            type: integer
-          description: The target version number to compare to.
+            type: string
+          description: The target version number (integer) or version tag (string) to compare to.
       responses:
         "200":
           description: Versions compared successfully
@@ -435,6 +441,54 @@ paths:
                 $ref: "./auth.yaml#/components/schemas/APIError"
               example:
                 error: "only draft versions can be deleted"
+
+  /v1/prompts/{id}/versions/{version}/variables:
+    get:
+      summary: Get Template Variables
+      description: Parses the version's Go text/template syntax and returns a list of extracted variables.
+      operationId: getVersionVariables
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The version number or status tag ('live', 'draft', 'stable').
+      responses:
+        "200":
+          description: Variables extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  variables:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
+        "404":
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "./auth.yaml#/components/schemas/APIError"
 
   /v1/prompts/{id}/versions/{version}/promote:
     post:
@@ -982,10 +1036,12 @@ components:
           example: "Hello, {{.name}}! Count is {{.count}}."
         model:
           type: string
+          nullable: true
           description: Optional `provider/model` identifier intended to execute this prompt version.
           example: openai/gpt-4.1-mini
         model_params:
           type: object
+          nullable: true
           additionalProperties: true
           description: Optional provider-specific model parameters. Nested values are supported.
           example:

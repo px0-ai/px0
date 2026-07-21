@@ -61,7 +61,7 @@ func TestAPIKey_ReachesGrantedProject(t *testing.T) {
 	}
 
 	// 1. Before any grant, the key's team cannot reach the project.
-	assert.Equal(t, http.StatusForbidden, listWithKey())
+	assert.Equal(t, http.StatusNotFound, listWithKey())
 
 	// 2. After granting the key's team access, the key reaches the prompts.
 	require.NoError(t, store.GrantProjectAccess(ctx, project.ID, granteeTeam.ID))
@@ -72,9 +72,24 @@ func TestAPIKey_ReachesGrantedProject(t *testing.T) {
 	prompts := decodeBody(t, resp)["prompts"].([]any)
 	assert.Len(t, prompts, 1)
 
+	// Search uses the same expanded project scope and never requires clients
+	// to submit provider-specific vectors or modes.
+	searchReq := newAPIKeyReq(t, http.MethodGet, "/v1/search?q=greeting&type=prompt", "", apiKey)
+	searchResp, err := a.Test(searchReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, searchResp.StatusCode)
+	searchResults := decodeBody(t, searchResp)["results"].([]any)
+	assert.Len(t, searchResults, 1)
+
 	// 3. After revoking the grant, reach is lost again.
 	require.NoError(t, store.RevokeProjectAccess(ctx, project.ID, granteeTeam.ID))
-	assert.Equal(t, http.StatusForbidden, listWithKey())
+	assert.Equal(t, http.StatusNotFound, listWithKey())
+	searchReq = newAPIKeyReq(t, http.MethodGet, "/v1/search?q=greeting&type=prompt", "", apiKey)
+	searchResp, err = a.Test(searchReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, searchResp.StatusCode)
+	searchResults = decodeBody(t, searchResp)["results"].([]any)
+	assert.Empty(t, searchResults)
 }
 
 // TestAPIKey_DeniedForeignProject verifies an API key cannot reach a project
@@ -104,7 +119,7 @@ func TestAPIKey_DeniedForeignProject(t *testing.T) {
 	resp, err := a.Test(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 // createAPIKeyForTeamWithOp creates an API key scoped to a single team with a custom operation and

@@ -8,9 +8,17 @@ import (
 	"github.com/px0-ai/px0/internal/handler"
 	"github.com/px0-ai/px0/internal/middleware"
 	"github.com/px0-ai/px0/internal/model"
+	"github.com/px0-ai/px0/internal/search"
 )
 
 func New() *fiber.App {
+	return NewWithSearch(search.NewDefault())
+}
+
+func NewWithSearch(entitySearch search.Searcher) *fiber.App {
+	if entitySearch == nil {
+		entitySearch = search.NewDefault()
+	}
 	app := fiber.New(fiber.Config{AppName: "px0"})
 
 	app.Use(cors.New(cors.Config{
@@ -27,6 +35,7 @@ func New() *fiber.App {
 
 	v1 := app.Group("/v1")
 	v1.Get("/health", handler.Health)
+	v1.Get("/search", middleware.RequireAuth, handler.Search(entitySearch))
 
 	auth := v1.Group("/auth")
 	auth.Post("/register", handler.Register)
@@ -36,6 +45,8 @@ func New() *fiber.App {
 	auth.Post("/password-reset/trigger", handler.TriggerPasswordReset)
 	auth.Post("/password-reset/reset", handler.ResetPassword)
 	auth.Delete("/session", handler.Logout)
+	auth.Get("/sessions", middleware.RequireSessionToken, handler.ListSessions)
+	auth.Delete("/sessions/:sessionID", middleware.RequireSessionToken, handler.DeleteSessionByID)
 	auth.Get("/me", middleware.RequireAccessToken, handler.Me)
 	auth.Put("/me", middleware.RequireAccessToken, handler.UpdateMe)
 	auth.Post("/me/change-password", middleware.RequireAccessToken, handler.ChangePassword)
@@ -54,11 +65,14 @@ func New() *fiber.App {
 	orgs.Post("/:orgID/teams", handler.CreateTeam)
 	orgs.Get("/:orgID/teams", handler.ListOrgTeams)
 	orgs.Get("/:orgID/people", handler.ListOrgPeople)
+	orgs.Get("/:orgID/audit-logs", handler.ListOrgAuditLogs)
+	orgs.Put("/:orgID/members/:userID/role", handler.UpdateOrgMemberRole)
 	orgs.Delete("/:orgID/members/:userID", handler.RemoveOrgMember)
 
 	projects := v1.Group("/projects", middleware.RequireAuth)
 	projects.Post("", handler.CreateProject)
 	projects.Get("/:projectID", middleware.RequireProjectRole(model.RoleViewer), handler.GetProject)
+	projects.Put("/:projectID", middleware.RequireProjectRole(model.RoleEditor), handler.UpdateProject)
 	projects.Delete("/:projectID", middleware.RequireProjectRole(model.RoleAdmin), handler.DeleteProject)
 	projects.Post("/:projectID/access", middleware.RequireProjectRole(model.RoleAdmin), handler.GrantProjectAccess)
 	projects.Delete("/:projectID/access/:teamID", middleware.RequireProjectRole(model.RoleAdmin), handler.RevokeProjectAccess)
@@ -66,6 +80,15 @@ func New() *fiber.App {
 	projects.Get("/:projectID/prompts", middleware.RequireProjectRole(model.RoleViewer), handler.ListPrompts)
 	projects.Post("/:projectID/prompts/:slug/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderLive)
 	projects.Post("/:projectID/prompts/:slug/versions/:version/render", middleware.RequireProjectRole(model.RoleViewer), handler.RenderVersion)
+	projects.Post("/:projectID/prompts/:slug/run", middleware.RequireProjectRole(model.RoleViewer), handler.RunLive)
+	projects.Post("/:projectID/prompts/:slug/batch-run", middleware.RequireProjectRole(model.RoleViewer), handler.BatchRun)
+	projects.Post("/:projectID/prompts/:slug/versions/:version/run", middleware.RequireProjectRole(model.RoleViewer), handler.RunVersion)
+	projects.Post("/:projectID/skills", middleware.RequireProjectRole(model.RoleEditor), handler.CreateSkill)
+	projects.Get("/:projectID/skills", middleware.RequireProjectRole(model.RoleViewer), handler.ListSkills)
+	projects.Post("/:projectID/tools", middleware.RequireProjectRole(model.RoleEditor), handler.CreateTool)
+	projects.Get("/:projectID/tools", middleware.RequireProjectRole(model.RoleViewer), handler.ListTools)
+	projects.Post("/:projectID/tools/:id/invoke", middleware.RequireProjectRole(model.RoleViewer), handler.InvokeLive)
+	projects.Post("/:projectID/tools/:id/versions/:version/invoke", middleware.RequireProjectRole(model.RoleViewer), handler.InvokeVersion)
 
 	teams := v1.Group("/teams", middleware.RequireAccessToken)
 	teams.Get("/:teamID/projects", middleware.RequireTeamRole(model.RoleViewer), handler.ListTeamProjects)
@@ -83,20 +106,28 @@ func New() *fiber.App {
 	apiKeys := v1.Group("/api-keys", middleware.RequireSessionToken)
 	apiKeys.Post("", handler.CreateAPIKey)
 	apiKeys.Get("", handler.ListAPIKeys)
+	apiKeys.Put("/:id", handler.UpdateAPIKey)
 	apiKeys.Delete("/:id", handler.DeleteAPIKey)
+	apiKeys.Post("/:id/regenerate", handler.RegenerateAPIKey)
 
 	prompts := v1.Group("/prompts", middleware.RequireAuth)
+	v1.Post("/cache/purge", handler.PurgeGlobalCache)
+	prompts.Post("/:id/cache/purge", handler.PurgePromptCache)
+
 	prompts.Get("", handler.ListAllPrompts)
 	prompts.Get("/:id", handler.GetPrompt)
+	prompts.Post("/:id/schema", handler.UpdatePromptSchema)
 	prompts.Put("/:id", handler.UpdatePrompt)
 	prompts.Post("/:id/archive", handler.ArchivePrompt)
 	prompts.Post("/:id/restore", handler.RestorePrompt)
+	prompts.Post("/:id/rollback", handler.RollbackPrompt)
 	prompts.Post("/:id/move", handler.MovePrompt)
 	prompts.Get("/:id/versions/diff", handler.DiffVersions)
 
 	prompts.Post("/:id/versions", handler.CreateVersion)
 	prompts.Get("/:id/versions", handler.ListVersions)
 	prompts.Get("/:id/versions/:version", handler.GetVersion)
+	prompts.Get("/:id/versions/:version/variables", handler.GetVersionVariables)
 	prompts.Put("/:id/versions/:version", handler.UpdateVersion)
 	prompts.Delete("/:id/versions/:version", handler.DeleteVersion)
 	prompts.Post("/:id/versions/:version/promote", handler.PromoteVersion)
@@ -112,6 +143,46 @@ func New() *fiber.App {
 	prompts.Get("/:id/payloads/:payloadID", handler.GetPromptPayload)
 	prompts.Put("/:id/payloads/:payloadID", handler.UpdatePromptPayload)
 	prompts.Delete("/:id/payloads/:payloadID", handler.DeletePromptPayload)
+
+	skills := v1.Group("/skills", middleware.RequireAuth)
+	skills.Post("/:id/cache/purge", handler.PurgeSkillCache)
+	skills.Get("/:id", handler.GetSkill)
+	skills.Put("/:id", handler.UpdateSkill)
+	skills.Delete("/:id", handler.DeleteSkill)
+	skills.Get("/:id/versions/diff", handler.DiffSkillVersions)
+	skills.Post("/:id/versions", handler.CreateSkillVersion)
+	skills.Put("/:id/versions", handler.UploadSkillZip)
+	skills.Get("/:id/versions", handler.ListSkillVersions)
+	skills.Get("/:id/versions/:version", handler.GetSkillVersion)
+	skills.Delete("/:id/versions/:version", handler.DeleteSkillVersion)
+	skills.Post("/:id/versions/:version/promote", handler.PromoteSkillVersion)
+	skills.Post("/:id/versions/:version/demote", handler.DemoteSkillVersion)
+	skills.Post("/:id/versions/:version/archive", handler.ArchiveSkillVersion)
+	skills.Post("/:id/versions/:version/duplicate", handler.DuplicateSkillVersion)
+	skills.Get("/:id/versions/:version/download", handler.DownloadSkillZip)
+	skills.Get("/:id/versions/:version/files", handler.ListSkillFiles)
+	skills.Get("/:id/versions/:version/files/content", handler.GetSkillFileContent)
+	skills.Post("/:id/versions/:version/files", handler.UpsertSkillFile)
+	skills.Put("/:id/versions/:version/files", handler.UpsertSkillFile)
+	skills.Delete("/:id/versions/:version/files", handler.DeleteSkillFile)
+
+	tools := v1.Group("/tools", middleware.RequireAuth)
+	tools.Post("/:id/cache/purge", handler.PurgeToolCache)
+	tools.Get("", handler.ListAllTools)
+	tools.Get("/:id", handler.GetTool)
+	tools.Put("/:id", handler.UpdateTool)
+	tools.Delete("/:id", handler.DeleteTool)
+	tools.Get("/:id/versions/diff", handler.DiffToolVersions)
+	tools.Post("/:id/versions", handler.CreateToolVersion)
+	tools.Get("/:id/versions", handler.ListToolVersions)
+	tools.Get("/:id/versions/:version", handler.GetToolVersion)
+	tools.Put("/:id/versions/:version", handler.UpdateToolVersion)
+	tools.Delete("/:id/versions/:version", handler.DeleteToolVersion)
+	tools.Post("/:id/versions/:version/promote", handler.PromoteToolVersion)
+	tools.Post("/:id/versions/:version/demote", handler.DemoteToolVersion)
+	tools.Post("/:id/versions/:version/archive", handler.ArchiveToolVersion)
+	tools.Post("/:id/versions/:version/duplicate", handler.DuplicateToolVersion)
+	tools.Get("/:id/invocations", handler.ListToolInvocations)
 
 	return app
 }

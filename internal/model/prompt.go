@@ -13,14 +13,15 @@ const (
 )
 
 type Prompt struct {
-	ID          uuid.UUID `json:"id"`
-	ProjectID   uuid.UUID `json:"project_id"`
-	Slug        string    `json:"slug"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uuid.UUID      `json:"id"`
+	ProjectID   uuid.UUID      `json:"project_id"`
+	Slug        string         `json:"slug"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Status      string         `json:"status"`
+	Schema      map[string]any `json:"schema,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 const (
@@ -41,4 +42,17 @@ type PromptVersion struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	PublishedAt *time.Time      `json:"published_at"`
 	Tags        []string        `json:"tags"`
+}
+
+type PromptInvocation struct {
+	ID             int64           `json:"id"`
+	PromptID       uuid.UUID       `json:"prompt_id"`
+	Version        int             `json:"version"`
+	Variables      json.RawMessage `json:"variables"`
+	RenderedPrompt string          `json:"rendered_prompt"`
+	ModelResponse  *string         `json:"model_response,omitempty"`
+	LatencyMs      *int            `json:"latency_ms,omitempty"`
+	TokenUsage     json.RawMessage `json:"token_usage,omitempty"`
+	CacheHit       bool            `json:"cache_hit"`
+	CreatedAt      time.Time       `json:"created_at"`
 }

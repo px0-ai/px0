@@ -44,7 +44,7 @@ func RequireAccessToken(c *fiber.Ctx) error {
 				}
 				return c.Next()
 			}
-			
+
 			// For API Key: must have some Editor/Admin capability or IsOrgAdmin
 			hasAccess := subj.IsOrgAdmin
 			if !hasAccess {

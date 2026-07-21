@@ -288,6 +288,67 @@ func PromoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*m
 	return v, nil
 }
 
+func RollbackVersion(ctx context.Context, promptID uuid.UUID, targetVersion int) (*model.PromptVersion, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Check if target version exists and is stable
+	var currentStatus string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM prompt_versions
+		 WHERE prompt_id = $1 AND version = $2
+		 FOR UPDATE`,
+		promptID, targetVersion,
+	).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("lock target version: %w", err)
+	}
+
+	if currentStatus != model.VersionStatusStable {
+		return nil, fmt.Errorf("can only rollback to stable version: %w", ErrConflict)
+	}
+
+	// Demote existing live version to stable
+	_, err = tx.Exec(ctx,
+		`UPDATE prompt_versions SET status = 'stable'
+		 WHERE prompt_id = $1 AND status = 'live'`,
+		promptID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("demote existing live version: %w", err)
+	}
+
+	// Promote target version to live
+	now := time.Now()
+	v := &model.PromptVersion{}
+	err = tx.QueryRow(ctx,
+		`UPDATE prompt_versions
+		 SET status = 'live', published_at = $1
+		 WHERE prompt_id = $2 AND version = $3
+		 RETURNING id, prompt_id, version, template, status, model, model_params, created_at, published_at`,
+		now, promptID, targetVersion,
+	).Scan(&v.ID, &v.PromptID, &v.Version, &v.Template, &v.Status, &v.Model, &v.ModelParams, &v.CreatedAt, &v.PublishedAt)
+	if err != nil {
+		return nil, fmt.Errorf("promote target version: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
+	if err := populateTags(ctx, v); err != nil {
+		return nil, fmt.Errorf("populate tags: %w", err)
+	}
+
+	return v, nil
+}
+
 func DemoteVersion(ctx context.Context, promptID uuid.UUID, versionNum int) (*model.PromptVersion, error) {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {

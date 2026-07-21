@@ -78,6 +78,8 @@ var (
 	ErrTemplateExecutionFailed  = &APIError{Status: fiber.StatusUnprocessableEntity, Message: "template execution failed"}
 	ErrTemplateRequired         = &APIError{Status: fiber.StatusBadRequest, Message: "template is required"}
 	ErrInvalidTemplate          = &APIError{Status: fiber.StatusBadRequest, Message: "invalid template"}
+	ErrToolNotFound             = &APIError{Status: fiber.StatusNotFound, Message: "tool not found"}
+	ErrInvalidToolID            = &APIError{Status: fiber.StatusBadRequest, Message: "invalid tool id"}
 	ErrOnlyDraftsModifiable     = &APIError{Status: fiber.StatusUnprocessableEntity, Message: "only draft versions can be modified"}
 	ErrOnlyDraftsDeletable      = &APIError{Status: fiber.StatusUnprocessableEntity, Message: "only draft versions can be deleted"}
 	ErrUserNotVerified          = &APIError{Status: fiber.StatusForbidden, Message: "user is not verified"}
@@ -86,4 +88,11 @@ var (
 	ErrTagRequired              = &APIError{Status: fiber.StatusBadRequest, Message: "tag is required"}
 	ErrInvalidTag               = &APIError{Status: fiber.StatusBadRequest, Message: "invalid tag format: must be 1-50 characters containing only letters, numbers, dashes, underscores, and dots"}
 	ErrTagNotFound              = &APIError{Status: fiber.StatusNotFound, Message: "tag not found"}
+
+	// Skill Registry Errors
+	ErrSkillNotFound     = &APIError{Status: fiber.StatusNotFound, Message: "skill not found"}
+	ErrInvalidSkillID    = &APIError{Status: fiber.StatusBadRequest, Message: "invalid skill id"}
+	ErrFileNotFound      = &APIError{Status: fiber.StatusNotFound, Message: "file not found"}
+	ErrFilePathRequired  = &APIError{Status: fiber.StatusBadRequest, Message: "file path is required"}
+	ErrFileAlreadyExists = &APIError{Status: fiber.StatusConflict, Message: "file already exists"}
 )

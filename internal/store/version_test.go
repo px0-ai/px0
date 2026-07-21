@@ -190,8 +190,10 @@ func TestUpdateVersionModel(t *testing.T) {
 	versionModel := "gpt-4.1-mini"
 	modelParams := json.RawMessage(`{"temperature":0.5}`)
 	updated, err := store.UpdateVersion(ctx, v.ID, store.UpdateVersionParams{
-		Model:       &versionModel,
-		ModelParams: modelParams,
+		Model:             &versionModel,
+		UpdateModel:       true,
+		ModelParams:       modelParams,
+		UpdateModelParams: true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "original", updated.Template)

@@ -1,0 +1,434 @@
+openapi: 3.1.0
+info:
+  title: Tools Registry Core API
+  version: 1.0.0
+paths:
+  /v1/projects/{projectID}/tools:
+    post:
+      summary: Create a Tool
+      description: Creates a new tool inside a project.
+      operationId: createTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateToolRequest"
+      responses:
+        "201":
+          description: Tool created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Project not found
+        "409":
+          description: Duplicate tool name or slug
+    get:
+      summary: List Tools
+      description: Lists the tools inside a project.
+      operationId: listTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      responses:
+        "200":
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tool"
+
+  /v1/tools:
+    get:
+      summary: List All Tools (global, with filtering)
+      description: Lists tools globally, optionally filtered by an explicit project ID query parameter.
+      operationId: listAllTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project to filter by.
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Alternate query parameter for filtering by project ID.
+      responses:
+        "200":
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tool"
+
+  /v1/tools/{id}:
+    get:
+      summary: Get a Tool
+      description: Retrieves details of a specific tool by ID or slug.
+      operationId: getTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        "200":
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "404":
+          description: Tool not found
+
+    put:
+      summary: Update a Tool
+      description: Updates the metadata of a specific tool.
+      operationId: updateTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolRequest"
+      responses:
+        "200":
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: "#/components/schemas/Tool"
+        "404":
+          description: Tool not found
+
+    delete:
+      summary: Delete a Tool
+      description: Deletes a specific tool and all its versions.
+      operationId: deleteTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        "204":
+          description: Tool deleted successfully
+        "404":
+          description: Tool not found
+
+  /v1/projects/{projectID}/tools/{id}/invoke:
+    post:
+      summary: Invoke Live Tool Version
+      description: Invokes the active 'live' version of the tool by making a call to its configured HTTP URL, validating request/response schemas.
+      operationId: invokeLive
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      requestBody:
+        description: Ad-hoc JSON payload passed on the fly to the tool execution
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Tool invoked successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_code:
+                    type: integer
+                  response:
+                    type: object
+        "400":
+          description: Request schema validation failed or invalid request payload
+        "404":
+          description: Tool or live version not found
+        "422":
+          description: Response schema validation failed
+
+  /v1/projects/{projectID}/tools/{id}/versions/{version}/invoke:
+    post:
+      summary: Invoke Tool Version
+      description: Invokes a specific version of the tool by making a call to its configured HTTP URL, validating request/response schemas.
+      operationId: invokeVersion
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number of the tool.
+      requestBody:
+        description: Ad-hoc JSON payload passed on the fly to the tool execution
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Tool version invoked successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_code:
+                    type: integer
+                  response:
+                    type: object
+        "400":
+          description: Request schema validation failed or invalid request payload
+        "404":
+          description: Tool or version not found
+        "422":
+          description: Response schema validation failed
+
+  /v1/tools/{id}/invocations:
+    get:
+      summary: List Tool Invocations
+      description: Returns a cursor-paginated history of tool execution logs, including payloads and validation outcomes.
+      operationId: listToolInvocations
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: The pagination cursor (representing the sequence ID of the last item in previous page).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+          description: Maximum number of invocation records to return.
+      responses:
+        "200":
+          description: Paginated tool execution logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invocations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ToolInvocation"
+                  next_cursor:
+                    type: string
+
+components:
+  schemas:
+    Tool:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - slug
+        - name
+    CreateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+      required:
+        - name
+    UpdateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+          format: uri
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+      required:
+        - name
+    ToolInvocation:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tool_id:
+          type: string
+          format: uuid
+        tool_version:
+          type: integer
+        request_payload:
+          type: object
+        response_payload:
+          type: object
+        error:
+          type: string
+        status_code:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tool_id
+        - tool_version
+        - request_payload
+        - created_at

@@ -263,3 +263,67 @@ func TestDeleteTeam_CascadesProjects(t *testing.T) {
 	_, err = store.GetProjectByID(ctx, p.ID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestUpdateProject(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	p, err := store.CreateProject(ctx, tm.ID, "proj_a", "Proj A")
+	require.NoError(t, err)
+
+	// Update name only
+	newName := "Updated Name"
+	updated, err := store.UpdateProject(ctx, p.ID, &newName, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", updated.Name)
+	assert.Equal(t, "proj_a", updated.Slug)
+
+	// Update slug only
+	newSlug := "updated_slug"
+	updated, err = store.UpdateProject(ctx, p.ID, nil, &newSlug)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", updated.Name)
+	assert.Equal(t, "updated_slug", updated.Slug)
+
+	// Update both
+	newName2 := "Final Name"
+	newSlug2 := "final_slug"
+	updated, err = store.UpdateProject(ctx, p.ID, &newName2, &newSlug2)
+	require.NoError(t, err)
+	assert.Equal(t, "Final Name", updated.Name)
+	assert.Equal(t, "final_slug", updated.Slug)
+
+	// Update nothing (should return same project)
+	updated, err = store.UpdateProject(ctx, p.ID, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "Final Name", updated.Name)
+	assert.Equal(t, "final_slug", updated.Slug)
+
+	// NotFound error
+	_, err = store.UpdateProject(ctx, nonExistentUUID(), &newName2, nil)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestUpdateProject_Duplicate(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	tm, err := store.CreateTeam(ctx, "Test Team")
+	require.NoError(t, err)
+
+	p1, err := store.CreateProject(ctx, tm.ID, "proj_1", "Proj 1")
+	require.NoError(t, err)
+	_, err = store.CreateProject(ctx, tm.ID, "proj_2", "Proj 2")
+	require.NoError(t, err)
+
+	// Update p1 to have a duplicate name
+	dupName := "Proj 2"
+	_, err = store.UpdateProject(ctx, p1.ID, &dupName, nil)
+	assert.ErrorIs(t, err, store.ErrDuplicate)
+
+	// Update p1 to have a duplicate slug
+	dupSlug := "proj_2"
+	_, err = store.UpdateProject(ctx, p1.ID, nil, &dupSlug)
+	assert.ErrorIs(t, err, store.ErrDuplicate)
+}

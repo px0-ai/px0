@@ -28,6 +28,78 @@ paths:
                     example: OK
                 required:
                   - status
+  /v1/search:
+    get:
+      summary: Search Registry Entities
+      description: Searches prompts, skills, and tools across every project the requester can view. The server retrieves lexical and semantic candidates from the natural-language query, reranks them, and reapplies project access before returning common entity metadata.
+      operationId: searchRegistry
+      tags:
+        - Search
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Natural-language text describing the desired prompt, skill, or tool. Can optionally include an inline type filter prefix or suffix (e.g., `type:prompt refund` or `refund type:tool`) which restricts results to the specified entity type. If an invalid type filter (e.g., `type:unknown`) is provided in the query string, a 400 Bad Request is returned. Provider names, modes, scores, and embedding vectors are internal and cannot be supplied by clients.
+          schema:
+            type: string
+            minLength: 1
+            example: Find something that handles customer refunds
+        - name: type
+          in: query
+          required: false
+          description: Restricts the search to one entity type. When omitted, all registered entity types are searched together.
+          schema:
+            $ref: '#/components/schemas/SearchEntityType'
+      x-edge-cases:
+        - Missing, empty, or whitespace-only q returns 400 and never runs an unbounded search.
+        - An unsupported type returns 400 with the complete list of accepted values.
+        - Omitting type searches prompts, skills, and tools and returns one globally reranked result list.
+        - An inline type filter in the q query parameter (e.g. `type:prompt`, `type:skill`, `type:tool`) restricts the search to that entity type, overriding the query parameter `type`. The filter prefix/suffix itself is stripped from the search text.
+        - An invalid inline type filter (e.g. `type:unknown`) in the q query parameter returns a 400 Bad Request.
+        - Every retriever receives only project IDs the requester can view; hydration reapplies the same scope as a defense-in-depth boundary.
+        - Archived prompts are excluded. Skills and tools currently have no container archive state.
+        - A project grant makes its entities searchable by the granted team's API keys; revocation removes them immediately.
+        - Provider-specific scores, selection, and vectors are never exposed in the public request or response.
+      x-test-coverage:
+        - 'TestSearchAcrossAllEntityTypesAndAccessibleProjects: Verifies unfiltered search returns prompts, skills, and tools while excluding an inaccessible project.'
+        - 'TestSearchFiltersByEntityType: Verifies type=tool returns only matching tools.'
+        - 'TestSearchRejectsMissingQueryAndInvalidType: Verifies missing/blank q and unknown types return 400.'
+        - 'TestSearchExcludesArchivedPrompts: Verifies archived prompt containers are not searchable.'
+        - 'TestSearchRequiresAuthentication: Verifies unauthenticated requests return 401.'
+        - 'TestSearchInlineTypeFilters: Verifies correct functioning of valid and invalid inline type filters.'
+        - 'TestAPIKey_ReachesGrantedProject: Verifies search honors API-key project grants and revocations.'
+        - 'TestPostgresRetrieverSearchesAllEntityTypesAndEnforcesScope: Verifies PostgreSQL FTS covers all current registry entities with project isolation.'
+        - 'TestPostgresRetrieverHonorsEntityTypeFilter: Verifies the retriever applies the requested entity type.'
+        - 'TestPostgresRetrieverReflectsEntityUpdates: Verifies generated search documents update transactionally with entity metadata.'
+        - 'TestGetSearchResultsPreservesRankAndEnforcesScope: Verifies hydration preserves fused rank while dropping archived or unauthorized references.'
+        - 'TestEngineSearchRetrievesAndReranksBothSources: Verifies lexical and semantic candidates are deterministically fused.'
+      responses:
+        '200':
+          description: Ranked registry search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Missing query or unsupported entity type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Search provider or internal failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/auth/register:
     post:
       summary: Register a new user
@@ -364,6 +436,74 @@ paths:
       responses:
         '204':
           description: Logged out successfully (No content)
+  /v1/auth/sessions:
+    get:
+      summary: List Active Sessions
+      description: Returns a list of all active login sessions for the currently authenticated user.
+      operationId: listSessions
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      x-edge-cases:
+        - Requires a valid session token.
+      x-test-coverage:
+        - 'TestListSessions_Success: Verifies list of active sessions is returned.'
+      responses:
+        '200':
+          description: List of active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/auth/sessions/{sessionID}:
+    delete:
+      summary: Revoke Session
+      description: Terminates and deletes a specific login session by ID.
+      operationId: revokeSession
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the session to terminate.
+      x-edge-cases:
+        - Requires a valid session token.
+        - Users can only delete their own sessions.
+      x-test-coverage:
+        - 'TestRevokeSession_Success: Verifies a user can terminate another session of theirs.'
+      responses:
+        '204':
+          description: Session terminated successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/auth/me:
     get:
       summary: Me
@@ -729,6 +869,48 @@ paths:
         '500':
           description: Internal Server Error
   /v1/api-keys/{id}:
+    put:
+      summary: Update an API Key
+      description: Update the name, operation, or scoped teams of an existing API key.
+      operationId: updateAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to update.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAPIKeyRequest'
+      responses:
+        '200':
+          description: API key updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    $ref: '#/components/schemas/APIKey'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: API key not found
+        '500':
+          description: Internal Server Error
     delete:
       summary: Delete an API Key
       description: Revokes and permanently deletes an API key by its unique UUID.
@@ -758,6 +940,130 @@ paths:
           description: API key not found
         '500':
           description: Internal Server Error
+  /v1/api-keys/{id}/regenerate:
+    post:
+      summary: Rotate/Regenerate an API Key
+      description: Generates and returns a new secure raw key string for an existing API Key while keeping metadata, scopes, and association unchanged.
+      operationId: regenerateAPIKey
+      tags:
+        - API Keys
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique UUID of the API Key to regenerate.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - Only Org Admins and system administrators can regenerate API keys.
+      x-test-coverage:
+        - 'TestRegenerateAPIKey: Verifies regeneration produces a new key.'
+      responses:
+        '200':
+          description: API key regenerated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreatedResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: API key not found
+        '500':
+          description: Internal Server Error
+  /v1/cache/purge:
+    post:
+      summary: Purge Global Cache
+      description: Clears all caches globally across the cluster.
+      operationId: purgeGlobalCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cache purged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '401':
+          description: Unauthorized
+  /v1/prompts/{id}/cache/purge:
+    post:
+      summary: Purge Prompt Cache
+      description: Clears the cache for a specific prompt by its ID.
+      operationId: purgePromptCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
+  /v1/skills/{id}/cache/purge:
+    post:
+      summary: Purge Skill Cache
+      description: Clears the cache for a specific skill by its ID.
+      operationId: purgeSkillCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
+  /v1/tools/{id}/cache/purge:
+    post:
+      summary: Purge Tool Cache
+      description: Clears the cache for a specific tool by its ID.
+      operationId: purgeToolCache
+      tags:
+        - Cache Purges
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cache purged successfully
+        '401':
+          description: Unauthorized
   /v1/me/teams:
     get:
       summary: List User Teams
@@ -1644,6 +1950,148 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/orgs/{orgID}/members/{userID}/role:
+    put:
+      summary: Update Organization Member Role
+      description: |
+        Promotes a standard user to an organization admin role or demotes them back to a standard member.
+        Requires Org Admin privileges.
+      operationId: updateOrgMemberRole
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the user whose role is being updated.
+      x-edge-cases:
+        - Only Org Admins and system administrators can update member roles.
+        - Returns 403 Forbidden if a standard user tries to update a member's role.
+        - Returns 404 Not Found if the user is not a member of the organization.
+      x-test-coverage:
+        - 'TestOrg_UpdateMemberRole: Verifies that an Org Admin can successfully promote and demote a member.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrgMemberRoleRequest'
+      responses:
+        '200':
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: User or Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/orgs/{orgID}/audit-logs:
+    get:
+      summary: List Administrative Audit Logs
+      description: |
+        Returns a paginated event stream of administrative actions in the organization.
+        Requires Org Admin privileges.
+      operationId: listOrgAuditLogs
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the organization.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      x-edge-cases:
+        - Only Org Admins and system administrators can view audit logs.
+        - Returns 403 Forbidden if a standard user tries to view audit logs.
+      x-test-coverage:
+        - 'TestOrg_ListAuditLogs: Verifies that an Org Admin can successfully view audit logs, while a standard user cannot.'
+      responses:
+        '200':
+          description: A paginated list of audit logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Organization Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/projects:
     post:
       summary: Create a Project
@@ -1718,6 +2166,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
   /v1/projects/{projectID}:
+    put:
+      summary: Update a Project
+      description: |
+        Updates a project's metadata (e.g., name and/or slug). The requester
+        must be an editor-or-above of the owning team or an admin of its
+        organization.
+      operationId: updateProject
+      tags:
+        - Projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project.
+          schema:
+            type: string
+            format: uuid
+      x-edge-cases:
+        - A duplicate name or slug within the same owning team returns 409.
+        - A non-editor member is refused with 403.
+        - An unknown project id returns 404.
+      x-test-coverage:
+        - 'TestUpdateProject_Success: editor updates the project (200).'
+        - 'TestUpdateProject_Duplicate: duplicate name/slug returns 409.'
+        - 'TestUpdateProject_Forbidden: a viewer is refused (403).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: Invalid project id or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden (requester is not an editor of the owning team or org admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '409':
+          description: Duplicate project name or slug in team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
     get:
       summary: Get a Project
       description: |
@@ -2421,6 +2945,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/prompts/{id}/schema:
+    post:
+      summary: Update Prompt Schema
+      description: Stores or updates a JSON Schema at the prompt level to enforce presence and types of input variables before execution.
+      operationId: updatePromptSchema
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                schema:
+                  type: object
+                  additionalProperties: true
+                  description: The JSON Schema to store.
+      responses:
+        '200':
+          description: Schema updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    $ref: '#/components/schemas/Prompt'
+                required:
+                  - prompt
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/archive:
     post:
       summary: Archive a Prompt
@@ -2549,6 +3137,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/prompts/{id}/rollback:
+    post:
+      summary: Rollback a Prompt
+      description: Instantly demotes the active live version and promotes a target historical version in a single atomic transaction.
+      operationId: rollbackPrompt
+      tags:
+        - Prompts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - target_version
+                - rollback_reason
+              properties:
+                target_version:
+                  type: integer
+                  description: The historical version number to promote to live.
+                rollback_reason:
+                  type: string
+                  description: The reason for rolling back.
+      responses:
+        '200':
+          description: Prompt successfully rolled back
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/PromptVersion'
+                required:
+                  - version
+        '400':
+          description: Invalid UUID format or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or target version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/move:
     post:
       summary: Move a Prompt
@@ -2636,6 +3292,12 @@ paths:
         - Prompt Versions
       security:
         - BearerAuth: []
+      x-edge-cases:
+        - Accepts either a version sequence number or a tag (e.g. 'prod', 'dev') for both 'from' and 'to' query parameters.
+        - Returns 404 Not Found if either the 'from' or 'to' version/tag does not exist.
+        - Fails with 400 Bad Request if 'from' or 'to' query parameters are missing.
+      x-test-coverage:
+        - 'TestDiffVersions: Verifies diffing via numeric sequence numbers, diffing via tags, and verifying a nonexistent tag returns 404.'
       parameters:
         - name: id
           in: path
@@ -2647,14 +3309,14 @@ paths:
           in: query
           required: true
           schema:
-            type: integer
-          description: The source version number to compare from.
+            type: string
+          description: The source version number (integer) or version tag (string) to compare from.
         - name: to
           in: query
           required: true
           schema:
-            type: integer
-          description: The target version number to compare to.
+            type: string
+          description: The target version number (integer) or version tag (string) to compare to.
       responses:
         '200':
           description: Versions compared successfully
@@ -2801,6 +3463,139 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: internal error
+  /v1/projects/{projectID}/prompts/{slug}/run:
+    post:
+      summary: Run Live Prompt Version
+      description: Renders the active 'live' template version and executes it against the configured model provider (e.g. OpenAI or Anthropic). Supports ad-hoc overrides for models and params, and unified stream mode.
+      operationId: runLive
+      tags:
+        - Prompt Runs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
+        - name: slug
+          in: path
+          required: true
+          description: Prompt slug, unique within the project.
+          schema:
+            type: string
+      x-edge-cases:
+        - Fails with 400 if provider key is missing.
+        - Fails with 502 Bad Gateway if provider API returns non-200.
+      x-test-coverage:
+        - 'TestRunLive_Success_OpenAI_Block: Verifies block model completions for OpenAI.'
+        - 'TestRunLive_Success_OpenAI_Stream: Verifies unified Server-Sent Events delta streams for OpenAI.'
+        - 'TestRunLive_Success_Anthropic_Block: Verifies block completions for Anthropic.'
+        - 'TestRunLive_Success_Anthropic_Stream: Verifies unified SSE streams for Anthropic.'
+        - 'TestRunLive_AdhocOverrides: Verifies that model and model_params overrides take precedence.'
+        - 'TestRunLive_ProviderErrorHandling: Verifies bad gateway is returned on upstream errors.'
+        - 'TestRunLive_MissingAPIKey: Verifies key requirement check.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+      responses:
+        '200':
+          description: 'Completed response text (non-streaming) or stream chunk headers (streaming). Streaming SSE events where each line is formatted as data: {"delta": string, "done": boolean}.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          description: Missing keys or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '502':
+          description: Upstream model provider error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/prompts/{slug}/batch-run:
+    post:
+      summary: Batch Run Live Prompt Version
+      description: Renders the active 'live' template version and executes it concurrently against multiple variable payloads.
+      operationId: batchRunLive
+      tags:
+        - Prompt Runs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
+        - name: slug
+          in: path
+          required: true
+          description: Prompt slug, unique within the project.
+          schema:
+            type: string
+      x-edge-cases:
+        - Executes multiple variable payloads concurrently.
+        - Correlates completions or errors for each payload in the batch.
+      x-test-coverage:
+        - 'TestBatchRun_Success_OpenAI: Verifies batch block completions for OpenAI.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRunRequest'
+      responses:
+        '200':
+          description: Correlated list of model completions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchRunResponse'
+        '400':
+          description: Missing keys or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/versions:
     post:
       summary: Create a Prompt Version
@@ -3158,6 +3953,53 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: only draft versions can be deleted
+  /v1/prompts/{id}/versions/{version}/variables:
+    get:
+      summary: Get Template Variables
+      description: Parses the version's Go text/template syntax and returns a list of extracted variables.
+      operationId: getVersionVariables
+      tags:
+        - Prompt Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: The ID of the prompt.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The version number or status tag ('live', 'draft', 'stable').
+      responses:
+        '200':
+          description: Variables extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  variables:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Prompt or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/versions/{version}/promote:
     post:
       summary: Promote Prompt Version
@@ -3524,6 +4366,69 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example:
                 error: 'template execution failed: ...'
+  /v1/projects/{projectID}/prompts/{slug}/versions/{version}/run:
+    post:
+      summary: Run Specific Prompt Version
+      description: Renders a specific template version of a prompt and executes it against the configured model provider.
+      operationId: runVersion
+      tags:
+        - Prompt Runs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          description: The ID of the project the prompt belongs to.
+          schema:
+            type: string
+            format: uuid
+        - name: slug
+          in: path
+          required: true
+          description: Prompt slug, unique within the project.
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          description: Version sequence number (integer) or version tag (string) to execute.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+      responses:
+        '200':
+          description: 'Completed response text or stream chunks (Streaming SSE events where each line is formatted as data: {"delta": string, "done": boolean}).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+        '502':
+          description: Provider failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
   /v1/prompts/{id}/versions/{version}/tags:
     post:
       summary: Attach/Set Version Tag
@@ -3944,6 +4849,1138 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/APIError'
+  /v1/projects/{projectID}/skills:
+    post:
+      summary: Create a Skill
+      description: Creates a new skill inside a project. Accepts JSON or multipart/form-data with a zip file.
+      operationId: createSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+                description:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+              required:
+                - name
+      responses:
+        '201':
+          description: Skill created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:
+                    $ref: '#/components/schemas/Skill'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Project not found
+        '409':
+          description: Duplicate skill name or slug
+    get:
+      summary: List Skills
+      description: Lists the skills inside a project.
+      operationId: listSkills
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      responses:
+        '200':
+          description: List of skills
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Skill'
+  /v1/skills/{id}:
+    get:
+      summary: Get a Skill
+      description: Retrieves details of a specific skill by ID or slug.
+      operationId: getSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the skill.
+      responses:
+        '200':
+          description: Skill details
+        '404':
+          description: Skill not found
+    put:
+      summary: Update a Skill
+      description: Updates the metadata of a specific skill.
+      operationId: updateSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the skill.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillRequest'
+      responses:
+        '200':
+          description: Skill updated successfully
+        '404':
+          description: Skill not found
+    delete:
+      summary: Delete a Skill
+      description: Deletes a specific skill and all its versions/files.
+      operationId: deleteSkill
+      tags:
+        - Skills
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the skill.
+      responses:
+        '200':
+          description: Skill deleted successfully
+        '404':
+          description: Skill not found
+  /v1/skills/{id}/versions/diff:
+    get:
+      summary: Diff Skill Versions
+      description: Compares the files of two skill versions and returns a unified diff.
+      operationId: diffSkillVersions
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                  to_version:
+                    type: integer
+                  diff:
+                    type: string
+        '400':
+          description: Missing or invalid parameters
+        '401':
+          description: Unauthorized
+        '404':
+          description: Skill or version not found
+  /v1/skills/{id}/versions:
+    get:
+      summary: List Skill Versions
+      description: Lists all versions of a skill.
+      operationId: listSkillVersions
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        '200':
+          description: List of versions
+    post:
+      summary: Create a Skill Version
+      description: Creates a new empty draft version.
+      operationId: createSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      responses:
+        '201':
+          description: Version created successfully
+    put:
+      summary: Upload a ZIP Archive as a New Version
+      description: Creates a new draft version by uploading a ZIP file containing the version's files.
+      operationId: uploadSkillZip
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '201':
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/SkillVersion'
+  /v1/skills/{id}/versions/{version}:
+    get:
+      summary: Get a Skill Version
+      description: Retrieves details of a specific skill version.
+      operationId: getSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version details
+        '404':
+          description: Version not found
+    delete:
+      summary: Delete a Skill Version
+      description: Deletes a draft version.
+      operationId: deleteSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version deleted successfully
+        '409':
+          description: Only draft versions can be deleted
+  /v1/skills/{id}/versions/{version}/promote:
+    post:
+      summary: Promote a Skill Version
+      description: Promotes a version status (draft -> stable -> live).
+      operationId: promoteSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version promoted successfully
+  /v1/skills/{id}/versions/{version}/demote:
+    post:
+      summary: Demote a Skill Version
+      description: Demotes a live version back to stable.
+      operationId: demoteSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version demoted successfully
+  /v1/skills/{id}/versions/{version}/archive:
+    post:
+      summary: Archive a Skill Version
+      description: Archives a version.
+      operationId: archiveSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version archived successfully
+  /v1/skills/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate a Skill Version
+      description: Creates a new draft version by duplicating this version's files.
+      operationId: duplicateSkillVersion
+      tags:
+        - Skill Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '201':
+          description: Version duplicated successfully
+  /v1/skills/{id}/versions/{version}/download:
+    get:
+      summary: Download ZIP Archive
+      description: Packs, renders with Go text/template engine, and downloads all files of this version as a ZIP file. Any query parameters, request body variables, or a 'variables' JSON string parameter will be parsed as template context.
+      operationId: downloadSkillZip
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: The packed ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+  /v1/skills/{id}/versions/{version}/files:
+    get:
+      summary: List Files in Version
+      description: Lists metadata of all files in this version.
+      operationId: listSkillFiles
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: List of files metadata
+    post:
+      summary: Upsert an Individual File
+      description: Creates or updates an individual file inside a draft version.
+      operationId: upsertSkillFile
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertFileRequest'
+      responses:
+        '200':
+          description: File saved successfully
+    put:
+      summary: Update an Individual File
+      description: Updates an individual file inside a draft version.
+      operationId: updateSkillFile
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertFileRequest'
+      responses:
+        '200':
+          description: File saved successfully
+    delete:
+      summary: Delete an Individual File
+      description: Deletes an individual file from a draft version.
+      operationId: deleteSkillFile
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file to delete.
+      responses:
+        '200':
+          description: File deleted successfully
+  /v1/skills/{id}/versions/{version}/files/content:
+    get:
+      summary: Get File Content
+      description: Retrieves the path and raw text content of an individual file, rendered with Go text/template using variables passed in query parameters or request body.
+      operationId: getSkillFileContent
+      tags:
+        - Skill Files
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the skill.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+        - name: file_path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The path of the file.
+      responses:
+        '200':
+          description: File content details
+  /v1/projects/{projectID}/tools:
+    post:
+      summary: Create a Tool
+      description: Creates a new tool inside a project.
+      operationId: createTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolRequest'
+      responses:
+        '201':
+          description: Tool created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: '#/components/schemas/Tool'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Project not found
+        '409':
+          description: Duplicate tool name or slug
+    get:
+      summary: List Tools
+      description: Lists the tools inside a project.
+      operationId: listTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: projectID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project.
+      responses:
+        '200':
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tool'
+  /v1/tools:
+    get:
+      summary: List All Tools (global, with filtering)
+      description: Lists tools globally, optionally filtered by an explicit project ID query parameter.
+      operationId: listAllTools
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: The ID of the project to filter by.
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Alternate query parameter for filtering by project ID.
+      responses:
+        '200':
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tool'
+  /v1/tools/{id}:
+    get:
+      summary: Get a Tool
+      description: Retrieves details of a specific tool by ID or slug.
+      operationId: getTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        '200':
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: '#/components/schemas/Tool'
+        '404':
+          description: Tool not found
+    put:
+      summary: Update a Tool
+      description: Updates the metadata of a specific tool.
+      operationId: updateTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateToolRequest'
+      responses:
+        '200':
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    $ref: '#/components/schemas/Tool'
+        '404':
+          description: Tool not found
+    delete:
+      summary: Delete a Tool
+      description: Deletes a specific tool and all its versions.
+      operationId: deleteTool
+      tags:
+        - Tools
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID (UUID) or slug of the tool.
+      responses:
+        '204':
+          description: Tool deleted successfully
+        '404':
+          description: Tool not found
+  /v1/tools/{id}/versions/diff:
+    get:
+      summary: Diff Tool Versions
+      description: Compares the schemas of two tool versions and returns a unified diff.
+      operationId: diffToolVersions
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versions compared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from_version:
+                    type: integer
+                  to_version:
+                    type: integer
+                  diff:
+                    type: string
+        '400':
+          description: Missing or invalid parameters
+        '401':
+          description: Unauthorized
+        '404':
+          description: Tool or version not found
+  /v1/tools/{id}/versions:
+    get:
+      summary: List Tool Versions
+      description: Lists all versions of a tool.
+      operationId: listToolVersions
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+      responses:
+        '200':
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ToolVersion'
+    post:
+      summary: Create a Tool Version
+      description: Creates a new empty draft version.
+      operationId: createToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolVersionRequest'
+      responses:
+        '201':
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+  /v1/tools/{id}/versions/{version}:
+    get:
+      summary: Get a Tool Version
+      description: Retrieves details of a specific tool version.
+      operationId: getToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
+    put:
+      summary: Update a Tool Version
+      description: Updates the schemas of a draft tool version.
+      operationId: updateToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateToolVersionRequest'
+      responses:
+        '200':
+          description: Version updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
+        '422':
+          description: Only draft versions can be modified
+    delete:
+      summary: Delete or Archive a Tool Version
+      description: Deletes a specific tool version if it is in draft status, otherwise archives it.
+      operationId: deleteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '204':
+          description: Version deleted successfully
+        '404':
+          description: Version not found
+  /v1/tools/{id}/versions/{version}/promote:
+    post:
+      summary: Promote a Tool Version
+      description: 'Promotes version status: draft -> stable -> live.'
+      operationId: promoteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version promoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
+  /v1/tools/{id}/versions/{version}/demote:
+    post:
+      summary: Demote a Tool Version
+      description: 'Demotes version status: live -> stable.'
+      operationId: demoteToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version demoted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
+  /v1/tools/{id}/versions/{version}/archive:
+    post:
+      summary: Archive a Tool Version
+      description: Archives a specific tool version.
+      operationId: archiveToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Version archived successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
+  /v1/tools/{id}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate a Tool Version
+      description: Creates a new draft version by duplicating the schemas of an existing tool version.
+      operationId: duplicateToolVersion
+      tags:
+        - Tool Versions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID or slug of the tool.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number to duplicate.
+      responses:
+        '201':
+          description: Version duplicated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    $ref: '#/components/schemas/ToolVersion'
+        '404':
+          description: Version not found
 components:
   securitySchemes:
     BearerAuth:
@@ -3985,6 +6022,30 @@ components:
         - email
         - is_verified
         - is_admin
+        - created_at
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: Session token string (partially masked in lists).
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - token
+        - expires_at
         - created_at
     APIKey:
       type: object
@@ -4322,6 +6383,93 @@ components:
         - tags
         - model
         - model_params
+    RunRequest:
+      type: object
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          description: Variables to interpolate into the template.
+        stream:
+          type: boolean
+          description: Set to true to receive token stream instead of a blocked response.
+          default: false
+        model:
+          type: string
+          nullable: true
+          description: 'Ad-hoc model override. Must start with a supported provider prefix: ''openai/'', ''anthropic/'', ''gemini/'', ''deepseek/'', ''groq/'', or ''openrouter/''. All providers except ''anthropic/'' follow standard OpenAI-compatible JSON request, response, and SSE streaming conventions.'
+        model_params:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Ad-hoc model parameters override.
+    RunResponse:
+      type: object
+      properties:
+        response:
+          type: string
+          description: Text content produced by the model provider completion.
+          example: Greetings from the model!
+        model:
+          type: string
+          description: The model identifier that was executed.
+          example: openai/gpt-4o
+        version:
+          type: integer
+          description: The prompt version number that was used.
+          example: 2
+        slug:
+          type: string
+          description: Prompt slug.
+          example: my-prompt
+      required:
+        - response
+        - model
+        - version
+        - slug
+    BatchRunRequest:
+      type: object
+      properties:
+        batch:
+          type: array
+          items:
+            type: object
+            properties:
+              variables:
+                type: object
+                additionalProperties: true
+        model:
+          type: string
+          nullable: true
+        model_params:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required:
+        - batch
+    BatchRunResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              response:
+                type: string
+              error:
+                type: string
+        model:
+          type: string
+        version:
+          type: integer
+        slug:
+          type: string
+      required:
+        - results
+        - model
+        - version
+        - slug
     PromptPayload:
       type: object
       properties:
@@ -4386,6 +6534,248 @@ components:
           type: string
           description: Brief summary explaining the prompt purpose.
           example: Useful greeting prompt
+    Skill:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - name
+        - slug
+    SkillVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        skill_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - skill_id
+        - version
+        - status
+    CreateSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+    UpdateSkillRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+    UpsertFileRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+        content:
+          type: string
+      required:
+        - file_path
+        - content
+    Tool:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - slug
+        - name
+    ToolVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tool_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        input_schema:
+          type: object
+          description: JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: JSON Schema for tool outputs.
+        status:
+          type: string
+          enum:
+            - draft
+            - stable
+            - live
+            - archived
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tool_id
+        - version
+        - input_schema
+        - output_schema
+        - status
+    CreateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+      required:
+        - name
+    UpdateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+          format: uri
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+      required:
+        - name
+    CreateToolVersionRequest:
+      type: object
+      properties:
+        input_schema:
+          type: object
+          description: Optional JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: Optional JSON Schema for tool outputs.
+    UpdateToolVersionRequest:
+      type: object
+      properties:
+        input_schema:
+          type: object
+          description: Optional JSON Schema for tool inputs.
+        output_schema:
+          type: object
+          description: Optional JSON Schema for tool outputs.
+    SearchEntityType:
+      type: string
+      enum:
+        - prompt
+        - skill
+        - tool
+      example: prompt
+    SearchResult:
+      type: object
+      description: Common searchable metadata. Use type and id with the corresponding registry endpoint to retrieve the full entity.
+      properties:
+        type:
+          $ref: '#/components/schemas/SearchEntityType'
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - type
+        - id
+        - project_id
+        - slug
+        - name
+        - description
+        - created_at
+        - updated_at
+    SearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+      required:
+        - results
     RegisterRequest:
       type: object
       properties:
@@ -4527,6 +6917,24 @@ components:
         - key
         - operation
         - created_at
+    UpdateAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Descriptive name for the key.
+        team_ids:
+          type: array
+          description: Optional list of teams the key can access. Omit or pass an empty array for organization-wide access.
+          items:
+            type: string
+            format: uuid
+        operation:
+          type: string
+          enum:
+            - read_render
+            - all
+            - admin
     TeamMemberResponse:
       type: object
       required:
@@ -4542,6 +6950,51 @@ components:
           type: string
         role:
           type: string
+        created_at:
+          type: string
+          format: date-time
+    UpdateOrgMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum:
+            - admin
+            - member
+          description: The new role for the member. 'admin' promotes to organization admin, 'member' demotes to standard member.
+    AuditLog:
+      type: object
+      required:
+        - id
+        - org_id
+        - action
+        - entity_type
+        - metadata
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
         created_at:
           type: string
           format: date-time
@@ -4593,6 +7046,15 @@ components:
       properties:
         project:
           $ref: '#/components/schemas/Project'
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable project name.
+        slug:
+          type: string
+          description: Normalized identifier, unique within the owning team.
     GrantProjectAccessRequest:
       type: object
       required:
@@ -4671,10 +7133,12 @@ components:
           example: Hello, {{.name}}! Count is {{.count}}.
         model:
           type: string
+          nullable: true
           description: Optional `provider/model` identifier intended to execute this prompt version.
           example: openai/gpt-4.1-mini
         model_params:
           type: object
+          nullable: true
           additionalProperties: true
           description: Optional provider-specific model parameters. Nested values are supported.
           example:

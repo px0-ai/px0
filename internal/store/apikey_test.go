@@ -118,3 +118,17 @@ func TestDeleteAPIKey_NotFound(t *testing.T) {
 	err := store.DeleteAPIKey(context.Background(), nonExistentUUID())
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
+
+func TestUpdateAPIKey(t *testing.T) {
+	testutil.SetupDB(t)
+	ctx := context.Background()
+	org, _ := store.CreateOrganization(ctx, "Test Update Org")
+	team, _ := store.CreateTeamWithOrg(ctx, "Test Update Team", org.ID)
+	
+	key, _ := store.CreateAPIKey(ctx, "initial", org.ID, []uuid.UUID{team.ID}, "read_render", "hash")
+	
+	updated, err := store.UpdateAPIKey(ctx, key.ID, "updated_name", []uuid.UUID{team.ID}, "all")
+	require.NoError(t, err)
+	assert.Equal(t, "updated_name", updated.Name)
+	assert.Equal(t, "all", updated.Operation)
+}

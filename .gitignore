@@ -3,6 +3,7 @@ tmp/
 .env
 *.test
 *.out
+destroy
 
 # Python
 __pycache__/
