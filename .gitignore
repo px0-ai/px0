@@ -4,3 +4,9 @@ tmp/
 *.test
 *.out
 destroy
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
