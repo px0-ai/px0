@@ -152,7 +152,8 @@ trigger:
   manual: true
   schedule: "0 9 * * 1"
 output:
-  target: stdout
+  target: file
+  path: outputs/consolidate-{date}.md
   format: markdown
 timeout: 300s
 ---
