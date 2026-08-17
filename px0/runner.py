@@ -23,21 +23,29 @@ from px0 import tools, versioning
 from px0 import workflow as workflow_mod
 
 MAX_TOOL_TURNS = 5
+# Matches a `TOOL_CALL: {...}` line and captures the JSON payload.
 _TOOL_CALL_RE = re.compile(r"TOOL_CALL:\s*(\{.*\})", re.DOTALL)
+# Matches `{{dotted.path}}` template placeholders.
 _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 
 
 class RunError(Exception):
+    """A run failed. Carries the partial run record (if any) so callers can
+    still write/report it before propagating the failure."""
     def __init__(self, message: str, record: dict | None = None):
+        """Stores the failure message and the partial run record, if any."""
         super().__init__(message)
         self.record = record or {}
 
 
 def _now() -> datetime:
+    """Current time in UTC, used for all run timestamps."""
     return datetime.now(timezone.utc)
 
 
 def _lookup(context: dict, dotted: str) -> Any:
+    """Resolves a dotted path like `input.foo` against a nested dict context.
+    Returns None if any segment is missing rather than raising."""
     node: Any = context
     for part in dotted.split("."):
         if isinstance(node, dict) and part in node:
@@ -48,6 +56,11 @@ def _lookup(context: dict, dotted: str) -> Any:
 
 
 def render_value(value: Any, context: dict) -> Any:
+    """Recursively resolves `{{dotted.path}}` template placeholders against context.
+    A string that is entirely one placeholder returns the looked-up value as-is
+    (preserving its type); a placeholder embedded in a larger string is
+    stringified in place. Lists and dicts are walked recursively; other types
+    pass through unchanged."""
     if isinstance(value, str):
         stripped = value.strip()
         whole = re.fullmatch(r"\{\{\s*([\w.\-]+)\s*\}\}", stripped)
@@ -67,6 +80,10 @@ def render_value(value: Any, context: dict) -> Any:
 
 
 def _with_retry(config: dict, fn, *args, **kwargs):
+    """Calls fn with exponential backoff on ConnectorError, up to
+    connectors.retries attempts. ConnectorNotConfigured is never retried --
+    it means the connector isn't set up, not that the call failed transiently.
+    Re-raises the last error if all attempts are exhausted."""
     retries = config_mod.get(config, "connectors.retries", 3)
     delay = 1.0
     last_err = None
@@ -79,13 +96,19 @@ def _with_retry(config: dict, fn, *args, **kwargs):
             last_err = e
             if attempt < retries:
                 time.sleep(delay)
-                delay *= 2
+                delay *= 2  # exponential backoff
     raise last_err
 
 
 def resolve_inputs(
     home: Path, config: dict, wf: workflow_mod.Workflow, cli_inputs: dict
 ) -> tuple[dict, list[dict]]:
+    """Resolves every declared input of a workflow (tool call, retrieval query,
+    stdin source, or nested sub-workflow run) into a template context dict.
+    Returns (context, meta) where meta is a per-input list of resolution
+    outcomes for the run record. An optional input that fails resolves to None
+    and is marked degraded rather than aborting the run; a required input that
+    fails raises RunError."""
     context: dict = {"config": config, "input": cli_inputs}
     meta: list[dict] = []
 
@@ -125,6 +148,9 @@ def resolve_inputs(
 
 
 def render_prompt(wf: workflow_mod.Workflow, guideline_texts: dict[str, str], context: dict) -> str:
+    """Builds the final prompt: renders the workflow body's templates against
+    context, then inlines guideline text either at an explicit `{{guidelines}}`
+    placeholder or, if none is present, prepended before the body."""
     guidelines_block = "\n\n".join(
         f"# {name}\n\n{text}" for name, text in guideline_texts.items()
     )
@@ -142,6 +168,13 @@ def _tool_call_loop(
     home: Path, config: dict, prompt: str, allowed_tools: list[str],
     dry_run: bool, timeout: float, run_id: str
 ) -> tuple[str, list[dict]]:
+    """Drives the model through up to MAX_TOOL_TURNS turns, feeding it a
+    `TOOL_CALL: {...}` protocol line-by-line since the harness backend is a
+    plain non-interactive subprocess rather than a real MCP transport. Each
+    call is checked against the workflow's tool allowlist; write tools are
+    stubbed out (never executed) when dry_run is set. Returns the model's
+    final text output and the list of tool calls actually made, each recorded
+    for the run's audit trail."""
     tool_calls: list[dict] = []
     conversation = prompt
     if allowed_tools:
@@ -164,18 +197,18 @@ def _tool_call_loop(
 
         match = _TOOL_CALL_RE.search(output)
         if not match or not allowed_tools:
-            return output, tool_calls
+            return output, tool_calls  # model gave a final answer, not a tool request
         try:
             call = json.loads(match.group(1))
             tool_id, args = call["tool"], call.get("args", {})
         except (json.JSONDecodeError, KeyError):
-            return output, tool_calls
+            return output, tool_calls  # malformed tool call: treat the raw output as the final answer
 
         is_write = tools.exists(tool_id) and tools.is_write(tool_id)
         if tool_id not in allowed_tools:
             result: Any = {"error": f"{tool_id} is not in this workflow's tools: allowlist"}
         elif dry_run and is_write:
-            result = {"stubbed": True, "success": True}
+            result = {"stubbed": True, "success": True}  # dry runs never execute side effects
         else:
             try:
                 result = _with_retry(config, tools.call, home, config, tool_id, args)
@@ -200,7 +233,9 @@ def route_output(
 ) -> dict:
     """Writes the output where it belongs and returns a description of what
     happened. Does not print: stdout routing is a decision for the CLI
-    layer, which also needs plain stdout free for `--json` output."""
+    layer, which also needs plain stdout free for `--json` output.
+    File writes are serialized with a store-wide lock to avoid two concurrent
+    runs racing on the same output path."""
     target = output_spec.get("target", "stdout")
     if note:
         text = f"<!-- {note} -->\n\n{text}"
@@ -236,6 +271,12 @@ def run(
     output_override: dict | None = None,
     late_scheduled_at: str | None = None,
 ) -> dict:
+    """Runs one workflow end to end through its eight stages: load/validate,
+    checkpoint hand edits under lock, resolve inputs, render the prompt,
+    run the model/tool-call loop, route the output, and write the run record.
+    A pipeline workflow (wf.pipeline set) is delegated to _run_pipeline instead.
+    Raises RunError on any stage failure, with a run record already persisted
+    describing the failure. Returns the completed run record on success."""
     cli_inputs = cli_inputs or {}
     run_id = runs_mod.new_run_id()
     start = _now()
@@ -245,6 +286,8 @@ def run(
     }
 
     def fail(message: str, **extra) -> "RunError":
+        # finalizes and persists the run record as a failure, then hands back
+        # a RunError carrying that record for the caller to raise
         end = _now()
         record.update(outcome="failed", error=message, end_time=end.isoformat(),
                        duration_seconds=(end - start).total_seconds(), **extra)
@@ -325,6 +368,12 @@ def _run_pipeline(
     home: Path, config: dict, wf: workflow_mod.Workflow, trigger: str,
     dry_run: bool, run_id: str, start: datetime, record: dict
 ) -> dict:
+    """Runs each workflow in wf.pipeline in sequence, piping one stage's
+    output text into the next stage's stdin, with only the final stage's
+    output routed to its real destination (intermediate stages route to
+    memory). Any stage failure aborts the pipeline and persists a failed
+    record carrying the stages completed so far. Returns the parent run
+    record with `stages` set to the list of child run records."""
     stages = []
     stdin_text = ""
     for i, stage_id in enumerate(wf.pipeline):

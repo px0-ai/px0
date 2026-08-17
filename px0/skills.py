@@ -10,6 +10,9 @@ from px0 import paths
 
 
 def build(home: Path) -> list[str]:
+    """Copies every guidelines/*.md file into skills/, mirroring the relative
+    path, except files under a top-level work/ folder. Overwrites existing
+    files in skills/. Returns the list of relative paths written."""
     written = []
     src_base = paths.guidelines_dir(home)
     dest_base = paths.skills_dir(home)

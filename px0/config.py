@@ -47,7 +47,9 @@ DEFAULTS: dict[str, Any] = {
 
 
 def _toml_value(v: Any) -> str:
-    if isinstance(v, bool):
+    """Formats a Python value as a TOML scalar literal: bool, int, list
+    (recursively), or a quoted/escaped string for anything else."""
+    if isinstance(v, bool):  # must precede the int check: bool is a subclass of int
         return "true" if v else "false"
     if isinstance(v, int):
         return str(v)
@@ -58,6 +60,10 @@ def _toml_value(v: Any) -> str:
 
 
 def dumps(config: dict[str, Any]) -> str:
+    """Serializes a config dict to TOML text: root-level scalars first,
+    then each top-level table (recursing into nested dicts as dotted
+    `[a.b]` table headers). Assumes a shallow, well-formed structure --
+    not a general-purpose TOML writer."""
     lines: list[str] = []
     # scalar/list keys at root first (none expected, but keep it general)
     root_scalars = {k: v for k, v in config.items() if not isinstance(v, dict)}
@@ -67,6 +73,9 @@ def dumps(config: dict[str, Any]) -> str:
         lines.append("")
 
     def emit_table(prefix: str, table: dict[str, Any]) -> None:
+        """Emits a `[prefix]` table header and its scalar keys, then
+        recurses into nested tables using dotted prefixes. Mutates the
+        enclosing `lines` list."""
         scalars = {k: v for k, v in table.items() if not isinstance(v, dict)}
         subtables = {k: v for k, v in table.items() if isinstance(v, dict)}
         lines.append(f"[{prefix}]")
@@ -84,6 +93,9 @@ def dumps(config: dict[str, Any]) -> str:
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merges overlay onto base, returning a new dict; overlay
+    values win. Nested dicts are merged key-by-key rather than replaced
+    outright, but a non-dict overlay value replaces the base value as-is."""
     out = dict(base)
     for k, v in overlay.items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -94,6 +106,9 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 
 
 def load(path: Path) -> dict[str, Any]:
+    """Loads config from `path`, deep-merged on top of DEFAULTS so any keys
+    missing on disk fall back to their default values. Returns a fresh
+    copy of DEFAULTS if `path` doesn't exist yet."""
     if not path.exists():
         return {k: dict(v) for k, v in DEFAULTS.items()}
     with open(path, "rb") as f:
@@ -102,10 +117,13 @@ def load(path: Path) -> dict[str, Any]:
 
 
 def save(path: Path, config: dict[str, Any]) -> None:
+    """Writes `config` to `path` as TOML, overwriting any existing file."""
     path.write_text(dumps(config))
 
 
 def get(config: dict[str, Any], dotted_key: str, default: Any = None) -> Any:
+    """Looks up a dotted config key (e.g. "logs.path"), returning `default`
+    if any segment along the path is missing or not a dict."""
     node: Any = config
     for part in dotted_key.split("."):
         if not isinstance(node, dict) or part not in node:

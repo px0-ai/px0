@@ -18,6 +18,8 @@ from px0 import workflow as workflow_mod
 
 @dataclass
 class Proposal:
+    """One pending guideline edit awaiting user review, with the evidence that
+    generated it (a knowledge source, or a manual correction)."""
     id: str
     target_file: str        # relative to guidelines/
     action: str              # new | amend | retire
@@ -30,15 +32,18 @@ class Proposal:
 
 
 def _proposal_path(home: Path, proposal_id: str) -> Path:
+    """Path to a proposal's JSON file under .state/proposals/."""
     return paths.proposals_dir(home) / f"{proposal_id}.json"
 
 
 def save_proposal(home: Path, p: Proposal) -> None:
+    """Writes a proposal to disk as JSON."""
     paths.proposals_dir(home).mkdir(parents=True, exist_ok=True)
     _proposal_path(home, p.id).write_text(json.dumps(asdict(p), indent=2))
 
 
 def list_proposals(home: Path) -> list[Proposal]:
+    """Loads all pending proposals, skipping any file that fails to parse."""
     d = paths.proposals_dir(home)
     if not d.exists():
         return []
@@ -52,6 +57,8 @@ def list_proposals(home: Path) -> list[Proposal]:
 
 
 def dismiss(home: Path, proposal_id: str) -> None:
+    """Deletes a proposal's file; no-op if it doesn't exist. Nothing is recorded
+    about a dismissal beyond the file's absence."""
     p = _proposal_path(home, proposal_id)
     if p.exists():
         p.unlink()
@@ -61,6 +68,9 @@ _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 
 def propose_from_knowledge(home: Path, config: dict, knowledge_file: Path) -> list[Proposal]:
+    """Asks the harness to read one knowledge file and propose zero or more
+    guideline edits, saving each as a pending Proposal. Returns [] if the model
+    response has no JSON array (rather than raising)."""
     from px0 import knowledge as knowledge_mod
 
     header, body = knowledge_mod.read_header(knowledge_file)
@@ -106,6 +116,10 @@ def propose_from_knowledge(home: Path, config: dict, knowledge_file: Path) -> li
 
 
 def _apply_proposal_to_content(current: str, p: Proposal) -> str:
+    """Splices one accepted proposal into a guideline file's current content:
+    replaces the matching section for "amend", removes it for "retire" (no-op if
+    already absent), replaces it if a same-slug section exists, otherwise appends
+    a new section at the end."""
     heading_line = f"## {p.claim}\n"
     section_text = f"{heading_line}\n{p.body.strip()}\n"
     slug = claims.slugify(p.claim)
@@ -157,6 +171,7 @@ def apply_many(home: Path, actor: str, decisions: list[dict]) -> str | None:
 
 
 def unreferenced_guideline_files(home: Path) -> list[str]:
+    """Guideline files that no workflow lists under its `guidelines:`, sorted."""
     all_files = {
         str(p.relative_to(paths.guidelines_dir(home)))
         for p in paths.guidelines_dir(home).rglob("*.md")

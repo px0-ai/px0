@@ -16,10 +16,14 @@ from px0 import credentials as creds_mod
 
 
 def setup_composio(home: Path, api_key: str) -> None:
+    """Stores the Composio API key as a credential. Does not validate the key."""
     creds_mod.set_service(home, "composio", {"api_key": api_key})
 
 
 def connect_github_native(home: Path, token: str) -> dict:
+    """Verifies a GitHub PAT against the GitHub API and stores it on success.
+
+    Raises ValueError if GitHub rejects the token. Returns the resolved login."""
     resp = requests.get(
         "https://api.github.com/user",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
@@ -38,10 +42,12 @@ def connect_github_native(home: Path, token: str) -> dict:
 
 
 def rotate_github(home: Path, token: str) -> dict:
+    """Replaces the stored GitHub token; rotation is just a re-verify-and-store."""
     return connect_github_native(home, token)
 
 
 def list_connections(home: Path) -> list[dict]:
+    """Returns one summary dict per configured connection (service, kind, login, expiry)."""
     creds = creds_mod.load(home)
     out = []
     for service, values in creds.items():
@@ -59,4 +65,5 @@ def list_connections(home: Path) -> list[dict]:
 
 
 def remove_connection(home: Path, service: str) -> bool:
+    """Deletes a stored connection. Returns False if the service wasn't configured."""
     return creds_mod.remove_service(home, service)

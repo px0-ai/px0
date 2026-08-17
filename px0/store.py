@@ -11,6 +11,8 @@ SCHEMA_VERSION = 1
 
 
 def is_initialized(home: Path) -> bool:
+    """Returns whether a store already exists at `home`, based on the
+    presence of config.toml."""
     return paths.config_path(home).exists()
 
 
@@ -80,7 +82,7 @@ def init(home: Path) -> list[str]:
     if not schema_file.exists():
         schema_file.write_text(str(SCHEMA_VERSION))
 
-    file_changes = []
+    file_changes = []  # track newly written starter files for the initial version snapshot
     for name, body in starters.WORKFLOWS.items():
         dest = paths.workflows_dir(home) / name
         if not dest.exists():

@@ -14,6 +14,10 @@ from px0 import config as config_mod
 
 
 def resolve_logs_path(config: dict) -> Path:
+    """Resolves the directory used for run logs and records, creating it if
+    needed. Falls back to `~/.local/state/px0/logs` if the configured path
+    (default `/var/log/px0`) isn't writable. Side effect: writes and
+    removes a probe file to test writability."""
     configured = config_mod.get(config, "logs.path", "/var/log/px0")
     path = Path(configured).expanduser()
     try:
@@ -29,31 +33,44 @@ def resolve_logs_path(config: dict) -> Path:
 
 
 def new_run_id(prefix: str = "run") -> str:
+    """Generates a unique run id from a UTC timestamp plus a short random
+    hex suffix."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{prefix}_{ts}-{secrets.token_hex(2)}"
 
 
 def _date_of(run_id: str) -> str:
+    """Extracts the run's date (YYYY-MM-DD) from its run id, used to
+    partition records and logs into per-day directories."""
     # run_YYYYMMDD-HHMMSS-xxxx -> YYYY-MM-DD
     ts = run_id.split("_", 1)[1].split("-")[0]
     return f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
 
 
 def record_path(config: dict, run_id: str) -> Path:
+    """Returns the path to a run's JSON record file, partitioned by date
+    under `records/`."""
     return resolve_logs_path(config) / "records" / _date_of(run_id) / f"{run_id}.json"
 
 
 def log_path(config: dict, run_id: str) -> Path:
+    """Returns the path to a run's raw log file, partitioned by date under
+    `runs/`."""
     return resolve_logs_path(config) / "runs" / _date_of(run_id) / f"{run_id}.log"
 
 
 def write_record(config: dict, record: dict) -> None:
+    """Writes a run record as JSON to disk, creating parent directories as
+    needed. Overwrites any existing record for the same run id."""
     path = record_path(config, record["id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, indent=2, default=str))
 
 
 def append_raw_log(config: dict, run_id: str, text: str) -> None:
+    """Appends text to a run's raw log file, creating parent directories
+    (and the file) as needed. Ensures the appended text ends with a
+    newline."""
     path = log_path(config, run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a") as f:
@@ -63,6 +80,8 @@ def append_raw_log(config: dict, run_id: str, text: str) -> None:
 
 
 def read_record(config: dict, run_id: str) -> dict:
+    """Reads and parses a run's JSON record. Raises FileNotFoundError if
+    the record is missing, e.g. because it aged out under retention."""
     path = record_path(config, run_id)
     if not path.exists():
         raise FileNotFoundError(f"no run record for {run_id} (may have aged out)")
@@ -70,6 +89,8 @@ def read_record(config: dict, run_id: str) -> dict:
 
 
 def read_raw_log(config: dict, run_id: str) -> str:
+    """Reads a run's raw log file. Returns an empty string if the log
+    doesn't exist rather than raising."""
     path = log_path(config, run_id)
     if not path.exists():
         return ""
@@ -82,6 +103,10 @@ def list_records(
     failed: bool = False,
     since: datetime | None = None,
 ) -> list[dict]:
+    """Lists run records matching the given filters (workflow id,
+    failed-only, since a given time), newest first. Returns an empty list
+    if the records directory doesn't exist. Record files that fail to
+    parse as JSON are silently skipped."""
     base = resolve_logs_path(config) / "records"
     if not base.exists():
         return []
@@ -117,10 +142,11 @@ def apply_retention(config: dict) -> dict:
 
     for rec in list_records(config):
         wrote = any(c.get("is_write") for c in rec.get("tool_calls", []))
-        if wrote:
+        if wrote:  # runs that mutated something are kept regardless of age
             continue
         start = datetime.fromisoformat(rec["start_time"])
         age_days = (now - start).days
+        # failed runs get a longer retention window than successful ones
         log_limit = retention_days_failed if rec.get("outcome") == "failed" else retention_days
         if age_days > log_limit:
             lp = log_path(config, rec["id"])

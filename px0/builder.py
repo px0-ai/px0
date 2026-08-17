@@ -13,15 +13,17 @@ import yaml
 from px0 import harness, paths, tools
 from px0 import workflow as workflow_mod
 
-_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)  # greedy match spans newlines to grab the whole object out of prose
 
 
 class BuilderError(Exception):
-    pass
+    """Raised when a workflow plan can't be generated or parsed from the harness response."""
 
 
 @dataclass
 class Plan:
+    """A workflow plan produced by the harness: trigger, inputs, tools, output shape,
+    and the instruction body, plus the raw JSON the model returned."""
     trigger: dict
     inputs: list[dict]
     tools: list[str]
@@ -32,6 +34,8 @@ class Plan:
 
 
 def generate_plan(config: dict, description: str) -> Plan:
+    """Asks the harness to turn a natural-language request into a JSON workflow plan.
+    Raises BuilderError if the harness response has no JSON object or the JSON is malformed."""
     tool_ids = [t.id for t in tools.list_tools()]
     prompt = (
         "Turn this request into a JSON workflow plan for a personal automation "
@@ -69,10 +73,14 @@ def generate_plan(config: dict, description: str) -> Plan:
 
 
 def check_feasibility(plan: Plan, home: Path) -> list[str]:
+    """Validates a plan against reality: unknown tool ids, write tools used as inputs
+    (inputs must be read-only), and an invalid cron schedule. Returns a list of
+    human-readable issue strings; empty means the plan can proceed."""
     issues = []
     known = [t.id for t in tools.list_tools()]
 
     def check_tool(tool_id: str, context: str):
+        # records an issue with a did-you-mean suggestion when the id is close to a real one
         if tool_id in known:
             return
         close = difflib.get_close_matches(tool_id, known, n=1)
@@ -104,6 +112,7 @@ def check_feasibility(plan: Plan, home: Path) -> list[str]:
 
 
 def required_connections(plan: Plan) -> set[str]:
+    """Returns the set of provider names (e.g. "github") the plan's inputs and tools touch."""
     providers = set()
     for inp in plan.inputs:
         tool_id = inp.get("tool")
@@ -116,6 +125,8 @@ def required_connections(plan: Plan) -> set[str]:
 
 
 def write_tools_named(plan: Plan) -> list[str]:
+    """Returns the subset of plan.tools that are write tools, so the CLI can warn the user
+    before granting them."""
     return [t for t in plan.tools if t in tools.REGISTRY and tools.is_write(t)]
 
 
@@ -136,6 +147,8 @@ def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]
 
 
 def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str]) -> str:
+    """Renders a Plan into the workflow file's text: YAML frontmatter followed by the
+    instruction body, in the same `---\\nfrontmatter\\n---\\nbody` shape workflow.py parses."""
     front = {
         "id": workflow_id,
         "kind": "workflow",
@@ -157,7 +170,9 @@ def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str]) ->
 
 
 def save_workflow(home: Path, workflow_id: str, content: str) -> Path:
-    from px0 import versioning
+    """Writes a new workflow file to workflows/ and records it as a versioned change.
+    Overwrites any existing file at the same id."""
+    from px0 import versioning  # deferred: versioning imports builder-adjacent modules, avoid a cycle
 
     dest = paths.workflows_dir(home) / f"{workflow_id}.md"
     dest.parent.mkdir(parents=True, exist_ok=True)

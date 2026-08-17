@@ -6,10 +6,16 @@ from px0 import claims, runs as runs_mod
 
 
 class WhyError(Exception):
+    """Raised when why() cannot resolve the given target id to a claim or run."""
     pass
 
 
 def why(home: Path, config: dict, target_id: str) -> dict:
+    """Resolves a target_id to its provenance: a claim id (containing '#')
+    returns its full edit history and current resolution, anything else is
+    looked up as a run id and returns that run's record.
+
+    Raises WhyError if the claim has no history or the run id doesn't exist."""
     if "#" in target_id:
         log = claims.guidelines_log(home, target_id)
         resolved = claims.resolve_claim(home, target_id)

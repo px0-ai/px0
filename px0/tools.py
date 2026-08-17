@@ -28,6 +28,7 @@ class ConnectorNotConfigured(ConnectorError):
 
 @dataclass
 class ToolSpec:
+    """Registry entry describing one callable tool: its id, provider, read/write shape, and handler."""
     id: str
     provider: str
     description: str
@@ -38,11 +39,13 @@ class ToolSpec:
 
 @dataclass
 class Context:
+    """Execution context passed to every tool handler: the store home and loaded config."""
     home: Any
     config: dict
 
 
 def _github_token(ctx: Context) -> str:
+    """Loads the stored GitHub PAT, raising ConnectorNotConfigured if github is not connected."""
     creds = creds_mod.load(ctx.home)
     gh = creds.get("github")
     if not gh or not gh.get("token"):
@@ -53,6 +56,7 @@ def _github_token(ctx: Context) -> str:
 
 
 def _github_headers(ctx: Context) -> dict:
+    """Builds the standard bearer-auth headers used for every GitHub REST call."""
     return {
         "Authorization": f"Bearer {_github_token(ctx)}",
         "Accept": "application/vnd.github+json",
@@ -61,6 +65,8 @@ def _github_headers(ctx: Context) -> dict:
 
 
 def _github_request(ctx: Context, method: str, path: str, **kwargs) -> requests.Response:
+    """Issues one authenticated GitHub API request and raises ConnectorError on network
+    failure, a rejected token (401), or any other 4xx/5xx response."""
     headers = kwargs.pop("headers", {})
     headers = {**_github_headers(ctx), **headers}
     try:
@@ -78,6 +84,7 @@ _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<
 
 
 def _parse_pr_url(url: str) -> tuple[str, str, str]:
+    """Extracts (owner, repo, pr number) from a github.com PR URL; raises ConnectorError if it doesn't match."""
     m = _PR_URL_RE.search(url)
     if not m:
         raise ConnectorError(f"not a github pull request url: {url}")
@@ -85,6 +92,7 @@ def _parse_pr_url(url: str) -> tuple[str, str, str]:
 
 
 def _since_to_date(since: str) -> str:
+    """Converts a relative window like "-7d" into an ISO date; passes through anything else unchanged."""
     if since.startswith("-") and since.endswith("d"):
         days = int(since[1:-1])
         return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -92,6 +100,8 @@ def _since_to_date(since: str) -> str:
 
 
 def github_list_my_prs(args: dict, ctx: Context) -> list[dict]:
+    """Lists PRs authored by the connected user, updated since args["since"]
+    (default -7d), optionally scoped to args["repos"]. Read-only."""
     me = _github_request(ctx, "GET", "/user").json()["login"]
     since = _since_to_date(args.get("since", "-7d"))
     repos = args.get("repos") or []
@@ -107,6 +117,7 @@ def github_list_my_prs(args: dict, ctx: Context) -> list[dict]:
 
 
 def github_get_pr(args: dict, ctx: Context) -> dict:
+    """Fetches one pull request's metadata by URL. Read-only."""
     owner, repo, number = _parse_pr_url(args["url"])
     pr = _github_request(ctx, "GET", f"/repos/{owner}/{repo}/pulls/{number}").json()
     return {
@@ -117,6 +128,7 @@ def github_get_pr(args: dict, ctx: Context) -> dict:
 
 
 def github_get_pr_diff(args: dict, ctx: Context) -> str:
+    """Fetches the unified diff text of a pull request by URL. Read-only."""
     owner, repo, number = _parse_pr_url(args["url"])
     resp = _github_request(
         ctx, "GET", f"/repos/{owner}/{repo}/pulls/{number}",
@@ -126,6 +138,7 @@ def github_get_pr_diff(args: dict, ctx: Context) -> str:
 
 
 def github_list_review_comments(args: dict, ctx: Context) -> list[dict]:
+    """Lists existing review comments on a pull request by URL. Read-only."""
     owner, repo, number = _parse_pr_url(args["url"])
     resp = _github_request(ctx, "GET", f"/repos/{owner}/{repo}/pulls/{number}/comments")
     return [
@@ -135,6 +148,8 @@ def github_list_review_comments(args: dict, ctx: Context) -> list[dict]:
 
 
 def github_create_review_comment(args: dict, ctx: Context) -> dict:
+    """Posts a single-line review comment on a pull request. Write tool: mutates the PR
+    on GitHub. Resolves the PR's head sha itself so the caller only needs the URL."""
     owner, repo, number = _parse_pr_url(args["url"])
     pr = _github_request(ctx, "GET", f"/repos/{owner}/{repo}/pulls/{number}").json()
     payload = {
@@ -149,6 +164,8 @@ def github_create_review_comment(args: dict, ctx: Context) -> dict:
 
 
 def _composio_unconfigured(args: dict, ctx: Context) -> Any:
+    """Handler for every Composio-backed tool (calendar, gmail, slack): this build has no
+    live Composio client, so calling one always raises ConnectorNotConfigured."""
     raise ConnectorNotConfigured(
         "this build wires GitHub natively only; Composio-backed tools "
         "(calendar, gmail, slack) are listed for shape but not executed. "
@@ -193,6 +210,7 @@ REGISTRY: dict[str, ToolSpec] = {
 
 
 def list_tools(service: str | None = None) -> list[ToolSpec]:
+    """Returns all registered tools, or only those for one provider, sorted by id."""
     tools = list(REGISTRY.values())
     if service:
         tools = [t for t in tools if t.provider == service]
@@ -200,14 +218,18 @@ def list_tools(service: str | None = None) -> list[ToolSpec]:
 
 
 def exists(tool_id: str) -> bool:
+    """Whether tool_id is a known entry in the registry."""
     return tool_id in REGISTRY
 
 
 def is_write(tool_id: str) -> bool:
+    """Whether the given tool mutates external state (used to gate what a workflow may call)."""
     return REGISTRY[tool_id].is_write
 
 
 def call(home, config: dict, tool_id: str, args: dict) -> Any:
+    """Dispatches to a tool's handler by id. Raises ConnectorError for an unknown tool id;
+    the handler itself may raise ConnectorError/ConnectorNotConfigured."""
     if tool_id not in REGISTRY:
         raise ConnectorError(f"no such tool: {tool_id}")
     ctx = Context(home=home, config=config)

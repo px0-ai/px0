@@ -8,10 +8,16 @@ from px0 import harness, retrieval, runs as runs_mod
 
 
 class AskError(Exception):
+    """Raised when ask() cannot answer: empty/missing index or no matching passages."""
     pass
 
 
 def ask(home: Path, config: dict, question: str, k: int = 5) -> dict:
+    """Retrieves the top-k passages from knowledge/, asks the harness to
+    answer using only those passages, and records the exchange as a run.
+
+    Raises AskError if the index is empty/missing or nothing matches.
+    Returns {"answer", "passages", "run_id"}."""
     if retrieval.index_count(home) == 0:
         raise AskError(
             "the knowledge index is empty or missing; run `px0 search reindex` first"

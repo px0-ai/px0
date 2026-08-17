@@ -22,6 +22,8 @@ from px0 import paths
 
 @dataclass
 class Passage:
+    """One retrieved chunk: source file and heading anchor, text, BM25 score, and
+    provenance flags (when it was ingested, whether it's still a stub)."""
     path: str
     anchor: str
     text: str
@@ -31,15 +33,18 @@ class Passage:
 
 
 def knowledge_path(home: Path, config: dict) -> Path:
+    """Resolves the configured knowledge/ directory, expanding ~."""
     configured = config_mod.get(config, "knowledge.path", "~/.px0/knowledge")
     return Path(configured).expanduser()
 
 
 def index_db_path(home: Path) -> Path:
+    """Path to the SQLite FTS5 index file backing retrieval."""
     return paths.index_dir(home) / "index.sqlite"
 
 
 def _connect(home: Path) -> sqlite3.Connection:
+    """Opens the index DB, creating the index directory and the FTS5 virtual table if needed."""
     paths.index_dir(home).mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_db_path(home))
     conn.execute(
@@ -89,6 +94,8 @@ def _chunk_file(text: str) -> list[tuple[str, str]]:
 
 
 def reindex(home: Path, config: dict) -> int:
+    """Rebuilds the passage index from scratch: wipes the table, walks every knowledge/*.md
+    file, chunks it, and inserts each chunk as a row. Returns the number of passages indexed."""
     from px0 import knowledge as knowledge_mod  # avoid import cycle
 
     base = knowledge_path(home, config)
@@ -116,6 +123,7 @@ def reindex(home: Path, config: dict) -> int:
 
 
 def index_count(home: Path) -> int:
+    """Number of indexed passages, or 0 if the index doesn't exist yet."""
     if not index_db_path(home).exists():
         return 0
     conn = _connect(home)
@@ -126,6 +134,8 @@ def index_count(home: Path) -> int:
 
 
 def _fts_query(query: str) -> str:
+    """Builds an FTS5 MATCH expression that OR-matches every word token in the query,
+    quoting each token so punctuation in the input can't break the query syntax."""
     tokens = re.findall(r"[A-Za-z0-9_]+", query)
     if not tokens:
         return '""'
@@ -150,13 +160,14 @@ def retrieve(
         )
         args: list = [_fts_query(query)]
         if local_only is False:
-            pass
+            pass  # is_work is never added to the WHERE clause; local_only has no effect yet
         sql += " ORDER BY score LIMIT ?"
         args.append(k)
         rows = conn.execute(sql, args).fetchall()
     finally:
         conn.close()
     return [
+        # sqlite's bm25() returns lower-is-better; negate so higher score means better match
         Passage(path=r[0], anchor=r[1], text=r[2], score=-r[5],
                 ingested_at=r[3], is_stub=bool(r[4]))
         for r in rows

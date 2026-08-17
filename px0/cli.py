@@ -43,6 +43,11 @@ EXIT_INTEGRITY_ERROR = 4
 
 
 def _ctx(require_init: bool = True) -> tuple[Path, dict]:
+    """Resolves the store home and loads its config for a subcommand.
+
+    Exits the process with EXIT_USER_ERROR if the store hasn't been
+    initialized and require_init is True.
+    """
     home = paths.store_home()
     if require_init and not store_mod.is_initialized(home):
         print(f"no px0 store at {home}; run `px0 init` first", file=sys.stderr)
@@ -52,6 +57,7 @@ def _ctx(require_init: bool = True) -> tuple[Path, dict]:
 
 
 def _parse_since(text: str) -> datetime:
+    """Parses a `--since` value like "7d" into an absolute datetime that many days ago."""
     m = re.fullmatch(r"(\d+)d", text)
     if not m:
         raise ValueError(f"unsupported --since format: {text!r} (use e.g. 7d)")
@@ -59,12 +65,14 @@ def _parse_since(text: str) -> datetime:
 
 
 def _dump(args: argparse.Namespace, data) -> None:
+    """Prints data to stdout as indented JSON, coercing non-JSON-serializable values via str()."""
     print(json.dumps(data, indent=2, default=str))
 
 
 # --- init / new / run / ask ---------------------------------------------
 
 def cmd_init(args: argparse.Namespace) -> None:
+    """Handles `px0 init`: scaffolds a new store and prints suggested next commands."""
     home = Path(args.dir).expanduser() if args.dir else paths.store_home()
     created = store_mod.init(home)
     for line in created:
@@ -77,6 +85,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def cmd_new(args: argparse.Namespace) -> None:
+    """Handles `px0 new`: generates a workflow plan from a natural-language description,
+    checks feasibility and required connections, then writes the workflow file after
+    interactive confirmation (unless --yes is passed)."""
     home, config = _ctx()
     try:
         plan = builder_mod.generate_plan(config, args.description)
@@ -113,6 +124,7 @@ def cmd_new(args: argparse.Namespace) -> None:
             print("cancelled")
             return
 
+    # slugify the description into a default workflow id, capped to 40 chars
     default_id = re.sub(r"[^a-z0-9-]+", "-", plan.description.lower()).strip("-")[:40] or "new-workflow"
     workflow_id = args.id or (default_id if args.yes else input(f"workflow id [{default_id}]: ").strip() or default_id)
 
@@ -126,6 +138,9 @@ def cmd_new(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    """Handles `px0 run`: executes a workflow with inputs collected from --stdin and
+    --input KEY=VALUE flags, then prints the outcome and, depending on --json/--quiet
+    and the workflow's output target, the run's output text."""
     home, config = _ctx()
     cli_inputs: dict = {}
     if args.stdin:
@@ -161,6 +176,8 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
+    """Handles `px0 ask`: answers a question via retrieval over guidelines/knowledge
+    and prints the answer, optionally followed by source passages with --sources."""
     home, config = _ctx()
     try:
         result = ask_mod.ask(home, config, args.question, k=args.k)
@@ -175,6 +192,8 @@ def cmd_ask(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
+    """Handles `px0 list`: prints workflows, guidelines, and/or knowledge file paths.
+    With no kind given, prints all three sections; otherwise prints just that section."""
     home, config = _ctx()
     kind = args.kind
 
@@ -203,6 +222,9 @@ def cmd_list(args: argparse.Namespace) -> None:
 # --- connect / tools -----------------------------------------------------
 
 def cmd_connect(args: argparse.Namespace) -> None:
+    """Handles `px0 connect` and its sub-targets: setup-composio, list, remove, rotate,
+    and connecting a new service (native github only in this build; anything else
+    reports Composio auth-link creation as unimplemented)."""
     home, _ = _ctx()
     target = args.target
 
@@ -263,6 +285,8 @@ def cmd_connect(args: argparse.Namespace) -> None:
 
 
 def cmd_tools(args: argparse.Namespace) -> None:
+    """Handles `px0 tools list`: prints each available tool with a read/write marker,
+    its id, provider, description, and parameters, optionally filtered by service."""
     for t in tools.list_tools(args.service):
         marker = "write" if t.is_write else "read "
         print(f"[{marker}] {t.id}\t{t.provider}\t{t.description}\tparams={t.params}")
@@ -271,6 +295,9 @@ def cmd_tools(args: argparse.Namespace) -> None:
 # --- daemon ----------------------------------------------------------------
 
 def cmd_daemon(args: argparse.Namespace) -> None:
+    """Handles `px0 daemon` subcommands: install, status, start, stop, restart, logs,
+    serve. start/restart spawn `python -m px0.cli daemon serve` as a detached child
+    process with PX0_HOME set; stop/restart send SIGTERM to the recorded pid."""
     home, config = _ctx()
 
     if args.daemon_cmd == "install":
@@ -290,6 +317,7 @@ def cmd_daemon(args: argparse.Namespace) -> None:
         return
 
     if args.daemon_cmd == "start":
+        # detached child inherits current env plus an explicit PX0_HOME so it targets the same store
         subprocess.Popen(
             [sys.executable, "-m", "px0.cli", "daemon", "serve"],
             env={**os.environ, "PX0_HOME": str(home)},
@@ -332,6 +360,8 @@ def cmd_daemon(args: argparse.Namespace) -> None:
 # --- runs --------------------------------------------------------------
 
 def cmd_runs(args: argparse.Namespace) -> None:
+    """Handles `px0 runs` subcommands: list, show, output, rerun, logs -- inspecting
+    and replaying past workflow run records."""
     home, config = _ctx()
 
     if args.runs_cmd == "list":
@@ -376,6 +406,8 @@ def cmd_runs(args: argparse.Namespace) -> None:
 # --- knowledge -----------------------------------------------------------
 
 def cmd_knowledge(args: argparse.Namespace) -> None:
+    """Handles `px0 knowledge add` and `refresh`: ingests a source (URL, file, etc.)
+    into the knowledge library or re-fetches an already-ingested source."""
     home, config = _ctx()
 
     if args.knowledge_cmd == "add":
@@ -403,6 +435,9 @@ def cmd_knowledge(args: argparse.Namespace) -> None:
 # --- guidelines / consolidate --------------------------------------------
 
 def _interactive_review(home: Path, proposal_list: list, non_interactive: bool) -> None:
+    """Walks the user through each pending proposal, prompting accept/edit/dismiss
+    unless non_interactive is set (in which case proposals are only printed, not
+    acted on). Accepted/edited proposals are applied together as one change."""
     if not proposal_list:
         print("nothing pending")
         return
@@ -422,7 +457,7 @@ def _interactive_review(home: Path, proposal_list: list, non_interactive: bool) 
             while True:
                 line = input()
                 if not line:
-                    break
+                    break  # blank line terminates multi-line entry
                 lines.append(line)
             decisions.append({"proposal": p, "edited_body": "\n".join(lines)})
         else:
@@ -436,6 +471,9 @@ def _interactive_review(home: Path, proposal_list: list, non_interactive: bool) 
 
 
 def cmd_guidelines(args: argparse.Namespace) -> None:
+    """Handles `px0 guidelines` subcommands: review (pending proposals), log (claim
+    history), revert (roll a claim back to an earlier version), and alias
+    (list/link/unlink claim aliases)."""
     home, config = _ctx()
 
     if args.guidelines_cmd == "review":
@@ -470,6 +508,9 @@ def cmd_guidelines(args: argparse.Namespace) -> None:
 
 
 def cmd_consolidate(args: argparse.Namespace) -> None:
+    """Handles `px0 consolidate`: builds a consolidation session (pending proposals,
+    decayed claims, contradictions, unreferenced guideline files), prints a summary,
+    then runs the same interactive review flow as `guidelines review`."""
     home, config = _ctx()
     session = consolidate_mod.build_session(home, config)
 
@@ -488,6 +529,7 @@ def cmd_consolidate(args: argparse.Namespace) -> None:
 # --- versions / changes --------------------------------------------------
 
 def _parse_version_ref(ref: str) -> tuple[str, int]:
+    """Splits a `<path>@v<N>` reference into (path, version number)."""
     if "@v" not in ref:
         raise ValueError(f"expected <path>@v<N>, got {ref!r}")
     path, v = ref.rsplit("@v", 1)
@@ -495,6 +537,8 @@ def _parse_version_ref(ref: str) -> tuple[str, int]:
 
 
 def cmd_versions(args: argparse.Namespace) -> None:
+    """Handles `px0 versions` subcommands: list, show, diff, revert, prune -- the
+    per-file version history maintained by the tool's own versioning system."""
     home, config = _ctx()
 
     if args.versions_cmd == "list":
@@ -529,6 +573,8 @@ def cmd_versions(args: argparse.Namespace) -> None:
 
 
 def cmd_changes(args: argparse.Namespace) -> None:
+    """Handles `px0 changes` subcommands: list, show, revert -- multi-file changesets
+    (as opposed to `versions`, which tracks a single file's history)."""
     home, config = _ctx()
 
     if args.changes_cmd == "list":
@@ -554,6 +600,8 @@ def cmd_changes(args: argparse.Namespace) -> None:
 # --- search / skills / why / store / update / version / doctor -----------
 
 def cmd_search(args: argparse.Namespace) -> None:
+    """Handles `px0 search`: rebuilds the retrieval index when the query is literally
+    "reindex", otherwise retrieves and prints the top-k matching passages."""
     home, config = _ctx()
     if args.query == "reindex":
         count = retrieval.reindex(home, config)
@@ -569,6 +617,8 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_skills(args: argparse.Namespace) -> None:
+    """Handles `px0 skills build`: builds the skills/ output directory and prints
+    each file written."""
     home, config = _ctx()
     written = skills_mod.build(home)
     for w in written:
@@ -576,6 +626,8 @@ def cmd_skills(args: argparse.Namespace) -> None:
 
 
 def cmd_why(args: argparse.Namespace) -> None:
+    """Handles `px0 why <target_id>`: prints the provenance chain explaining how a
+    claim, proposal, or other tracked entity came to be."""
     home, config = _ctx()
     try:
         result = provenance.why(home, config, args.target_id)
@@ -586,6 +638,8 @@ def cmd_why(args: argparse.Namespace) -> None:
 
 
 def cmd_store(args: argparse.Namespace) -> None:
+    """Handles `px0 store export <dir>`: copies store content and version history to
+    another directory, excluding credentials."""
     home, config = _ctx()
     if args.store_cmd == "export":
         store_mod.export(home, Path(args.dir))
@@ -593,6 +647,8 @@ def cmd_store(args: argparse.Namespace) -> None:
 
 
 def cmd_update(args: argparse.Namespace) -> None:
+    """Handles `px0 update`: switches the update channel, checks for/applies an
+    update, or reports that rollback is unavailable in this build."""
     home, config = _ctx()
     if args.rollback:
         print("rollback is not available; this build has no release manifest "
@@ -608,6 +664,8 @@ def cmd_update(args: argparse.Namespace) -> None:
 
 
 def cmd_version(args: argparse.Namespace) -> None:
+    """Handles `px0 version`: prints version/build info. Works even without an
+    initialized store (require_init=False)."""
     home, config = _ctx(require_init=False)
     info = update_mod.version_info(home, config)
     for k, v in info.items():
@@ -615,6 +673,8 @@ def cmd_version(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
+    """Handles `px0 doctor`: runs integrity/health checks and prints pass/fail per
+    check. Exits with EXIT_INTEGRITY_ERROR if any check failed."""
     home, config = _ctx()
     report = doctor_mod.run(home, config, quick=args.quick)
     for name, check in report["checks"].items():
@@ -628,6 +688,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 # --- argument parser -----------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
+    """Builds the full px0 argparse tree: one subparser per top-level command, each
+    wiring its own flags and a `func` default that cmd dispatches to in main()."""
     p = argparse.ArgumentParser(prog="px0")
     p.add_argument("--json", action="store_true", help="machine-readable output where supported")
     sub = p.add_subparsers(dest="command", required=True)
@@ -649,7 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--output", choices=["stdout", "file"])
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--input", action="append", metavar="KEY=VALUE")
-    sp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)
+    sp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)  # internal-use only: hidden from --help, set by the daemon for backfilled runs
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_run)
 
@@ -807,10 +869,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """CLI entry point: parses args, dispatches to the selected subcommand's handler,
+    and translates known exception types into the appropriate exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         args.func(args)
+    # each except maps a failure category to its own exit code so callers/scripts can branch on it
     except tools.ConnectorError as e:
         print(str(e), file=sys.stderr)
         sys.exit(EXIT_CONNECTOR_ERROR)

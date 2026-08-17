@@ -32,10 +32,12 @@ LATE_THRESHOLD_SECONDS = 90
 
 
 def pidfile_path(home: Path) -> Path:
+    """Path to the file holding the running daemon's pid."""
     return paths.state_dir(home) / "daemon.pid"
 
 
 def load_schedule_state(home: Path) -> dict:
+    """Loads the last-fire-time-per-workflow-id map, or {} if none recorded yet."""
     p = paths.schedule_path(home)
     if not p.exists():
         return {}
@@ -43,12 +45,16 @@ def load_schedule_state(home: Path) -> dict:
 
 
 def save_schedule_state(home: Path, state: dict) -> None:
+    """Persists the last-fire-time-per-workflow-id map."""
     p = paths.schedule_path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(state, indent=2))
 
 
 def _due_fires(schedule: str, last_fire: datetime | None, now: datetime) -> list[datetime]:
+    """Returns every cron fire time for `schedule` between the later of last_fire
+    or today's midnight, and now. With no last_fire, starts one second before
+    midnight so a fire exactly at midnight is still included."""
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = max(last_fire, midnight) if last_fire else midnight - timedelta(seconds=1)
     itr = croniter(schedule, start)
@@ -81,6 +87,8 @@ def tick(home: Path, config: dict, state: dict) -> dict:
 
 
 def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime) -> None:
+    """Launches `px0 run <workflow_id> --quiet` as a detached subprocess, passing
+    --late-scheduled-at when the fire was recovered rather than on-time."""
     px0_bin = shutil.which("px0") or sys.executable
     args = [px0_bin] if px0_bin != sys.executable else [sys.executable, "-m", "px0.cli"]
     args += ["run", workflow_id, "--quiet"]
@@ -97,6 +105,9 @@ def recover_missed_fires(home: Path, config: dict) -> None:
 
 
 def run_nightly(home: Path, config: dict) -> dict:
+    """Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, knowledge
+    reindex, and run-log retention. Reindex failures are captured in the report
+    rather than raised, so one broken index doesn't block the rest of housekeeping."""
     report = {}
     report["checkpoint"] = claims.scan_and_process(home, force_hash=True)
     try:
@@ -108,16 +119,21 @@ def run_nightly(home: Path, config: dict) -> dict:
 
 
 def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS) -> None:
+    """Runs the daemon's main loop until SIGTERM/SIGINT: writes a pidfile, recovers
+    missed fires from earlier today, then polls every poll_interval seconds,
+    ticking the schedule and running the nightly pass once per calendar day."""
     pidfile = pidfile_path(home)
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
     def handle_stop(signum, frame):
+        # removes the pidfile before exiting so status() doesn't report a stale pid
         if pidfile.exists():
             pidfile.unlink()
         os._exit(0)
 
     def reap_children(signum, frame):
+        # reaps spawned `px0 run` children so they don't linger as zombies
         try:
             while os.waitpid(-1, os.WNOHANG)[0] > 0:
                 pass
@@ -146,6 +162,9 @@ def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS
 
 
 def status(home: Path, config: dict) -> dict:
+    """Reports whether the daemon is alive (by signaling its pid with signal 0),
+    plus the last recorded fire per workflow and each scheduled workflow's next
+    upcoming fire time."""
     pidfile = pidfile_path(home)
     alive = False
     pid = None
@@ -172,6 +191,8 @@ def status(home: Path, config: dict) -> dict:
 # --- install: platform detection and unit generation --------------------
 
 def detect_platform() -> str:
+    """Picks the scheduling mechanism for this OS: launchd on macOS, systemd on
+    Linux when a user session bus is available, cron as the fallback everywhere else."""
     if sys.platform == "darwin":
         return "launchd"
     if sys.platform.startswith("linux"):
@@ -182,6 +203,7 @@ def detect_platform() -> str:
 
 
 def systemd_unit(home: Path, px0_bin: str) -> str:
+    """Renders a systemd user-service unit file that runs `px0 daemon serve`."""
     return f"""[Unit]
 Description=px0 scheduler
 
@@ -196,6 +218,7 @@ WantedBy=default.target
 
 
 def launchd_plist(home: Path, px0_bin: str) -> str:
+    """Renders a launchd plist that runs `px0 daemon serve` at load and keeps it alive."""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -213,6 +236,8 @@ def launchd_plist(home: Path, px0_bin: str) -> str:
 
 
 def crontab_block(home: Path, px0_bin: str) -> str:
+    """Renders one crontab line per scheduled, non-pipeline workflow, for the
+    cron fallback path which has no long-running daemon process."""
     lines = ["# BEGIN px0-managed"]
     for wf in workflow_mod.load_all(home).values():
         schedule = wf.trigger.get("schedule")
@@ -223,6 +248,10 @@ def crontab_block(home: Path, px0_bin: str) -> str:
 
 
 def install(home: Path, fallback_cron: bool = False) -> dict:
+    """Writes the platform-appropriate scheduler unit (systemd/launchd) or, on cron
+    fallback, only renders the crontab block without writing anything (the caller
+    installs it with `crontab -e`). Returns platform, path written (if any), the
+    rendered content, and a human hint for how to start it."""
     px0_bin = shutil.which("px0") or f"{sys.executable} -m px0.cli"
     platform = "cron" if fallback_cron else detect_platform()
 

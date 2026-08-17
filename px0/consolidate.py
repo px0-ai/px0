@@ -11,8 +11,15 @@ from px0 import proposals as proposals_mod
 
 
 def build_session(home: Path, config: dict, decay_days: int = 180) -> dict:
+    """Assembles one consolidation session: proposals ranked by how often
+    their target file recurs, claims stale past decay_days, contradiction
+    pairs, and guideline files no workflow references.
+
+    Caps proposals at config's proposals.max_per_consolidation; the rest are
+    reported as overflow rather than dropped."""
     props = proposals_mod.list_proposals(home)
     counts = Counter(p.target_file for p in props)
+    # surface proposals touching the same file repeatedly first -- repetition is signal
     ranked = sorted(props, key=lambda p: -counts[p.target_file])
 
     max_n = config_mod.get(config, "proposals.max_per_consolidation", 10)

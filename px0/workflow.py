@@ -12,11 +12,15 @@ from px0 import paths, tools
 
 
 class WorkflowError(Exception):
+    """Raised when a workflow file fails to parse or fails validation."""
     pass
 
 
 @dataclass
 class InputSpec:
+    """One entry in a workflow's `inputs` list: a tool call, retrieval query,
+    static source, or sub-workflow used to gather context before the main
+    prompt runs."""
     id: str
     tool: str | None = None
     args: dict = field(default_factory=dict)
@@ -27,6 +31,9 @@ class InputSpec:
 
     @property
     def kind(self) -> str:
+        """Returns which of tool/retrieve/source/workflow this input is,
+        inferred from which field is set. Raises WorkflowError if none are
+        set."""
         if self.tool:
             return "tool"
         if self.retrieve is not None:
@@ -40,6 +47,8 @@ class InputSpec:
 
 @dataclass
 class Workflow:
+    """Parsed representation of a workflow file: YAML frontmatter fields
+    plus the Markdown body (the prompt)."""
     id: str
     path: Path
     version: int = 1
@@ -55,14 +64,20 @@ class Workflow:
 
     @property
     def rel_path(self) -> str | None:
+        """Placeholder for a path relative to the store home; always None
+        here and filled in by the caller when needed."""
         return None  # set by caller relative to home when needed
 
 
 def parse(path: Path) -> Workflow:
+    """Parses a workflow file into a Workflow, splitting YAML frontmatter
+    from the Markdown body. Raises WorkflowError if the file has no
+    frontmatter delimiters or the frontmatter section is malformed.
+    Missing frontmatter keys fall back to their dataclass defaults."""
     text = path.read_text()
     if not text.startswith("---"):
         raise WorkflowError(f"{path}: missing frontmatter")
-    parts = text.split("---", 2)
+    parts = text.split("---", 2)  # ["", frontmatter, body]
     if len(parts) < 3:
         raise WorkflowError(f"{path}: malformed frontmatter")
     front = yaml.safe_load(parts[1]) or {}
@@ -87,6 +102,10 @@ def parse(path: Path) -> Workflow:
 
 
 def load_all(home: Path) -> dict[str, Workflow]:
+    """Loads every workflow file (*.md, recursively) under the store's
+    workflows directory, keyed by workflow id. Returns an empty dict if the
+    workflows directory doesn't exist. A duplicate id overwrites the
+    previously loaded workflow with that id."""
     base = paths.workflows_dir(home)
     result = {}
     if not base.exists():
@@ -98,6 +117,8 @@ def load_all(home: Path) -> dict[str, Workflow]:
 
 
 def load(home: Path, workflow_id: str) -> Workflow:
+    """Loads a single workflow by id. Raises WorkflowError if no workflow
+    with that id exists."""
     for wf_id, wf in load_all(home).items():
         if wf_id == workflow_id:
             return wf
@@ -105,6 +126,11 @@ def load(home: Path, workflow_id: str) -> Workflow:
 
 
 def validate(wf: Workflow, home: Path) -> list[str]:
+    """Validates a parsed workflow's cross-references and structural
+    constraints -- guideline files, tool references, pipeline stages, cron
+    schedule syntax, and output target -- returning a list of
+    human-readable error strings. An empty list means the workflow is
+    valid."""
     errors: list[str] = []
 
     for g in wf.guidelines:

@@ -19,6 +19,8 @@ from px0 import store
 
 
 def version_info(home: Path, config: dict) -> dict:
+    """Reports installed px0/schema versions and whether the configured
+    harness binary is actually on PATH."""
     schema_on_disk = None
     schema_file = home / ".state" / "schema"
     if schema_file.exists():
@@ -37,6 +39,8 @@ def version_info(home: Path, config: dict) -> dict:
 
 
 def check(config: dict) -> dict:
+    """Reports update availability. Always says no manifest exists in this
+    build rather than fabricating a version check."""
     return {
         "channel": config_mod.get(config, "update.channel", "stable"),
         "current_version": __version__,
@@ -50,6 +54,8 @@ def check(config: dict) -> dict:
 
 
 def run_update(config: dict, check_only: bool = False) -> dict:
+    """Entry point for `px0 update`. With check_only, same as check(); otherwise
+    still performs no action, since there's no manifest to update against."""
     result = check(config)
     if check_only:
         return result

@@ -9,10 +9,13 @@ from px0 import config as config_mod
 
 
 class HarnessError(Exception):
+    """Raised when the harness command is missing, times out, or exits non-zero."""
     pass
 
 
 def parse_duration(s: str) -> float:
+    """Parses a duration string with an optional ms/s/m/h suffix into seconds.
+    No suffix is treated as seconds."""
     s = s.strip()
     if s.endswith("ms"):
         return float(s[:-2]) / 1000
@@ -26,6 +29,11 @@ def parse_duration(s: str) -> float:
 
 
 def invoke(config: dict, prompt: str, timeout: float = 120) -> str:
+    """Shells out to the configured harness command (e.g. `claude -p`) with
+    the prompt as its final argument and returns stdout.
+
+    Raises HarnessError if the binary is missing, the call times out, or it
+    exits non-zero."""
     harness_cmd = config_mod.get(config, "model.harness_cmd", "claude -p")
     cmd = shlex.split(harness_cmd) + [prompt]
     try:

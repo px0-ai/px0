@@ -24,17 +24,22 @@ from px0.retrieval import knowledge_path
 
 
 class IngestError(Exception):
-    pass
+    """A knowledge source could not be ingested (unrecognized, extraction tool
+    missing, extraction failed, etc.)."""
 
 
 @dataclass
 class IngestResult:
+    """Where an ingested (or refreshed) source landed, and whether it's still
+    a stub awaiting a transcript."""
     path: Path
     kind: str  # docs | blogs | papers
     is_stub: bool
 
 
 def read_header(path: Path) -> tuple[dict, str]:
+    """Splits a knowledge file into its YAML frontmatter dict and body text.
+    Returns ({}, full_text) if the file has no frontmatter block."""
     text = path.read_text()
     if not text.startswith("---"):
         return {}, text
@@ -46,12 +51,15 @@ def read_header(path: Path) -> tuple[dict, str]:
 
 
 def write_file(dest: Path, header: dict, body: str) -> None:
+    """Writes a knowledge file as YAML frontmatter followed by the body text,
+    creating parent directories as needed."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     front = yaml.safe_dump(header, sort_keys=False).strip()
     dest.write_text(f"---\n{front}\n---\n{body}\n")
 
 
 def _slug_from_source(source: str) -> str:
+    """Turns a URL or file path into a filesystem-safe filename stem, capped at 80 chars."""
     slug = re.sub(r"^https?://", "", source)
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", slug).strip("-").lower()
     return slug[:80] or "untitled"
@@ -76,6 +84,8 @@ def _detect_kind(source: str) -> tuple[str, str]:
 
 
 def _extract_web(url: str) -> tuple[str, str]:
+    """Fetches a web page and extracts its readable text: strips script/style/nav/
+    footer/header/aside, prefers <article> or <main> if present. Returns (title, text)."""
     resp = requests.get(url, timeout=20, headers={"User-Agent": "px0/0.1"})
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -90,6 +100,8 @@ def _extract_web(url: str) -> tuple[str, str]:
 
 
 def _extract_pdf(path: Path) -> str:
+    """Extracts text from a PDF via the `pdftotext` CLI. Raises IngestError if the
+    tool is missing or exits non-zero."""
     if not shutil.which("pdftotext"):
         raise IngestError("pdftotext not found; install poppler-utils")
     result = subprocess.run(
@@ -101,6 +113,8 @@ def _extract_pdf(path: Path) -> str:
 
 
 def _extract_document(path: Path) -> str:
+    """Extracts plain text from a document (.docx/.doc/.odt) via the `pandoc` CLI.
+    Raises IngestError if the tool is missing or exits non-zero."""
     if not shutil.which("pandoc"):
         raise IngestError("pandoc not found; install pandoc")
     result = subprocess.run(
@@ -112,6 +126,7 @@ def _extract_document(path: Path) -> str:
 
 
 def _youtube_id(url: str) -> str:
+    """Extracts the 11-char video id from a youtube.com or youtu.be URL."""
     parsed = urlparse(url)
     if "youtu.be" in parsed.netloc:
         return parsed.path.strip("/")
@@ -120,6 +135,8 @@ def _youtube_id(url: str) -> str:
 
 
 def _youtube_oembed(url: str) -> dict:
+    """Fetches YouTube's public oEmbed metadata (title, author) for a video URL,
+    no API key required. Returns {} on any failure."""
     try:
         resp = requests.get(
             "https://www.youtube.com/oembed", params={"url": url, "format": "json"}, timeout=10
@@ -147,6 +164,8 @@ def _extract_youtube(url: str) -> tuple[str, str | None, dict]:
 
 
 def enumerate_playlist(url: str) -> list[str]:
+    """Scrapes a YouTube playlist page's HTML for video ids and returns their
+    watch URLs in playlist order, deduplicated."""
     resp = requests.get(url, timeout=20, headers={"User-Agent": "px0/0.1"})
     resp.raise_for_status()
     ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
@@ -159,6 +178,7 @@ def enumerate_playlist(url: str) -> list[str]:
 
 
 def _dest_path(home: Path, config: dict, folder: str, source: str) -> Path:
+    """Resolves the destination path for an ingested source under knowledge/<folder>/."""
     base = knowledge_path(home, config)
     return base / folder / f"{_slug_from_source(source)}.md"
 
@@ -166,6 +186,11 @@ def _dest_path(home: Path, config: dict, folder: str, source: str) -> Path:
 def add(
     home: Path, config: dict, source: str, to: str | None = None, no_propose: bool = False
 ) -> IngestResult:
+    """Ingests one source into the knowledge library: detects its kind, extracts
+    text (or queues a playlist for background processing), writes the knowledge
+    file, best-effort proposes guideline edits from it (unless no_propose), and
+    reindexes retrieval. A YouTube video with no published transcript is written
+    as a stub rather than failing."""
     kind, default_folder = _detect_kind(source)
     folder = to or default_folder
     today = date.today().isoformat()
@@ -229,6 +254,9 @@ def add(
 
 
 def refresh(home: Path, config: dict, path: Path) -> IngestResult:
+    """Retries transcript extraction for a YouTube stub file; rewrites it in place
+    once a transcript is available. Raises IngestError if path isn't a stub or the
+    transcript still isn't published."""
     header, body = read_header(path)
     if header.get("kind") != "stub":
         raise IngestError(f"{path} is not a stub")

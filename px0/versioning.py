@@ -52,24 +52,30 @@ CREATE TABLE IF NOT EXISTS aliases (
 
 @dataclass
 class FileChange:
+    """One file's new content (or deletion) waiting to be recorded as a version."""
     rel_path: str
     content: bytes | None  # None means delete (tombstone)
     evidence: str | None = None
 
 
 def _now() -> str:
+    """Current UTC timestamp as an ISO 8601 string, for storing in the manifest."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def manifest_path(home: Path) -> Path:
+    """Path to the sqlite manifest that indexes all versions."""
     return paths.versions_dir(home) / "manifest.sqlite"
 
 
 def objects_dir(home: Path) -> Path:
+    """Path to the content-addressed blob store (zstd-compressed file contents)."""
     return paths.versions_dir(home) / "objects"
 
 
 def connect(home: Path) -> sqlite3.Connection:
+    """Opens the manifest db, creating the versions directory and schema if needed.
+    Caller is responsible for closing the connection."""
     paths.versions_dir(home).mkdir(parents=True, exist_ok=True)
     objects_dir(home).mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(manifest_path(home))
@@ -79,8 +85,11 @@ def connect(home: Path) -> sqlite3.Connection:
 
 
 def store_blob(home: Path, content: bytes) -> str:
+    """Writes content to the blob store under its sha256 digest, compressed with zstd.
+    No-op if a blob with that digest already exists (content-addressed dedup).
+    Returns the hex digest."""
     digest = hashlib.sha256(content).hexdigest()
-    blob_dir = objects_dir(home) / digest[:2]
+    blob_dir = objects_dir(home) / digest[:2]  # two-char fanout to avoid huge flat dirs
     blob_dir.mkdir(parents=True, exist_ok=True)
     blob_path = blob_dir / digest
     if not blob_path.exists():
@@ -90,12 +99,15 @@ def store_blob(home: Path, content: bytes) -> str:
 
 
 def read_blob(home: Path, digest: str) -> bytes:
+    """Reads and decompresses a blob by its digest."""
     blob_path = objects_dir(home) / digest[:2] / digest
     compressed = blob_path.read_bytes()
     return zstandard.ZstdDecompressor().decompress(compressed)
 
 
 def new_change_id(conn: sqlite3.Connection, actor: str) -> str:
+    """Allocates and inserts a new change id of the form chg_YYYY-MM-DD-NNN,
+    sequential per day. Caller must commit the transaction."""
     date = datetime.now().strftime("%Y-%m-%d")
     row = conn.execute(
         "SELECT id FROM changes WHERE id LIKE ? ORDER BY id DESC LIMIT 1",
@@ -142,6 +154,7 @@ def record_change(
                         continue  # unchanged, nothing to record
 
             if change_id is None:
+                # allocate the change id lazily, only once we know at least one file actually changed
                 change_id = new_change_id(conn, actor)
 
             conn.execute(
@@ -174,6 +187,8 @@ def record_change(
 
 
 def list_versions(home: Path, rel_path: str) -> list[dict]:
+    """Returns every recorded version of a file, oldest first, as dicts with
+    version/actor/change_id/timestamp/deleted/evidence."""
     conn = connect(home)
     try:
         rows = conn.execute(
@@ -187,6 +202,8 @@ def list_versions(home: Path, rel_path: str) -> list[dict]:
 
 
 def show_version(home: Path, rel_path: str, version: int) -> bytes | None:
+    """Returns the raw bytes of a file at a specific version, or None if that
+    version was a deletion. Raises ValueError if the version doesn't exist."""
     conn = connect(home)
     try:
         row = conn.execute(
@@ -203,6 +220,7 @@ def show_version(home: Path, rel_path: str, version: int) -> bytes | None:
 
 
 def latest_version_number(home: Path, rel_path: str) -> int | None:
+    """Returns the newest version number for a file, or None if it has no history."""
     conn = connect(home)
     try:
         row = conn.execute(
@@ -214,6 +232,8 @@ def latest_version_number(home: Path, rel_path: str) -> int | None:
 
 
 def diff_versions(home: Path, rel_path: str, v1: int, v2: int) -> str:
+    """Returns a unified diff string between two versions of a file.
+    A deleted version is treated as empty content."""
     a = (show_version(home, rel_path, v1) or b"").decode("utf-8", "replace")
     b = (show_version(home, rel_path, v2) or b"").decode("utf-8", "replace")
     diff = difflib.unified_diff(
@@ -226,11 +246,16 @@ def diff_versions(home: Path, rel_path: str, v1: int, v2: int) -> str:
 
 
 def revert_file(home: Path, rel_path: str, to_version: int, actor: str) -> str | None:
+    """Reverts a file to a prior version by recording its old content as a new
+    version (history is never rewritten). Returns the new change id, or None
+    if the content is already identical to the current version."""
     content = show_version(home, rel_path, to_version)
     return record_change(home, actor, [FileChange(rel_path, content)])
 
 
 def list_changes(home: Path, since: datetime | None = None, actor: str | None = None) -> list[dict]:
+    """Returns changes newest-first, optionally filtered by timestamp and actor,
+    each annotated with the list of (path, version) pairs it touched."""
     conn = connect(home)
     try:
         query = "SELECT id, actor, timestamp FROM changes WHERE 1=1"
@@ -254,6 +279,9 @@ def list_changes(home: Path, since: datetime | None = None, actor: str | None = 
 
 
 def show_change(home: Path, change_id: str) -> dict:
+    """Returns a change's metadata plus a per-file unified diff against each
+    file's previous version (or a diff from /dev/null for a first version).
+    Raises ValueError if the change id doesn't exist."""
     conn = connect(home)
     try:
         change = conn.execute(
@@ -273,6 +301,7 @@ def show_change(home: Path, change_id: str) -> dict:
     for r in rows:
         prev_rows = list_versions(home, r["path"])
         prev_version = None
+        # rows are version-ascending, so this ends up holding the version immediately before r
         for v in prev_rows:
             if v["version"] < r["version"]:
                 prev_version = v["version"]
@@ -294,11 +323,15 @@ def show_change(home: Path, change_id: str) -> dict:
 
 
 def revert_change(home: Path, change_id: str, actor: str) -> str | None:
+    """Reverts every file touched by a change back to its version immediately
+    prior (or deletes it, if the file had no earlier version). Returns the
+    new change id, or None if there was nothing to revert."""
     change = show_change(home, change_id)
     file_changes = []
     for f in change["files"]:
         rows = list_versions(home, f["path"])
         prev_version = None
+        # rows are version-ascending, so this ends up holding the version immediately before f
         for v in rows:
             if v["version"] < f["version"]:
                 prev_version = v["version"]
@@ -308,6 +341,8 @@ def revert_change(home: Path, change_id: str, actor: str) -> str | None:
 
 
 def _walk_versioned_files(home: Path) -> list[Path]:
+    """Lists every file on disk that falls under version control: all
+    markdown under workflows/ and guidelines/, plus config.toml."""
     files = []
     for base in (paths.workflows_dir(home), paths.guidelines_dir(home)):
         if base.exists():
@@ -409,6 +444,8 @@ def prune(home: Path, config: dict, dry_run: bool = False) -> dict:
 
 
 def _gc_blobs(home: Path) -> int:
+    """Deletes any blob in the objects store not referenced by any version row.
+    Returns the number of blobs removed."""
     conn = connect(home)
     try:
         referenced = {
@@ -433,5 +470,7 @@ def _gc_blobs(home: Path) -> int:
 
 
 def ensure_secure_permissions(path: Path) -> None:
+    """Restricts a file to owner read/write only (mode 0600); no-op if it
+    doesn't exist yet. Used for credentials.toml."""
     if path.exists():
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)

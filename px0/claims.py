@@ -13,6 +13,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 
 
 def slugify(heading: str) -> str:
+    """Converts a Markdown heading into the URL/id-safe slug used to address it as a claim."""
     slug = heading.lower().strip()
     slug = re.sub(r"[`*_]", "", slug)
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
@@ -22,6 +23,8 @@ def slugify(heading: str) -> str:
 
 @dataclass
 class Section:
+    """One `##`-or-deeper section of a guideline file: its heading, slug, line range
+    within the file, and raw lines (heading line included)."""
     heading: str
     slug: str
     start_line: int
@@ -30,14 +33,18 @@ class Section:
 
     @property
     def text(self) -> str:
+        """The section's full text, heading line included."""
         return "".join(self.lines)
 
     @property
     def body(self) -> str:
+        """The section's text with the heading line stripped."""
         return "".join(self.lines[1:])
 
 
 def extract_sections(content: str) -> list[Section]:
+    """Splits a guideline file's content into sections, one per heading, each
+    running up to the next heading (or end of file)."""
     lines = content.splitlines(keepends=True)
     headings: list[tuple[int, str]] = []
     for i, line in enumerate(lines):
@@ -52,6 +59,7 @@ def extract_sections(content: str) -> list[Section]:
 
 
 def _normalize_tokens(text: str) -> set[str]:
+    """Lowercases text, unwraps inline code spans, and splits into a set of word tokens."""
     text = text.lower()
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"[^\w\s]", " ", text)
@@ -59,6 +67,8 @@ def _normalize_tokens(text: str) -> set[str]:
 
 
 def jaccard_similarity(a: str, b: str) -> float:
+    """Token-level Jaccard similarity between two texts. Two empty texts are
+    treated as identical (1.0); one empty and one non-empty are unrelated (0.0)."""
     ta, tb = _normalize_tokens(a), _normalize_tokens(b)
     if not ta and not tb:
         return 1.0
@@ -96,6 +106,7 @@ def detect_renames(old_content: str, new_content: str) -> list[tuple[str, str]]:
 # --- alias storage -----------------------------------------------------
 
 def add_alias(home: Path, old_claim: str, new_claim: str) -> None:
+    """Records (or updates) that old_claim now resolves to new_claim."""
     conn = versioning.connect(home)
     try:
         conn.execute(
@@ -109,6 +120,7 @@ def add_alias(home: Path, old_claim: str, new_claim: str) -> None:
 
 
 def remove_alias(home: Path, old_claim: str) -> None:
+    """Deletes an alias mapping; no-op if it doesn't exist."""
     conn = versioning.connect(home)
     try:
         conn.execute("DELETE FROM aliases WHERE old_claim = ?", (old_claim,))
@@ -118,6 +130,7 @@ def remove_alias(home: Path, old_claim: str) -> None:
 
 
 def list_aliases(home: Path) -> list[dict]:
+    """Returns every alias mapping, sorted by old_claim."""
     conn = versioning.connect(home)
     try:
         return [dict(r) for r in conn.execute(
@@ -169,6 +182,9 @@ def lineage_slugs(home: Path, path: str, claim_id: str) -> set[str]:
 
 
 def process_change_for_renames(home: Path, change_id: str | None) -> None:
+    """For each guideline file touched by a change, diffs it against its previous
+    version and records any detected section renames as aliases. No-op for a
+    None change_id (nothing was actually recorded)."""
     if change_id is None:
         return
     change = versioning.show_change(home, change_id)
@@ -202,6 +218,8 @@ def scan_and_process(home: Path, actor: str = "user:manual", force_hash: bool = 
 def capture_guideline_change(
     home: Path, actor: str, file_changes: list[versioning.FileChange]
 ) -> str | None:
+    """Records a guideline edit as a version and immediately runs rename detection
+    on it, so aliases stay in sync with every guideline write path."""
     change_id = versioning.record_change(home, actor, file_changes)
     process_change_for_renames(home, change_id)
     return change_id
@@ -210,6 +228,8 @@ def capture_guideline_change(
 # --- claim log / revert -------------------------------------------------
 
 def guidelines_log(home: Path, claim_id: str) -> list[dict]:
+    """Returns the version history of one claim, following its alias lineage so
+    a section that was renamed still shows its full history under either name."""
     path, _ = claim_id.split("#", 1)
     slugs = lineage_slugs(home, path, claim_id)
     entries = []
@@ -235,6 +255,10 @@ def guidelines_log(home: Path, claim_id: str) -> list[dict]:
 
 
 def guidelines_revert(home: Path, claim_id: str, to_version: int, actor: str) -> str | None:
+    """Restores one claim's section text from an earlier file version, splicing it
+    back into the current file content (replacing the section if it's still present
+    under any alias, appending it otherwise) and recording the result as a new change.
+    Raises ValueError if the target version has no content or lacks this claim."""
     path, _ = claim_id.split("#", 1)
     slugs = lineage_slugs(home, path, claim_id)
 

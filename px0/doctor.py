@@ -10,6 +10,7 @@ from px0 import daemon, harness, paths, proposals, retrieval, versioning
 
 
 def _check_credentials(home: Path) -> dict:
+    """Verifies credentials.toml is mode 0600 (or absent, which is also fine)."""
     path = paths.credentials_path(home)
     if not path.exists():
         return {"ok": True, "detail": "no credentials file yet"}
@@ -19,11 +20,13 @@ def _check_credentials(home: Path) -> dict:
 
 
 def _check_daemon(home: Path, config: dict) -> dict:
+    """Reports daemon status. Always ok: a stopped daemon isn't an integrity failure."""
     s = daemon.status(home, config)
     return {"ok": True, "detail": "running" if s["alive"] else "not running", **s}
 
 
 def _check_harness(config: dict) -> dict:
+    """Sends a trivial prompt to the model backend to confirm it responds."""
     try:
         harness.invoke(config, "reply with the single word: ok", timeout=20)
         return {"ok": True, "detail": "harness responded"}
@@ -32,6 +35,7 @@ def _check_harness(config: dict) -> dict:
 
 
 def _check_index(home: Path, config: dict) -> dict:
+    """Flags a stale retrieval index: knowledge files exist but nothing is indexed."""
     base = retrieval.knowledge_path(home, config)
     file_count = len(list(base.rglob("*.md"))) if base.exists() else 0
     indexed = retrieval.index_count(home)
@@ -40,6 +44,7 @@ def _check_index(home: Path, config: dict) -> dict:
 
 
 def _check_versions(home: Path) -> dict:
+    """Confirms the version manifest database opens and is queryable."""
     try:
         conn = versioning.connect(home)
         conn.execute("SELECT COUNT(*) FROM versions")
@@ -50,11 +55,13 @@ def _check_versions(home: Path) -> dict:
 
 
 def _check_locks(home: Path) -> dict:
+    """Checks the store lock is currently free, i.e. no run is stuck holding it."""
     lock = paths.lock_path(home)
     if not lock.exists():
         return {"ok": True, "detail": "no lock file yet"}
     with open(lock, "w") as f:
         try:
+            # non-blocking acquire-then-release: fails immediately if another process holds it
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(f, fcntl.LOCK_UN)
             return {"ok": True, "detail": "lock is free"}
@@ -63,6 +70,7 @@ def _check_locks(home: Path) -> dict:
 
 
 def _check_schema(home: Path) -> dict:
+    """Confirms the store's on-disk schema version matches this binary's SCHEMA_VERSION."""
     schema_file = paths.schema_path(home)
     if not schema_file.exists():
         return {"ok": False, "detail": "no .state/schema; store not initialized"}
@@ -72,16 +80,22 @@ def _check_schema(home: Path) -> dict:
 
 
 def _check_connections(home: Path) -> dict:
+    """Reports configured connections. Always ok: having zero is a valid state."""
     conns = connect_mod.list_connections(home)
     return {"ok": True, "detail": f"{len(conns)} connection(s) configured", "connections": conns}
 
 
 def _check_unreferenced_guidelines(home: Path) -> dict:
+    """Flags guideline files that no workflow lists, since they're inlined into
+    prompts by reference and are otherwise dead weight."""
     files = proposals.unreferenced_guideline_files(home)
     return {"ok": len(files) == 0, "detail": f"{len(files)} unreferenced file(s)", "files": files}
 
 
 def run(home: Path, config: dict, quick: bool = False) -> dict:
+    """Runs all health checks and returns a report with per-check results plus an
+    overall all_ok flag. quick=True skips the slower checks (daemon, harness,
+    retrieval index) that need a live subprocess or filesystem walk."""
     checks = {
         "credentials": _check_credentials(home),
         "versions": _check_versions(home),
