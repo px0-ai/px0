@@ -1,0 +1,102 @@
+"""px0 doctor: credentials, daemon, harness, index, versions, locks, schema."""
+
+import fcntl
+import stat
+from pathlib import Path
+
+from px0 import __version__, SCHEMA_VERSION
+from px0 import connect as connect_mod
+from px0 import daemon, harness, paths, proposals, retrieval, versioning
+
+
+def _check_credentials(home: Path) -> dict:
+    path = paths.credentials_path(home)
+    if not path.exists():
+        return {"ok": True, "detail": "no credentials file yet"}
+    mode = stat.S_IMODE(path.stat().st_mode)
+    ok = mode == 0o600
+    return {"ok": ok, "detail": f"mode {oct(mode)}" + ("" if ok else ", expected 0600")}
+
+
+def _check_daemon(home: Path, config: dict) -> dict:
+    s = daemon.status(home, config)
+    return {"ok": True, "detail": "running" if s["alive"] else "not running", **s}
+
+
+def _check_harness(config: dict) -> dict:
+    try:
+        harness.invoke(config, "reply with the single word: ok", timeout=20)
+        return {"ok": True, "detail": "harness responded"}
+    except harness.HarnessError as e:
+        return {"ok": False, "detail": str(e)}
+
+
+def _check_index(home: Path, config: dict) -> dict:
+    base = retrieval.knowledge_path(home, config)
+    file_count = len(list(base.rglob("*.md"))) if base.exists() else 0
+    indexed = retrieval.index_count(home)
+    ok = indexed > 0 or file_count == 0
+    return {"ok": ok, "detail": f"{file_count} knowledge files, {indexed} indexed passages"}
+
+
+def _check_versions(home: Path) -> dict:
+    try:
+        conn = versioning.connect(home)
+        conn.execute("SELECT COUNT(*) FROM versions")
+        conn.close()
+        return {"ok": True, "detail": "manifest opens cleanly"}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+
+def _check_locks(home: Path) -> dict:
+    lock = paths.lock_path(home)
+    if not lock.exists():
+        return {"ok": True, "detail": "no lock file yet"}
+    with open(lock, "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+            return {"ok": True, "detail": "lock is free"}
+        except OSError:
+            return {"ok": False, "detail": "lock is held; a run may be stuck"}
+
+
+def _check_schema(home: Path) -> dict:
+    schema_file = paths.schema_path(home)
+    if not schema_file.exists():
+        return {"ok": False, "detail": "no .state/schema; store not initialized"}
+    on_disk = int(schema_file.read_text().strip())
+    return {"ok": on_disk == SCHEMA_VERSION,
+            "detail": f"store schema {on_disk}, binary schema {SCHEMA_VERSION}"}
+
+
+def _check_connections(home: Path) -> dict:
+    conns = connect_mod.list_connections(home)
+    return {"ok": True, "detail": f"{len(conns)} connection(s) configured", "connections": conns}
+
+
+def _check_unreferenced_guidelines(home: Path) -> dict:
+    files = proposals.unreferenced_guideline_files(home)
+    return {"ok": len(files) == 0, "detail": f"{len(files)} unreferenced file(s)", "files": files}
+
+
+def run(home: Path, config: dict, quick: bool = False) -> dict:
+    checks = {
+        "credentials": _check_credentials(home),
+        "versions": _check_versions(home),
+        "locks": _check_locks(home),
+        "schema": _check_schema(home),
+        "connections": _check_connections(home),
+        "unreferenced_guidelines": _check_unreferenced_guidelines(home),
+    }
+    if not quick:
+        checks["daemon"] = _check_daemon(home, config)
+        checks["harness"] = _check_harness(config)
+        checks["index"] = _check_index(home, config)
+
+    return {
+        "px0_version": __version__,
+        "all_ok": all(c["ok"] for c in checks.values()),
+        "checks": checks,
+    }
