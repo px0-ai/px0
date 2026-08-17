@@ -27,19 +27,29 @@ entry point in `pyproject.toml`.
 
 ```shell
 px0 init
-git diff | px0 run pr-precheck --stdin
+echo "https://example.com/some-post" | px0 run summarize --stdin
 ```
 
 `px0 init` scaffolds the store with a handful of starter workflows and
-guidelines. `pr-precheck` is one of them: it reads a diff on stdin,
-checks it against the code-review guidelines, and prints any violations
--- no external connection required, so it's the fastest way to see px0
-do something real.
+guidelines. `summarize` is one of them: it takes a URL, a local file, or
+raw pasted text on stdin and summarizes it -- no external connection
+required, so it's the fastest way to see px0 do something real.
+`pr-precheck` is another: it reads a diff on stdin, checks it against
+the code-review guidelines, and prints any violations.
 
 ```shell
 px0 list workflows
 px0 runs list
 ```
+
+## Model backend
+
+px0 shells out to a coding agent CLI in non-interactive mode as its
+model backend, reusing that CLI's own auth, model choice, and rate
+limits -- there is no direct-API backend. `claude -p` is the default;
+`px0 init --harness <name>` picks the right invocation for `claude`,
+`gemini`, `pi`, or `opencode` instead. Any other command works too, set
+directly as `model.harness_cmd` in `config.toml`.
 
 ## Documentation
 

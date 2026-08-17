@@ -940,6 +940,16 @@ Text and tool-calls in, text out -- there is no direct-API backend.
 
 Raised when the harness command is missing, times out, or exits non-zero.
 
+### `resolve_harness_cmd`
+
+```python
+def resolve_harness_cmd(value: str) -> str
+```
+
+Expands a known harness name (e.g. "gemini") to its full invocation
+command. A value that isn't a known name is returned unchanged, since
+`model.harness_cmd` also accepts an arbitrary literal command.
+
 ### `parse_duration`
 
 ```python
@@ -1745,11 +1755,13 @@ way to move a store to another machine.
 ### `init`
 
 ```python
-def init(home: Path) -> list[str]
+def init(home: Path, harness_cmd: str | None = None) -> list[str]
 ```
 
-Scaffold a store at `home`. Returns a list of human-readable lines
-describing what was created.
+Scaffold a store at `home`. If `harness_cmd` is given, it overrides
+the default `model.harness_cmd` in the generated config.toml (e.g. to
+point a fresh store at gemini, pi, or opencode instead of claude).
+Returns a list of human-readable lines describing what was created.
 
 ## `px0.tools`
 

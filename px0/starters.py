@@ -55,6 +55,31 @@ values. Internal helpers are exempt when the types are obvious from context.
 `except:` and `except Exception:` without re-raising hide bugs. Catch the
 specific exception type being handled.
 """,
+    "summarization.md": """\
+## Lead with the takeaway
+
+Open with the single most important point, not with framing like "this
+piece discusses" or "the article is about". A reader who stops after the
+first sentence should still walk away with the core idea.
+
+## Match length to source, not to a fixed template
+
+A short note gets a short summary. Do not pad a three-paragraph blog post
+into five bullet points just to look thorough, and do not compress a dense
+paper into a single line that loses the argument.
+
+## Keep the source's own claims, not your commentary
+
+Report what the source says, not whether you agree with it. Leave out
+value judgments ("this is a great point") unless the user asked for an
+opinion.
+
+## Preserve concrete details
+
+Numbers, names, and specific examples carry more information than
+adjectives. When space is limited, cut adjectives before cutting a
+concrete detail.
+""",
 }
 
 WORKFLOWS: dict[str, str] = {
@@ -177,6 +202,29 @@ timeout: 120s
 ---
 This workflow is a thin wrapper; `px0 skills build` compiles
 `guidelines/` into `skills/`.
+""",
+    "summarize.md": """\
+---
+id: summarize
+kind: workflow
+version: 1
+description: Summarize a URL, a local file, or raw pasted text.
+trigger:
+  manual: true
+guidelines:
+  - summarization.md
+inputs:
+  - id: content
+    source: stdin
+output:
+  target: stdout
+  format: markdown
+timeout: 120s
+---
+{{content}} is either a URL, a path to a local file, or raw text pasted
+directly. If it is a URL or a file path, fetch or read it before
+summarizing; if it is already raw text, summarize it as given. Follow the
+guidelines above.
 """,
     "weekly-digest.md": """\
 ---

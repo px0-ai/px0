@@ -26,7 +26,7 @@ def version_info(home: Path, config: dict) -> dict:
     if schema_file.exists():
         schema_on_disk = schema_file.read_text().strip()
 
-    harness_cmd = config_mod.get(config, "model.harness_cmd", "claude -p")
+    harness_cmd = harness.resolve_harness_cmd(config_mod.get(config, "model.harness_cmd", "claude -p"))
     harness_bin = harness_cmd.split()[0] if harness_cmd else None
 
     return {

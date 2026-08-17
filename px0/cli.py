@@ -74,7 +74,8 @@ def _dump(args: argparse.Namespace, data) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     """Handles `px0 init`: scaffolds a new store and prints suggested next commands."""
     home = Path(args.dir).expanduser() if args.dir else paths.store_home()
-    created = store_mod.init(home)
+    harness_cmd = harness.KNOWN_HARNESSES[args.harness] if args.harness else None
+    created = store_mod.init(home, harness_cmd=harness_cmd)
     for line in created:
         print(f"created {line}")
     print(f"\npx0 initialized at {home}")
@@ -696,6 +697,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("init")
     sp.add_argument("dir", nargs="?")
+    sp.add_argument(
+        "--harness",
+        choices=sorted(harness.KNOWN_HARNESSES),
+        help="coding agent CLI to use as the model backend (default: claude)",
+    )
     sp.set_defaults(func=cmd_init)
 
     sp = sub.add_parser("new")

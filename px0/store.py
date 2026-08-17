@@ -43,9 +43,11 @@ def export(home: Path, dest: Path) -> None:
             shutil.copy2(src, target)
 
 
-def init(home: Path) -> list[str]:
-    """Scaffold a store at `home`. Returns a list of human-readable lines
-    describing what was created."""
+def init(home: Path, harness_cmd: str | None = None) -> list[str]:
+    """Scaffold a store at `home`. If `harness_cmd` is given, it overrides
+    the default `model.harness_cmd` in the generated config.toml (e.g. to
+    point a fresh store at gemini, pi, or opencode instead of claude).
+    Returns a list of human-readable lines describing what was created."""
     created: list[str] = []
 
     for d in (
@@ -69,6 +71,8 @@ def init(home: Path) -> list[str]:
         initial_config = {k: dict(v) for k, v in config_mod.DEFAULTS.items()}
         initial_config["knowledge"]["path"] = str(home / "knowledge")
         initial_config["output"]["path"] = str(home / "outputs")
+        if harness_cmd:
+            initial_config["model"]["harness_cmd"] = harness_cmd
         config_mod.save(cfg_path, initial_config)
         created.append("config.toml")
 

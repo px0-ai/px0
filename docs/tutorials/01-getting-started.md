@@ -25,12 +25,31 @@ This scaffolds `~/.px0` (or `$PX0_HOME` if set): `workflows/`,
 workflows and guideline files you can read, edit, or delete like any other
 file. Nothing here is hidden or binary.
 
+By default the model backend is `claude -p`. If you use a different
+coding agent CLI as your backend, pass `--harness` at init time:
+
+```shell
+px0 init --harness gemini     # or pi, or opencode
+```
+
+This just picks the right non-interactive invocation for that CLI and
+writes it to `model.harness_cmd` in `config.toml`; you can also edit
+`harness_cmd` there directly to point at any other command.
+
 ## 3. Run your first workflow
 
-`pr-precheck` is one of the starters. It takes a diff on stdin, checks it
-against the code-review guidelines, and prints violations to stdout --
-no external connection required, which makes it the fastest way to see
-px0 actually do something.
+`summarize` is one of the starters. It takes a URL, a local file path, or
+raw pasted text on stdin and summarizes it -- no external connection
+required, which makes it the fastest way to see px0 actually do
+something.
+
+```shell
+echo "https://example.com/some-post" | px0 run summarize --stdin
+```
+
+`pr-precheck` is another connection-free starter: it takes a diff on
+stdin, checks it against the code-review guidelines, and prints
+violations to stdout.
 
 ```shell
 git diff | px0 run pr-precheck --stdin

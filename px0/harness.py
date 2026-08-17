@@ -7,10 +7,27 @@ import subprocess
 
 from px0 import config as config_mod
 
+# Non-interactive invocation for each supported coding-agent CLI: a command
+# prefix that, with the prompt appended as the final argument, prints the
+# reply to stdout and exits. Verified against each CLI's own --help output.
+KNOWN_HARNESSES: dict[str, str] = {
+    "claude": "claude -p",
+    "gemini": "gemini -p",
+    "pi": "pi -p",
+    "opencode": "opencode run",
+}
+
 
 class HarnessError(Exception):
     """Raised when the harness command is missing, times out, or exits non-zero."""
     pass
+
+
+def resolve_harness_cmd(value: str) -> str:
+    """Expands a known harness name (e.g. "gemini") to its full invocation
+    command. A value that isn't a known name is returned unchanged, since
+    `model.harness_cmd` also accepts an arbitrary literal command."""
+    return KNOWN_HARNESSES.get(value.strip(), value)
 
 
 def parse_duration(s: str) -> float:
@@ -34,7 +51,7 @@ def invoke(config: dict, prompt: str, timeout: float = 120) -> str:
 
     Raises HarnessError if the binary is missing, the call times out, or it
     exits non-zero."""
-    harness_cmd = config_mod.get(config, "model.harness_cmd", "claude -p")
+    harness_cmd = resolve_harness_cmd(config_mod.get(config, "model.harness_cmd", "claude -p"))
     cmd = shlex.split(harness_cmd) + [prompt]
     try:
         result = subprocess.run(
