@@ -318,9 +318,11 @@ def _walk_versioned_files(home: Path) -> list[Path]:
     return files
 
 
-def checkpoint_scan(home: Path, actor: str = "user:manual") -> str | None:
+def checkpoint_scan(home: Path, actor: str = "user:manual", force_hash: bool = False) -> str | None:
     """Scan workflows/, guidelines/, and config.toml for changes made
-    outside the tool (hand edits), and capture them as new versions."""
+    outside the tool (hand edits), and capture them as new versions.
+    `force_hash` skips the mtime/size shortcut (the daemon's nightly pass,
+    which catches what mtime tricks miss)."""
     conn = connect(home)
     try:
         known = {
@@ -339,7 +341,8 @@ def checkpoint_scan(home: Path, actor: str = "user:manual") -> str | None:
         on_disk_rel.add(rel)
         st = path.stat()
         prev = known.get(rel)
-        if prev and not prev["deleted"] and prev["size"] == st.st_size and prev["mtime"] == st.st_mtime:
+        if (not force_hash and prev and not prev["deleted"]
+                and prev["size"] == st.st_size and prev["mtime"] == st.st_mtime):
             continue  # unchanged by mtime/size heuristic
         content = path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()

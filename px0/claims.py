@@ -192,9 +192,9 @@ def process_change_for_renames(home: Path, change_id: str | None) -> None:
             add_alias(home, f"{path}#{old_slug}", f"{path}#{new_slug}")
 
 
-def scan_and_process(home: Path, actor: str = "user:manual") -> str | None:
+def scan_and_process(home: Path, actor: str = "user:manual", force_hash: bool = False) -> str | None:
     """The checkpoint scan plus rename detection over what it captured."""
-    change_id = versioning.checkpoint_scan(home, actor)
+    change_id = versioning.checkpoint_scan(home, actor, force_hash=force_hash)
     process_change_for_renames(home, change_id)
     return change_id
 
