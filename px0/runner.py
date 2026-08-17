@@ -198,6 +198,9 @@ def _tool_call_loop(
 def route_output(
     home: Path, output_spec: dict, text: str, note: str | None = None
 ) -> dict:
+    """Writes the output where it belongs and returns a description of what
+    happened. Does not print: stdout routing is a decision for the CLI
+    layer, which also needs plain stdout free for `--json` output."""
     target = output_spec.get("target", "stdout")
     if note:
         text = f"<!-- {note} -->\n\n{text}"
@@ -205,7 +208,6 @@ def route_output(
     if target == "memory":
         return {"target": "memory", "text": text}
     if target == "stdout":
-        print(text)
         return {"target": "stdout", "text": text}
     if target == "file":
         path_template = output_spec.get("path", "outputs/output-{date}.md")

@@ -153,8 +153,11 @@ def cmd_run(args: argparse.Namespace) -> None:
             print(f"[{record['id']}] {record['outcome']} -> {out.get('path')}", file=sys.stderr)
         else:
             print(f"[{record['id']}] {record['outcome']}", file=sys.stderr)
+
     if args.json:
         _dump(args, record)
+    elif record.get("output", {}).get("target") == "stdout":
+        print(record["output"].get("text", ""))
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
@@ -360,7 +363,9 @@ def cmd_runs(args: argparse.Namespace) -> None:
             print("this run has no workflow to rerun (it was an ask)", file=sys.stderr)
             sys.exit(EXIT_USER_ERROR)
         new_record = runner.run(home, config, wf_id, trigger="manual")
-        print(f"reran as {new_record['id']}")
+        print(f"reran as {new_record['id']}", file=sys.stderr)
+        if new_record.get("output", {}).get("target") == "stdout":
+            print(new_record["output"].get("text", ""))
         return
 
     if args.runs_cmd == "logs":
@@ -645,6 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--input", action="append", metavar="KEY=VALUE")
     sp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)
+    sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("ask")
@@ -689,6 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--workflow")
     rp.add_argument("--failed", action="store_true")
     rp.add_argument("--since")
+    rp.add_argument("--json", action="store_true")
     for name in ("show", "output", "rerun"):
         rp2 = runs_sub.add_parser(name)
         rp2.add_argument("run_id")
@@ -735,6 +742,7 @@ def build_parser() -> argparse.ArgumentParser:
     v_sub = sp.add_subparsers(dest="versions_cmd", required=True)
     vp = v_sub.add_parser("list")
     vp.add_argument("path")
+    vp.add_argument("--json", action="store_true")
     vp = v_sub.add_parser("show")
     vp.add_argument("ref", help="<path>@v<N>")
     vp = v_sub.add_parser("diff")
@@ -753,6 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     cp = c_sub.add_parser("list")
     cp.add_argument("--since")
     cp.add_argument("--actor")
+    cp.add_argument("--json", action="store_true")
     cp = c_sub.add_parser("show")
     cp.add_argument("change_id")
     cp = c_sub.add_parser("revert")
@@ -762,6 +771,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("search")
     sp.add_argument("query")
     sp.add_argument("--k", type=int, default=5)
+    sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser("skills")
@@ -790,6 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("doctor")
     sp.add_argument("--quick", action="store_true")
+    sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_doctor)
 
     return p
