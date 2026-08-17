@@ -1,0 +1,23 @@
+[project]
+name = "px0"
+version = "0.1.0"
+description = "A local-first CLI where everything is a workflow"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.30",
+    "zstandard>=0.22",
+    "croniter>=2.0",
+    "beautifulsoup4>=4.12",
+    "youtube-transcript-api>=0.6",
+]
+
+[project.scripts]
+px0 = "px0.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["px0"]
