@@ -36,7 +36,10 @@ def init(home: Path) -> list[str]:
 
     cfg_path = paths.config_path(home)
     if not cfg_path.exists():
-        config_mod.save(cfg_path, config_mod.DEFAULTS)
+        initial_config = {k: dict(v) for k, v in config_mod.DEFAULTS.items()}
+        initial_config["knowledge"]["path"] = str(home / "knowledge")
+        initial_config["output"]["path"] = str(home / "outputs")
+        config_mod.save(cfg_path, initial_config)
         created.append("config.toml")
 
     creds_path = paths.credentials_path(home)
