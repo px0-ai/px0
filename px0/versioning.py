@@ -370,6 +370,68 @@ def checkpoint_scan(home: Path, actor: str = "user:manual", force_hash: bool = F
     return record_change(home, actor, file_changes)
 
 
+def prune(home: Path, config: dict, dry_run: bool = False) -> dict:
+    """Apply [versions] retention policy: drop the oldest version rows
+    beyond max_versions_per_file, never the current version of a live
+    file. No-op when keep_all is true. Followed by blob garbage collection
+    over anything no longer referenced."""
+    from px0 import config as config_mod
+
+    if config_mod.get(config, "versions.keep_all", True):
+        return {"pruned": 0, "note": "versions.keep_all is true; nothing to prune"}
+    max_n = config_mod.get(config, "versions.max_versions_per_file", 200)
+
+    conn = connect(home)
+    try:
+        file_paths = [r["path"] for r in conn.execute("SELECT DISTINCT path FROM versions").fetchall()]
+        pruned = 0
+        for path in file_paths:
+            rows = conn.execute(
+                "SELECT version FROM versions WHERE path = ? ORDER BY version", (path,)
+            ).fetchall()
+            excess = len(rows) - max_n
+            if excess <= 0:
+                continue
+            for r in rows[:excess]:
+                if not dry_run:
+                    conn.execute(
+                        "DELETE FROM versions WHERE path = ? AND version = ?",
+                        (path, r["version"]),
+                    )
+                pruned += 1
+        if not dry_run:
+            conn.commit()
+    finally:
+        conn.close()
+
+    blobs_removed = 0 if dry_run else _gc_blobs(home)
+    return {"pruned": pruned, "blobs_removed": blobs_removed, "dry_run": dry_run}
+
+
+def _gc_blobs(home: Path) -> int:
+    conn = connect(home)
+    try:
+        referenced = {
+            r["hash"] for r in conn.execute(
+                "SELECT DISTINCT hash FROM versions WHERE hash IS NOT NULL"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    obj_dir = objects_dir(home)
+    if not obj_dir.exists():
+        return 0
+    removed = 0
+    for sub in obj_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        for blob in sub.iterdir():
+            if blob.name not in referenced:
+                blob.unlink()
+                removed += 1
+    return removed
+
+
 def ensure_secure_permissions(path: Path) -> None:
     if path.exists():
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)

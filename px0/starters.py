@@ -122,6 +122,8 @@ trigger:
   manual: true
 guidelines:
   - code-review/common.md
+  - code-review/go.md
+  - code-review/python.md
 inputs:
   - id: pr
     tool: github.get_pr

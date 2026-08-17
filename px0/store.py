@@ -1,5 +1,6 @@
 """px0 init: scaffold the store."""
 
+import shutil
 from pathlib import Path
 
 from px0 import config as config_mod
@@ -11,6 +12,33 @@ SCHEMA_VERSION = 1
 
 def is_initialized(home: Path) -> bool:
     return paths.config_path(home).exists()
+
+
+def export(home: Path, dest: Path) -> None:
+    """Content plus version history, credentials excluded -- the supported
+    way to move a store to another machine."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in ("workflows", "guidelines", "knowledge", "outputs", "skills", "config.toml"):
+        src = home / name
+        if not src.exists():
+            continue
+        target = dest / name
+        if src.is_dir():
+            shutil.copytree(src, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, target)
+
+    state_dest = dest / ".state"
+    state_dest.mkdir(parents=True, exist_ok=True)
+    for name in ("versions", "proposals", "schema", "schedule.json"):
+        src = paths.state_dir(home) / name
+        if not src.exists():
+            continue
+        target = state_dest / name
+        if src.is_dir():
+            shutil.copytree(src, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, target)
 
 
 def init(home: Path) -> list[str]:

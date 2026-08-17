@@ -112,23 +112,28 @@ def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
-    running = True
-
     def handle_stop(signum, frame):
-        nonlocal running
-        running = False
+        if pidfile.exists():
+            pidfile.unlink()
+        os._exit(0)
+
+    def reap_children(signum, frame):
+        try:
+            while os.waitpid(-1, os.WNOHANG)[0] > 0:
+                pass
+        except ChildProcessError:
+            pass
 
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
+    signal.signal(signal.SIGCHLD, reap_children)
 
     try:
         state = load_schedule_state(home)
         tick(home, config, state)  # recover missed fires on start/wake
         last_nightly = None
-        while running:
+        while True:
             time.sleep(poll_interval)
-            if not running:
-                break
             state = load_schedule_state(home)
             tick(home, config, state)
             today = datetime.now().date()
