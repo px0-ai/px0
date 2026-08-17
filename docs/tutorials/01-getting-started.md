@@ -36,6 +36,15 @@ This just picks the right non-interactive invocation for that CLI and
 writes it to `model.harness_cmd` in `config.toml`; you can also edit
 `harness_cmd` there directly to point at any other command.
 
+To switch later, or to pick a specific model (not just the harness), run
+`px0 config model`. It lists the harnesses it knows about with their PATH
+status, takes a model name to select, and actually invokes the result
+before saving so a typo'd model name or a missing API key gets caught
+there instead of mid-workflow. It never asks for or stores a key itself --
+that stays with the harness CLI's own login or environment variable. For
+everything else, `px0 config list|get|set` reads and writes any key in
+`config.toml`, validated against that key's type and allowed values.
+
 ## 3. Run your first workflow
 
 `summarize` is one of the starters. It takes a URL, a local file path, or

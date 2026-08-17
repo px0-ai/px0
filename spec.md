@@ -691,6 +691,10 @@ px0 search "<query>" [--k 5]    # raw passages; also: px0 search reindex
 px0 skills build
 px0 why <id>
 px0 store export <dir>          # content and history, credentials excluded
+px0 config list [--json]        # every key: current value, default, type, allowed choices
+px0 config get <key>            # e.g. px0 config get logs.retention_days
+px0 config set <key> <value>    # validated against the key's type/choices, then saved
+px0 config model                # pick a harness + model interactively, verify it responds, save
 px0 update [--check|--channel|rollback]
 px0 version
 px0 doctor                      # credentials, daemon, harness, index, versions, locks, schema
@@ -705,7 +709,7 @@ All commands support `--json`. Exit codes: 0 success, 1 user error, 2 connector 
 ```toml
 # ~/.px0/config.toml
 [model]
-harness_cmd = "claude -p"
+harness_cmd = "claude -p"       # claude | gemini | pi | opencode | any literal command
 
 [knowledge]
 path = "~/.px0/knowledge"       # any folder works, e.g. an existing notes vault
@@ -740,12 +744,16 @@ check = true
 auto_install = false
 
 [retrieval]
-backend = "qmd"
+backend = "qmd"                 # target backend; this build only implements "local" (SQLite FTS5/BM25)
 k_default = 5
 rerank = true
 ```
 
 `config.toml` holds no credentials; they live in `.state/credentials.toml` at mode 0600. `config.toml` is itself versioned, so a bad edit is revertible.
+
+`px0 config list` prints every key above with its current value, default, type, and allowed choices where the key is restricted to a fixed set (`connectors.provider`, `update.channel`, `retrieval.backend`); `px0 config get <key>` and `px0 config set <key> <value>` read and write one key, validated the same way. Both go through the same `save()` as a hand edit, so a bad `set` is revertible with `px0 versions revert config.toml --to <N>` like any other edit.
+
+`px0 config model` is the guided path to `model.harness_cmd`: it lists the known harnesses with their install status, takes a model name to append as `--model <name>` (the flag all four accept), and verifies the resulting command actually responds via the same trivial-prompt check `px0 doctor` uses before saving. Since px0 has no direct-API backend, this never asks for or stores a provider key: a failed verification surfaces that harness's own error and, for a known harness, a hint pointing at its own env var or login command -- `model.harness_cmd` can still be set directly (`px0 config set model.harness_cmd "claude -p --model opus"`) for anyone who'd rather skip the wizard.
 
 ## Security posture
 

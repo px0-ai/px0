@@ -477,6 +477,34 @@ def cmd_store(args: argparse.Namespace) -> None
 Handles `px0 store export <dir>`: copies store content and version history to
 another directory, excluding credentials.
 
+### `cmd_config`
+
+```python
+def cmd_config(args: argparse.Namespace) -> None
+```
+
+Handles `px0 config` subcommands: list (every recognized key with its
+current value, default, type, and allowed choices), get <key>, set <key>
+<value>, and model (an interactive harness/model picker, see
+_select_model).
+
+### `_select_model`
+
+```python
+def _select_model(home: Path, config: dict) -> None
+```
+
+Interactive `px0 config model`: lists known harnesses with their PATH
+status, lets the user pick one (or type a custom command) and an
+optional model name, then verifies the resulting harness_cmd actually
+responds before saving -- surfacing that CLI's own auth error (with a
+hint from harness.AUTH_HINTS) rather than guessing why it failed.
+
+px0 has no direct-API backend: it never asks for or stores a provider
+API key itself. Authentication is entirely the chosen harness's own
+(an env var it reads, or its own interactive login), same as every
+other px0-invoked run of it.
+
 ### `cmd_update`
 
 ```python
@@ -583,6 +611,46 @@ def get(config: dict[str, Any], dotted_key: str, default: Any = None) -> Any
 
 Looks up a dotted config key (e.g. "logs.path"), returning `default`
 if any segment along the path is missing or not a dict.
+
+### `_coerce`
+
+```python
+def _coerce(key: str, raw: str) -> Any
+```
+
+Validates `key` against SCHEMA and converts the raw string `raw` (as
+typed on a command line) into the key's real type, checking choices
+where the key restricts them. Raises ValueError with a message meant to
+be printed as-is on a bad key, type, or choice.
+
+### `get_key`
+
+```python
+def get_key(config: dict[str, Any], key: str) -> Any
+```
+
+Looks up a SCHEMA-known dotted key. Raises ValueError for a key not
+in SCHEMA, unlike the more permissive `get`.
+
+### `set_key`
+
+```python
+def set_key(config: dict[str, Any], key: str, raw: str) -> Any
+```
+
+Validates and coerces `raw` per SCHEMA, then writes it into `config`
+at `key` (mutating the nested tables in place) and returns the coerced
+value. Does not save to disk -- callers persist via `save`.
+
+### `describe`
+
+```python
+def describe(config: dict[str, Any]) -> list[dict[str, Any]]
+```
+
+Returns one entry per SCHEMA key: its current value, default, type
+name, allowed choices (or None), and help text. Used by `px0 config
+list`.
 
 ## `px0.connect`
 
@@ -939,6 +1007,27 @@ Text and tool-calls in, text out -- there is no direct-API backend.
 ### `class HarnessError`
 
 Raised when the harness command is missing, times out, or exits non-zero.
+
+### `installed_harnesses`
+
+```python
+def installed_harnesses() -> dict[str, bool]
+```
+
+Reports, for each name in KNOWN_HARNESSES, whether its binary is
+found on PATH right now.
+
+### `with_model`
+
+```python
+def with_model(harness_cmd: str, model: str | None) -> str
+```
+
+Appends a `--model <name>` flag to a harness command. All four known
+harnesses accept `--model` for non-interactive model selection (verified
+against each CLI's own docs); a custom command gets the same flag
+appended on the same convention. Returns `harness_cmd` unchanged if
+`model` is falsy.
 
 ### `resolve_harness_cmd`
 

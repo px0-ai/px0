@@ -130,3 +130,153 @@ def get(config: dict[str, Any], dotted_key: str, default: Any = None) -> Any:
             return default
         node = node[part]
     return node
+
+
+# Metadata for every recognized dotted key: its scalar type, the values it's
+# restricted to (None if free-form), and a one-line description of what it
+# does and how fully this build actually wires it up. Drives `px0 config
+# get/set/list` validation and listing; load()/save() stay schema-agnostic.
+SCHEMA: dict[str, dict[str, Any]] = {
+    "model.harness_cmd": {
+        "type": str, "choices": None,
+        "help": "coding agent CLI invocation, e.g. 'claude -p'; a known harness name "
+                "(claude, gemini, pi, opencode) expands to its full command, or pass any "
+                "literal command. `px0 config model` sets this interactively.",
+    },
+    "knowledge.path": {
+        "type": str, "choices": None,
+        "help": "directory the knowledge library lives in (any folder, e.g. an existing notes vault)",
+    },
+    "output.path": {
+        "type": str, "choices": None,
+        "help": "default directory for workflow file outputs",
+    },
+    "connectors.provider": {
+        "type": str, "choices": ["composio", "native"],
+        "help": "intended default for brokering tool connections; not yet enforced in this build "
+                "-- `px0 connect` chooses per call (--native vs setup-composio)",
+    },
+    "connectors.retries": {
+        "type": int, "choices": None,
+        "help": "per-run transient connector retries, exponential backoff",
+    },
+    "proposals.max_per_consolidation": {
+        "type": int, "choices": None,
+        "help": "cap on proposals surfaced per consolidation session",
+    },
+    "versions.keep_all": {
+        "type": bool, "choices": None,
+        "help": "true keeps every version forever; false enables the max_versions_per_file cap",
+    },
+    "versions.max_versions_per_file": {
+        "type": int, "choices": None,
+        "help": "per-file version cap applied by `px0 versions prune` when keep_all is false",
+    },
+    "logs.path": {
+        "type": str, "choices": None,
+        "help": "run log directory, kept outside the versioned store",
+    },
+    "logs.retention_days": {
+        "type": int, "choices": None,
+        "help": "days to keep logs for successful runs",
+    },
+    "logs.retention_days_failed": {
+        "type": int, "choices": None,
+        "help": "days to keep logs for failed runs",
+    },
+    "logs.record_retention_days": {
+        "type": int, "choices": None,
+        "help": "days to keep run records (outlives the logs themselves)",
+    },
+    "logs.max_file_size_mb": {
+        "type": int, "choices": None,
+        "help": "single log file rotation size cap, in MB",
+    },
+    "update.channel": {
+        "type": str, "choices": ["stable", "beta"],
+        "help": "release channel; not functionally checked in this build -- "
+                "`px0 update` reports that no release manifest is configured",
+    },
+    "update.check": {
+        "type": bool, "choices": None,
+        "help": "whether the daemon checks weekly for an available update",
+    },
+    "update.auto_install": {
+        "type": bool, "choices": None,
+        "help": "install updates automatically instead of only surfacing them",
+    },
+    "retrieval.backend": {
+        "type": str, "choices": ["local"],
+        "help": "retrieval backend; only 'local' (SQLite FTS5/BM25) is implemented in this build",
+    },
+    "retrieval.k_default": {
+        "type": int, "choices": None,
+        "help": "default number of passages retrieved per query",
+    },
+    "retrieval.rerank": {
+        "type": bool, "choices": None,
+        "help": "reserved for a future rerank stage; not yet wired in this build",
+    },
+}
+
+
+def _coerce(key: str, raw: str) -> Any:
+    """Validates `key` against SCHEMA and converts the raw string `raw` (as
+    typed on a command line) into the key's real type, checking choices
+    where the key restricts them. Raises ValueError with a message meant to
+    be printed as-is on a bad key, type, or choice."""
+    spec = SCHEMA.get(key)
+    if spec is None:
+        raise ValueError(f"unknown config key: {key!r} (see `px0 config list`)")
+    if spec["choices"] is not None and raw not in spec["choices"]:
+        raise ValueError(f"{key} must be one of {spec['choices']}, got {raw!r}")
+    t = spec["type"]
+    if t is bool:
+        low = raw.strip().lower()
+        if low not in ("true", "false"):
+            raise ValueError(f"{key} expects true or false, got {raw!r}")
+        return low == "true"
+    if t is int:
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(f"{key} expects an integer, got {raw!r}") from None
+    return raw
+
+
+def get_key(config: dict[str, Any], key: str) -> Any:
+    """Looks up a SCHEMA-known dotted key. Raises ValueError for a key not
+    in SCHEMA, unlike the more permissive `get`."""
+    if key not in SCHEMA:
+        raise ValueError(f"unknown config key: {key!r} (see `px0 config list`)")
+    return get(config, key)
+
+
+def set_key(config: dict[str, Any], key: str, raw: str) -> Any:
+    """Validates and coerces `raw` per SCHEMA, then writes it into `config`
+    at `key` (mutating the nested tables in place) and returns the coerced
+    value. Does not save to disk -- callers persist via `save`."""
+    value = _coerce(key, raw)
+    node = config
+    parts = key.split(".")
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = value
+    return value
+
+
+def describe(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Returns one entry per SCHEMA key: its current value, default, type
+    name, allowed choices (or None), and help text. Used by `px0 config
+    list`."""
+    return [
+        {
+            "key": key,
+            "value": get(config, key),
+            "default": get(DEFAULTS, key),
+            "type": spec["type"].__name__,
+            "choices": spec["choices"],
+            "help": spec["help"],
+        }
+        for key, spec in SCHEMA.items()
+    ]

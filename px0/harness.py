@@ -3,6 +3,7 @@ non-interactive mode (`harness_cmd` in config.toml, e.g. `claude -p`).
 Text and tool-calls in, text out -- there is no direct-API backend."""
 
 import shlex
+import shutil
 import subprocess
 
 from px0 import config as config_mod
@@ -17,10 +18,39 @@ KNOWN_HARNESSES: dict[str, str] = {
     "opencode": "opencode run",
 }
 
+# What to tell the user when a harness fails to respond, most likely because
+# it isn't authenticated yet. Each of these CLIs manages its own auth and
+# model choice -- px0 has no direct-API backend and never stores a
+# provider key itself -- so this only points at that CLI's own setup path.
+AUTH_HINTS: dict[str, str] = {
+    "claude": "authenticate it by running `claude` once (OAuth login), or set ANTHROPIC_API_KEY",
+    "gemini": "set GEMINI_API_KEY, or run `gemini` once to authenticate interactively",
+    "pi": "set the provider's API key env var, or pass --api-key (see `pi --help`)",
+    "opencode": "run `opencode auth login`, or set a provider API key env var "
+                "(e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)",
+}
+
 
 class HarnessError(Exception):
     """Raised when the harness command is missing, times out, or exits non-zero."""
     pass
+
+
+def installed_harnesses() -> dict[str, bool]:
+    """Reports, for each name in KNOWN_HARNESSES, whether its binary is
+    found on PATH right now."""
+    return {name: shutil.which(cmd.split()[0]) is not None for name, cmd in KNOWN_HARNESSES.items()}
+
+
+def with_model(harness_cmd: str, model: str | None) -> str:
+    """Appends a `--model <name>` flag to a harness command. All four known
+    harnesses accept `--model` for non-interactive model selection (verified
+    against each CLI's own docs); a custom command gets the same flag
+    appended on the same convention. Returns `harness_cmd` unchanged if
+    `model` is falsy."""
+    if not model:
+        return harness_cmd
+    return f"{harness_cmd} --model {shlex.quote(model)}"
 
 
 def resolve_harness_cmd(value: str) -> str:

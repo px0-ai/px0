@@ -2,6 +2,7 @@
 every subcommand delegates to the module that actually does the work."""
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -647,6 +648,112 @@ def cmd_store(args: argparse.Namespace) -> None:
         print(f"exported to {args.dir} (credentials excluded)")
 
 
+def cmd_config(args: argparse.Namespace) -> None:
+    """Handles `px0 config` subcommands: list (every recognized key with its
+    current value, default, type, and allowed choices), get <key>, set <key>
+    <value>, and model (an interactive harness/model picker, see
+    _select_model)."""
+    home, config = _ctx()
+
+    if args.config_cmd == "list":
+        entries = config_mod.describe(config)
+        if args.json:
+            _dump(args, entries)
+            return
+        for e in entries:
+            changed = "" if e["value"] == e["default"] else f"  (default: {e['default']!r})"
+            choices = f"  choices={e['choices']}" if e["choices"] else ""
+            print(f"{e['key']} = {e['value']!r}{changed}  [{e['type']}]{choices}")
+            print(f"    {e['help']}")
+        return
+
+    if args.config_cmd == "get":
+        try:
+            value = config_mod.get_key(config, args.key)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(EXIT_USER_ERROR)
+        if args.json:
+            _dump(args, {args.key: value})
+        else:
+            print(value)
+        return
+
+    if args.config_cmd == "set":
+        try:
+            value = config_mod.set_key(config, args.key, args.value)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(EXIT_USER_ERROR)
+        config_mod.save(paths.config_path(home), config)
+        print(f"{args.key} = {value}")
+        return
+
+    if args.config_cmd == "model":
+        _select_model(home, config)
+        return
+
+
+def _select_model(home: Path, config: dict) -> None:
+    """Interactive `px0 config model`: lists known harnesses with their PATH
+    status, lets the user pick one (or type a custom command) and an
+    optional model name, then verifies the resulting harness_cmd actually
+    responds before saving -- surfacing that CLI's own auth error (with a
+    hint from harness.AUTH_HINTS) rather than guessing why it failed.
+
+    px0 has no direct-API backend: it never asks for or stores a provider
+    API key itself. Authentication is entirely the chosen harness's own
+    (an env var it reads, or its own interactive login), same as every
+    other px0-invoked run of it."""
+    installed = harness.installed_harnesses()
+    names = sorted(harness.KNOWN_HARNESSES)
+
+    current = config_mod.get(config, "model.harness_cmd", "")
+    print(f"current: model.harness_cmd = {current!r}\n")
+    print("harnesses:")
+    for i, name in enumerate(names, 1):
+        mark = "installed" if installed[name] else "not found on PATH"
+        print(f"  {i}. {name}  ({harness.KNOWN_HARNESSES[name]})  -- {mark}")
+    print(f"  {len(names) + 1}. custom command")
+
+    choice = input(f"pick [1-{len(names) + 1}]: ").strip()
+    if not choice.isdigit() or not (1 <= int(choice) <= len(names) + 1):
+        print("cancelled")
+        return
+    idx = int(choice)
+
+    if idx == len(names) + 1:
+        base_cmd = input("harness command (the prompt is appended as the final argument): ").strip()
+        if not base_cmd:
+            print("cancelled")
+            return
+        name = None
+    else:
+        name = names[idx - 1]
+        base_cmd = harness.KNOWN_HARNESSES[name]
+
+    model = input("model name (blank = harness default; appended as --model <name>): ").strip()
+    harness_cmd = harness.with_model(base_cmd, model or None)
+
+    trial_config = copy.deepcopy(config)
+    trial_config.setdefault("model", {})["harness_cmd"] = harness_cmd
+    print(f"\nverifying: {harness_cmd} ...")
+    try:
+        harness.invoke(trial_config, "reply with the single word: ok", timeout=20)
+        print("harness responded OK")
+    except harness.HarnessError as e:
+        print(f"verification failed: {e}", file=sys.stderr)
+        if name and name in harness.AUTH_HINTS:
+            print(f"hint: {harness.AUTH_HINTS[name]}", file=sys.stderr)
+        if input("save anyway? [y/N] ").strip().lower() != "y":
+            print("not saved")
+            return
+
+    config.setdefault("model", {})["harness_cmd"] = harness_cmd
+    config_mod.save(paths.config_path(home), config)
+    print(f"model.harness_cmd = {harness_cmd}")
+
+
 def cmd_update(args: argparse.Namespace) -> None:
     """Handles `px0 update`: switches the update channel, checks for/applies an
     update, or reports that rollback is unavailable in this build."""
@@ -856,6 +963,19 @@ def build_parser() -> argparse.ArgumentParser:
     ep = store_sub.add_parser("export")
     ep.add_argument("dir")
     sp.set_defaults(func=cmd_store)
+
+    sp = sub.add_parser("config")
+    config_sub = sp.add_subparsers(dest="config_cmd", required=True)
+    lp = config_sub.add_parser("list")
+    lp.add_argument("--json", action="store_true")
+    gp = config_sub.add_parser("get")
+    gp.add_argument("key")
+    gp.add_argument("--json", action="store_true")
+    stp = config_sub.add_parser("set")
+    stp.add_argument("key")
+    stp.add_argument("value")
+    config_sub.add_parser("model")
+    sp.set_defaults(func=cmd_config)
 
     sp = sub.add_parser("update")
     sp.add_argument("--check", action="store_true")
