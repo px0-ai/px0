@@ -25,6 +25,12 @@ This scaffolds `~/.px0` (or `$PX0_HOME` if set): `workflows/`,
 workflows and guideline files you can read, edit, or delete like any other
 file. Nothing here is hidden or binary.
 
+During initialization, it will also prompt you for a Composio API key. Setting this up allows px0 to orchestrate tool connections. You can also provide it directly:
+
+```shell
+px0 init --composio-key <your-api-key>
+```
+
 By default the model backend is `claude -p`. If you use a different
 coding agent CLI as your backend, pass `--harness` at init time:
 

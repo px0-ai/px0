@@ -76,7 +76,17 @@ def cmd_init(args: argparse.Namespace) -> None:
     """Handles `px0 init`: scaffolds a new store and prints suggested next commands."""
     home = Path(args.dir).expanduser() if args.dir else paths.store_home()
     harness_cmd = harness.KNOWN_HARNESSES[args.harness] if args.harness else None
+
+    composio_key = args.composio_key
+    if not composio_key:
+        composio_key = input("Composio API key (leave blank to skip): ").strip()
+
     created = store_mod.init(home, harness_cmd=harness_cmd)
+
+    if composio_key:
+        connect_mod.setup_composio(home, composio_key)
+        created.append("composio credentials")
+
     for line in created:
         print(f"created {line}")
     print(f"\npx0 initialized at {home}")
@@ -877,6 +887,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(harness.KNOWN_HARNESSES),
         help="coding agent CLI to use as the model backend (default: claude)",
     )
+    sp.add_argument("--composio-key", help="Composio API key")
     sp.set_defaults(func=cmd_init)
 
     sp = sub.add_parser("new")
