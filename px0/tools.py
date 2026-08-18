@@ -44,43 +44,76 @@ class Context:
     config: dict
 
 
-def _github_token(ctx: Context) -> str:
-    """Loads the stored GitHub PAT, raising ConnectorNotConfigured if github is not connected."""
-    creds = creds_mod.load(ctx.home)
-    gh = creds.get("github")
-    if not gh or not gh.get("token"):
-        raise ConnectorNotConfigured(
-            "github is not connected; run `px0 connect github --native --pat`"
-        )
-    return gh["token"]
-
-
-def _github_headers(ctx: Context) -> dict:
-    """Builds the standard bearer-auth headers used for every GitHub REST call."""
-    return {
-        "Authorization": f"Bearer {_github_token(ctx)}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-def _github_request(ctx: Context, method: str, path: str, **kwargs) -> requests.Response:
-    """Issues one authenticated GitHub API request and raises ConnectorError on network
-    failure, a rejected token (401), or any other 4xx/5xx response."""
-    headers = kwargs.pop("headers", {})
-    headers = {**_github_headers(ctx), **headers}
-    try:
-        resp = requests.request(method, f"{GITHUB_API}{path}", headers=headers, timeout=15, **kwargs)
-    except requests.RequestException as e:
-        raise ConnectorError(f"github request failed: {e}") from e
-    if resp.status_code == 401:
-        raise ConnectorError("github token rejected (401); run `px0 connect rotate github`")
-    if resp.status_code >= 400:
-        raise ConnectorError(f"github {method} {path} -> {resp.status_code}: {resp.text[:200]}")
-    return resp
-
-
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
+
+
+def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any:
+    """Issues one authenticated GitHub API request via Composio's proxy."""
+    creds = creds_mod.load(ctx.home)
+    composio = creds.get("composio")
+    if not composio or not composio.get("api_key"):
+        raise ConnectorNotConfigured("Composio API key is not configured; run `px0 connect setup-composio <key>`")
+    
+    connected_accounts = composio.get("connected_accounts", {})
+    if "github" not in connected_accounts:
+        raise ConnectorNotConfigured("github is not connected; run `px0 connect github`")
+        
+    connected_account_id = connected_accounts["github"]
+    
+    from composio import Composio
+    client = Composio(api_key=composio["api_key"])
+
+    endpoint = f"https://api.github.com{path}"
+    
+    parameters = []
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    headers.update(kwargs.pop("headers", {}))
+    
+    for k, v in headers.items():
+        parameters.append({"name": k, "value": str(v), "type": "header"})
+        
+    if "params" in kwargs:
+        for k, v in kwargs.pop("params").items():
+            parameters.append({"name": k, "value": str(v), "type": "query"})
+            
+    body = kwargs.get("json", None)
+
+    class FakeResponse:
+        def __init__(self, proxy_resp):
+            self.status_code = proxy_resp.status
+            self._data = proxy_resp.data
+            import json
+            if isinstance(self._data, (dict, list)):
+                self.text = json.dumps(self._data)
+            else:
+                self.text = str(self._data)
+                
+        def json(self):
+            if isinstance(self._data, (dict, list)):
+                return self._data
+            import json
+            return json.loads(self._data)
+
+    try:
+        resp = client.tools.proxy(
+            endpoint=endpoint,
+            method=method.upper(), # type: ignore
+            body=body,
+            connected_account_id=connected_account_id,
+            parameters=parameters # type: ignore
+        )
+    except Exception as e:
+        raise ConnectorError(f"github proxy request failed: {e}") from e
+
+    fake_resp = FakeResponse(resp)
+    if fake_resp.status_code == 401:
+        raise ConnectorError("github token rejected (401); you may need to reconnect via `px0 connect github`")
+    if fake_resp.status_code >= 400:
+        raise ConnectorError(f"github {method} {path} -> {fake_resp.status_code}: {fake_resp.text[:200]}")
+    return fake_resp
 
 
 def _parse_pr_url(url: str) -> tuple[str, str, str]:
@@ -180,48 +213,40 @@ def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -
 
     connected_account_id = connected_accounts[app]
     api_key = composio["api_key"]
-    headers = {
-        "x-api-key": api_key,
-        "Content-Type": "application/json"
-    }
+    
+    from composio import Composio
+    client = Composio(api_key=api_key)
 
     try:
-        status_resp = requests.get(
-            f"https://backend.composio.dev/api/v3.1/connected_accounts/{connected_account_id}",
-            headers=headers,
-            timeout=15,
-        )
-        if status_resp.status_code == 404:
-            raise ConnectorNotConfigured(f"{app} connection not found on Composio; run `px0 connect {app}`")
-        if status_resp.status_code >= 400:
-            raise ConnectorError(f"Composio status API error -> {status_resp.status_code}: {status_resp.text[:200]}")
-
-        status = status_resp.json().get("status", "UNKNOWN")
-        if status == "INITIATED":
+        account = client.connected_accounts.get(connected_account_id)
+        if account.status == "INITIATED":
             raise ConnectorNotConfigured(f"{app} connection is INITIATED, not ACTIVE -- finish the browser consent")
-        if status != "ACTIVE":
-            raise ConnectorNotConfigured(f"{app} connection is {status}, not ACTIVE -- run `px0 connect {app}` and complete OAuth")
-    except requests.RequestException as e:
-        raise ConnectorError(f"Composio API unreachable: {e}") from e
+        if account.status != "ACTIVE":
+            raise ConnectorNotConfigured(f"{app} connection is {account.status}, not ACTIVE -- run `px0 connect {app}` and complete OAuth")
+    except ConnectorNotConfigured:
+        raise
+    except Exception as e:
+        if "404" in str(e) or "not found" in str(e).lower():
+            raise ConnectorNotConfigured(f"{app} connection not found on Composio; run `px0 connect {app}`")
+        raise ConnectorError(f"Composio API error: {e}") from e
 
-    payload = {
-        "arguments": arguments,
-        "connected_account_id": connected_account_id
-    }
     try:
-        resp = requests.post(
-            f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
-            headers=headers,
-            json=payload,
-            timeout=15,
+        result = client.tools.execute(
+            slug=tool_slug,
+            connected_account_id=connected_account_id,
+            arguments=arguments,
+            dangerously_skip_version_check=True
         )
-    except requests.RequestException as e:
-        raise ConnectorError(f"Composio API unreachable: {e}") from e
+    except Exception as e:
+        raise ConnectorError(f"Composio execution failed: {e}") from e
 
-    if resp.status_code >= 400:
-        raise ConnectorError(f"Composio execution failed -> {resp.status_code}: {resp.text[:200]}")
+    successful = result.get("successful", True) if isinstance(result, dict) else result.successful
+    if not successful:
+        error = result.get("error", "Unknown error") if isinstance(result, dict) else result.error
+        raise ConnectorError(f"Composio execution failed -> {error}")
 
-    return resp.json()
+    data = result.get("data", result) if isinstance(result, dict) else result.data
+    return data
 
 
 def calendar_list_events(args: dict, ctx: Context) -> Any:

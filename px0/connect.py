@@ -1,8 +1,6 @@
 """px0 connect: creating and managing connections.
 
-The native GitHub PAT path is fully wired (verifies the token against the
-GitHub API before storing it). `setup-composio` stores the API key; actually
-creating a Composio-hosted auth link is fully supported (see tools.py).
+All external app connections are managed through Composio.
 """
 
 from datetime import datetime, timezone
@@ -16,6 +14,7 @@ TOOLKIT_SLUGS = {
     "gmail": "gmail",
     "slack": "slack",
     "calendar": "googlecalendar",
+    "github": "github",
 }
 
 
@@ -24,20 +23,16 @@ def setup_composio(home: Path, api_key: str) -> None:
     creds_mod.set_service(home, "composio", {"api_key": api_key})
 
 
-def _composio_client(home: Path) -> requests.Session:
-    """Returns a requests.Session configured with the stored Composio API key."""
+def _composio_client(home: Path):
+    """Returns a Composio client configured with the stored Composio API key."""
     creds = creds_mod.load(home)
     composio = creds.get("composio")
     if not composio or not composio.get("api_key"):
         raise ValueError(
             "Composio API key is not configured; run `px0 connect setup-composio <key>` first"
         )
-    session = requests.Session()
-    session.headers.update({
-        "x-api-key": composio["api_key"],
-        "Content-Type": "application/json"
-    })
-    return session
+    from composio import Composio
+    return Composio(api_key=composio["api_key"])
 
 
 def _ensure_auth_config(home: Path, toolkit: str) -> str:
@@ -49,17 +44,13 @@ def _ensure_auth_config(home: Path, toolkit: str) -> str:
     if toolkit in auth_configs:
         return auth_configs[toolkit]
 
-    session = _composio_client(home)
-    payload = {
-        "toolkit": {"slug": toolkit},
-        "auth_config": {"type": "use_composio_managed_auth"}
-    }
-    resp = session.post("https://backend.composio.dev/api/v3.1/auth_configs", json=payload, timeout=15)
-    if resp.status_code >= 400:
-        raise ValueError(f"Composio auth_configs API -> {resp.status_code}: {resp.text[:200]}")
+    client = _composio_client(home)
+    try:
+        auth_config = client.auth_configs.create(toolkit=toolkit, options={"type": "use_composio_managed_auth"})
+        auth_config_id = auth_config.id
+    except Exception as e:
+        raise ValueError(f"Composio auth_configs API error: {e}")
 
-    data = resp.json()
-    auth_config_id = data["auth_config"]["id"]
     auth_configs[toolkit] = auth_config_id
     creds_mod.set_service(home, "composio", composio_creds)
     return auth_config_id
@@ -74,18 +65,17 @@ def connect_composio_app(home: Path, app: str) -> dict:
     toolkit_slug = TOOLKIT_SLUGS[app]
     auth_config_id = _ensure_auth_config(home, toolkit_slug)
 
-    session = _composio_client(home)
-    payload = {
-        "auth_config_id": auth_config_id,
-        "user_id": "px0-local"
-    }
-    resp = session.post("https://backend.composio.dev/api/v3/connected_accounts/link", json=payload, timeout=15)
-    if resp.status_code >= 400:
-        raise ValueError(f"Composio linked_accounts API -> {resp.status_code}: {resp.text[:200]}")
+    client = _composio_client(home)
+    try:
+        connection_request = client.connected_accounts.link(
+            user_id="px0-local",
+            auth_config_id=auth_config_id
+        )
+    except Exception as e:
+        raise ValueError(f"Composio linked_accounts API error: {e}")
 
-    data = resp.json()
-    redirect_url = data["redirect_url"]
-    connected_account_id = data["connected_account_id"]
+    redirect_url = getattr(connection_request, "redirectUrl", getattr(connection_request, "redirect_url", None))
+    connected_account_id = getattr(connection_request, "id", None)
 
     creds = creds_mod.load(home)
     composio_creds = creds.get("composio", {})
@@ -106,41 +96,13 @@ def connected_account_status(home: Path, app: str) -> str:
 
     connected_account_id = connected_accounts[app]
     try:
-        session = _composio_client(home)
-        resp = session.get(f"https://backend.composio.dev/api/v3.1/connected_accounts/{connected_account_id}", timeout=15)
-        if resp.status_code == 404:
-            return "NOT_FOUND"
-        if resp.status_code >= 400:
-            return f"ERROR ({resp.status_code})"
-        return resp.json().get("status", "UNKNOWN")
+        client = _composio_client(home)
+        account = client.connected_accounts.get(connected_account_id)
+        return account.status
     except Exception as e:
+        if "404" in str(e) or "not found" in str(e).lower():
+            return "NOT_FOUND"
         return f"ERROR ({str(e)})"
-
-
-def connect_github_native(home: Path, token: str) -> dict:
-    """Verifies a GitHub PAT against the GitHub API and stores it on success.
-
-    Raises ValueError if GitHub rejects the token. Returns the resolved login."""
-    resp = requests.get(
-        "https://api.github.com/user",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        timeout=15,
-    )
-    if resp.status_code != 200:
-        raise ValueError(f"github rejected this token ({resp.status_code}): {resp.text[:200]}")
-    login = resp.json()["login"]
-    creds_mod.set_service(home, "github", {
-        "kind": "native-pat",
-        "token": token,
-        "login": login,
-        "connected_at": datetime.now(timezone.utc).isoformat(),
-    })
-    return {"login": login}
-
-
-def rotate_github(home: Path, token: str) -> dict:
-    """Replaces the stored GitHub token; rotation is just a re-verify-and-store."""
-    return connect_github_native(home, token)
 
 
 def list_connections(home: Path) -> list[dict]:

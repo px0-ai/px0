@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 import json
 import requests
+import httpx
 from px0 import store, config as config_mod
 
 class MockResponse:
@@ -42,24 +43,38 @@ class FakeComposio:
         if "/connected_accounts/link" in url:
             return MockResponse(201, {
                 "link_token": "mock_token",
+                "redirectUrl": "https://backend.composio.dev/redirect-mock",
                 "redirect_url": "https://backend.composio.dev/redirect-mock",
                 "expires_at": "2026-08-18",
+                "connectedAccountId": self.connected_account_id,
                 "connected_account_id": self.connected_account_id
             })
 
-        # 3. Connected accounts status query
-        if "/connected_accounts/" in url and method == "GET":
-            # extract id or just return status
-            return MockResponse(200, {
-                "status": self.status
+
+        # 3. Connected accounts status query or list
+        if "/connected_accounts" in url and method == "GET":
+            if "?" in url or not url.endswith(self.connected_account_id):
+                return MockResponse(200, {"items": [], "total_pages": 1, "page_info": None})
+            return MockResponse(200, {"status": self.status})
+        
+        # 3.5 Connected accounts link POST
+        if "/connected_accounts" in url and method == "POST":
+            return MockResponse(201, {
+                "link_token": "mock_token",
+                "redirectUrl": "https://backend.composio.dev/redirect-mock",
+                "redirect_url": "https://backend.composio.dev/redirect-mock",
+                "expires_at": "2026-08-18",
+                "connectedAccountId": self.connected_account_id,
+                "connected_account_id": self.connected_account_id
             })
 
+
         # 4. Execute tool
-        if "/tools/execute/" in url:
+        if "/tools" in url:
             self.last_execute_slug = url.split("/tools/execute/")[-1]
             payload = kwargs.get("json", {})
             self.last_execute_args = payload.get("arguments", {})
-            return MockResponse(200, self.execute_response)
+            return MockResponse(200, {'successful': True, 'data': self.execute_response})
 
         # 5. Fallback
         return MockResponse(404, {"error": "Not Found"})
@@ -106,5 +121,22 @@ def fake_composio(monkeypatch):
     monkeypatch.setattr(requests.Session, "request", mock_request_method)
     monkeypatch.setattr(requests.Session, "get", mock_get)
     monkeypatch.setattr(requests.Session, "post", mock_post)
+
+    def mock_httpx_send(self, request, *args, **kwargs):
+        url = str(request.url)
+        if "backend.composio.dev" in url or "api.github.com" in url:
+            # Parse json body if present
+            try:
+                body = json.loads(request.read().decode("utf-8")) if request.content else {}
+            except Exception:
+                body = {}
+            mock_resp = fake.handle_request(request.method, url, json=body)
+            # Create httpx.Response
+            content = mock_resp.text.encode("utf-8")
+            return httpx.Response(mock_resp.status_code, content=content, request=request)
+        raise RuntimeError(f"Unexpected external request: {request.method} {url}")
+
+    monkeypatch.setattr(httpx.Client, "send", mock_httpx_send)
+
 
     return fake

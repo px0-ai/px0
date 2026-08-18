@@ -243,11 +243,17 @@ def cmd_list(args: argparse.Namespace) -> None:
 # --- connect / tools -----------------------------------------------------
 
 def cmd_connect(args: argparse.Namespace) -> None:
-    """Handles `px0 connect` and its sub-targets: setup-composio, list, remove, rotate,
-    and connecting a new service (native github only in this build; anything else
-    reports Composio auth-link creation as unimplemented)."""
+    """Handles `px0 connect` and its sub-targets: setup-composio, list, remove, 
+    and connecting a new service (managed via Composio)."""
     home, _ = _ctx()
     target = args.target
+
+    if not target:
+        print("Available services to connect via Composio:")
+        for app in sorted(connect_mod.TOOLKIT_SLUGS.keys()):
+            print(f"  - {app}")
+        print("\nUsage: px0 connect <service>")
+        return
 
     if target == "setup-composio":
         key = args.service2 or args.api_key
@@ -271,35 +277,9 @@ def cmd_connect(args: argparse.Namespace) -> None:
         print("removed" if ok else "no such connection")
         return
 
-    if target == "rotate":
-        service = args.service2
-        if service != "github":
-            print("rotate is only wired for native github in this build", file=sys.stderr)
-            sys.exit(EXIT_USER_ERROR)
-        if not args.pat:
-            print("usage: px0 connect rotate github --pat <token>", file=sys.stderr)
-            sys.exit(EXIT_USER_ERROR)
-        try:
-            info = connect_mod.rotate_github(home, args.pat)
-        except ValueError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(EXIT_CONNECTOR_ERROR)
-        print(f"rotated github token for {info['login']}")
-        return
-
     # otherwise: connecting a service
     service = target
-    if service == "github" and args.native:
-        if not args.pat:
-            print("usage: px0 connect github --native --pat <token>", file=sys.stderr)
-            sys.exit(EXIT_USER_ERROR)
-        try:
-            info = connect_mod.connect_github_native(home, args.pat)
-        except ValueError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(EXIT_CONNECTOR_ERROR)
-        print(f"connected github as {info['login']}")
-    elif service in ("gmail", "slack", "calendar"):
+    if service in connect_mod.TOOLKIT_SLUGS:
         try:
             res = connect_mod.connect_composio_app(home, service)
             print(f"To connect {service}, open the following URL in your browser and complete OAuth:")
@@ -308,8 +288,10 @@ def cmd_connect(args: argparse.Namespace) -> None:
             print(str(e), file=sys.stderr)
             sys.exit(EXIT_USER_ERROR)
     else:
-        print(f"{service}: Composio auth-link creation is not implemented in this build.")
-        print("Use `px0 connect github --native --pat <token>` for the native path.")
+        print(f"Unsupported service: {service}")
+        print("Available services to connect via Composio:")
+        for app in sorted(connect_mod.TOOLKIT_SLUGS.keys()):
+            print(f"  - {app}")
         sys.exit(EXIT_USER_ERROR)
 
 
@@ -918,10 +900,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_list)
 
     sp = sub.add_parser("connect")
-    sp.add_argument("target")
+    sp.add_argument("target", nargs="?")
     sp.add_argument("service2", nargs="?")
-    sp.add_argument("--native", action="store_true")
-    sp.add_argument("--pat")
     sp.add_argument("--api-key")
     sp.set_defaults(func=cmd_connect)
 
