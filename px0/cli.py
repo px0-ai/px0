@@ -117,8 +117,17 @@ def cmd_new(args: argparse.Namespace) -> None:
     missing = needed - existing
     if missing:
         print(f"\nconnections needed but not configured: {sorted(missing)}")
-        print("connect them first, e.g. `px0 connect github --native --pat <token>` "
-              "(only native github executes in this build)")
+        for service in sorted(missing):
+            if service in ("gmail", "slack", "calendar"):
+                try:
+                    res = connect_mod.connect_composio_app(home, service)
+                    print(f"To connect {service} (Composio), open this URL and complete OAuth:")
+                    print(f"  {res['redirect_url']}")
+                except ValueError as e:
+                    print(f"Error preparing Composio connection for {service}: {e}", file=sys.stderr)
+            elif service == "github":
+                print("To connect github, run: `px0 connect github --native --pat <token>`")
+        sys.exit(EXIT_USER_ERROR)
 
     if not args.yes:
         confirm = input("\nGenerate this workflow? [y/N] ").strip().lower()
@@ -280,6 +289,14 @@ def cmd_connect(args: argparse.Namespace) -> None:
             print(str(e), file=sys.stderr)
             sys.exit(EXIT_CONNECTOR_ERROR)
         print(f"connected github as {info['login']}")
+    elif service in ("gmail", "slack", "calendar"):
+        try:
+            res = connect_mod.connect_composio_app(home, service)
+            print(f"To connect {service}, open the following URL in your browser and complete OAuth:")
+            print(f"  {res['redirect_url']}")
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(EXIT_USER_ERROR)
     else:
         print(f"{service}: Composio auth-link creation is not implemented in this build.")
         print("Use `px0 connect github --native --pat <token>` for the native path.")
@@ -350,8 +367,19 @@ def cmd_daemon(args: argparse.Namespace) -> None:
         return
 
     if args.daemon_cmd == "logs":
-        print("this build keeps no separate daemon log; see `px0 runs logs <id>` "
-              "for the runs it spawned")
+        daemon_log_path = runs_mod.resolve_logs_path(config) / "daemon.log"
+        if not daemon_log_path.exists():
+            print("no daemon log yet")
+            return
+        content = daemon_log_path.read_text(encoding="utf-8")
+        if content:
+            print(content, end="")
+        if args.follow:
+            try:
+                for line in runs_mod.tail_lines(daemon_log_path):
+                    print(line, end="", flush=True)
+            except KeyboardInterrupt:
+                pass
         return
 
     if args.daemon_cmd == "serve":
@@ -366,16 +394,20 @@ def cmd_runs(args: argparse.Namespace) -> None:
     and replaying past workflow run records."""
     home, config = _ctx()
 
+    if args.runs_cmd is None:
+        from px0 import runs_tui
+        runs_tui.run(home, config)
+        return
+
     if args.runs_cmd == "list":
         since = _parse_since(args.since) if args.since else None
         records = runs_mod.list_records(config, workflow=args.workflow, failed=args.failed, since=since)
         if args.json:
             _dump(args, records)
             return
+        from px0 import runs_tui
         for r in records:
-            wrote = any(c.get("is_write") for c in r.get("tool_calls", []))
-            marker = " [write]" if wrote else ""
-            print(f"{r['id']}\t{r.get('workflow_id')}\t{r['trigger']}\t{r.get('outcome')}{marker}")
+            print(runs_tui.format_row(r))
         return
 
     if args.runs_cmd == "show":
@@ -401,7 +433,36 @@ def cmd_runs(args: argparse.Namespace) -> None:
         return
 
     if args.runs_cmd == "logs":
-        print(runs_mod.read_raw_log(config, args.run_id))
+        log_path = runs_mod.log_path(config, args.run_id)
+        if not log_path.exists():
+            print(f"no log file for run {args.run_id}")
+            return
+        content = runs_mod.read_raw_log(config, args.run_id)
+        if content:
+            print(content, end="")
+        if args.follow:
+            import time
+            try:
+                with open(log_path, "r", encoding="utf-8") as f:
+                    f.seek(0, 2)
+                    while True:
+                        line = f.readline()
+                        if line:
+                            print(line, end="", flush=True)
+                        else:
+                            try:
+                                rec = runs_mod.read_record(config, args.run_id)
+                                if rec.get("outcome") in ("success", "failed"):
+                                    line = f.readline()
+                                    while line:
+                                        print(line, end="", flush=True)
+                                        line = f.readline()
+                                    break
+                            except FileNotFoundError:
+                                pass
+                            time.sleep(1.0)
+            except KeyboardInterrupt:
+                pass
         return
 
 
@@ -756,19 +817,26 @@ def _select_model(home: Path, config: dict) -> None:
 
 def cmd_update(args: argparse.Namespace) -> None:
     """Handles `px0 update`: switches the update channel, checks for/applies an
-    update, or reports that rollback is unavailable in this build."""
+    update, or rolls back."""
     home, config = _ctx()
     if args.rollback:
-        print("rollback is not available; this build has no release manifest "
-              "to roll back against", file=sys.stderr)
-        sys.exit(EXIT_USER_ERROR)
+        try:
+            update_mod.rollback(home, config)
+        except update_mod.UpdateError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(EXIT_USER_ERROR)
+        return
     if args.channel:
-        config["update"]["channel"] = args.channel
+        config.setdefault("update", {})["channel"] = args.channel
         config_mod.save(paths.config_path(home), config)
         print(f"channel set to {args.channel}")
         return
-    result = update_mod.run_update(config, check_only=args.check)
-    print(result["message"])
+    try:
+        result = update_mod.run_update(home, config, check_only=args.check)
+        print(result["message"])
+    except update_mod.UpdateError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(EXIT_USER_ERROR)
 
 
 def cmd_version(args: argparse.Namespace) -> None:
@@ -860,12 +928,13 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_sub.add_parser("start")
     daemon_sub.add_parser("stop")
     daemon_sub.add_parser("restart")
-    daemon_sub.add_parser("logs")
+    daemon_logs_parser = daemon_sub.add_parser("logs")
+    daemon_logs_parser.add_argument("--follow", "-f", action="store_true", help="follow daemon log tail")
     daemon_sub.add_parser("serve")
     sp.set_defaults(func=cmd_daemon)
 
     sp = sub.add_parser("runs")
-    runs_sub = sp.add_subparsers(dest="runs_cmd", required=True)
+    runs_sub = sp.add_subparsers(dest="runs_cmd", required=False)
     rp = runs_sub.add_parser("list")
     rp.add_argument("--workflow")
     rp.add_argument("--failed", action="store_true")
@@ -876,7 +945,7 @@ def build_parser() -> argparse.ArgumentParser:
         rp2.add_argument("run_id")
     rp3 = runs_sub.add_parser("logs")
     rp3.add_argument("run_id")
-    rp3.add_argument("--follow", action="store_true", help="not supported; prints once")
+    rp3.add_argument("--follow", "-f", action="store_true", help="follow run log tail")
     sp.set_defaults(func=cmd_runs)
 
     sp = sub.add_parser("knowledge")

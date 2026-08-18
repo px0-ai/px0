@@ -34,8 +34,39 @@ def _check_harness(config: dict) -> dict:
         return {"ok": False, "detail": str(e)}
 
 
+def _check_qmd_version(home: Path, config: dict) -> dict:
+    """Runs qmd --version and compares against QMD_PINNED_VERSION."""
+    try:
+        out = retrieval._qmd_run(config, "--version")
+        version = out.strip()
+        pinned = retrieval.QMD_PINNED_VERSION
+        if version != pinned:
+            return {"ok": False, "detail": f"qmd version {version} does not match pinned {pinned}"}
+        return {"ok": True, "detail": f"qmd version matches {pinned}"}
+    except retrieval.RetrievalBackendError as e:
+        return {"ok": False, "detail": f"qmd check failed: {e}"}
+
+
 def _check_index(home: Path, config: dict) -> dict:
     """Flags a stale retrieval index: knowledge files exist but nothing is indexed."""
+    backend = config_mod.get(config, "retrieval.backend", "local")
+    if backend == "qmd":
+        v_check = _check_qmd_version(home, config)
+        if not v_check["ok"]:
+            return v_check
+        # Also check model download consent status
+        consent_path = paths.retrieval_consent_path(home)
+        import json
+        consented = False
+        if consent_path.exists():
+            try:
+                data = json.loads(consent_path.read_text())
+                consented = bool(data.get("qmd_embed_consented"))
+            except Exception:
+                pass
+        consent_str = "semantic search consented" if consented else "semantic search not consented"
+        return {"ok": True, "detail": f"qmd backend configured (version: {retrieval.QMD_PINNED_VERSION}, {consent_str})"}
+
     base = retrieval.knowledge_path(home, config)
     file_count = len(list(base.rglob("*.md"))) if base.exists() else 0
     indexed = retrieval.index_count(home)
@@ -80,8 +111,21 @@ def _check_schema(home: Path) -> dict:
 
 
 def _check_connections(home: Path) -> dict:
-    """Reports configured connections. Always ok: having zero is a valid state."""
+    """Reports configured connections. Checks if any Composio connection is not ACTIVE."""
     conns = connect_mod.list_connections(home)
+    issues = []
+    for c in conns:
+        if c.get("service") in ("gmail", "slack", "calendar"):
+            status = c.get("status")
+            if status != "ACTIVE":
+                issues.append(f"{c['service']} connected_account is {status}, not ACTIVE -- finish the browser consent")
+
+    if issues:
+        return {
+            "ok": False,
+            "detail": "; ".join(issues),
+            "connections": conns,
+        }
     return {"ok": True, "detail": f"{len(conns)} connection(s) configured", "connections": conns}
 
 

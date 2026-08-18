@@ -40,6 +40,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "retrieval": {
         "backend": "local",
+        "qmd_cmd": "qmd",
         "k_default": 5,
         "rerank": True,
     },
@@ -206,8 +207,12 @@ SCHEMA: dict[str, dict[str, Any]] = {
         "help": "install updates automatically instead of only surfacing them",
     },
     "retrieval.backend": {
-        "type": str, "choices": ["local"],
-        "help": "retrieval backend; only 'local' (SQLite FTS5/BM25) is implemented in this build",
+        "type": str, "choices": ["local", "qmd"],
+        "help": "retrieval backend; either 'local' (SQLite FTS5/BM25) or 'qmd'",
+    },
+    "retrieval.qmd_cmd": {
+        "type": str, "choices": None,
+        "help": "command prefix used to run the qmd CLI",
     },
     "retrieval.k_default": {
         "type": int, "choices": None,

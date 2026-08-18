@@ -4,10 +4,8 @@ import shutil
 from pathlib import Path
 
 from px0 import config as config_mod
-from px0 import paths, starters, versioning
+from px0 import paths, starters, versioning, SCHEMA_VERSION
 from px0.versioning import FileChange
-
-SCHEMA_VERSION = 1
 
 
 def is_initialized(home: Path) -> bool:

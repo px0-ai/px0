@@ -207,18 +207,23 @@ def _tool_call_loop(
         is_write = tools.exists(tool_id) and tools.is_write(tool_id)
         if tool_id not in allowed_tools:
             result: Any = {"error": f"{tool_id} is not in this workflow's tools: allowlist"}
-        elif dry_run and is_write:
+        elapsed = 0.0
+        if dry_run and is_write:
             result = {"stubbed": True, "success": True}  # dry runs never execute side effects
         else:
+            import time as time_mod
+            t0 = time_mod.monotonic()
             try:
                 result = _with_retry(config, tools.call, home, config, tool_id, args)
             except tools.ConnectorError as e:
                 result = {"error": str(e)}
+            elapsed = time_mod.monotonic() - t0
 
         tool_calls.append({
             "tool": tool_id, "args": args, "is_write": is_write,
             "stubbed": bool(dry_run and is_write),
             "timestamp": _now().isoformat(), "result_summary": str(result)[:500],
+            "elapsed_seconds": round(elapsed, 3),
         })
         conversation += (
             f'\n\nTOOL_CALL: {json.dumps(call)}\n'

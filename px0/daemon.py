@@ -31,6 +31,20 @@ POLL_INTERVAL_SECONDS = 30
 LATE_THRESHOLD_SECONDS = 90
 
 
+def _log_event(config: dict, message: str) -> None:
+    """Appends a timestamped message to daemon.log, swallowing OSError."""
+    try:
+        from datetime import timezone
+        dt = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        log_dir = runs_mod.resolve_logs_path(config)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "daemon.log"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{dt} {message}\n")
+    except OSError:
+        pass
+
+
 def pidfile_path(home: Path) -> Path:
     """Path to the file holding the running daemon's pid."""
     return paths.state_dir(home) / "daemon.pid"
@@ -81,6 +95,7 @@ def tick(home: Path, config: dict, state: dict) -> dict:
         for fire_time in fires:
             late = (now - fire_time).total_seconds() > LATE_THRESHOLD_SECONDS
             spawn_run(home, wf.id, late, fire_time)
+            _log_event(config, f"tick: spawned {wf.id} ({'late' if late else 'on-time'})")
             state[wf.id] = fire_time.isoformat()
     save_schedule_state(home, state)
     return state
@@ -108,13 +123,52 @@ def run_nightly(home: Path, config: dict) -> dict:
     """Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, knowledge
     reindex, and run-log retention. Reindex failures are captured in the report
     rather than raised, so one broken index doesn't block the rest of housekeeping."""
+    _log_event(config, "nightly: started housekeeping")
     report = {}
     report["checkpoint"] = claims.scan_and_process(home, force_hash=True)
     try:
         report["reindexed"] = retrieval.reindex(home, config)
     except Exception as e:
         report["reindex_error"] = str(e)
+    try:
+        from px0 import knowledge as knowledge_mod
+        report["ingest_queue"] = knowledge_mod.process_ingest_queue(home, config)
+    except Exception as e:
+        report["ingest_error"] = str(e)
     report["retention"] = runs_mod.apply_retention(config)
+
+    # Weekly update check
+    try:
+        from px0 import update as update_mod
+        state = load_schedule_state(home)
+        last_check_str = state.get("last_update_check")
+        last_check = datetime.fromisoformat(last_check_str) if last_check_str else None
+
+        if not last_check or (datetime.now() - last_check).days >= 7:
+            check_res = update_mod.check(config)
+            state["last_update_check"] = datetime.now().isoformat()
+            save_schedule_state(home, state)
+
+            up_check_path = paths.update_check_path(home)
+            up_check_path.parent.mkdir(parents=True, exist_ok=True)
+            up_check_path.write_text(json.dumps({
+                "checked_at": datetime.now().isoformat(),
+                "available_version": check_res.get("available_version")
+            }, indent=2))
+    except Exception:
+        pass
+
+    cp_val = 0
+    if report.get("checkpoint"):
+        try:
+            ch = versioning.show_change(home, report["checkpoint"])
+            cp_val = len(ch.get("files", []))
+        except Exception:
+            cp_val = 1
+
+    reindexed_val = report.get("reindexed", 0)
+    ret_removed = report.get("retention", {}).get("logs", 0)
+    _log_event(config, f"nightly: checkpoint={cp_val} changed, reindexed={reindexed_val} passages, retention removed {ret_removed} logs")
     return report
 
 
@@ -126,10 +180,13 @@ def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
 
+    _log_event(config, "start: serve started")
+
     def handle_stop(signum, frame):
         # removes the pidfile before exiting so status() doesn't report a stale pid
         if pidfile.exists():
             pidfile.unlink()
+        _log_event(config, "stop: SIGTERM received")
         os._exit(0)
 
     def reap_children(signum, frame):
@@ -278,3 +335,22 @@ def install(home: Path, fallback_cron: bool = False) -> dict:
             "start_hint": "add the printed block with `crontab -e`",
             "reduced_semantics": "no missed-fire recovery, no log rotation, "
                                   "no background ingest queue"}
+
+
+def restart_if_running(home: Path, config: dict) -> None:
+    """Checks daemon status, and if it is running/alive, sends SIGTERM and respawns it."""
+    s = status(home, config)
+    if s.get("pid") and s.get("alive"):
+        try:
+            os.kill(s["pid"], signal.SIGTERM)
+            for _ in range(20):
+                time.sleep(0.1)
+                if not status(home, config)["alive"]:
+                    break
+        except Exception:
+            pass
+        subprocess.Popen(
+            [sys.executable, "-m", "px0.cli", "daemon", "serve"],
+            env={**os.environ, "PX0_HOME": str(home)},
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )

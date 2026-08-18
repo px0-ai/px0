@@ -274,3 +274,84 @@ def refresh(home: Path, config: dict, path: Path) -> IngestResult:
         pass
     retrieval.reindex(home, config)
     return IngestResult(path, path.parent.name, False)
+
+
+MAX_INGEST_ATTEMPTS = 3
+
+
+def process_ingest_queue(home: Path, config: dict) -> dict:
+    """Processes any queued YouTube playlist ingest jobs under .state/ingest/."""
+    import json
+
+    ingest_dir = paths.ingest_dir(home)
+    failed_dir = paths.ingest_failed_dir(home)
+
+    jobs_processed = 0
+    videos_ingested = 0
+    jobs_given_up = 0
+
+    job_paths = sorted(ingest_dir.glob("*.json"))
+
+    for jp in job_paths:
+        if not jp.is_file():
+            continue
+
+        try:
+            job = json.loads(jp.read_text())
+        except Exception:
+            continue
+
+        source = job.get("source")
+        folder = job.get("to") or "docs"
+        attempts = job.get("attempts", 0)
+
+        failures = []
+        try:
+            urls = enumerate_playlist(source)
+            for url in urls:
+                dest = _dest_path(home, config, folder, url)
+                if dest.exists():
+                    continue  # Idempotent skip
+                try:
+                    add(home, config, url, to=folder)
+                    videos_ingested += 1
+                except IngestError as ie:
+                    failures.append(f"{url}: {ie}")
+                except Exception as e:
+                    failures.append(f"{url}: {e}")
+        except Exception as e:
+            failures.append(f"Playlist enumeration failed: {e}")
+
+        jobs_processed += 1
+        if not failures:
+            try:
+                jp.unlink()
+            except OSError:
+                pass
+        else:
+            attempts += 1
+            last_error = f"{len(failures)} item(s) failed: " + "; ".join(failures)
+            if attempts >= MAX_INGEST_ATTEMPTS:
+                failed_dir.mkdir(parents=True, exist_ok=True)
+                failed_jp = failed_dir / jp.name
+                job["attempts"] = attempts
+                job["last_error"] = last_error
+                try:
+                    failed_jp.write_text(json.dumps(job, indent=2))
+                    jp.unlink()
+                except OSError:
+                    pass
+                jobs_given_up += 1
+            else:
+                job["attempts"] = attempts
+                job["last_error"] = last_error
+                try:
+                    jp.write_text(json.dumps(job, indent=2))
+                except OSError:
+                    pass
+
+    return {
+        "jobs_processed": jobs_processed,
+        "videos_ingested": videos_ingested,
+        "jobs_given_up": jobs_given_up,
+    }

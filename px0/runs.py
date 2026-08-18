@@ -6,6 +6,7 @@ user might copy or sync."""
 import json
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -160,3 +161,18 @@ def apply_retention(config: dict) -> dict:
                 removed["records"] += 1
 
     return removed
+
+
+def tail_lines(path: Path, poll_interval: float = 1.0):
+    """Yields lines appended to `path` after this call starts, polling
+    every poll_interval seconds. Never returns on its own -- the caller
+    breaks out (e.g. on a terminal run outcome, or KeyboardInterrupt)."""
+    with open(path, "r", encoding="utf-8") as f:
+        f.seek(0, 2)  # start at current end-of-file
+        while True:
+            f.seek(f.tell())  # Clear EOF flag
+            line = f.readline()
+            if line:
+                yield line
+            else:
+                time.sleep(poll_interval)

@@ -1,7 +1,8 @@
 [project]
 name = "px0"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A local-first CLI where everything is a workflow"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
@@ -10,6 +11,17 @@ dependencies = [
     "croniter>=2.0",
     "beautifulsoup4>=4.12",
     "youtube-transcript-api>=0.6",
+    "composio>=0.1.0",
+    "packaging>=23.0",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "px0.__version__"}
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.6",
 ]
 
 [project.scripts]

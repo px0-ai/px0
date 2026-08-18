@@ -163,15 +163,130 @@ def github_create_review_comment(args: dict, ctx: Context) -> dict:
     return {"id": resp.json()["id"], "url": resp.json()["html_url"]}
 
 
-def _composio_unconfigured(args: dict, ctx: Context) -> Any:
-    """Handler for every Composio-backed tool (calendar, gmail, slack): this build has no
-    live Composio client, so calling one always raises ConnectorNotConfigured."""
-    raise ConnectorNotConfigured(
-        "this build wires GitHub natively only; Composio-backed tools "
-        "(calendar, gmail, slack) are listed for shape but not executed. "
-        "Connect the native GitHub PAT path, or wire a Composio client "
-        "against verified API docs before relying on this tool."
-    )
+def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any:
+    """Executes a Composio tool using the stored API key and connected account ID."""
+    creds = creds_mod.load(ctx.home)
+    composio = creds.get("composio")
+    if not composio or not composio.get("api_key"):
+        raise ConnectorNotConfigured(
+            "Composio API key is not configured; run `px0 connect setup-composio <key>`"
+        )
+
+    connected_accounts = composio.get("connected_accounts", {})
+    if app not in connected_accounts:
+        raise ConnectorNotConfigured(
+            f"{app} is not connected; run `px0 connect {app}`"
+        )
+
+    connected_account_id = connected_accounts[app]
+    api_key = composio["api_key"]
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        status_resp = requests.get(
+            f"https://backend.composio.dev/api/v3.1/connected_accounts/{connected_account_id}",
+            headers=headers,
+            timeout=15,
+        )
+        if status_resp.status_code == 404:
+            raise ConnectorNotConfigured(f"{app} connection not found on Composio; run `px0 connect {app}`")
+        if status_resp.status_code >= 400:
+            raise ConnectorError(f"Composio status API error -> {status_resp.status_code}: {status_resp.text[:200]}")
+
+        status = status_resp.json().get("status", "UNKNOWN")
+        if status == "INITIATED":
+            raise ConnectorNotConfigured(f"{app} connection is INITIATED, not ACTIVE -- finish the browser consent")
+        if status != "ACTIVE":
+            raise ConnectorNotConfigured(f"{app} connection is {status}, not ACTIVE -- run `px0 connect {app}` and complete OAuth")
+    except requests.RequestException as e:
+        raise ConnectorError(f"Composio API unreachable: {e}") from e
+
+    payload = {
+        "arguments": arguments,
+        "connected_account_id": connected_account_id
+    }
+    try:
+        resp = requests.post(
+            f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+            headers=headers,
+            json=payload,
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        raise ConnectorError(f"Composio API unreachable: {e}") from e
+
+    if resp.status_code >= 400:
+        raise ConnectorError(f"Composio execution failed -> {resp.status_code}: {resp.text[:200]}")
+
+    return resp.json()
+
+
+def calendar_list_events(args: dict, ctx: Context) -> Any:
+    """Lists calendar events in a window."""
+    window = args.get("window", "")
+    now = datetime.now(timezone.utc)
+    if window == "yesterday":
+        start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_yesterday = start_of_yesterday + timedelta(days=1) - timedelta(microseconds=1)
+        timeMin = start_of_yesterday.isoformat()
+        timeMax = end_of_yesterday.isoformat()
+    elif window.startswith("-") and window.endswith("d"):
+        days = int(window[1:-1])
+        start_of_window = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+        timeMin = start_of_window.isoformat()
+        timeMax = now.isoformat()
+    else:
+        timeMin = (now - timedelta(days=1)).isoformat()
+        timeMax = now.isoformat()
+
+    arguments = {
+        "calendarId": "primary",
+        "timeMin": timeMin,
+        "timeMax": timeMax,
+        "singleEvents": True,
+    }
+    return _composio_execute(ctx, "calendar", "GOOGLECALENDAR_EVENTS_LIST", arguments)
+
+
+def gmail_search_messages(args: dict, ctx: Context) -> Any:
+    """Search gmail messages."""
+    query = args.get("query", "")
+    arguments = {
+        "query": query,
+    }
+    return _composio_execute(ctx, "gmail", "GMAIL_FETCH_EMAILS", arguments)
+
+
+def gmail_get_message(args: dict, ctx: Context) -> Any:
+    """Fetch one gmail message."""
+    msg_id = args.get("id", "")
+    arguments = {
+        "id": msg_id,
+        "message_id": msg_id,
+    }
+    return _composio_execute(ctx, "gmail", "GMAIL_GET_EMAIL", arguments)
+
+
+def gmail_send_message(args: dict, ctx: Context) -> Any:
+    """Send a gmail message."""
+    arguments = {
+        "recipient_email": args.get("to", ""),
+        "subject": args.get("subject", ""),
+        "body": args.get("body", ""),
+    }
+    return _composio_execute(ctx, "gmail", "GMAIL_SEND_EMAIL", arguments)
+
+
+def slack_post_message(args: dict, ctx: Context) -> Any:
+    """Post a message to a slack channel."""
+    arguments = {
+        "channel": args.get("channel", ""),
+        "message": args.get("text", ""),
+    }
+    return _composio_execute(ctx, "slack", "SLACK_SEND_MESSAGE", arguments)
 
 
 REGISTRY: dict[str, ToolSpec] = {
@@ -193,19 +308,19 @@ REGISTRY: dict[str, ToolSpec] = {
         github_create_review_comment),
     "calendar.list_events": ToolSpec(
         "calendar.list_events", "calendar", "List calendar events in a window",
-        {"window": "str"}, False, _composio_unconfigured),
+        {"window": "str"}, False, calendar_list_events),
     "gmail.search_messages": ToolSpec(
         "gmail.search_messages", "gmail", "Search gmail messages",
-        {"query": "str"}, False, _composio_unconfigured),
+        {"query": "str"}, False, gmail_search_messages),
     "gmail.get_message": ToolSpec(
         "gmail.get_message", "gmail", "Fetch one gmail message",
-        {"id": "str"}, False, _composio_unconfigured),
+        {"id": "str"}, False, gmail_get_message),
     "gmail.send_message": ToolSpec(
         "gmail.send_message", "gmail", "Send a gmail message",
-        {"to": "str", "subject": "str", "body": "str"}, True, _composio_unconfigured),
+        {"to": "str", "subject": "str", "body": "str"}, True, gmail_send_message),
     "slack.post_message": ToolSpec(
         "slack.post_message", "slack", "Post a message to a slack channel",
-        {"channel": "str", "text": "str"}, True, _composio_unconfigured),
+        {"channel": "str", "text": "str"}, True, slack_post_message),
 }
 
 

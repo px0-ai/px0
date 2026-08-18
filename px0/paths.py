@@ -54,6 +54,11 @@ def ingest_dir(home: Path | None = None) -> Path:
     return state_dir(home) / "ingest"
 
 
+def ingest_failed_dir(home: Path | None = None) -> Path:
+    """Path to the directory holding failed knowledge ingest jobs."""
+    return ingest_dir(home) / "failed"
+
+
 def credentials_path(home: Path | None = None) -> Path:
     """Path to `credentials.toml`, mode 0600, holding connector secrets."""
     return state_dir(home) / "credentials.toml"
@@ -69,6 +74,16 @@ def schema_path(home: Path | None = None) -> Path:
     return state_dir(home) / "schema"
 
 
+def update_history_path(home: Path | None = None) -> Path:
+    """Path to `.state/update-history.json` recording update history."""
+    return state_dir(home) / "update-history.json"
+
+
+def update_check_path(home: Path | None = None) -> Path:
+    """Path to `.state/update-check.json` recording last update availability check."""
+    return state_dir(home) / "update-check.json"
+
+
 def schedule_path(home: Path | None = None) -> Path:
     """Path to the daemon's persisted scheduling state."""
     return state_dir(home) / "schedule.json"
@@ -77,3 +92,8 @@ def schedule_path(home: Path | None = None) -> Path:
 def config_path(home: Path | None = None) -> Path:
     """Path to the store's versioned `config.toml`."""
     return (home or store_home()) / "config.toml"
+
+
+def retrieval_consent_path(home: Path | None = None) -> Path:
+    """Path to `.state/retrieval-consent.json` recording model download consent."""
+    return state_dir(home) / "retrieval-consent.json"
