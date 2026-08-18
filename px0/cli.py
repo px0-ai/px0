@@ -101,8 +101,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         print(f"created {line}")
     print(f"\npx0 initialized at {home}")
     print("try next:")
-    print("  px0 list workflows")
-    print("  px0 run pr-precheck --stdin < some.diff")
+    print("  px0 new --help")
     print("  px0 doctor")
 
 

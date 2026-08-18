@@ -10,6 +10,10 @@ nothing else installed alongside it.
 
 See [spec.md](spec.md) for the full design.
 
+## Prerequisites
+
+px0 uses Composio for tool integrations. You will need a Composio API key.
+
 ## Install
 
 This is a Python package; install it into a virtualenv:
@@ -27,15 +31,12 @@ entry point in `pyproject.toml`.
 
 ```shell
 px0 init
+px0 new "summarize a URL on stdin"
 echo "https://example.com/some-post" | px0 run summarize --stdin
 ```
 
-`px0 init` scaffolds the store with a handful of starter workflows and
-guidelines. `summarize` is one of them: it takes a URL, a local file, or
-raw pasted text on stdin and summarizes it -- no external connection
-required, so it's the fastest way to see px0 do something real.
-`pr-precheck` is another: it reads a diff on stdin, checks it against
-the code-review guidelines, and prints any violations.
+`px0 init` scaffolds the store directory. `px0 new` creates a workflow
+from your prompt. `px0 run` executes it. 
 
 ```shell
 px0 list workflows
