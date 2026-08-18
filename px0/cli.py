@@ -99,6 +99,13 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     for line in created:
         print(f"created {line}")
+    
+    import shutil
+    if not shutil.which("npx"):
+        print("\nNote: 'npx' was not found on your PATH.")
+        print("Node.js is a prerequisite for managing community skills with `px0 skills`.")
+        print("Please install Node.js (https://nodejs.org) to use this feature.")
+        
     print(f"\npx0 initialized at {home}")
     print("try next:")
     print("  px0 new --help")
@@ -681,12 +688,51 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_skills(args: argparse.Namespace) -> None:
-    """Handles `px0 skills build`: builds the skills/ output directory and prints
-    each file written."""
+    """Handles `px0 skills`: proxies to `npx skills` or runs local `build`."""
     home, config = _ctx()
-    written = skills_mod.build(home)
-    for w in written:
-        print(f"built skills/{w}")
+    
+    skills_args = getattr(args, "skills_args", [])
+    if skills_args and skills_args[0] == "build":
+        written = skills_mod.build(home)
+        if not written:
+            print("no guidelines found to build")
+            return
+        for w in written:
+            print(f"built skills/{w}")
+        return
+
+    import subprocess
+    import shutil
+
+    if not shutil.which("npx"):
+        print("Error: 'npx' is not installed.", file=sys.stderr)
+        print("Node.js is a prerequisite for managing community skills with `px0 skills`.", file=sys.stderr)
+        print("Please install Node.js (https://nodejs.org) to use this feature.", file=sys.stderr)
+        sys.exit(EXIT_USER_ERROR)
+
+    skills_json = home / "skills.json"
+    agents_skill_lock = Path("~/.agents/.skill-lock.json").expanduser()
+
+    # Sync local .px0/skills.json -> ~/.agents/.skill-lock.json before running npx
+    if skills_json.exists():
+        agents_skill_lock.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(str(skills_json), str(agents_skill_lock))
+
+    # We always want global mode (-g) for px0 skills proxies, because we're managing the user's AI state.
+    run_args = ["npx", "--yes", "skills@latest"] + skills_args
+    if "-g" not in skills_args and "--global" not in skills_args:
+        run_args.append("-g")
+
+    try:
+        subprocess.run(run_args, check=True)
+    except subprocess.CalledProcessError as e:
+        sys.exit(e.returncode)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    finally:
+        # Sync back ~/.agents/.skill-lock.json -> .px0/skills.json
+        if agents_skill_lock.exists():
+            shutil.copy(str(agents_skill_lock), str(skills_json))
 
 
 def cmd_why(args: argparse.Namespace) -> None:
@@ -1019,8 +1065,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser("skills")
-    skills_sub = sp.add_subparsers(dest="skills_cmd", required=True)
-    skills_sub.add_parser("build")
+    sp.add_argument("skills_args", nargs=argparse.REMAINDER, help="Arguments to pass to npx skills")
     sp.set_defaults(func=cmd_skills)
 
     sp = sub.add_parser("why")

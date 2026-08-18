@@ -105,4 +105,22 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
 
     versioning.record_change(home, "builder", file_changes)
 
+    # Restore community skills if .px0/skills.json exists
+    skills_json = home / "skills.json"
+    if skills_json.exists():
+        import shutil
+        import subprocess
+        agents_skill_lock = Path("~/.agents/.skill-lock.json").expanduser()
+        agents_skill_lock.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(str(skills_json), str(agents_skill_lock))
+        
+        if shutil.which("npx"):
+            try:
+                subprocess.run(["npx", "--yes", "skills@latest", "experimental_install", "-g"], check=True)
+                created.append("skills restored from skills.json")
+            except subprocess.CalledProcessError:
+                created.append("warning: failed to restore skills using npx")
+        else:
+            created.append("warning: npx not found, skipping skill restoration from skills.json")
+
     return created
