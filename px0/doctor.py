@@ -6,6 +6,7 @@ from pathlib import Path
 
 from px0 import __version__, SCHEMA_VERSION
 from px0 import connect as connect_mod
+from px0 import config as config_mod
 from px0 import daemon, harness, paths, proposals, retrieval, versioning
 
 
