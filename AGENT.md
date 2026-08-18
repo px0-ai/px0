@@ -61,6 +61,12 @@ some new features to the codebase
 - Co-authored-by: Claude <noreply@anthropic.com>
 ```
 
+## CLI Output and Error Messages
+
+- Keep output subtle, professional, and standard.
+- Do not use emojis in CLI outputs or error messages. Let the text speak for itself.
+- Format multi-line error messages cleanly without visual clutter.
+
 ## Documentation Updates
 
 - Documentation is powered by [MkDocs](https://www.mkdocs.org/) with the [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) theme.

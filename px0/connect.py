@@ -6,7 +6,7 @@ All external app connections are managed through Composio.
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
+
 
 from px0 import credentials as creds_mod
 
@@ -19,7 +19,25 @@ TOOLKIT_SLUGS = {
 
 
 def setup_composio(home: Path, api_key: str) -> None:
-    """Stores the Composio API key as a credential. Does not validate the key."""
+    """Stores the Composio API key as a credential after validating it."""
+    from composio import Composio
+
+    client = Composio(api_key=api_key)
+    try:
+        # Hello world / healthcheck: fetch github toolkit info to verify the key.
+        client.toolkits.get("github")
+        print("Composio API key is valid.")
+    except Exception as e:
+        if "401" in str(e) or "AuthenticationError" in str(type(e)):
+            raise ValueError(
+                "\nInvalid Composio API key.\n"
+                "Please create one from the Composio platform:\n"
+                "https://composio.dev > Get Started > Settings > API Keys\n"
+                "Please put the key to proceed.\n"
+            ) from e
+        # If it fails for another reason (e.g. network issue), we probably still want to surface it
+        raise ValueError(f"\nFailed to verify Composio API key: {e}\n") from e
+
     creds_mod.set_service(home, "composio", {"api_key": api_key})
 
 

@@ -77,15 +77,25 @@ def cmd_init(args: argparse.Namespace) -> None:
     home = Path(args.dir).expanduser() if args.dir else paths.store_home()
     harness_cmd = harness.KNOWN_HARNESSES[args.harness] if args.harness else None
 
-    composio_key = args.composio_key
-    if not composio_key:
-        composio_key = input("Composio API key (leave blank to skip): ").strip()
-
     created = store_mod.init(home, harness_cmd=harness_cmd)
 
-    if composio_key:
-        connect_mod.setup_composio(home, composio_key)
-        created.append("composio credentials")
+    composio_key = args.composio_key
+    while True:
+        if composio_key is None:
+            composio_key = input("Composio API key: ").strip()
+
+        if not composio_key:
+            print("Composio API key is required. Please enter it or press Ctrl+C to abort.", file=sys.stderr)
+            composio_key = None
+            continue
+
+        try:
+            connect_mod.setup_composio(home, composio_key)
+            created.append("composio credentials")
+            break
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            composio_key = None  # clear it so we prompt again on the next iteration
 
     for line in created:
         print(f"created {line}")
