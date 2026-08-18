@@ -23,6 +23,10 @@ dev = [
     "pytest>=7.0",
     "pytest-mock>=3.6",
 ]
+docs = [
+    "mkdocs>=1.5",
+    "mkdocs-material>=9.4",
+]
 
 [project.scripts]
 px0 = "px0.cli:main"

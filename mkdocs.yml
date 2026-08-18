@@ -1,0 +1,14 @@
+site_name: px0 Documentation
+site_description: A local-first CLI where everything is a workflow
+
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Reference: reference.md
+  - Tutorials:
+    - Getting Started: tutorials/01-getting-started.md
+    - Building a Workflow: tutorials/02-building-a-workflow.md
+    - Knowledge and Ask: tutorials/03-knowledge-and-ask.md
+    - Guidelines and Provenance: tutorials/04-guidelines-and-provenance.md
