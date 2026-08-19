@@ -128,10 +128,11 @@ def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     assert creds["composio"]["api_key"] == "cli_passed_key"
 
 
-def test_store_init_installs_skills_from_skills_json(tmp_path, monkeypatch):
+def test_store_init_updates_and_syncs_skills(tmp_path, monkeypatch):
     from px0 import store
     import subprocess
     import shutil
+    from pathlib import Path
 
     home = tmp_path / "test_store"
     home.mkdir()
@@ -143,50 +144,8 @@ def test_store_init_installs_skills_from_skills_json(tmp_path, monkeypatch):
     # Mock shutil.which to return True for npx
     monkeypatch.setattr(shutil, "which", lambda cmd: True if cmd == "npx" else False)
 
-    # Track subprocess calls
-    ran_commands = []
-    def mock_run(args, **kwargs):
-        ran_commands.append(args)
-        return subprocess.CompletedProcess(args, 0)
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    # Run store.init
-    store.init(home)
-
-    # Check that the npx skills install and experimental_install commands were called
-    experimental_installed = False
-    installed = False
-    updated = False
-
-    for cmd in ran_commands:
-        if "experimental_install" in cmd:
-            experimental_installed = True
-        if "install" in cmd and "experimental_install" not in cmd:
-            installed = True
-        if "update" in cmd:
-            updated = True
-
-    assert experimental_installed is True, "npx skills experimental_install was not called"
-    assert installed is True, "npx skills install was not called"
-    assert updated is True, "npx skills update was not called"
-
-
-def test_store_init_installs_skills_when_only_global_lock_exists(tmp_path, monkeypatch):
-    from px0 import store
-    import subprocess
-    import shutil
-    from pathlib import Path
-
-    home = tmp_path / "test_store"
-    home.mkdir()
-
-    # Mock shutil.which to return True for npx
-    monkeypatch.setattr(shutil, "which", lambda cmd: True if cmd == "npx" else False)
-
-    # Mock Path("~/.agents/.skill-lock.json").expanduser().exists() to return True
+    # Mock global agents_skill_lock path
     fake_global_lock = tmp_path / "fake_skill_lock"
-    fake_global_lock.write_text('{"skills": {"global_skill": "version_1"}}')
     
     orig_expanduser = Path.expanduser
     def mock_expanduser(self):
@@ -200,6 +159,8 @@ def test_store_init_installs_skills_when_only_global_lock_exists(tmp_path, monke
     ran_commands = []
     def mock_run(args, **kwargs):
         ran_commands.append(args)
+        # Simulate creating/updating the skill lock during the run
+        fake_global_lock.write_text('{"skills": {"some_skill": "version_1", "another": "v2"}}')
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -207,19 +168,10 @@ def test_store_init_installs_skills_when_only_global_lock_exists(tmp_path, monke
     # Run store.init
     store.init(home)
 
-    experimental_installed = False
-    installed = False
-    updated = False
+    # Check that only npx skills update was called
+    assert len(ran_commands) == 1
+    assert ran_commands[0] == ["npx", "--yes", "skills@latest", "update", "-g", "-y"]
 
-    for cmd in ran_commands:
-        if "experimental_install" in cmd:
-            experimental_installed = True
-        if "install" in cmd and "experimental_install" not in cmd:
-            installed = True
-        if "update" in cmd:
-            updated = True
-
-    assert experimental_installed is False, "npx skills experimental_install should not be called since local skills.json is missing"
-    assert installed is True, "npx skills install was not called"
-    assert updated is True, "npx skills update was not called"
+    # Verify that the local skills.json was updated with final state synced back from fake_global_lock
+    assert "another" in skills_json.read_text()
 
