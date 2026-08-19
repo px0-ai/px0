@@ -21,6 +21,7 @@ def load(home: Path) -> dict:
 def save(home: Path, creds: dict) -> None:
     """Writes the full credentials dict and re-asserts mode 0600 on the file."""
     path = paths.credentials_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
     config_mod.save(path, creds)
     versioning.ensure_secure_permissions(path)
 

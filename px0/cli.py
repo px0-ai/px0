@@ -19,6 +19,7 @@ from px0 import (
     config as config_mod,
     connect as connect_mod,
     consolidate as consolidate_mod,
+    credentials as creds_mod,
     daemon as daemon_mod,
     doctor as doctor_mod,
     harness,
@@ -72,6 +73,15 @@ def _dump(args: argparse.Namespace, data) -> None:
 
 # --- init / new / run / ask ---------------------------------------------
 
+def _mask_key(key: str) -> str:
+    """Returns a masked version of an API key (e.g. 'abcd...1234' or '****')."""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "*" * len(key)
+    return f"{key[:4]}...{key[-4:]}"
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Handles `px0 init`: scaffolds a new store and prints suggested next commands."""
     home = Path(args.dir).expanduser() if args.dir else paths.store_home()
@@ -80,9 +90,22 @@ def cmd_init(args: argparse.Namespace) -> None:
     created = store_mod.init(home, harness_cmd=harness_cmd)
 
     composio_key = args.composio_key
+    creds = creds_mod.load(home)
+    existing_key = creds.get("composio", {}).get("api_key")
+
     while True:
         if composio_key is None:
-            composio_key = input("Composio API key: ").strip()
+            if existing_key:
+                prompt = f"Composio API key [{_mask_key(existing_key)} - press Enter to keep current]: "
+            else:
+                prompt = "Composio API key: "
+            user_input = input(prompt).strip()
+            if not user_input:
+                if existing_key:
+                    break
+                print("Composio API key is required. Please enter it or press Ctrl+C to abort.", file=sys.stderr)
+                continue
+            composio_key = user_input
 
         if not composio_key:
             print("Composio API key is required. Please enter it or press Ctrl+C to abort.", file=sys.stderr)

@@ -74,3 +74,7 @@ some new features to the codebase
 - `mkdocs.yml` at the project root defines the documentation structure.
 - **Always keep the documentation updated.** If you add a new feature, change an API, or update core logic, you MUST update the corresponding markdown files in `docs/` to reflect these changes.
 - Ensure that the navigation in `mkdocs.yml` accurately represents the files in the `docs/` folder.
+
+## Implementation Guidelines
+
+- **Always cover all edge cases**: When implementing any feature, fix, or refactor, thoroughly identify, handle, and test all edge cases (e.g., boundary conditions, empty/null inputs, malformed data, unexpected errors, and failure paths). Ensure code is resilient and fails gracefully where appropriate.
