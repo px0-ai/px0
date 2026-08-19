@@ -30,6 +30,14 @@ class FakeComposio:
         if self.fail_status_code:
             return MockResponse(self.fail_status_code, {}, "Mock Failure")
 
+        # 0. Toolkits (healthcheck)
+        if "/toolkits" in url:
+            return MockResponse(200, {
+                "name": "github",
+                "slug": "github",
+                "description": "GitHub integration"
+            })
+
         # 1. Auth configs
         if "/auth_configs" in url:
             payload = kwargs.get("json", {})

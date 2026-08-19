@@ -11,11 +11,24 @@ def load(home: Path) -> dict:
     """Reads all stored credentials keyed by service. Returns {} if the file
     is missing or empty (fresh store, nothing connected yet)."""
     path = paths.credentials_path(home)
-    if not path.exists() or path.stat().st_size == 0:
-        return {}
-    with open(path, "rb") as f:
-        import tomllib
-        return tomllib.load(f)
+    creds = {}
+    if path.exists() and path.stat().st_size > 0:
+        with open(path, "rb") as f:
+            import tomllib
+            creds = tomllib.load(f)
+
+    # Dynamic fallback to load Composio API key from config.toml
+    try:
+        cfg_path = paths.config_path(home)
+        if cfg_path.exists():
+            config = config_mod.load(cfg_path)
+            api_key = config.get("connectors", {}).get("composio_api_key")
+            if api_key:
+                creds.setdefault("composio", {})["api_key"] = api_key
+    except Exception:
+        pass
+
+    return creds
 
 
 def save(home: Path, creds: dict) -> None:

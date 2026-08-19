@@ -55,6 +55,12 @@ def _ctx(require_init: bool = True) -> tuple[Path, dict]:
         print(f"no px0 store at {home}; run `px0 init` first", file=sys.stderr)
         sys.exit(EXIT_USER_ERROR)
     config = config_mod.load(paths.config_path(home))
+
+    # Load Composio key from config at startup when any command is loaded
+    composio_api_key = config.get("connectors", {}).get("composio_api_key")
+    if composio_api_key:
+        os.environ["COMPOSIO_API_KEY"] = composio_api_key
+
     return home, config
 
 

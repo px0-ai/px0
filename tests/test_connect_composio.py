@@ -58,3 +58,33 @@ def test_connected_account_status_mapping(tmp_home, fake_composio):
     # FAILED
     fake_composio.status = "FAILED"
     assert connect.connected_account_status(tmp_home, "gmail") == "FAILED"
+
+
+def test_setup_composio_writes_to_config_toml(tmp_home, fake_composio):
+    from px0 import config as config_mod, paths, cli
+    import os
+
+    # Ensure the key does not exist yet in environment or config
+    os.environ.pop("COMPOSIO_API_KEY", None)
+    cfg_path = paths.config_path(tmp_home)
+    config = config_mod.load(cfg_path)
+    assert config.get("connectors", {}).get("composio_api_key") == ""
+
+    # Setup composio
+    connect.setup_composio(tmp_home, "config_test_api_key_abc")
+
+    # Verify it is written to config.toml
+    config = config_mod.load(cfg_path)
+    assert config["connectors"]["composio_api_key"] == "config_test_api_key_abc"
+
+    # Verify it is dynamically loaded into credentials
+    creds = creds_mod.load(tmp_home)
+    assert creds["composio"]["api_key"] == "config_test_api_key_abc"
+
+    # Verify running _ctx sets COMPOSIO_API_KEY in environment
+    os.environ.pop("COMPOSIO_API_KEY", None)
+    # Monkeypatch paths.store_home to return tmp_home so _ctx reads our tmp_home store
+    from unittest.mock import patch
+    with patch("px0.paths.store_home", return_value=tmp_home):
+        cli._ctx()
+        assert os.environ.get("COMPOSIO_API_KEY") == "config_test_api_key_abc"

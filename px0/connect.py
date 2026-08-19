@@ -19,7 +19,7 @@ TOOLKIT_SLUGS = {
 
 
 def setup_composio(home: Path, api_key: str) -> None:
-    """Stores the Composio API key as a credential after validating it."""
+    """Stores the Composio API key inside config.toml and credentials after validating it."""
     from composio import Composio
 
     client = Composio(api_key=api_key)
@@ -37,6 +37,13 @@ def setup_composio(home: Path, api_key: str) -> None:
             ) from e
         # If it fails for another reason (e.g. network issue), we probably still want to surface it
         raise ValueError(f"\nFailed to verify Composio API key: {e}\n") from e
+
+    # Store in config.toml
+    from px0 import config as config_mod, paths
+    cfg_path = paths.config_path(home)
+    config = config_mod.load(cfg_path)
+    config_mod.set_key(config, "connectors.composio_api_key", api_key)
+    config_mod.save(cfg_path, config)
 
     creds_mod.set_service(home, "composio", {"api_key": api_key})
 

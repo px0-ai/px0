@@ -18,6 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "connectors": {
         "provider": "composio",
         "retries": 3,
+        "composio_api_key": "",
     },
     "proposals": {
         "max_per_consolidation": 10,
@@ -160,6 +161,10 @@ SCHEMA: dict[str, dict[str, Any]] = {
     "connectors.retries": {
         "type": int, "choices": None,
         "help": "per-run transient connector retries, exponential backoff",
+    },
+    "connectors.composio_api_key": {
+        "type": str, "choices": None,
+        "help": "Composio API key used to authenticate external app connections",
     },
     "proposals.max_per_consolidation": {
         "type": int, "choices": None,
