@@ -711,7 +711,9 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_skills(args: argparse.Namespace) -> None:
-    """Handles `px0 skills`: proxies to `npx skills` or runs local `build`."""
+    """Handles `px0 skills`: acts as a proxy for the `npx skills` utility to discover,
+    install, list, update, and remove community agent skills, or runs local `build` to compile
+    guidelines into Claude Code skill bundles (`SKILL.md`)."""
     home, config = _ctx()
     
     skills_args = getattr(args, "skills_args", [])

@@ -100,3 +100,4 @@ came to be. See [04-guidelines-and-provenance.md](04-guidelines-and-provenance.m
   workflow from a plain-English description.
 - [03-knowledge-and-ask.md](03-knowledge-and-ask.md) -- build a personal
   knowledge library and query it.
+- [05-skills.md](05-skills.md) -- manage agent skills and compile guideline bundles.

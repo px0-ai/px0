@@ -292,6 +292,14 @@ def _dump(args: argparse.Namespace, data) -> None
 
 Prints data to stdout as indented JSON, coercing non-JSON-serializable values via str().
 
+### `_mask_key`
+
+```python
+def _mask_key(key: str) -> str
+```
+
+Returns a masked version of an API key (e.g. 'abcd...1234' or '****').
+
 ### `cmd_init`
 
 ```python
@@ -344,9 +352,8 @@ With no kind given, prints all three sections; otherwise prints just that sectio
 def cmd_connect(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 connect` and its sub-targets: setup-composio, list, remove, rotate,
-and connecting a new service (native github only in this build; anything else
-reports Composio auth-link creation as unimplemented).
+Handles `px0 connect` and its sub-targets: setup-composio, list, remove, 
+and connecting a new service (managed via Composio).
 
 ### `cmd_tools`
 
@@ -456,8 +463,9 @@ Handles `px0 search`: rebuilds the retrieval index when the query is literally
 def cmd_skills(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 skills build`: builds the skills/ output directory and prints
-each file written.
+Handles `px0 skills`: acts as a proxy for the `npx skills` utility to discover,
+install, list, update, and remove community agent skills, or runs local `build` to compile
+guidelines into Claude Code skill bundles (`SKILL.md`).
 
 ### `cmd_why`
 
@@ -512,7 +520,7 @@ def cmd_update(args: argparse.Namespace) -> None
 ```
 
 Handles `px0 update`: switches the update channel, checks for/applies an
-update, or reports that rollback is unavailable in this build.
+update, or rolls back.
 
 ### `cmd_version`
 
@@ -656,11 +664,7 @@ list`.
 
 px0 connect: creating and managing connections.
 
-The native GitHub PAT path is fully wired (verifies the token against the
-GitHub API before storing it). `setup-composio` stores the API key; actually
-creating a Composio-hosted auth link is not implemented in this build (see
-tools.py) so `connect <app>` without --native says so plainly rather than
-faking a flow.
+All external app connections are managed through Composio.
 
 ### `setup_composio`
 
@@ -668,25 +672,41 @@ faking a flow.
 def setup_composio(home: Path, api_key: str) -> None
 ```
 
-Stores the Composio API key as a credential. Does not validate the key.
+Stores the Composio API key as a credential after validating it.
 
-### `connect_github_native`
-
-```python
-def connect_github_native(home: Path, token: str) -> dict
-```
-
-Verifies a GitHub PAT against the GitHub API and stores it on success.
-
-Raises ValueError if GitHub rejects the token. Returns the resolved login.
-
-### `rotate_github`
+### `_composio_client`
 
 ```python
-def rotate_github(home: Path, token: str) -> dict
+def _composio_client(home: Path)
 ```
 
-Replaces the stored GitHub token; rotation is just a re-verify-and-store.
+Returns a Composio client configured with the stored Composio API key.
+
+### `_ensure_auth_config`
+
+```python
+def _ensure_auth_config(home: Path, toolkit: str) -> str
+```
+
+Checks [composio.auth_configs].<toolkit> in credentials; if absent,
+creates it via Composio API and caches the returned ID.
+
+### `connect_composio_app`
+
+```python
+def connect_composio_app(home: Path, app: str) -> dict
+```
+
+Creates (or reuses) an auth config, creates an auth link session for the app,
+caches the connected_account_id, and returns the redirect_url.
+
+### `connected_account_status`
+
+```python
+def connected_account_status(home: Path, app: str) -> str
+```
+
+Polls the status of the cached connected account from the Composio API.
 
 ### `list_connections`
 
@@ -775,6 +795,14 @@ recorded as late (the machine was asleep or the daemon was down); a fire
 discovered within that window is an ordinary on-time fire. There is no
 separate OS sleep/wake hook, since none is available portably from plain
 Python.
+
+### `_log_event`
+
+```python
+def _log_event(config: dict, message: str) -> None
+```
+
+Appends a timestamped message to daemon.log, swallowing OSError.
 
 ### `pidfile_path`
 
@@ -911,6 +939,14 @@ fallback, only renders the crontab block without writing anything (the caller
 installs it with `crontab -e`). Returns platform, path written (if any), the
 rendered content, and a human hint for how to start it.
 
+### `restart_if_running`
+
+```python
+def restart_if_running(home: Path, config: dict) -> None
+```
+
+Checks daemon status, and if it is running/alive, sends SIGTERM and respawns it.
+
 ## `px0.doctor`
 
 px0 doctor: credentials, daemon, harness, index, versions, locks, schema.
@@ -938,6 +974,14 @@ def _check_harness(config: dict) -> dict
 ```
 
 Sends a trivial prompt to the model backend to confirm it responds.
+
+### `_check_qmd_version`
+
+```python
+def _check_qmd_version(home: Path, config: dict) -> dict
+```
+
+Runs qmd --version and compares against QMD_PINNED_VERSION.
 
 ### `_check_index`
 
@@ -977,7 +1021,7 @@ Confirms the store's on-disk schema version matches this binary's SCHEMA_VERSION
 def _check_connections(home: Path) -> dict
 ```
 
-Reports configured connections. Always ok: having zero is a valid state.
+Reports configured connections. Checks if any Composio connection is not ACTIVE.
 
 ### `_check_unreferenced_guidelines`
 
@@ -1204,6 +1248,14 @@ Retries transcript extraction for a YouTube stub file; rewrites it in place
 once a transcript is available. Raises IngestError if path isn't a stub or the
 transcript still isn't published.
 
+### `process_ingest_queue`
+
+```python
+def process_ingest_queue(home: Path, config: dict) -> dict
+```
+
+Processes any queued YouTube playlist ingest jobs under .state/ingest/.
+
 ## `px0.paths`
 
 Store location and path helpers.
@@ -1288,6 +1340,14 @@ def ingest_dir(home: Path | None = None) -> Path
 
 Path to the knowledge ingest queue/workspace.
 
+### `ingest_failed_dir`
+
+```python
+def ingest_failed_dir(home: Path | None = None) -> Path
+```
+
+Path to the directory holding failed knowledge ingest jobs.
+
 ### `credentials_path`
 
 ```python
@@ -1312,6 +1372,22 @@ def schema_path(home: Path | None = None) -> Path
 
 Path to the file recording the store's on-disk schema version.
 
+### `update_history_path`
+
+```python
+def update_history_path(home: Path | None = None) -> Path
+```
+
+Path to `.state/update-history.json` recording update history.
+
+### `update_check_path`
+
+```python
+def update_check_path(home: Path | None = None) -> Path
+```
+
+Path to `.state/update-check.json` recording last update availability check.
+
 ### `schedule_path`
 
 ```python
@@ -1327,6 +1403,14 @@ def config_path(home: Path | None = None) -> Path
 ```
 
 Path to the store's versioned `config.toml`.
+
+### `retrieval_consent_path`
+
+```python
+def retrieval_consent_path(home: Path | None = None) -> Path
+```
+
+Path to `.state/retrieval-consent.json` recording model download consent.
 
 ## `px0.proposals`
 
@@ -1464,6 +1548,10 @@ gates behind explicit, printed-size consent. `[retrieval] backend` names
 this the "local" backend so a real qmd integration can be swapped in later
 behind this same function signature.
 
+### `class RetrievalBackendError`
+
+Raised when the retrieval backend is missing, times out, or errors.
+
 ### `class Passage`
 
 One retrieved chunk: source file and heading anchor, text, BM25 score, and
@@ -1499,8 +1587,10 @@ Opens the index DB, creating the index directory and the FTS5 virtual table if n
 def _chunk_by_paragraph(text: str) -> list[tuple[str, str]]
 ```
 
-Fallback for material with no Markdown headings (extracted web
-pages, transcripts): group paragraphs into ~1000-char chunks.
+Chunks text by splitting on two or more newlines, grouping paragraphs
+until the chunk is at least 150 words (or we hit a heading/EOF), and
+finding the nearest preceding markdown heading (e.g. `## Section`) to
+use as the anchor.
 
 ### `_chunk_file`
 
@@ -1508,8 +1598,47 @@ pages, transcripts): group paragraphs into ~1000-char chunks.
 def _chunk_file(text: str) -> list[tuple[str, str]]
 ```
 
-Split a knowledge file's body into (anchor, text) chunks by heading,
-falling back to paragraph grouping when there are no headings.
+Standard file-chunking entry point. Returns a list of (anchor, text) tuples.
+
+### `_qmd_run`
+
+```python
+def _qmd_run(config: dict, *args, timeout: float = 60) -> str
+```
+
+Shells out to the qmd command configured in retrieval.qmd_cmd with args.
+
+### `_qmd_ensure_collection`
+
+```python
+def _qmd_ensure_collection(home: Path, config: dict)
+```
+
+Idempotently adds the knowledge path to qmd's collections.
+
+### `_qmd_ensure_embed_consent`
+
+```python
+def _qmd_ensure_embed_consent(home: Path, config: dict) -> bool
+```
+
+Checks and prompts for model download consent if not already given.
+
+### `_parse_qmd_result`
+
+```python
+def _parse_qmd_result(home: Path, config: dict, raw_json: str) -> list[Passage]
+```
+
+Parses JSON output of qmd and returns a list of Passage instances.
+
+### `_qmd_retrieve`
+
+```python
+def _qmd_retrieve(home: Path, config: dict, query: str, k: int) -> list[Passage]
+```
+
+Retrieves passages using the qmd query command.
 
 ### `reindex`
 
@@ -1797,6 +1926,77 @@ def apply_retention(config: dict) -> dict
 Delete artifacts past retention, per config, except runs that
 called a write tool -- those are exempt.
 
+### `tail_lines`
+
+```python
+def tail_lines(path: Path, poll_interval: float = 1.0)
+```
+
+Yields lines appended to `path` after this call starts, polling
+every poll_interval seconds. Never returns on its own -- the caller
+breaks out (e.g. on a terminal run outcome, or KeyboardInterrupt).
+
+## `px0.runs_tui`
+
+### `format_row`
+
+```python
+def format_row(r: dict) -> str
+```
+
+Formats one run record into a single list row string, shared between CLI and TUI.
+
+### `extract_rendered_prompt`
+
+```python
+def extract_rendered_prompt(raw_log_text: str) -> str
+```
+
+Pulls the first turn's rendered prompt out of a run's raw log, which
+interleaves `--- turn N PROMPT ---` / `--- turn N OUTPUT ---` blocks.
+Returns "" if the log has no such block (e.g. the run failed before stage 5,
+or its raw log has aged out under retention).
+
+### `apply_filters`
+
+```python
+def apply_filters(records: list[dict], workflow: str | None, outcome: str | None, write_only: bool, since: str | None) -> list[dict]
+```
+
+Filters the list of run records based on the TUI parameters.
+
+### `run`
+
+```python
+def run(home: Path, config: dict) -> None
+```
+
+Entry point for the px0 runs curses TUI.
+
+### `_main`
+
+```python
+def _main(stdscr, home: Path, config: dict) -> None
+```
+
+### `_prompt`
+
+```python
+def _prompt(stdscr, y, prompt_text) -> str | None
+```
+
+### `_status_err`
+
+```python
+def _status_err(stdscr, y, text) -> None
+```
+
+### `_detail_view`
+
+```python
+def _detail_view(stdscr, home: Path, config: dict, record_brief: dict) -> None
+```
+
 ## `px0.skills`
 
 px0 skills build: compile guidelines/ into skills/, the harness-facing
@@ -1805,15 +2005,24 @@ machine rule -- they still reach the model at run time (inlined into
 prompts), but are not written into a bundle a coding agent might carry
 into a repository.
 
+### `_sync_claude_symlink`
+
+```python
+def _sync_claude_symlink(skill_dir: Path, name: str, claude_skills_dir: Path, create: bool) -> None
+```
+
+Manages ~/.claude/skills/px0-<name> symlink.
+If create=True, ensures symlink points to skill_dir.
+If create=False, removes the symlink if it exists and points to skill_dir.
+
 ### `build`
 
 ```python
 def build(home: Path) -> list[str]
 ```
 
-Copies every guidelines/*.md file into skills/, mirroring the relative
-path, except files under a top-level work/ folder. Overwrites existing
-files in skills/. Returns the list of relative paths written.
+Compiles every guidelines/*.md file into Claude Code skill bundles (skills/<name>/SKILL.md),
+prunes stale bundles, and manages ~/.claude/skills/ symlinks if the configured harness is Claude.
 
 ## `px0.starters`
 
@@ -1878,30 +2087,13 @@ Registry entry describing one callable tool: its id, provider, read/write shape,
 
 Execution context passed to every tool handler: the store home and loaded config.
 
-### `_github_token`
-
-```python
-def _github_token(ctx: Context) -> str
-```
-
-Loads the stored GitHub PAT, raising ConnectorNotConfigured if github is not connected.
-
-### `_github_headers`
-
-```python
-def _github_headers(ctx: Context) -> dict
-```
-
-Builds the standard bearer-auth headers used for every GitHub REST call.
-
 ### `_github_request`
 
 ```python
-def _github_request(ctx: Context, method: str, path: str, **kwargs) -> requests.Response
+def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any
 ```
 
-Issues one authenticated GitHub API request and raises ConnectorError on network
-failure, a rejected token (401), or any other 4xx/5xx response.
+Issues one authenticated GitHub API request via Composio's proxy.
 
 ### `_parse_pr_url`
 
@@ -1961,14 +2153,53 @@ def github_create_review_comment(args: dict, ctx: Context) -> dict
 Posts a single-line review comment on a pull request. Write tool: mutates the PR
 on GitHub. Resolves the PR's head sha itself so the caller only needs the URL.
 
-### `_composio_unconfigured`
+### `_composio_execute`
 
 ```python
-def _composio_unconfigured(args: dict, ctx: Context) -> Any
+def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any
 ```
 
-Handler for every Composio-backed tool (calendar, gmail, slack): this build has no
-live Composio client, so calling one always raises ConnectorNotConfigured.
+Executes a Composio tool using the stored API key and connected account ID.
+
+### `calendar_list_events`
+
+```python
+def calendar_list_events(args: dict, ctx: Context) -> Any
+```
+
+Lists calendar events in a window.
+
+### `gmail_search_messages`
+
+```python
+def gmail_search_messages(args: dict, ctx: Context) -> Any
+```
+
+Search gmail messages.
+
+### `gmail_get_message`
+
+```python
+def gmail_get_message(args: dict, ctx: Context) -> Any
+```
+
+Fetch one gmail message.
+
+### `gmail_send_message`
+
+```python
+def gmail_send_message(args: dict, ctx: Context) -> Any
+```
+
+Send a gmail message.
+
+### `slack_post_message`
+
+```python
+def slack_post_message(args: dict, ctx: Context) -> Any
+```
+
+Post a message to a slack channel.
 
 ### `list_tools`
 
@@ -2007,12 +2238,9 @@ the handler itself may raise ConnectorError/ConnectorNotConfigured.
 
 px0 update / px0 version.
 
-The spec's self-update flow assumes a signed release manifest served from a
-real distribution channel. No such channel exists for this build (there is
-no px0.sh release infrastructure to check against), so `update` and
-`update --check` report that plainly instead of fabricating a manifest
-fetch against a URL nobody verified. Everything else here -- reading the
-installed component versions -- is real.
+### `class UpdateError`
+
+Raised when an update or rollback fails.
 
 ### `version_info`
 
@@ -2023,23 +2251,45 @@ def version_info(home: Path, config: dict) -> dict
 Reports installed px0/schema versions and whether the configured
 harness binary is actually on PATH.
 
+### `_pypi_latest_version`
+
+```python
+def _pypi_latest_version(channel: str) -> str | None
+```
+
+Queries PyPI JSON API and returns the latest available version for the channel.
+
 ### `check`
 
 ```python
 def check(config: dict) -> dict
 ```
 
-Reports update availability. Always says no manifest exists in this
-build rather than fabricating a version check.
+Reports update availability.
+
+### `_detect_install_mechanism`
+
+```python
+def _detect_install_mechanism(home: Path) -> str
+```
+
+Detects whether px0 is installed via pipx or pip.
 
 ### `run_update`
 
 ```python
-def run_update(config: dict, check_only: bool = False) -> dict
+def run_update(home: Path, config: dict, check_only: bool = False) -> dict
 ```
 
-Entry point for `px0 update`. With check_only, same as check(); otherwise
-still performs no action, since there's no manifest to update against.
+Entry point for `px0 update`. Performs PyPI check and upgrades using pipx/pip.
+
+### `rollback`
+
+```python
+def rollback(home: Path, config: dict) -> None
+```
+
+Restores the previously installed px0 version from update history.
 
 ## `px0.versioning`
 

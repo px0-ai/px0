@@ -86,6 +86,8 @@ px0 changes list --since 7d
 
 ## Next
 
-Back to [01-getting-started.md](01-getting-started.md), or see
-[02-building-a-workflow.md](02-building-a-workflow.md) if you haven't
-generated a workflow of your own yet.
+- [05-skills.md](05-skills.md) -- manage community agent skills and compile
+  guidelines into Claude Code skill bundles.
+- Back to [01-getting-started.md](01-getting-started.md), or see
+  [02-building-a-workflow.md](02-building-a-workflow.md) if you haven't
+  generated a workflow of your own yet.
