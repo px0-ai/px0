@@ -12,7 +12,14 @@ See [spec.md](spec.md) for the full design.
 
 ## Prerequisites
 
-px0 uses Composio for tool integrations. You will need a Composio API key.
+- **Python 3.10+** (with `pip` and `venv`)
+- **Node.js and npx**: Required for managing community agent skills with `px0 skills`.
+  To install Node.js (which includes `npx`):
+  - **macOS (Homebrew):** `brew install node`
+  - **Ubuntu / Debian:** `sudo apt update && sudo apt install -y nodejs npm`
+  - **nvm (Node Version Manager):** `nvm install --lts`
+  - **Official installer / other platforms:** Download from [nodejs.org](https://nodejs.org)
+- **Composio API key**: px0 uses Composio for tool integrations.
 
 ## Install
 
@@ -52,10 +59,28 @@ limits -- there is no direct-API backend. `claude -p` is the default;
 `gemini`, `pi`, or `opencode` instead. Any other command works too, set
 directly as `model.harness_cmd` in `config.toml`.
 
+## Skills
+
+px0 supports managing agent skills via the `px0 skills` command, which acts as a proxy for the `npx skills` utility (`skills@latest`):
+
+```shell
+px0 skills search "github"        # search community skills (same as `npx skills search`)
+px0 skills add composio/github    # install a skill (same as `npx skills add`)
+px0 skills list                   # list installed skills (same as `npx skills list`)
+px0 skills update                 # update installed skills (same as `npx skills update`)
+px0 skills remove <skill>         # remove an installed skill (same as `npx skills remove`)
+```
+
+To compile your local `guidelines/` into agent skill bundles (`skills/<name>/SKILL.md`) and automatically symlink them into `~/.claude/skills/` (when using Claude Code):
+
+```shell
+px0 skills build
+```
+
 ## Documentation
 
 - [docs/tutorials/](docs/tutorials/) -- step-by-step walkthroughs:
   getting started, building a workflow from a description, knowledge and
-  `ask`, and guideline provenance.
+  `ask`, guideline provenance, and skills management.
 - `python scripts/gen_docs.py` regenerates [docs/reference.md](docs/reference.md),
   an API reference generated from the docstrings in `px0/*.py`.
