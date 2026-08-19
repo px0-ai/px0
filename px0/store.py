@@ -122,6 +122,8 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
                     subprocess.run(["npx", "--yes", "skills@latest", "experimental_install", "-g"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:
                     pass
+
+            if agents_skill_lock.exists():
                 subprocess.run(["npx", "--yes", "skills@latest", "install", "-g"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Update global skills
