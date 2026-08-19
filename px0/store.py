@@ -118,7 +118,11 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
             if skills_json.exists():
                 agents_skill_lock.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(str(skills_json), str(agents_skill_lock))
-                subprocess.run(["npx", "--yes", "skills@latest", "experimental_install", "-g"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    subprocess.run(["npx", "--yes", "skills@latest", "experimental_install", "-g"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                subprocess.run(["npx", "--yes", "skills@latest", "install", "-g"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Update global skills
             subprocess.run(["npx", "--yes", "skills@latest", "update", "-g", "-y"], check=True)

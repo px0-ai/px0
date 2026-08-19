@@ -127,3 +127,47 @@ def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     creds = creds_mod.load(home)
     assert creds["composio"]["api_key"] == "cli_passed_key"
 
+
+def test_store_init_installs_skills_from_skills_json(tmp_path, monkeypatch):
+    from px0 import store
+    import subprocess
+    import shutil
+
+    home = tmp_path / "test_store"
+    home.mkdir()
+
+    # Pre-create skills.json in store home
+    skills_json = home / "skills.json"
+    skills_json.write_text('{"skills": {"some_skill": "version_1"}}')
+
+    # Mock shutil.which to return True for npx
+    monkeypatch.setattr(shutil, "which", lambda cmd: True if cmd == "npx" else False)
+
+    # Track subprocess calls
+    ran_commands = []
+    def mock_run(args, **kwargs):
+        ran_commands.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    # Run store.init
+    store.init(home)
+
+    # Check that the npx skills install and experimental_install commands were called
+    experimental_installed = False
+    installed = False
+    updated = False
+
+    for cmd in ran_commands:
+        if "experimental_install" in cmd:
+            experimental_installed = True
+        if "install" in cmd and "experimental_install" not in cmd:
+            installed = True
+        if "update" in cmd:
+            updated = True
+
+    assert experimental_installed is True, "npx skills experimental_install was not called"
+    assert installed is True, "npx skills install was not called"
+    assert updated is True, "npx skills update was not called"
+
