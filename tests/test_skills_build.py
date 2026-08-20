@@ -159,7 +159,10 @@ def test_skills_build_integration_valid_yaml(tmp_home, monkeypatch, tmp_path):
     config["model"]["harness_cmd"] = "gemini"
     config_mod.save(paths.config_path(tmp_home), config)
 
-    # Let's populate the starter guidelines
+    # Populate a guideline
+    (paths.guidelines_dir(tmp_home) / "commit-messages.md").write_text(
+        "## Imperative mood summary line\n\nWrite the summary line in the imperative mood.\n"
+    )
     skills.build(tmp_home)
 
     # Pick one of the built skills and load it back

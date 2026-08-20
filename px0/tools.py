@@ -234,12 +234,19 @@ def _needs_connection(home, app: str, reason: str) -> ConnectorNotConfigured:
 def _composio_credentials(home):
     """The stored Composio credentials, or a ConnectorNotConfigured explaining how
     to set the API key up."""
+    import os
+    from px0 import config as config_mod, paths
+    cfg = config_mod.load(paths.config_path(home))
+    api_key = config_mod.get(cfg, "connectors.composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
     creds = creds_mod.load(home)
-    composio = creds.get("composio")
-    if not composio or not composio.get("api_key"):
+    composio = creds.get("composio", {})
+    if not api_key:
+        api_key = composio.get("api_key")
+    if not api_key:
         raise ConnectorNotConfigured(
             "Composio API key is not configured; run `px0 config composio <key>`"
         )
+    composio["api_key"] = api_key
     return composio
 
 

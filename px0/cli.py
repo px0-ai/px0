@@ -102,8 +102,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     created = store_mod.init(home, harness_cmd=harness_cmd)
 
     composio_key = args.composio_key
-    creds = creds_mod.load(home)
-    existing_key = creds.get("composio", {}).get("api_key")
+    cfg = config_mod.load(paths.config_path(home))
+    existing_key = cfg.get("connectors", {}).get("composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
 
     while True:
         if composio_key is None:
@@ -1172,8 +1172,8 @@ def _set_composio_key(home: Path, key: str | None) -> None:
     when a workflow first needs them, so there is nothing else to configure
     per service.
     """
-    creds = creds_mod.load(home)
-    existing = creds.get("composio", {}).get("api_key")
+    cfg = config_mod.load(paths.config_path(home))
+    existing = cfg.get("connectors", {}).get("composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
 
     if not key:
         label = "Composio API key"

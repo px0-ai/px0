@@ -2,8 +2,8 @@ import pytest
 from px0 import connect, credentials as creds_mod
 
 def test_ensure_auth_config_creates_once_and_reuses(tmp_home, fake_composio):
-    # Setup credentials with api_key
-    creds_mod.set_service(tmp_home, "composio", {"api_key": "test_key"})
+    # Setup API key
+    connect.setup_composio(tmp_home, "test_key")
 
     # First call - should create and cache
     ac_id_1 = connect._ensure_auth_config(tmp_home, "gmail")
@@ -30,8 +30,14 @@ def test_connect_composio_app_happy_path(tmp_home, fake_composio):
     assert creds["composio"]["connected_accounts"]["gmail"] == "ca_testaccount"
 
 
-def test_connect_composio_app_raises_on_missing_api_key(tmp_home, fake_composio):
+def test_connect_composio_app_raises_on_missing_api_key(tmp_home, fake_composio, monkeypatch):
     # Ensure no composio key is configured
+    monkeypatch.delenv("COMPOSIO_API_KEY", raising=False)
+    from px0 import config as config_mod, paths
+    cfg_path = paths.config_path(tmp_home)
+    config = config_mod.load(cfg_path)
+    config["connectors"]["composio_api_key"] = ""
+    config_mod.save(cfg_path, config)
     creds_mod.remove_service(tmp_home, "composio")
 
     with pytest.raises(ValueError, match="Composio API key is not configured"):

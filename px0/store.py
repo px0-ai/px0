@@ -50,12 +50,11 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
 
     for d in (
         paths.workflows_dir(home),
-        paths.guidelines_dir(home) / "code-review",
+        paths.guidelines_dir(home),
         home / "knowledge" / "docs",
         home / "knowledge" / "blogs",
         home / "knowledge" / "papers",
         paths.outputs_dir(home),
-        paths.skills_dir(home),
         paths.state_dir(home),
         paths.proposals_dir(home),
         paths.index_dir(home),
@@ -74,12 +73,6 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
         config_mod.save(cfg_path, initial_config)
         created.append("config.toml")
 
-    creds_path = paths.credentials_path(home)
-    if not creds_path.exists():
-        creds_path.write_text("")
-        versioning.ensure_secure_permissions(creds_path)
-        created.append(".state/credentials.toml (mode 0600)")
-
     schema_file = paths.schema_path(home)
     if not schema_file.exists():
         schema_file.write_text(str(SCHEMA_VERSION))
@@ -91,13 +84,6 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
             dest.write_text(body)
             file_changes.append(FileChange(str(dest.relative_to(home)), body.encode()))
             created.append(f"workflows/{name}")
-    for name, body in starters.GUIDELINES.items():
-        dest = paths.guidelines_dir(home) / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if not dest.exists():
-            dest.write_text(body)
-            file_changes.append(FileChange(str(dest.relative_to(home)), body.encode()))
-            created.append(f"guidelines/{name}")
     if cfg_path.exists():
         file_changes.append(
             FileChange(str(cfg_path.relative_to(home)), cfg_path.read_bytes())

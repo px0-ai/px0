@@ -5,7 +5,12 @@ from px0 import cli, credentials as creds_mod, connect
 
 def _fake_setup_composio(home, key):
     """Stand-in for the real thing, matching its return contract."""
-    creds_mod.set_service(home, "composio", {"api_key": key})
+    from px0 import config as config_mod, paths
+    cfg_path = paths.config_path(home)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    config = config_mod.load(cfg_path)
+    config_mod.set_key(config, "connectors.composio_api_key", key)
+    config_mod.save(cfg_path, config)
     return {"ca_bundle": None}
 
 
@@ -18,9 +23,14 @@ def test_mask_key():
 
 
 def test_cmd_init_with_existing_key_keeps_as_is_on_empty_input(tmp_path, monkeypatch):
+    from px0 import config as config_mod, paths
     home = tmp_path / "test_store"
-    # Pre-populate credentials
-    creds_mod.set_service(home, "composio", {"api_key": "existing_secret_key_123"})
+    # Pre-populate config
+    home.mkdir(parents=True, exist_ok=True)
+    cfg_path = paths.config_path(home)
+    config = config_mod.load(cfg_path)
+    config_mod.set_key(config, "connectors.composio_api_key", "existing_secret_key_123")
+    config_mod.save(cfg_path, config)
 
     # Mock store.init to avoid npx network calls during unit test
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
@@ -43,13 +53,18 @@ def test_cmd_init_with_existing_key_keeps_as_is_on_empty_input(tmp_path, monkeyp
     assert "existing_secret_key_123" not in prompt_displayed[0]
 
     # Verify key was kept as-is
-    creds = creds_mod.load(home)
-    assert creds["composio"]["api_key"] == "existing_secret_key_123"
+    cfg = config_mod.load(paths.config_path(home))
+    assert cfg["connectors"]["composio_api_key"] == "existing_secret_key_123"
 
 
 def test_cmd_init_with_existing_key_updates_on_new_input(tmp_path, monkeypatch):
+    from px0 import config as config_mod, paths
     home = tmp_path / "test_store"
-    creds_mod.set_service(home, "composio", {"api_key": "existing_secret_key_123"})
+    home.mkdir(parents=True, exist_ok=True)
+    cfg_path = paths.config_path(home)
+    config = config_mod.load(cfg_path)
+    config_mod.set_key(config, "connectors.composio_api_key", "existing_secret_key_123")
+    config_mod.save(cfg_path, config)
 
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
     monkeypatch.setattr(connect, "setup_composio", _fake_setup_composio)
@@ -71,11 +86,12 @@ def test_cmd_init_with_existing_key_updates_on_new_input(tmp_path, monkeypatch):
     assert "existing_secret_key_123" not in prompt_displayed[0]
 
     # Verify key was updated
-    creds = creds_mod.load(home)
-    assert creds["composio"]["api_key"] == "new_secret_key_456"
+    cfg = config_mod.load(paths.config_path(home))
+    assert cfg["connectors"]["composio_api_key"] == "new_secret_key_456"
 
 
 def test_cmd_init_fresh_prompts_without_brackets(tmp_path, monkeypatch):
+    from px0 import config as config_mod, paths
     home = tmp_path / "test_store"
 
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
@@ -97,11 +113,12 @@ def test_cmd_init_fresh_prompts_without_brackets(tmp_path, monkeypatch):
     assert prompt_displayed[0].endswith("Composio API key: ")
     assert "[" not in prompt_displayed[0]
 
-    creds = creds_mod.load(home)
-    assert creds["composio"]["api_key"] == "fresh_api_key_789"
+    cfg = config_mod.load(paths.config_path(home))
+    assert cfg["connectors"]["composio_api_key"] == "fresh_api_key_789"
 
 
 def test_cmd_init_retry_on_invalid_key(tmp_path, monkeypatch):
+    from px0 import config as config_mod, paths
     home = tmp_path / "test_store"
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
 
@@ -123,11 +140,12 @@ def test_cmd_init_retry_on_invalid_key(tmp_path, monkeypatch):
     cli.cmd_init(args)
 
     assert attempts == 2
-    creds = creds_mod.load(home)
-    assert creds["composio"]["api_key"] == "good_key"
+    cfg = config_mod.load(paths.config_path(home))
+    assert cfg["connectors"]["composio_api_key"] == "good_key"
 
 
 def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
+    from px0 import config as config_mod, paths
     home = tmp_path / "test_store"
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
     monkeypatch.setattr(connect, "setup_composio", _fake_setup_composio)
@@ -135,8 +153,37 @@ def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     args = argparse.Namespace(dir=str(home), harness=None, composio_key="cli_passed_key")
     cli.cmd_init(args)
 
-    creds = creds_mod.load(home)
-    assert creds["composio"]["api_key"] == "cli_passed_key"
+    cfg = config_mod.load(paths.config_path(home))
+    assert cfg["connectors"]["composio_api_key"] == "cli_passed_key"
+
+
+def test_store_init_does_not_create_skills_folder(tmp_path):
+    from px0 import store
+
+    home = tmp_path / "test_store"
+    store.init(home)
+
+    assert not (home / "skills").exists()
+    assert not (home / "skills.json").exists()
+
+
+def test_store_init_does_not_create_guidelines_files(tmp_path):
+    from px0 import store, paths
+
+    home = tmp_path / "test_store"
+    store.init(home)
+
+    assert paths.guidelines_dir(home).exists()
+    assert list(paths.guidelines_dir(home).rglob("*")) == []
+
+
+def test_store_init_does_not_create_credentials_file(tmp_path):
+    from px0 import store, paths
+
+    home = tmp_path / "test_store"
+    store.init(home)
+
+    assert not paths.credentials_path(home).exists()
 
 
 def test_store_init_does_not_touch_skills(tmp_path, monkeypatch):
@@ -266,14 +313,8 @@ def test_cmd_init_survives_non_interactive_stdin(tmp_path, monkeypatch, capsys):
 
 
 def test_doctor_passes_on_a_freshly_initialized_store(tmp_path, monkeypatch):
-    """Phase 5 AC1: `px0 doctor` exits 0 right after install.
-
-    `px0 init` scaffolds guidelines but no workflows, so every guideline starts
-    out unreferenced; counting that as an integrity failure made a clean install
-    unhealthy by construction. spec.md:792 puts unreferenced files in the
-    consolidation report, which `px0 consolidate` already surfaces.
-    """
-    from px0 import store, doctor, config as config_mod, paths, proposals
+    """Phase 5 AC1: `px0 doctor` exits 0 right after install."""
+    from px0 import store, doctor, config as config_mod, paths
 
     home = tmp_path / "store"
     store.init(home)
@@ -281,7 +322,5 @@ def test_doctor_passes_on_a_freshly_initialized_store(tmp_path, monkeypatch):
 
     report = doctor.run(home, config, quick=True)
 
-    assert proposals.unreferenced_guideline_files(home), "starter guidelines should be unreferenced"
     assert report["checks"]["unreferenced_guidelines"]["ok"] is True
-    assert report["checks"]["unreferenced_guidelines"]["files"]  # still reported, just not fatal
     assert report["all_ok"] is True, report["checks"]

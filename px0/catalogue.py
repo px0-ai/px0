@@ -137,11 +137,15 @@ def _get(home: Path, path: str, params: dict) -> dict:
     Goes through requests rather than the SDK: the SDK models connected
     accounts and executions, not catalogue browsing.
     """
+    import os
     import requests
-    from px0 import connect as connect_mod, credentials as creds_mod
+    from px0 import config as config_mod, connect as connect_mod, credentials as creds_mod, paths
 
-    creds = creds_mod.load(home)
-    api_key = (creds.get("composio") or {}).get("api_key")
+    cfg = config_mod.load(paths.config_path(home))
+    api_key = config_mod.get(cfg, "connectors.composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
+    if not api_key:
+        creds = creds_mod.load(home)
+        api_key = (creds.get("composio") or {}).get("api_key")
     if not api_key:
         raise CatalogueError(
             "Composio API key is not configured; run `px0 config composio <key>`"

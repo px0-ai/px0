@@ -87,6 +87,11 @@ class FakeComposio:
         return MockResponse(404, {"error": "Not Found"})
 
 
+@pytest.fixture(autouse=True)
+def _clean_composio_env(monkeypatch):
+    monkeypatch.delenv("COMPOSIO_API_KEY", raising=False)
+
+
 @pytest.fixture
 def tmp_home(tmp_path):
     """Creates a temporary initialized store and returns its Path."""

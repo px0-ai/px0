@@ -248,22 +248,27 @@ def setup_composio(home: Path, api_key: str) -> dict:
     config_mod.set_key(config, "connectors.composio_api_key", api_key)
     config_mod.save(cfg_path, config)
 
-    creds_mod.set_service(home, "composio", {"api_key": api_key})
     return {"ca_bundle": used_bundle}
 
 
 def _composio_client(home: Path):
     """Returns a Composio client configured with the stored Composio API key."""
-    creds = creds_mod.load(home)
-    composio = creds.get("composio")
-    if not composio or not composio.get("api_key"):
+    from px0 import config as config_mod, paths
+    config = config_mod.load(paths.config_path(home))
+    api_key = config_mod.get(config, "connectors.composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
+    if not api_key:
+        creds = creds_mod.load(home)
+        composio = creds.get("composio")
+        if composio and composio.get("api_key"):
+            api_key = composio["api_key"]
+    if not api_key:
         raise ValueError(
             "Composio API key is not configured; run `px0 config composio <key>` first"
         )
     apply_ca_bundle(home)
     _silence_sdk_logging()
     from composio import Composio
-    return Composio(api_key=composio["api_key"])
+    return Composio(api_key=api_key)
 
 
 def _ensure_auth_config(home: Path, toolkit: str) -> str:

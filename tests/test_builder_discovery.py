@@ -338,6 +338,14 @@ def test_feasibility_flags_a_tool_that_was_never_discovered(tmp_home):
     ("check my python code for review issues", {"code-review/python.md"}),
 ])
 def test_guidelines_match_the_task(tmp_home, description, expected):
+    from px0 import paths
+    g_dir = paths.guidelines_dir(tmp_home)
+    (g_dir / "commit-messages.md").write_text("## Imperative mood summary line\n\nCommit messages body.\n")
+    (g_dir / "pr-descriptions.md").write_text("## Lead with the problem\n\nPR descriptions.\n")
+    (g_dir / "summarization.md").write_text("## Lead with the takeaway\n\nSummarization body.\n")
+    (g_dir / "code-review").mkdir(parents=True, exist_ok=True)
+    (g_dir / "code-review" / "go.md").write_text("## Wrap errors with %w\n\nGo code review.\n")
+    (g_dir / "code-review" / "python.md").write_text("## Type hints on public functions\n\nPython code review.\n")
     assert set(builder_mod.choose_guidelines(tmp_home, description)) == expected
 
 
