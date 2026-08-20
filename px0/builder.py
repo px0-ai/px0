@@ -1,4 +1,4 @@
-"""px0 new: turn a sentence into a working workflow.
+"""px0 workflows new: turn a sentence into a working workflow.
 
 Building one runs four harness passes, each with a job small enough that the
 model can do it well:
@@ -443,9 +443,159 @@ def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]
     return [rel for score, rel in scored[:top_n] if score >= cutoff]
 
 
-def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str]) -> str:
+# --- proposing a guideline the store doesn't have yet ----------------------
+
+@dataclass
+class GuidelineProposal:
+    """A durable standard this workflow leans on that the store has no file for.
+
+    `path` is relative to `guidelines/`, `why` says what in the workflow depends
+    on it, and `ask` is the question to put to the user -- their answer is the
+    content, because the whole point is that px0 cannot infer a convention the
+    user holds.
+    """
+    path: str
+    title: str
+    why: str
+    ask: str
+
+
+def propose_guidelines(config: dict, description: str, plan: Plan,
+                       existing: list[str]) -> list[GuidelineProposal]:
+    """Names the standards this workflow depends on that no guideline file covers.
+
+    Deliberately conservative. A guideline is a *durable, reusable* convention
+    that outlives one workflow -- a review rubric, a commit message format, a
+    writing voice. Anything the plan's own body already pins down is not one, and
+    neither is generic advice the model could have written without the user, since
+    inlining that into every run costs tokens and teaches px0 nothing.
+    """
+    existing_block = "\n".join(f"- {e}" for e in existing) or "- (none)"
+    prompt = (
+        "A workflow has just been planned. Decide whether it depends on any "
+        "durable standard held by the USER that no existing guideline file covers.\n\n"
+        "A guideline is a reusable convention that outlives this one workflow: a "
+        "code review rubric, a commit message format, a writing voice, a "
+        "summarization style, a definition of done. It is worth proposing ONLY if "
+        "(a) the workflow's output quality depends on it, (b) it is the user's "
+        "preference rather than something you could write correctly yourself, and "
+        "(c) no file listed below already covers it.\n\n"
+        "Do NOT propose: anything the instruction body already specifies in full; "
+        "generic best practice; a restatement of what the workflow does; or a "
+        "second file on a topic already listed.\n\n"
+        "Respond with ONLY a JSON array, at most 2 entries, each:\n"
+        '{"path": "<kebab-case>.md or <folder>/<kebab-case>.md", '
+        '"title": "<short label>", "why": "<what in this workflow needs it, one '
+        'sentence>", "ask": "<the question to ask the user, phrased so a two-line '
+        'answer is enough>"}\n\n'
+        "Return [] if the workflow needs no new guideline -- that is the common case.\n\n"
+        f"Existing guideline files:\n{existing_block}\n\n"
+        f"Workflow description: {plan.description or description}\n\n"
+        f"Instruction body:\n{plan.body[:2000]}"
+    )
+    raw = harness.invoke(config, prompt, timeout=60)
+    proposed = _extract_json(raw, want_array=True)
+    if not isinstance(proposed, list):
+        raise BuilderError("the harness returned a non-list of guideline proposals")
+
+    # Cap *after* filtering, not before: a junk first entry must not consume the
+    # budget and silently drop the valid proposal behind it.
+    out, seen = [], {e.lower() for e in existing}
+    for entry in proposed:
+        if len(out) == 2:
+            break
+        if not isinstance(entry, dict):
+            continue
+        path = _guideline_path(str(entry.get("path") or ""))
+        title = str(entry.get("title") or "").strip()
+        if not path or not title or path.lower() in seen:
+            continue
+        seen.add(path.lower())
+        out.append(GuidelineProposal(
+            path=path,
+            title=title,
+            why=str(entry.get("why") or "").strip(),
+            ask=str(entry.get("ask") or f"What is your {title.lower()} standard?").strip(),
+        ))
+    return out
+
+
+def _guideline_path(raw: str) -> str:
+    """Normalizes a model-proposed guideline path into a safe store-relative one.
+
+    The model picks this name, so it is untrusted input that becomes a filesystem
+    path: strip any traversal or absolute component and keep it to one optional
+    folder, which is as deep as `guidelines/` goes.
+    """
+    parts = [re.sub(r"[^a-z0-9.-]+", "-", p.strip().lower()).strip("-")
+             for p in raw.replace("\\", "/").split("/")]
+    parts = [p for p in parts if p and p not in (".", "..")]
+    if not parts:
+        return ""
+    parts = parts[-2:]
+    parts[-1] = parts[-1].removesuffix(".md") + ".md"
+    return "/".join(parts)
+
+
+def draft_guideline(config: dict, proposal: GuidelineProposal, answer: str) -> str:
+    """Turns what the user said into a guideline file in px0's own shape.
+
+    The user's answer is the authority here: this pass structures it into `## `
+    claim sections -- which is what makes each rule addressable by
+    `px0 guidelines log` and revertable on its own -- and must not add rules the
+    user did not state.
+    """
+    prompt = (
+        "Turn the user's stated standard into a guideline file.\n\n"
+        "Format: two to five `## ` sections. Each heading is a short "
+        "prescriptive instruction (\"Lead with the takeaway\", not \"Takeaways\"). "
+        "Under each, two or three lines of plain prose saying what to do and why. "
+        "No preamble, no top-level title, no bullet lists, no closing summary.\n\n"
+        "Use ONLY what the user said. Make their wording concrete and specific, "
+        "but do NOT invent additional rules, and do not pad to reach a section "
+        "count -- if they stated one rule, write one section.\n\n"
+        f"Topic: {proposal.title}\n"
+        f"They were asked: {proposal.ask}\n"
+        f"They answered:\n{answer}"
+    )
+    text = harness.invoke(config, prompt, timeout=90).strip()
+    # A harness that narrates around the answer leaves prose above the first
+    # heading; the file starts at the first section or it is not a guideline.
+    idx = text.find("## ")
+    if idx == -1:
+        raise BuilderError("the harness did not return any `## ` guideline sections")
+    return text[idx:].rstrip() + "\n"
+
+
+def save_guideline(home: Path, rel_path: str, content: str, actor: str = "builder") -> Path:
+    """Writes a new guideline file and records it as a versioned guideline change.
+
+    Goes through `claims.capture_guideline_change` rather than writing the file
+    directly, so the new claims get history from their first version and
+    `px0 guidelines log` / `why` / `revert` work on them immediately.
+    """
+    from px0 import claims, versioning  # deferred: both import builder-adjacent modules
+
+    dest = paths.guidelines_dir(home) / rel_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content)
+    claims.capture_guideline_change(
+        home, actor,
+        [versioning.FileChange(f"guidelines/{rel_path}", content.encode(),
+                               "authored by the user during `px0 workflows new`")],
+    )
+    return dest
+
+
+def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str],
+                         request: str = "") -> str:
     """Renders a Plan into the workflow file's text: YAML frontmatter followed by the
-    instruction body, in the same `---\\nfrontmatter\\n---\\nbody` shape workflow.py parses."""
+    instruction body, in the same `---\\nfrontmatter\\n---\\nbody` shape workflow.py parses.
+
+    `request` is the user's own sentence, stored verbatim next to the model's
+    normalized `description` so `px0 workflows edit` can show back what they
+    actually asked for rather than a paraphrase of it.
+    """
     front = {
         "id": workflow_id,
         "kind": "workflow",
@@ -453,6 +603,8 @@ def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str]) ->
         "description": plan.description,
         "trigger": plan.trigger,
     }
+    if request.strip():
+        front["request"] = request.strip()
     if guidelines:
         front["guidelines"] = guidelines
     if plan.inputs:

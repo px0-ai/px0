@@ -1,0 +1,156 @@
+"""The CLI is entity-first: `px0 <entity> <verb>`, with four flat exceptions.
+
+These tests pin the *shape*, not every flag -- the point is that a new command
+can't quietly land as a flat verb again, and that the old flat names are gone
+rather than silently doing something else.
+"""
+
+import argparse
+
+import pytest
+
+from px0 import cli
+
+
+FLAT = {"init", "doctor", "version", "update"}
+
+# The verbs each entity answers to. Anything added to a group should be added
+# here too, so the surface stays something you can read in one place.
+GROUPS = {
+    "workflows":  {"new", "run", "edit", "list"},
+    "knowledge":  {"add", "refresh", "list", "search", "ask", "reindex"},
+    "guidelines": {"list", "review", "log", "revert", "why", "consolidate", "alias"},
+    "runs":       {"list", "show", "output", "rerun", "logs", "why"},
+    "versions":   {"list", "show", "diff", "revert", "prune"},
+    "changes":    {"list", "show", "revert"},
+    "store":      {"export", "list"},
+    "config":     {"list", "get", "set", "model", "composio"},
+    "tools":      {"list"},
+    "daemon":     {"install", "status", "start", "stop", "restart", "logs", "serve"},
+}
+
+
+def _subparsers(parser):
+    """The parser's subcommand action, or None if it has no subcommands.
+
+    Matched on the action type rather than on `.choices`, because plenty of
+    plain flags carry choices too -- `px0 init --harness` among them.
+    """
+    return next((a for a in parser._actions
+                 if isinstance(a, argparse._SubParsersAction)), None)
+
+
+def _top_level():
+    return _subparsers(cli.build_parser()).choices
+
+
+def _verbs(entity):
+    sub = _subparsers(_top_level()[entity])
+    return set(sub.choices) if sub else set()
+
+
+def test_only_the_four_install_commands_are_flat():
+    """Everything else must name its entity first."""
+    top = set(_top_level())
+    leaves = {name for name in top if not _verbs(name)}
+    assert leaves == FLAT | {"skills"}, leaves
+
+
+@pytest.mark.parametrize("entity, verbs", sorted(GROUPS.items()))
+def test_each_entity_exposes_exactly_its_verbs(entity, verbs):
+    assert _verbs(entity) == verbs
+
+
+@pytest.mark.parametrize("gone", ["new", "run", "list", "ask", "search", "why", "consolidate"])
+def test_the_old_flat_verbs_are_gone(gone):
+    """A hard break: these must error, not resolve to something unexpected."""
+    assert gone not in _top_level()
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args([gone, "x"])
+
+
+@pytest.mark.parametrize("argv, handler", [
+    (["workflows", "new", "a thing"], "cmd_new"),
+    (["workflows", "run", "wf"], "cmd_run"),
+    (["workflows", "list"], "cmd_workflows_list"),
+    (["knowledge", "add", "https://x"], "cmd_knowledge"),
+    (["knowledge", "list"], "cmd_knowledge_list"),
+    (["knowledge", "search", "q"], "cmd_search"),
+    (["knowledge", "ask", "q"], "cmd_ask"),
+    (["knowledge", "reindex"], "cmd_reindex"),
+    (["guidelines", "list"], "cmd_guidelines_list"),
+    (["guidelines", "review"], "cmd_guidelines"),
+    (["guidelines", "consolidate"], "cmd_consolidate"),
+    (["guidelines", "why", "f.md#c1"], "cmd_why"),
+    (["runs", "why", "r_1"], "cmd_why"),
+    (["runs", "list"], "cmd_runs"),
+    (["store", "list"], "cmd_store_list"),
+    (["store", "export", "/tmp/x"], "cmd_store"),
+    (["doctor"], "cmd_doctor"),
+])
+def test_every_leaf_dispatches_to_its_own_handler(argv, handler):
+    assert cli.build_parser().parse_args(argv).func.__name__ == handler
+
+
+def test_why_takes_a_claim_id_under_guidelines_and_a_run_id_under_runs():
+    """One handler, two id shapes -- provenance.why branches on the id itself."""
+    p = cli.build_parser()
+    assert p.parse_args(["guidelines", "why", "go.md#c1"]).target_id == "go.md#c1"
+    assert p.parse_args(["runs", "why", "r_20260820"]).target_id == "r_20260820"
+
+
+def test_a_group_with_no_verb_is_an_error_not_a_no_op():
+    """`px0 knowledge` alone must say what it wants; only `runs` defaults."""
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["knowledge"])
+    assert cli.build_parser().parse_args(["runs"]).runs_cmd is None
+
+
+def test_reindex_is_a_verb_so_reindex_is_still_a_searchable_word():
+    """The old `px0 search reindex` made its own name unsearchable."""
+    args = cli.build_parser().parse_args(["knowledge", "search", "reindex"])
+    assert args.func.__name__ == "cmd_search" and args.query == "reindex"
+
+
+# --- config: --help has to name the keys ------------------------------------
+
+def _leaf(entity, verb):
+    return _subparsers(_top_level()[entity]).choices[verb]
+
+
+def test_config_get_and_set_help_list_every_settable_key():
+    """A key you have to know is a key --help must name."""
+    from px0 import config as config_mod
+
+    for verb in ("get", "set"):
+        epilog = _leaf("config", verb).epilog
+        assert epilog, verb
+        for key in config_mod.SCHEMA:
+            assert key in epilog, (verb, key)
+
+
+def test_set_shows_allowed_values_and_get_does_not():
+    """Choices constrain what you can write; they say nothing about reading."""
+    assert "local|qmd" in _leaf("config", "set").epilog
+    assert "local|qmd" not in _leaf("config", "get").epilog
+
+
+def test_the_key_list_is_grouped_and_typed():
+    from px0 import config as config_mod
+
+    text = config_mod.key_help()
+    assert "  retrieval.backend" in text and "bool" in text and "int" in text
+    # a blank line separates each TOML table from the next
+    assert "\n\n  logs.path" in text
+    assert "px0 config list" in text, "should point at the fuller listing"
+
+
+def test_an_unknown_key_is_a_user_error_not_an_argparse_error():
+    """argparse `choices` would exit 2, which this CLI uses for connector
+    failures -- so the key stays free-form and config.get_key validates it."""
+    from px0 import config as config_mod
+
+    args = cli.build_parser().parse_args(["config", "get", "not.a.key"])
+    assert args.key == "not.a.key"
+    with pytest.raises(ValueError, match="unknown config key"):
+        config_mod.get_key({}, "not.a.key")

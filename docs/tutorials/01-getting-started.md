@@ -98,7 +98,7 @@ freshly initialized store you'll see something like:
 ✓ locks                    no lock file yet
 ✓ schema                   store schema 1, binary schema 1
 ✓ connections              0 connection(s) configured
-✓ unreferenced_guidelines  6 unreferenced file(s) -- see `px0 consolidate`
+✓ unreferenced_guidelines  6 unreferenced file(s) -- see `px0 guidelines consolidate`
 ✓ update                   0.1.0 (no update check recorded yet)
 ✓ daemon                   not running
 ✓ harness                  harness responded
@@ -139,7 +139,7 @@ give you something real in one command.
 
 ```shell
 px0 knowledge add https://example.com/some-post
-px0 ask "what did that post say about caching?"
+px0 knowledge ask "what did that post say about caching?"
 ```
 
 `knowledge add` extracts the text locally and files it under
@@ -150,14 +150,14 @@ them, citing what it used with `--sources`. See
 **A generated workflow**, which is the main loop:
 
 ```shell
-px0 new "summarize any URL I paste and print the summary"
+px0 workflows new "summarize any URL I paste and print the summary"
 ```
 
 px0 plans it, shows you the plan, asks for confirmation, and writes a
 Markdown file under `workflows/`. Then:
 
 ```shell
-px0 run summarize-any-url --stdin <<< "https://example.com/some-post"
+px0 workflows run summarize-any-url --stdin <<< "https://example.com/some-post"
 ```
 
 See [02-building-a-workflow.md](02-building-a-workflow.md) for the whole
@@ -167,9 +167,9 @@ have yet.
 ## 5. See what's there
 
 ```shell
-px0 list workflows
-px0 list guidelines
-px0 list knowledge
+px0 workflows list
+px0 guidelines list
+px0 knowledge list
 px0 tools list          # every tool a workflow can call, read vs write
 ```
 
@@ -182,7 +182,7 @@ px0 runs show <run-id>  # the full JSON record
 ```
 
 Every run is recorded -- inputs, guideline versions used, tool calls with
-timings, and outcome -- so `px0 why <run-id>` can later explain exactly
+timings, and outcome -- so `px0 runs why <run-id>` can later explain exactly
 how an output came to be. See
 [07-browsing-runs.md](07-browsing-runs.md) and
 [05-guidelines-and-provenance.md](05-guidelines-and-provenance.md).

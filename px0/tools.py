@@ -56,9 +56,7 @@ def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any:
     connected_account_id = connected_accounts["github"]
     
     from px0 import connect as connect_mod
-    from composio import Composio
-    connect_mod._silence_sdk_logging()
-    client = Composio(api_key=composio["api_key"])
+    client = connect_mod.composio_client(ctx.home, composio["api_key"])
 
     endpoint = f"https://api.github.com{path}"
     
@@ -95,15 +93,16 @@ def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any:
             return json.loads(self._data)
 
     try:
-        resp = client.tools.proxy(
+        resp = connect_mod.with_cert_recovery(ctx.home, lambda: client.tools.proxy(
             endpoint=endpoint,
             method=method.upper(), # type: ignore
             body=body,
             connected_account_id=connected_account_id,
             parameters=parameters # type: ignore
-        )
+        ))
     except Exception as e:
-        raise ConnectorError(f"github proxy request failed: {e}") from e
+        raise ConnectorError(
+            f"github proxy request failed: {connect_mod.describe_api_error(e)}") from e
 
     fake_resp = FakeResponse(resp)
     if fake_resp.status_code == 401:
@@ -262,12 +261,11 @@ def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -
     api_key = composio["api_key"]
     
     from px0 import connect as connect_mod
-    from composio import Composio
-    connect_mod._silence_sdk_logging()
-    client = Composio(api_key=api_key)
+    client = connect_mod.composio_client(ctx.home, api_key)
 
     try:
-        account = client.connected_accounts.get(connected_account_id)
+        account = connect_mod.with_cert_recovery(
+            ctx.home, lambda: client.connected_accounts.get(connected_account_id))
         if account.status == "INITIATED":
             raise ConnectorNotConfigured(
                 f"{app} authorization was started but never completed -- open the URL "
@@ -280,17 +278,20 @@ def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -
     except Exception as e:
         if "404" in str(e) or "not found" in str(e).lower():
             raise _needs_connection(ctx.home, app, "connection no longer exists on Composio")
-        raise ConnectorError(f"Composio API error: {e}") from e
+        raise ConnectorError(
+            f"Composio API error: {connect_mod.describe_api_error(e)}") from e
 
     try:
-        result = client.tools.execute(
+        result = connect_mod.with_cert_recovery(ctx.home, lambda: client.tools.execute(
             slug=tool_slug,
             connected_account_id=connected_account_id,
+            user_id=connect_mod.COMPOSIO_USER_ID,
             arguments=arguments,
             dangerously_skip_version_check=True
-        )
+        ))
     except Exception as e:
-        raise ConnectorError(f"Composio execution failed: {e}") from e
+        raise ConnectorError(
+            f"Composio execution failed: {connect_mod.describe_api_error(e)}") from e
 
     successful = result.get("successful", True) if isinstance(result, dict) else result.successful
     if not successful:
@@ -404,7 +405,7 @@ def _discovered_spec(tool) -> ToolSpec:
 
     Every discovered tool executes through the same path the curated Composio
     tools use, so authorization-on-demand, retries, and dry-run stubbing all
-    behave identically whether a tool was hand-written or found by `px0 new`.
+    behave identically whether a tool was hand-written or found by `px0 workflows new`.
     """
     def handler(args: dict, ctx: Context, _tool=tool) -> Any:
         return _composio_execute(ctx, _tool.toolkit, _tool.slug, args)
@@ -438,7 +439,7 @@ def resolve(tool_id: str, home=None) -> ToolSpec | None:
 
 
 def list_tools(service: str | None = None, home=None) -> list[ToolSpec]:
-    """Every usable tool -- curated, plus any discovered by `px0 new` when `home`
+    """Every usable tool -- curated, plus any discovered by `px0 workflows new` when `home`
     is given -- optionally narrowed to one provider, sorted by id."""
     specs = list(REGISTRY.values())
     if home is not None:

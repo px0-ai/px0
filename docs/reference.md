@@ -4,7 +4,7 @@ Generated from docstrings by `scripts/gen_docs.py`. Do not edit by hand.
 
 ## `px0.ask`
 
-px0 ask: retrieval plus generation over knowledge/, nothing else. Never
+px0 knowledge ask: retrieval plus generation over knowledge/, nothing else. Never
 touches connectors or guidelines.
 
 ### `class AskError`
@@ -25,7 +25,7 @@ Returns {"answer", "passages", "run_id"}.
 
 ## `px0.builder`
 
-px0 new: turn a sentence into a working workflow.
+px0 workflows new: turn a sentence into a working workflow.
 
 Building one runs four harness passes, each with a job small enough that the
 model can do it well:
@@ -229,14 +229,78 @@ so a long file doesn't win on sheer surface area. Files scoring below
 guideline is worse than attaching none, since every one is inlined verbatim
 into the run's prompt.
 
+### `class GuidelineProposal`
+
+A durable standard this workflow leans on that the store has no file for.
+
+`path` is relative to `guidelines/`, `why` says what in the workflow depends
+on it, and `ask` is the question to put to the user -- their answer is the
+content, because the whole point is that px0 cannot infer a convention the
+user holds.
+
+### `propose_guidelines`
+
+```python
+def propose_guidelines(config: dict, description: str, plan: Plan, existing: list[str]) -> list[GuidelineProposal]
+```
+
+Names the standards this workflow depends on that no guideline file covers.
+
+Deliberately conservative. A guideline is a *durable, reusable* convention
+that outlives one workflow -- a review rubric, a commit message format, a
+writing voice. Anything the plan's own body already pins down is not one, and
+neither is generic advice the model could have written without the user, since
+inlining that into every run costs tokens and teaches px0 nothing.
+
+### `_guideline_path`
+
+```python
+def _guideline_path(raw: str) -> str
+```
+
+Normalizes a model-proposed guideline path into a safe store-relative one.
+
+The model picks this name, so it is untrusted input that becomes a filesystem
+path: strip any traversal or absolute component and keep it to one optional
+folder, which is as deep as `guidelines/` goes.
+
+### `draft_guideline`
+
+```python
+def draft_guideline(config: dict, proposal: GuidelineProposal, answer: str) -> str
+```
+
+Turns what the user said into a guideline file in px0's own shape.
+
+The user's answer is the authority here: this pass structures it into `## `
+claim sections -- which is what makes each rule addressable by
+`px0 guidelines log` and revertable on its own -- and must not add rules the
+user did not state.
+
+### `save_guideline`
+
+```python
+def save_guideline(home: Path, rel_path: str, content: str, actor: str = 'builder') -> Path
+```
+
+Writes a new guideline file and records it as a versioned guideline change.
+
+Goes through `claims.capture_guideline_change` rather than writing the file
+directly, so the new claims get history from their first version and
+`px0 guidelines log` / `why` / `revert` work on them immediately.
+
 ### `render_workflow_file`
 
 ```python
-def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str]) -> str
+def render_workflow_file(workflow_id: str, plan: Plan, guidelines: list[str], request: str = '') -> str
 ```
 
 Renders a Plan into the workflow file's text: YAML frontmatter followed by the
 instruction body, in the same `---\nfrontmatter\n---\nbody` shape workflow.py parses.
+
+`request` is the user's own sentence, stored verbatim next to the model's
+normalized `description` so `px0 workflows edit` can show back what they
+actually asked for rather than a paraphrase of it.
 
 ### `save_workflow`
 
@@ -252,14 +316,14 @@ Overwrites any existing file at the same id.
 Composio's tool catalogue: searching it, and remembering what was found.
 
 px0 ships a small set of curated tools (`tools.REGISTRY`), but Composio's
-catalogue is thousands of tools across hundreds of toolkits. `px0 new`
+catalogue is thousands of tools across hundreds of toolkits. `px0 workflows new`
 searches it so a workflow can use the tool that actually fits the task
 instead of the nearest curated approximation.
 
 A discovered tool is *cached in the store* rather than looked up again at run
 time. Two reasons: a workflow must keep working offline and unchanged after it
 is written, and read-vs-write has to be knowable without a network call --
-`px0 run --dry-run` decides what to stub from it.
+`px0 workflows run --dry-run` decides what to stub from it.
 
 Read/write comes from Composio's own MCP-style hints in each tool's `tags`:
 `readOnlyHint` means it only reads; its absence means it can change something;
@@ -630,18 +694,74 @@ This is the gate before anything is authorized or written: the model chose
 these, and choosing a write tool the request didn't ask for is exactly the
 mistake a human should catch here.
 
+### `class _AuthOutcome`
+
+What an authorization pass ended up with, split by whether it can still finish.
+
+`waiting` is fine to build on -- a consent link is open, or the user chose to
+deal with it later, and the workflow file is valid either way. `blocked` is
+not: px0 asked Composio to start the flow and Composio refused, so no amount
+of clicking finishes it, and a workflow written against those toolkits could
+never run.
+
+#### `__add__`
+
+```python
+def __add__(self, other)
+```
+
 ### `_authorize_toolkits`
 
 ```python
-def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> list[str]
+def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> _AuthOutcome
 ```
 
-Authorizes each toolkit the plan needs that isn't authorized yet, asking
-first. Returns the toolkits still waiting on a browser consent.
+Authorizes each toolkit that isn't authorized yet, asking first.
 
-Nothing is aborted over a pending consent: the workflow file is valid either
-way, and making the user re-run `px0 new` would repeat the clarify, search,
-selection, and planning passes just to reach the same file.
+A pending consent never aborts: the workflow file is valid either way, and
+making the user re-run `px0 workflows new` would repeat the clarify, search, selection,
+and planning passes just to reach the same file. A toolkit Composio *refuses*
+to start is reported as blocked instead -- see `_abort_if_blocked`.
+
+### `_abort_if_blocked`
+
+```python
+def _abort_if_blocked(outcome: _AuthOutcome) -> None
+```
+
+Stops `px0 workflows new` when a toolkit cannot be authorized at all.
+
+Continuing would mean planning, prompting for, and writing a workflow whose
+first run is guaranteed to fail on the same refusal -- so this exits rather
+than folding the failure into the pending list, where it read as "finish this
+in your browser" for something no browser step can finish.
+
+### `_author_guidelines`
+
+```python
+def _author_guidelines(home: Path, config: dict, description: str, plan, attached: list[str], assume_yes: bool) -> list[str]
+```
+
+Offers to author the guidelines this workflow wants but the store lacks.
+
+The user's own words are the content -- a review rubric or a writing voice is
+a preference px0 cannot infer, so proposing one is only useful if it asks.
+Returns the relative paths actually created, for the workflow's `guidelines:`.
+
+Skipped wholesale under --yes: there is no sane default for "what is your
+commit message convention", so a non-interactive run must not invent one.
+
+### `_write_one_guideline`
+
+```python
+def _write_one_guideline(home: Path, config: dict, proposal) -> str | None
+```
+
+Asks, drafts, shows, and confirms one guideline. Returns its path, or None.
+
+Loops on "again" rather than accepting a first draft the user doesn't like:
+the file is about to be inlined into every run of this workflow, so it is
+worth another pass here instead of an edit later.
 
 ### `cmd_new`
 
@@ -649,9 +769,53 @@ selection, and planning passes just to reach the same file.
 def cmd_new(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 new`: clarifies the request, searches Composio's catalogue for
-the tools it needs, confirms them with the user, authorizes what isn't
-authorized yet, then plans and writes the workflow file.
+Handles `px0 workflows new`: builds a workflow from a sentence.
+
+### `cmd_workflows_edit`
+
+```python
+def cmd_workflows_edit(args: argparse.Namespace) -> None
+```
+
+Handles `px0 workflows edit`: shows the original request, takes a new one,
+and rebuilds the workflow in place.
+
+A rebuild rather than a text edit. The file is generated -- its tools, inputs,
+and guideline list all follow from the request -- so editing the request and
+regenerating keeps those consistent, where hand-editing the body would leave
+them describing a workflow that no longer exists. The old version stays in the
+version history either way, so `px0 versions revert` undoes this.
+
+### `_build_workflow`
+
+```python
+def _build_workflow(home: Path, config: dict, description: str, args: argparse.Namespace, existing_id: str | None) -> None
+```
+
+The build pipeline behind both `workflows new` and `workflows edit`.
+
+Clarifies the request, discovers and confirms tools, authorizes them, plans,
+checks feasibility, offers to author missing guidelines, and writes the file.
+
+Authorization runs *before* planning. The plan can only draw on the tools the
+user just confirmed, so a toolkit that cannot be authorized makes the workflow
+unbuildable -- finding that out first avoids spending a planning call and
+printing a plan the user is then asked to commit to anyway.
+
+`existing_id` is set when rebuilding: it pins the id instead of prompting, so
+an edit replaces the workflow rather than forking a near-duplicate under a
+slightly different name.
+
+### `_pick_workflow`
+
+```python
+def _pick_workflow(home: Path, for_stdin: bool, verb: str = 'run') -> str
+```
+
+Resolves the workflow to run when none was named, by asking.
+
+Refuses when --stdin is in play: the picker reads keystrokes from the same
+stdin the workflow's input is coming from, so one would consume the other.
 
 ### `cmd_run`
 
@@ -659,7 +823,7 @@ authorized yet, then plans and writes the workflow file.
 def cmd_run(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 run`: executes a workflow with inputs collected from --stdin and
+Handles `px0 workflows run`: executes a workflow with inputs collected from --stdin and
 --input KEY=VALUE flags, then prints the outcome and, depending on --json/--quiet
 and the workflow's output target, the run's output text.
 
@@ -669,17 +833,58 @@ and the workflow's output target, the run's output text.
 def cmd_ask(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 ask`: answers a question via retrieval over guidelines/knowledge
+Handles `px0 knowledge ask`: answers a question via retrieval over guidelines/knowledge
 and prints the answer, optionally followed by source passages with --sources.
 
-### `cmd_list`
+### `_print_workflows`
 
 ```python
-def cmd_list(args: argparse.Namespace) -> None
+def _print_workflows(home: Path, heading: bool) -> None
 ```
 
-Handles `px0 list`: prints workflows, guidelines, and/or knowledge file paths.
-With no kind given, prints all three sections; otherwise prints just that section.
+### `_print_guidelines`
+
+```python
+def _print_guidelines(home: Path, heading: bool) -> None
+```
+
+### `_print_knowledge`
+
+```python
+def _print_knowledge(home: Path, config: dict, heading: bool) -> None
+```
+
+### `cmd_workflows_list`
+
+```python
+def cmd_workflows_list(args: argparse.Namespace) -> None
+```
+
+Handles `px0 workflows list`: every workflow id with its description.
+
+### `cmd_guidelines_list`
+
+```python
+def cmd_guidelines_list(args: argparse.Namespace) -> None
+```
+
+Handles `px0 guidelines list`: every guideline file, store-relative.
+
+### `cmd_knowledge_list`
+
+```python
+def cmd_knowledge_list(args: argparse.Namespace) -> None
+```
+
+Handles `px0 knowledge list`: every knowledge file, store-relative.
+
+### `cmd_store_list`
+
+```python
+def cmd_store_list(args: argparse.Namespace) -> None
+```
+
+Handles `px0 store list`: all three entities at once, each under a heading.
 
 ### `cmd_tools`
 
@@ -752,7 +957,7 @@ history), revert (roll a claim back to an earlier version), and alias
 def cmd_consolidate(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 consolidate`: builds a consolidation session (pending proposals,
+Handles `px0 guidelines consolidate`: builds a consolidation session (pending proposals,
 decayed claims, contradictions, unreferenced guideline files), prints a summary,
 then runs the same interactive review flow as `guidelines review`.
 
@@ -790,14 +995,21 @@ def cmd_changes(args: argparse.Namespace) -> None
 Handles `px0 changes` subcommands: list, show, revert -- multi-file changesets
 (as opposed to `versions`, which tracks a single file's history).
 
+### `cmd_reindex`
+
+```python
+def cmd_reindex(args: argparse.Namespace) -> None
+```
+
+Handles `px0 knowledge reindex`: rebuilds the retrieval index from disk.
+
 ### `cmd_search`
 
 ```python
 def cmd_search(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 search`: rebuilds the retrieval index when the query is literally
-"reindex", otherwise retrieves and prints the top-k matching passages.
+Handles `px0 knowledge search`: prints the top-k passages matching the query.
 
 ### `cmd_skills`
 
@@ -815,7 +1027,7 @@ guidelines into Claude Code skill bundles (`SKILL.md`).
 def cmd_why(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 why <target_id>`: prints the provenance chain explaining how a
+Handles `px0 guidelines why` / `px0 runs why`: prints the provenance chain explaining how a
 claim, proposal, or other tracked entity came to be.
 
 ### `cmd_store`
@@ -1006,6 +1218,22 @@ Validates and coerces `raw` per SCHEMA, then writes it into `config`
 at `key` (mutating the nested tables in place) and returns the coerced
 value. Does not save to disk -- callers persist via `save`.
 
+### `key_help`
+
+```python
+def key_help(include_choices: bool = True) -> str
+```
+
+Every settable key as an aligned block, for a subcommand's --help epilog.
+
+Keys only -- type, and the allowed values where a key restricts them. The
+descriptions and each key's *current* value live in `px0 config list`, which
+needs a loaded store; --help must render without one, and a 22-key listing
+with wrapped help for each would bury the usage text above it.
+
+Grouped by the leading section so the shape of the config is visible: the
+dotted keys mirror the TOML tables they are written to.
+
 ### `describe`
 
 ```python
@@ -1139,13 +1367,54 @@ Returns what the caller may want to report: {"ca_bundle": <path or None>},
 naming the CA bundle a TLS interception forced px0 onto. Prints nothing --
 presentation belongs to the CLI, which may be drawing a spinner over this.
 
-### `_composio_client`
+### `composio_client`
 
 ```python
-def _composio_client(home: Path)
+def composio_client(home: Path, api_key: str | None = None)
 ```
 
 Returns a Composio client configured with the stored Composio API key.
+
+Every SDK client must come from here. `apply_ca_bundle` is the reason: from
+behind a TLS-intercepting proxy, a client built without it fails to verify
+Composio's certificate, and the SDK reports that as the bare string
+"Connection error." -- so a hand-rolled `Composio(api_key=...)` elsewhere
+reads as an outage rather than as a missing CA bundle.
+
+`api_key` short-circuits the lookup for callers that already resolved it.
+
+### `with_cert_recovery`
+
+```python
+def with_cert_recovery(home: Path, call)
+```
+
+Runs `call()`, healing a TLS-interception failure once and retrying.
+
+The same self-repair `catalogue.py` does for its plain `requests` calls:
+first contact from behind a new intercepting proxy should find a bundle that
+trusts it and remember it, rather than telling the user to go hunt one down.
+
+### `root_cause`
+
+```python
+def root_cause(exc: BaseException) -> BaseException
+```
+
+The innermost exception in `exc`'s cause/context chain.
+
+### `describe_api_error`
+
+```python
+def describe_api_error(exc: BaseException) -> str
+```
+
+One actionable line for a Composio SDK exception.
+
+The SDK collapses every transport failure into "Connection error." and puts
+the real reason -- a rejected certificate, a DNS failure, a timeout -- only in
+the exception chain. Unwrap it, and name the fix outright when the cause is
+TLS interception, which is the case a user cannot guess from the surface text.
 
 ### `_ensure_auth_config`
 
@@ -1242,7 +1511,7 @@ Deletes a service's stored credentials. Returns False if it wasn't present.
 ## `px0.daemon`
 
 px0d: the scheduler. Deliberately dumb -- it watches workflows/,
-evaluates cron schedules in machine local time, spawns `px0 run <id>
+evaluates cron schedules in machine local time, spawns `px0 workflows run <id>
 --quiet`, recovers missed fires, and runs the nightly housekeeping pass.
 
 Missed-fire detection here is a practical approximation: the same
@@ -1301,7 +1570,7 @@ midnight so a fire exactly at midnight is still included.
 def tick(home: Path, config: dict, state: dict) -> dict
 ```
 
-Check every scheduled workflow once; spawn `px0 run` for anything
+Check every scheduled workflow once; spawn `px0 workflows run` for anything
 due. Returns the updated schedule state.
 
 ### `spawn_run`
@@ -1310,8 +1579,8 @@ due. Returns the updated schedule state.
 def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime) -> None
 ```
 
-Launches `px0 run <workflow_id> --quiet` as a detached subprocess, passing
---late-scheduled-at when the fire was recovered rather than on-time.
+Launches `px0 workflows run <workflow_id> --quiet` as a detached subprocess,
+passing --late-scheduled-at when the fire was recovered rather than on-time.
 
 ### `recover_missed_fires`
 
@@ -1410,6 +1679,13 @@ Checks daemon status, and if it is running/alive, sends SIGTERM and respawns it.
 
 px0 doctor: credentials, daemon, harness, index, versions, locks, schema.
 
+Every check returns `{"ok": bool, "detail": str}`. A check that can fail also
+returns a `"fix"` string on the failing branch: the concrete next step that
+clears it, phrased as something the user can run. The fix is attached where the
+failure is detected rather than looked up by check name, because the same check
+fails for different reasons (a missing qmd binary and a version-drifted one need
+different commands) and only the failing branch knows which.
+
 ### `_check_credentials`
 
 ```python
@@ -1434,6 +1710,18 @@ def _check_harness(config: dict) -> dict
 
 Sends a trivial prompt to the model backend to confirm it responds.
 
+### `_harness_fix`
+
+```python
+def _harness_fix(error: str, harness_cmd: str) -> str
+```
+
+The fix for a harness failure, chosen by which way it failed.
+
+`not found` is an install/PATH problem, a timeout is usually a slow or
+hanging backend, and a non-zero exit is the backend itself refusing --
+three different next steps, so don't collapse them into one hint.
+
 ### `_check_qmd_version`
 
 ```python
@@ -1441,6 +1729,17 @@ def _check_qmd_version(home: Path, config: dict) -> dict
 ```
 
 Runs qmd --version and compares against QMD_PINNED_VERSION.
+
+### `_qmd_install_fix`
+
+```python
+def _qmd_install_fix() -> str
+```
+
+The fix for any qmd problem: pin the version, or stop using the backend.
+
+Both halves matter -- the local backend is a real answer here, not a
+consolation prize, since it needs no install and no model download.
 
 ### `_check_index`
 
@@ -1491,7 +1790,7 @@ def _check_unreferenced_guidelines(home: Path) -> dict
 Counts guideline files that no workflow lists.
 
 Informational, never a failure: spec.md:792 puts unreferenced files in the
-consolidation report ("to surface staleness"), which `px0 consolidate`
+consolidation report ("to surface staleness"), which `px0 guidelines consolidate`
 already does. Failing here would also mean every freshly initialized store
 is unhealthy -- `px0 init` scaffolds guidelines but no workflows, so all of
 them start out unreferenced.
@@ -1736,10 +2035,19 @@ Processes any queued YouTube playlist ingest jobs under .state/ingest/.
 
 The px0 argparse tree: what the CLI accepts, separated from what it does.
 
-Kept out of `cli.py` so the ~200 lines of declarative flag wiring don't sit in
-the middle of the command handlers. The dependency runs one way -- `cli`
-imports this, never the reverse -- so `build` is handed the module holding the
-handlers rather than importing them.
+Kept out of `cli.py` so the declarative flag wiring doesn't sit in the middle of
+the command handlers. The dependency runs one way -- `cli` imports this, never
+the reverse -- so `build` is handed the module holding the handlers rather than
+importing them.
+
+Shape: **entity first, then the verb acting on it** -- `px0 workflows new`,
+`px0 knowledge search`, `px0 guidelines review`. The only flat commands are the
+four that act on the install rather than on anything in the store: `init`,
+`doctor`, `version`, `update`.
+
+Each leaf sets its own `func`, so a group needs no dispatch table -- but the
+group's `dest` is still set, because several handlers serve more than one leaf
+and switch on it.
 
 ### `build`
 
@@ -1780,13 +2088,21 @@ def guidelines_dir(home: Path | None = None) -> Path
 
 Path to the versioned guidelines folder under `home` (or the default store).
 
+### `output_dir`
+
+```python
+def output_dir(home: Path | None = None) -> Path
+```
+
+Path to the tool-managed output folder under `home` (or the default store).
+
 ### `outputs_dir`
 
 ```python
 def outputs_dir(home: Path | None = None) -> Path
 ```
 
-Path to the tool-managed outputs folder under `home` (or the default store).
+Alias for output_dir.
 
 ### `skills_dir`
 
@@ -2012,7 +2328,7 @@ harness is unavailable rather than fabricating a result.
 
 ## `px0.provenance`
 
-px0 why: walk the chain for any run, answer, output, or claim.
+px0 guidelines why / px0 runs why: walk the chain for any run, answer, output, or claim.
 
 ### `class WhyError`
 
@@ -2832,7 +3148,7 @@ Wraps a catalogue tool as a ToolSpec with a generic Composio handler.
 
 Every discovered tool executes through the same path the curated Composio
 tools use, so authorization-on-demand, retries, and dry-run stubbing all
-behave identically whether a tool was hand-written or found by `px0 new`.
+behave identically whether a tool was hand-written or found by `px0 workflows new`.
 
 ### `resolve`
 
@@ -2851,7 +3167,7 @@ store's catalogue cache, not in this module.
 def list_tools(service: str | None = None, home = None) -> list[ToolSpec]
 ```
 
-Every usable tool -- curated, plus any discovered by `px0 new` when `home`
+Every usable tool -- curated, plus any discovered by `px0 workflows new` when `home`
 is given -- optionally narrowed to one provider, sorted by id.
 
 ### `exists`
@@ -3063,6 +3379,14 @@ def hint(text: str, stream = None) -> None
 
 A next step. Dim, indented, always after a blank line.
 
+### `remedy`
+
+```python
+def remedy(text: str, stream = None) -> None
+```
+
+The fix for a failed check: an arrow-led step, indented under its line.
+
 ### `command`
 
 ```python
@@ -3078,6 +3402,90 @@ def prompt(text: str) -> str
 ```
 
 A styled input prompt. Returns what the user typed, stripped.
+
+### `select`
+
+```python
+def select(label: str, options: list[tuple[str, str]], stream = None) -> int | None
+```
+
+Single-select from a short list. Returns the chosen index, or None if cancelled.
+
+`options` is [(name, detail)]. Arrows or j/k move, Enter chooses, a digit
+jumps straight to that row, q or Ctrl-C cancels.
+
+Drawn in place on the lines it already occupies rather than in a full-screen
+curses app: picking one item out of a handful should leave the scrollback
+intact, the way a prompt does. When stdin is not a terminal there are no
+keystrokes to read, so it degrades to a numbered prompt -- which is what
+keeps this usable over a pipe and in tests.
+
+### `_read_key`
+
+```python
+def _read_key(stream) -> str
+```
+
+Reads one keypress as a name: "up", "down", "enter", "cancel", or the char.
+
+Arrow keys arrive as a three-byte `ESC [ A` sequence, so the escape has to be
+consumed here rather than surfacing as a bare character.
+
+### `select_row`
+
+```python
+def select_row(index: int, name: str, detail: str, selected: bool, name_width: int, cols: int, stream = None) -> str
+```
+
+One `select` row, truncated to sit on a single physical line of `cols`.
+
+Truncation is load-bearing, not cosmetic: `select` redraws by moving the
+cursor up one line per option, so a row long enough to wrap makes the cursor
+land in the middle of it and every redraw appends a fresh copy instead of
+replacing the old one.
+
+The plain text is measured and cut *before* colour is applied, because escape
+sequences take no columns but do take characters.
+
+### `_ellipsize`
+
+```python
+def _ellipsize(text: str, budget: int) -> str
+```
+
+`text` cut to `budget` columns, marking the cut with a single character.
+
+### `select_action`
+
+```python
+def select_action(key: str, cursor: int, count: int) -> tuple[int, str]
+```
+
+Maps a key name to (new cursor, action) for `select`.
+
+Actions: "move", "choose", "cancel", "ignore". Movement wraps -- with a
+handful of options, going up from the first to reach the last is quicker than
+hitting the ceiling. Pure, so the key handling is testable without a pty.
+
+### `_select_numbered`
+
+```python
+def _select_numbered(label: str, options: list[tuple[str, str]], stream) -> int | None
+```
+
+The no-terminal fallback: print the list, read a number.
+
+### `paragraph`
+
+```python
+def paragraph(text: str, stream = None) -> str
+```
+
+Reads a multi-line answer, ending at the first blank line or EOF.
+
+A single `input()` cannot take a convention worth writing down -- most are
+two or three sentences. Blank-line-terminated is the idiom that needs no
+explanation beyond the hint printed above it.
 
 ### `class Spinner`
 

@@ -153,7 +153,7 @@ def test_missing_api_key_points_at_config_composio(tmp_home):
 
 
 def _new_args(**over):
-    """Namespace for `px0 new`, defaulting to the non-interactive path."""
+    """Namespace for `px0 workflows new`, defaulting to the non-interactive path."""
     base = dict(description="test description", yes=True, id="test-id",
                 no_clarify=True, no_discover=True)
     base.update(over)
@@ -164,7 +164,7 @@ def test_cmd_new_authorizes_what_the_plan_needs_and_still_writes_it(
         tmp_home, fake_composio, monkeypatch, capsys):
     """A pending consent must not throw away the plan.
 
-    Re-running `px0 new` would repeat the clarify, search, selection, and
+    Re-running `px0 workflows new` would repeat the clarify, search, selection, and
     planning passes to arrive at the same file, so the file is written and the
     pending authorization is reported.
     """

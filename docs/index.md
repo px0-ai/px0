@@ -26,10 +26,10 @@ writes the workflow file:
 
 ```shell
 px0 init
-px0 new "post a summary of my open pull requests to slack every morning"
+px0 workflows new "post a summary of my open pull requests to slack every morning"
 ```
 
-`px0 new` asks what's ambiguous, searches Composio's catalogue for the
+`px0 workflows new` asks what's ambiguous, searches Composio's catalogue for the
 tools the task needs, shows you what it picked before authorizing
 anything, and writes the workflow file.
 
@@ -37,11 +37,11 @@ The fastest path that needs no workflow at all is the knowledge library:
 
 ```shell
 px0 knowledge add https://example.com/some-post
-px0 ask "what did that post say about caching?"
+px0 knowledge ask "what did that post say about caching?"
 ```
 
 ```shell
-px0 list workflows      # what you can run
+px0 workflows list      # what you can run
 px0 runs                # interactive browser over past runs
 px0 doctor              # is everything wired up
 ```

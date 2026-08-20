@@ -5,7 +5,7 @@ through [Composio](https://composio.dev). Two kinds exist:
 
 - **Curated** (`slack.post_message`, `github.get_pr`) -- ten hand-written
   tools with stable argument names.
-- **Discovered** (`composio:SLACK_SEND_MESSAGE`) -- anything `px0 new`
+- **Discovered** (`composio:SLACK_SEND_MESSAGE`) -- anything `px0 workflows new`
   found by searching Composio's catalogue, which is thousands of tools
   across hundreds of toolkits.
 
@@ -73,7 +73,7 @@ stored bundle.
 Write a workflow that needs Slack, run it, and px0 does the rest:
 
 ```shell
-px0 run post-standup
+px0 workflows run post-standup
 ```
 
 ```
@@ -84,7 +84,7 @@ px0 run post-standup
 Open the URL, approve the consent screen, and run it again. That's the
 whole flow.
 
-Usually you never reach it, because `px0 new` asks first: once it knows
+Usually you never reach it, because `px0 workflows new` asks first: once it knows
 which tools the workflow needs, it checks what's authorized and offers to
 prepare the rest, so a workflow is authorized before it ever runs. See
 [02-building-a-workflow.md](02-building-a-workflow.md).
@@ -130,8 +130,8 @@ rather than the default.
 The `read` / `write` marker is the one that matters, and it's the only
 thing on that screen px0 bothers to colour. A write tool changes
 something outside px0 -- posts, comments, sends. px0 surfaces write tools
-separately everywhere it can: `px0 new` calls them out before generating
-a workflow, `px0 run --dry-run` stubs them instead of executing them, and
+separately everywhere it can: `px0 workflows new` calls them out before generating
+a workflow, `px0 workflows run --dry-run` stubs them instead of executing them, and
 `px0 runs` marks any run that used one with `[write]`.
 
 `px0 --json tools list` gives the same list with each tool's parameter
@@ -140,7 +140,7 @@ parameters are marked with a trailing `*` and listed first.
 
 Four toolkits have curated tools: `calendar`, `github`, `gmail`, `slack`.
 Any toolkit in Composio's catalogue can be reached through a discovered
-tool -- `px0 new` searches for what your task needs rather than limiting
+tool -- `px0 workflows new` searches for what your task needs rather than limiting
 you to that list. Discovered tools are recorded in the store, so they
 appear here too once a workflow uses one.
 

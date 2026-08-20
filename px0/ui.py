@@ -198,6 +198,13 @@ def hint(text: str, stream=None) -> None:
     print(dim(text, stream=stream), file=stream, flush=True)
 
 
+def remedy(text: str, stream=None) -> None:
+    """The fix for a failed check: an arrow-led step, indented under its line."""
+    stream = stream or sys.stdout
+    mark = paint("\u2192", _ACCENT, stream=stream) if color_enabled(stream) else "->"
+    print(f"    {mark} {dim(text, stream=stream)}", file=stream, flush=True)
+
+
 def command(text: str, stream=None) -> None:
     """A command the user can copy and run."""
     stream = stream or sys.stdout
@@ -207,6 +214,194 @@ def command(text: str, stream=None) -> None:
 def prompt(text: str) -> str:
     """A styled input prompt. Returns what the user typed, stripped."""
     return input(f"{accent('›')} {text}").strip()
+
+
+def select(label: str, options: list[tuple[str, str]], stream=None) -> int | None:
+    """Single-select from a short list. Returns the chosen index, or None if cancelled.
+
+    `options` is [(name, detail)]. Arrows or j/k move, Enter chooses, a digit
+    jumps straight to that row, q or Ctrl-C cancels.
+
+    Drawn in place on the lines it already occupies rather than in a full-screen
+    curses app: picking one item out of a handful should leave the scrollback
+    intact, the way a prompt does. When stdin is not a terminal there are no
+    keystrokes to read, so it degrades to a numbered prompt -- which is what
+    keeps this usable over a pipe and in tests.
+    """
+    stream = stream or sys.stdout
+    if not options:
+        return None
+    if not (is_tty(stream) and sys.stdin.isatty()):
+        return _select_numbered(label, options, stream)
+
+    import termios
+    import tty
+
+    width = max(len(name) for name, _ in options)
+    cursor = 0
+
+    def draw(first: bool) -> None:
+        if not first:
+            # Back up over the rows written last time and overwrite them. This is
+            # only correct because every row is truncated to one physical line --
+            # a wrapped row would put the cursor mid-row and each redraw would
+            # append instead of replace.
+            stream.write(f"\x1b[{len(options)}A")
+        cols = shutil.get_terminal_size((80, 24)).columns
+        for i, (name, detail) in enumerate(options):
+            row = select_row(i, name, detail, selected=(i == cursor),
+                             name_width=width, cols=cols, stream=stream)
+            stream.write(f"\x1b[2K{row}\r\n")
+        stream.flush()
+
+    print(f"{accent('›', stream=stream)} {label}", file=stream, flush=True)
+    print(dim("  ↑/↓ to move, enter to select, q to cancel", stream=stream),
+          file=stream, flush=True)
+
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    chosen: int | None = None
+    try:
+        tty.setraw(fd)
+        draw(first=True)
+        while True:
+            previous = cursor
+            cursor, action = select_action(_read_key(sys.stdin), cursor, len(options))
+            if action == "choose":
+                chosen = cursor
+                break
+            if action == "cancel":
+                break
+            if action == "move" and cursor != previous:
+                draw(first=False)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        # The last draw left the cursor below the rows; land on a clean line.
+        stream.write("\r")
+        stream.flush()
+    return chosen
+
+
+def _read_key(stream) -> str:
+    """Reads one keypress as a name: "up", "down", "enter", "cancel", or the char.
+
+    Arrow keys arrive as a three-byte `ESC [ A` sequence, so the escape has to be
+    consumed here rather than surfacing as a bare character.
+    """
+    ch = stream.read(1)
+    if ch == "\x1b":
+        if stream.read(1) != "[":
+            return "escape"
+        return {"A": "up", "B": "down", "C": "right", "D": "left"}.get(
+            stream.read(1), "escape")
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch in ("\x03", "\x04"):  # Ctrl-C, Ctrl-D
+        return "cancel"
+    return ch
+
+
+def select_row(index: int, name: str, detail: str, *, selected: bool,
+               name_width: int, cols: int, stream=None) -> str:
+    """One `select` row, truncated to sit on a single physical line of `cols`.
+
+    Truncation is load-bearing, not cosmetic: `select` redraws by moving the
+    cursor up one line per option, so a row long enough to wrap makes the cursor
+    land in the middle of it and every redraw appends a fresh copy instead of
+    replacing the old one.
+
+    The plain text is measured and cut *before* colour is applied, because escape
+    sequences take no columns but do take characters.
+    """
+    marker_plain = "\u203a" if selected else " "
+    num_plain = f"{index + 1:>2}."
+    head = f" {marker_plain} {num_plain} "
+    # -1 so nothing lands in the final column, which wraps on some terminals.
+    if cols - 1 < len(head):
+        # Narrower than the row's own prefix. Degenerate, but it still must not
+        # wrap, so give up the colour and return a plain stub that fits.
+        return head[:max(cols - 1, 0)]
+    budget = cols - 1 - len(head)
+
+    name_plain = _ellipsize(name, budget)
+    name_plain = name_plain.ljust(min(name_width, budget))
+    rest = budget - len(name_plain)
+    detail_plain = "  " + _ellipsize(detail, rest - 2) if detail and rest > 3 else ""
+
+    marker = paint("\u203a", _ACCENT, stream=stream) if selected else " "
+    shown = paint(name_plain, _ACCENT, bold=True, stream=stream) if selected \
+        else dim(name_plain, stream=stream)
+    row = f" {marker} {faint(num_plain, stream=stream)} {shown}"
+    return row + (dim(detail_plain, stream=stream) if detail_plain else "")
+
+
+def _ellipsize(text: str, budget: int) -> str:
+    """`text` cut to `budget` columns, marking the cut with a single character."""
+    if budget <= 0:
+        return ""
+    if len(text) <= budget:
+        return text
+    return text[:budget - 1] + "\u2026" if budget > 1 else text[:budget]
+
+
+def select_action(key: str, cursor: int, count: int) -> tuple[int, str]:
+    """Maps a key name to (new cursor, action) for `select`.
+
+    Actions: "move", "choose", "cancel", "ignore". Movement wraps -- with a
+    handful of options, going up from the first to reach the last is quicker than
+    hitting the ceiling. Pure, so the key handling is testable without a pty.
+    """
+    if key in ("up", "k", "K"):
+        return (cursor - 1) % count, "move"
+    if key in ("down", "j", "J"):
+        return (cursor + 1) % count, "move"
+    if key == "enter":
+        return cursor, "choose"
+    if key in ("cancel", "q", "Q"):
+        return cursor, "cancel"
+    if len(key) == 1 and key.isdigit() and key != "0" and int(key) <= count:
+        return int(key) - 1, "choose"
+    return cursor, "ignore"
+
+
+def _select_numbered(label: str, options: list[tuple[str, str]], stream) -> int | None:
+    """The no-terminal fallback: print the list, read a number."""
+    print(f"{accent('›', stream=stream)} {label}", file=stream, flush=True)
+    width = max(len(name) for name, _ in options)
+    for i, (name, detail) in enumerate(options, 1):
+        line = f"  {faint(f'{i:>2}.', stream=stream)} {name.ljust(width)}"
+        if detail:
+            line += f"  {dim(detail, stream=stream)}"
+        print(line, file=stream, flush=True)
+    try:
+        answer = input("  number: ").strip()
+    except EOFError:
+        return None
+    if not answer.isdigit() or not 1 <= int(answer) <= len(options):
+        return None
+    return int(answer) - 1
+
+
+def paragraph(text: str, stream=None) -> str:
+    """Reads a multi-line answer, ending at the first blank line or EOF.
+
+    A single `input()` cannot take a convention worth writing down -- most are
+    two or three sentences. Blank-line-terminated is the idiom that needs no
+    explanation beyond the hint printed above it.
+    """
+    stream = stream or sys.stdout
+    print(f"{accent('›', stream=stream)} {text}", file=stream, flush=True)
+    print(dim("  (finish with an empty line)", stream=stream), file=stream, flush=True)
+    lines = []
+    while True:
+        try:
+            line = input("  ")
+        except EOFError:
+            break
+        if not line.strip():
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 # --- spinner ---------------------------------------------------------------

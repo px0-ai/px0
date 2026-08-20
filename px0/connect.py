@@ -22,6 +22,12 @@ TOOLKIT_SLUGS = {
 
 COMPOSIO_HOST = "backend.composio.dev"
 
+# Composio scopes every connected account to a user id, and requires the *same*
+# one back when executing a tool through that account -- omitting it on execute
+# fails with "User ID is required with connected account". px0 is single-user
+# per store, so one constant serves both sides; it must never diverge.
+COMPOSIO_USER_ID = "px0-local"
+
 # Bundles that tend to carry a corporate/MITM root (Zscaler, Netskope, ...) which
 # certifi -- what httpx verifies against by default -- deliberately does not ship.
 CA_BUNDLE_CANDIDATES = (
@@ -251,11 +257,21 @@ def setup_composio(home: Path, api_key: str) -> dict:
     return {"ca_bundle": used_bundle}
 
 
-def _composio_client(home: Path):
-    """Returns a Composio client configured with the stored Composio API key."""
+def composio_client(home: Path, api_key: str | None = None):
+    """Returns a Composio client configured with the stored Composio API key.
+
+    Every SDK client must come from here. `apply_ca_bundle` is the reason: from
+    behind a TLS-intercepting proxy, a client built without it fails to verify
+    Composio's certificate, and the SDK reports that as the bare string
+    "Connection error." -- so a hand-rolled `Composio(api_key=...)` elsewhere
+    reads as an outage rather than as a missing CA bundle.
+
+    `api_key` short-circuits the lookup for callers that already resolved it.
+    """
     from px0 import config as config_mod, paths
-    config = config_mod.load(paths.config_path(home))
-    api_key = config_mod.get(config, "connectors.composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
+    if not api_key:
+        config = config_mod.load(paths.config_path(home))
+        api_key = config_mod.get(config, "connectors.composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
     if not api_key:
         creds = creds_mod.load(home)
         composio = creds.get("composio")
@@ -269,6 +285,59 @@ def _composio_client(home: Path):
     _silence_sdk_logging()
     from composio import Composio
     return Composio(api_key=api_key)
+
+
+# Kept as the old private name so existing internal callers keep working.
+_composio_client = composio_client
+
+
+def with_cert_recovery(home: Path, call):
+    """Runs `call()`, healing a TLS-interception failure once and retrying.
+
+    The same self-repair `catalogue.py` does for its plain `requests` calls:
+    first contact from behind a new intercepting proxy should find a bundle that
+    trusts it and remember it, rather than telling the user to go hunt one down.
+    """
+    try:
+        return call()
+    except Exception as e:
+        if not _is_cert_error(e) or not recover_ca_bundle(home):
+            raise
+        return call()
+
+
+def root_cause(exc: BaseException) -> BaseException:
+    """The innermost exception in `exc`'s cause/context chain."""
+    seen = {id(exc)}
+    while True:
+        nxt = exc.__cause__ or exc.__context__
+        if nxt is None or id(nxt) in seen:
+            return exc
+        seen.add(id(nxt))
+        exc = nxt
+
+
+def describe_api_error(exc: BaseException) -> str:
+    """One actionable line for a Composio SDK exception.
+
+    The SDK collapses every transport failure into "Connection error." and puts
+    the real reason -- a rejected certificate, a DNS failure, a timeout -- only in
+    the exception chain. Unwrap it, and name the fix outright when the cause is
+    TLS interception, which is the case a user cannot guess from the surface text.
+    """
+    if _is_cert_error(exc):
+        return (
+            "TLS certificate verification failed -- px0 could not verify Composio's "
+            "certificate, which usually means an intercepting proxy. Point px0 at "
+            "your corporate CA bundle:\n"
+            "  px0 config set connectors.ca_bundle /path/to/corporate-ca-bundle.pem\n"
+            "or export SSL_CERT_FILE to the same path."
+        )
+    summary = short_api_error(exc)
+    root = root_cause(exc)
+    if root is not exc and str(root).strip() and str(root) not in summary:
+        return f"{summary} ({type(root).__name__}: {root})"
+    return summary
 
 
 def _ensure_auth_config(home: Path, toolkit: str) -> str:
@@ -304,7 +373,7 @@ def connect_composio_app(home: Path, app: str) -> dict:
     client = _composio_client(home)
     try:
         connection_request = client.connected_accounts.link(
-            user_id="px0-local",
+            user_id=COMPOSIO_USER_ID,
             auth_config_id=auth_config_id
         )
     except Exception as e:

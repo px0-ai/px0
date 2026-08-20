@@ -87,7 +87,7 @@ Three things here are worth knowing:
 | `r` | Rerun this workflow; the view follows the new run |
 | `l` | Page the full raw log through `$PAGER` |
 | `o` | Show the run's output |
-| `w` | Trace provenance -- the same thing `px0 why` prints |
+| `w` | Trace provenance -- the same thing `px0 runs why` prints |
 | `Esc` or `q` | Back to the list |
 
 ## The same data without the TUI
@@ -105,7 +105,7 @@ px0 runs show <run-id>                     # the full JSON record
 px0 runs output <run-id>                   # just the output
 px0 runs logs <run-id> [--follow]          # the raw log
 px0 runs rerun <run-id>
-px0 why <run-id>                           # the provenance chain
+px0 runs why <run-id>                           # the provenance chain
 ```
 
 `px0 runs list` and the TUI's list view render row text from the same
@@ -114,6 +114,6 @@ formatter, so what you grep is what you saw on screen.
 ## Next
 
 - [05-guidelines-and-provenance.md](05-guidelines-and-provenance.md) --
-  what `w` / `px0 why` is walking.
+  what `w` / `px0 runs why` is walking.
 - [06-scheduling-and-the-daemon.md](06-scheduling-and-the-daemon.md) --
   where scheduled runs come from.

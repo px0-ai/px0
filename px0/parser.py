@@ -1,13 +1,23 @@
 """The px0 argparse tree: what the CLI accepts, separated from what it does.
 
-Kept out of `cli.py` so the ~200 lines of declarative flag wiring don't sit in
-the middle of the command handlers. The dependency runs one way -- `cli`
-imports this, never the reverse -- so `build` is handed the module holding the
-handlers rather than importing them.
+Kept out of `cli.py` so the declarative flag wiring doesn't sit in the middle of
+the command handlers. The dependency runs one way -- `cli` imports this, never
+the reverse -- so `build` is handed the module holding the handlers rather than
+importing them.
+
+Shape: **entity first, then the verb acting on it** -- `px0 workflows new`,
+`px0 knowledge search`, `px0 guidelines review`. The only flat commands are the
+four that act on the install rather than on anything in the store: `init`,
+`doctor`, `version`, `update`.
+
+Each leaf sets its own `func`, so a group needs no dispatch table -- but the
+group's `dest` is still set, because several handlers serve more than one leaf
+and switch on it.
 """
 
 import argparse
 
+from px0 import config as config_mod
 from px0 import harness
 
 
@@ -36,37 +46,46 @@ def build(handlers) -> argparse.ArgumentParser:
     sp.add_argument("--composio-key", help="Composio API key")
     sp.set_defaults(func=handlers.cmd_init)
 
-    sp = sub.add_parser("new")
-    sp.add_argument("description")
-    sp.add_argument("--yes", action="store_true",
+    sp = sub.add_parser("workflows", help="build, run, and list workflows")
+    wf_sub = sp.add_subparsers(dest="workflows_cmd", required=True)
+    wp = wf_sub.add_parser("new", help="describe a workflow and have px0 build it")
+    wp.add_argument("description")
+    wp.add_argument("--yes", action="store_true",
                     help="skip every prompt: no clarifying questions, no confirmations")
-    sp.add_argument("--id", help="workflow id to save as")
-    sp.add_argument("--no-clarify", action="store_true",
+    wp.add_argument("--id", help="workflow id to save as")
+    wp.add_argument("--no-clarify", action="store_true",
                     help="build from the description as written, without asking questions")
-    sp.add_argument("--no-discover", action="store_true",
+    wp.add_argument("--no-discover", action="store_true",
                     help="use only px0's curated tools; skip the Composio catalogue search")
-    sp.set_defaults(func=handlers.cmd_new)
+    wp.set_defaults(func=handlers.cmd_new)
 
-    sp = sub.add_parser("run")
-    sp.add_argument("workflow")
-    sp.add_argument("--quiet", action="store_true")
-    sp.add_argument("--stdin", action="store_true")
-    sp.add_argument("--output", choices=["stdout", "file"])
-    sp.add_argument("--dry-run", action="store_true")
-    sp.add_argument("--input", action="append", metavar="KEY=VALUE")
-    sp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)  # internal-use only: hidden from --help, set by the daemon for backfilled runs
-    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    sp.set_defaults(func=handlers.cmd_run)
+    wp = wf_sub.add_parser("run", help="execute a workflow")
+    # Optional: with no id, `cmd_run` puts up a picker. Not available with
+    # --stdin, which is already reading the stream the keystrokes would come from.
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit to pick one from a list")
+    wp.add_argument("--quiet", action="store_true")
+    wp.add_argument("--stdin", action="store_true")
+    wp.add_argument("--output", choices=["stdout", "file"])
+    wp.add_argument("--dry-run", action="store_true")
+    wp.add_argument("--input", action="append", metavar="KEY=VALUE")
+    wp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)  # internal-use only: hidden from --help, set by the daemon for backfilled runs
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_run)
 
-    sp = sub.add_parser("ask")
-    sp.add_argument("question")
-    sp.add_argument("--k", type=int, default=5)
-    sp.add_argument("--sources", action="store_true")
-    sp.set_defaults(func=handlers.cmd_ask)
+    wp = wf_sub.add_parser("edit", help="revise a workflow's instructions and rebuild it")
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit to pick one from a list")
+    wp.add_argument("--yes", action="store_true",
+                    help="skip every prompt: no clarifying questions, no confirmations")
+    wp.add_argument("--no-clarify", action="store_true",
+                    help="rebuild from the new instructions as written, without asking questions")
+    wp.add_argument("--no-discover", action="store_true",
+                    help="use only px0's curated tools; skip the Composio catalogue search")
+    wp.set_defaults(func=handlers.cmd_workflows_edit)
 
-    sp = sub.add_parser("list")
-    sp.add_argument("kind", nargs="?", choices=["workflows", "guidelines", "knowledge"])
-    sp.set_defaults(func=handlers.cmd_list)
+    wp = wf_sub.add_parser("list", help="every workflow in the store")
+    wp.set_defaults(func=handlers.cmd_workflows_list)
 
     sp = sub.add_parser("tools")
     tools_sub = sp.add_subparsers(dest="tools_cmd", required=True)
@@ -89,7 +108,7 @@ def build(handlers) -> argparse.ArgumentParser:
     daemon_sub.add_parser("serve")
     sp.set_defaults(func=handlers.cmd_daemon)
 
-    sp = sub.add_parser("runs")
+    sp = sub.add_parser("runs", help="inspect and re-run past executions")
     runs_sub = sp.add_subparsers(dest="runs_cmd", required=False)
     rp = runs_sub.add_parser("list")
     rp.add_argument("--workflow")
@@ -102,28 +121,73 @@ def build(handlers) -> argparse.ArgumentParser:
     rp3 = runs_sub.add_parser("logs")
     rp3.add_argument("run_id")
     rp3.add_argument("--follow", "-f", action="store_true", help="follow run log tail")
+    # `why` reads a run id here and a claim id under `guidelines`. One handler
+    # serves both -- provenance.why already branches on the id's shape -- but it
+    # is listed under each entity so the help says which id that group takes.
+    rp4 = runs_sub.add_parser("why", help="how a run reached its result")
+    rp4.add_argument("target_id", metavar="run_id")
+    rp4.set_defaults(func=handlers.cmd_why)
     sp.set_defaults(func=handlers.cmd_runs)
 
-    sp = sub.add_parser("knowledge")
+    sp = sub.add_parser("knowledge", help="ingest, search, and ask over knowledge")
     knowledge_sub = sp.add_subparsers(dest="knowledge_cmd", required=True)
-    kp = knowledge_sub.add_parser("add")
+    kp = knowledge_sub.add_parser("add", help="ingest a URL or file into the store")
     kp.add_argument("source")
     kp.add_argument("--to", choices=["docs", "blogs", "papers"])
     kp.add_argument("--no-propose", action="store_true")
-    kp2 = knowledge_sub.add_parser("refresh")
-    kp2.add_argument("path")
-    sp.set_defaults(func=handlers.cmd_knowledge)
+    kp.set_defaults(func=handlers.cmd_knowledge)
 
-    sp = sub.add_parser("guidelines")
+    kp = knowledge_sub.add_parser("refresh", help="re-fetch an already-ingested source")
+    kp.add_argument("path")
+    kp.set_defaults(func=handlers.cmd_knowledge)
+
+    kp = knowledge_sub.add_parser("list", help="every knowledge file in the store")
+    kp.set_defaults(func=handlers.cmd_knowledge_list)
+
+    kp = knowledge_sub.add_parser("search", help="retrieve matching passages")
+    kp.add_argument("query")
+    kp.add_argument("--k", type=int, default=5)
+    kp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    kp.set_defaults(func=handlers.cmd_search)
+
+    kp = knowledge_sub.add_parser("ask", help="answer a question from the knowledge store")
+    kp.add_argument("question")
+    kp.add_argument("--k", type=int, default=5)
+    kp.add_argument("--sources", action="store_true")
+    kp.set_defaults(func=handlers.cmd_ask)
+
+    # Its own verb rather than the old magic `search reindex` query value, which
+    # made "reindex" a word you could not search for.
+    kp = knowledge_sub.add_parser("reindex", help="rebuild the retrieval index")
+    kp.set_defaults(func=handlers.cmd_reindex)
+
+    sp = sub.add_parser("guidelines", help="review, trace, and consolidate guidelines")
     g_sub = sp.add_subparsers(dest="guidelines_cmd", required=True)
-    gp = g_sub.add_parser("review")
+    gp = g_sub.add_parser("list", help="every guideline file in the store")
+    gp.set_defaults(func=handlers.cmd_guidelines_list)
+
+    gp = g_sub.add_parser("review", help="accept or reject pending proposals")
     gp.add_argument("--list-only", action="store_true", help="print pending proposals without prompting")
-    gp = g_sub.add_parser("log")
+    gp.set_defaults(func=handlers.cmd_guidelines)
+
+    gp = g_sub.add_parser("log", help="a claim's edit history")
     gp.add_argument("claim_id")
-    gp = g_sub.add_parser("revert")
+    gp.set_defaults(func=handlers.cmd_guidelines)
+
+    gp = g_sub.add_parser("revert", help="restore a claim to an earlier version")
     gp.add_argument("claim_id")
     gp.add_argument("--to", type=lambda s: int(s.lstrip("v")), required=True)
-    gp = g_sub.add_parser("alias")
+    gp.set_defaults(func=handlers.cmd_guidelines)
+
+    gp = g_sub.add_parser("why", help="how a claim came to say what it says")
+    gp.add_argument("target_id", metavar="claim_id")
+    gp.set_defaults(func=handlers.cmd_why)
+
+    gp = g_sub.add_parser("consolidate", help="merge overlap and surface stale files")
+    gp.add_argument("--list-only", action="store_true")
+    gp.set_defaults(func=handlers.cmd_consolidate)
+
+    gp = g_sub.add_parser("alias", help="manage claim-id aliases")
     alias_sub = gp.add_subparsers(dest="alias_cmd", required=True)
     alias_sub.add_parser("list")
     lp = alias_sub.add_parser("link")
@@ -131,11 +195,7 @@ def build(handlers) -> argparse.ArgumentParser:
     lp.add_argument("new")
     up = alias_sub.add_parser("unlink")
     up.add_argument("old")
-    sp.set_defaults(func=handlers.cmd_guidelines)
-
-    sp = sub.add_parser("consolidate")
-    sp.add_argument("--list-only", action="store_true")
-    sp.set_defaults(func=handlers.cmd_consolidate)
+    gp.set_defaults(func=handlers.cmd_guidelines)
 
     sp = sub.add_parser("versions")
     v_sub = sp.add_subparsers(dest="versions_cmd", required=True)
@@ -167,36 +227,45 @@ def build(handlers) -> argparse.ArgumentParser:
     cp.add_argument("change_id")
     sp.set_defaults(func=handlers.cmd_changes)
 
-    sp = sub.add_parser("search")
-    sp.add_argument("query")
-    sp.add_argument("--k", type=int, default=5)
-    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    sp.set_defaults(func=handlers.cmd_search)
-
     sp = sub.add_parser("skills")
     sp.add_argument("skills_args", nargs=argparse.REMAINDER, help="Arguments to pass to npx skills")
     sp.set_defaults(func=handlers.cmd_skills)
 
-    sp = sub.add_parser("why")
-    sp.add_argument("target_id")
-    sp.set_defaults(func=handlers.cmd_why)
-
-    sp = sub.add_parser("store")
+    sp = sub.add_parser("store", help="the store as a whole")
     store_sub = sp.add_subparsers(dest="store_cmd", required=True)
-    ep = store_sub.add_parser("export")
+    ep = store_sub.add_parser("export", help="copy content and history elsewhere")
     ep.add_argument("dir")
-    sp.set_defaults(func=handlers.cmd_store)
+    ep.set_defaults(func=handlers.cmd_store)
+    # Where the flat `px0 list` overview went: workflows, guidelines, and
+    # knowledge in one pass. The per-entity `list` verbs print one section each.
+    lp2 = store_sub.add_parser("list", help="workflows, guidelines, and knowledge at once")
+    lp2.set_defaults(func=handlers.cmd_store_list)
 
-    sp = sub.add_parser("config")
+    sp = sub.add_parser("config", help="read and write store configuration")
     config_sub = sp.add_subparsers(dest="config_cmd", required=True)
-    lp = config_sub.add_parser("list")
+    lp = config_sub.add_parser("list", help="every key with its value, default, and help")
     lp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    gp = config_sub.add_parser("get")
-    gp.add_argument("key")
+
+    # `get` and `set` take a key the user has to know, so --help lists them.
+    # RawDescription keeps the aligned block from being re-wrapped into a
+    # paragraph. `get` omits the choices column: allowed values constrain what
+    # you can write, and say nothing about reading.
+    gp = config_sub.add_parser(
+        "get", help="print one key's current value",
+        epilog=config_mod.key_help(include_choices=False),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    gp.add_argument("key", metavar="KEY", help="dotted key; see the list below")
     gp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    stp = config_sub.add_parser("set")
-    stp.add_argument("key")
-    stp.add_argument("value")
+
+    stp = config_sub.add_parser(
+        "set", help="validate and save one key",
+        epilog=config_mod.key_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stp.add_argument("key", metavar="KEY", help="dotted key; see the list below")
+    stp.add_argument("value", metavar="VALUE",
+                     help="checked against the key's type and allowed values before saving")
     config_sub.add_parser("model")
     cop = config_sub.add_parser("composio")
     cop.add_argument("key", nargs="?", help="Composio API key; prompted for if omitted")

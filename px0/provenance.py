@@ -1,4 +1,4 @@
-"""px0 why: walk the chain for any run, answer, output, or claim."""
+"""px0 guidelines why / px0 runs why: walk the chain for any run, answer, output, or claim."""
 
 from pathlib import Path
 

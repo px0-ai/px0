@@ -1,4 +1,12 @@
-"""px0 doctor: credentials, daemon, harness, index, versions, locks, schema."""
+"""px0 doctor: credentials, daemon, harness, index, versions, locks, schema.
+
+Every check returns `{"ok": bool, "detail": str}`. A check that can fail also
+returns a `"fix"` string on the failing branch: the concrete next step that
+clears it, phrased as something the user can run. The fix is attached where the
+failure is detected rather than looked up by check name, because the same check
+fails for different reasons (a missing qmd binary and a version-drifted one need
+different commands) and only the failing branch knows which.
+"""
 
 import fcntl
 import stat
@@ -17,8 +25,13 @@ def _check_credentials(home: Path) -> dict:
     if not path.exists():
         return {"ok": True, "detail": "no credentials file yet"}
     mode = stat.S_IMODE(path.stat().st_mode)
-    ok = mode == 0o600
-    return {"ok": ok, "detail": f"mode {oct(mode)}" + ("" if ok else ", expected 0600")}
+    if mode == 0o600:
+        return {"ok": True, "detail": f"mode {oct(mode)}"}
+    return {
+        "ok": False,
+        "detail": f"mode {oct(mode)}, expected 0600",
+        "fix": f"tighten the permissions: chmod 600 {path}",
+    }
 
 
 def _check_daemon(home: Path, config: dict) -> dict:
@@ -33,7 +46,26 @@ def _check_harness(config: dict) -> dict:
         harness.invoke(config, "reply with the single word: ok", timeout=20)
         return {"ok": True, "detail": "harness responded"}
     except harness.HarnessError as e:
-        return {"ok": False, "detail": str(e)}
+        cmd = config_mod.get(config, "model.harness_cmd", "claude -p")
+        return {"ok": False, "detail": str(e), "fix": _harness_fix(str(e), cmd)}
+
+
+def _harness_fix(error: str, harness_cmd: str) -> str:
+    """The fix for a harness failure, chosen by which way it failed.
+
+    `not found` is an install/PATH problem, a timeout is usually a slow or
+    hanging backend, and a non-zero exit is the backend itself refusing --
+    three different next steps, so don't collapse them into one hint.
+    """
+    binary = harness.resolve_harness_cmd(harness_cmd).split()[0]
+    if "not found" in error:
+        return (f"install the {binary} CLI and make sure it is on PATH, or point px0 at "
+                f"another one: px0 config set model.harness_cmd '<cmd>'")
+    if "timed out" in error:
+        return (f"check `{binary}` responds on its own (it may be waiting on a login or a "
+                f"network call), then re-run px0 doctor")
+    return (f"run `{harness_cmd} 'hi'` by hand to see the backend's own error -- usually "
+            f"an expired login or an unavailable model")
 
 
 def _check_qmd_version(home: Path, config: dict) -> dict:
@@ -44,14 +76,28 @@ def _check_qmd_version(home: Path, config: dict) -> dict:
         # whole line -- the raw string never equals a bare pinned version.
         m = re.search(r"(\d+\.\d+\.\d+(?:[-.\w]*)?)", out)
         if not m:
-            return {"ok": False, "detail": f"could not parse qmd version from {out.strip()!r}"}
+            return {"ok": False,
+                    "detail": f"could not parse qmd version from {out.strip()!r}",
+                    "fix": _qmd_install_fix()}
         version = m.group(1)
         pinned = retrieval.QMD_PINNED_VERSION
         if version != pinned:
-            return {"ok": False, "detail": f"qmd version {version} does not match pinned {pinned}"}
+            return {"ok": False,
+                    "detail": f"qmd version {version} does not match pinned {pinned}",
+                    "fix": _qmd_install_fix()}
         return {"ok": True, "detail": f"qmd version matches {pinned}"}
     except retrieval.RetrievalBackendError as e:
-        return {"ok": False, "detail": f"qmd check failed: {e}"}
+        return {"ok": False, "detail": f"qmd check failed: {e}", "fix": _qmd_install_fix()}
+
+
+def _qmd_install_fix() -> str:
+    """The fix for any qmd problem: pin the version, or stop using the backend.
+
+    Both halves matter -- the local backend is a real answer here, not a
+    consolation prize, since it needs no install and no model download.
+    """
+    return (f"install the pinned build: npm install -g @tobilu/qmd@{retrieval.QMD_PINNED_VERSION} "
+            f"-- or drop back to the built-in backend: px0 config set retrieval.backend local")
 
 
 def _check_index(home: Path, config: dict) -> dict:
@@ -77,8 +123,13 @@ def _check_index(home: Path, config: dict) -> dict:
     base = retrieval.knowledge_path(home, config)
     file_count = len(list(base.rglob("*.md"))) if base.exists() else 0
     indexed = retrieval.index_count(home)
-    ok = indexed > 0 or file_count == 0
-    return {"ok": ok, "detail": f"{file_count} knowledge files, {indexed} indexed passages"}
+    detail = f"{file_count} knowledge files, {indexed} indexed passages"
+    if indexed > 0 or file_count == 0:
+        return {"ok": True, "detail": detail}
+    return {"ok": False, "detail": detail,
+            "fix": "build the index: px0 knowledge reindex -- until then "
+                   "`px0 knowledge ask` and `px0 knowledge search` have nothing "
+                   "to retrieve from"}
 
 
 def _check_versions(home: Path) -> dict:
@@ -89,7 +140,10 @@ def _check_versions(home: Path) -> dict:
         conn.close()
         return {"ok": True, "detail": "manifest opens cleanly"}
     except Exception as e:
-        return {"ok": False, "detail": str(e)}
+        return {"ok": False, "detail": str(e),
+                "fix": f"the manifest at {versioning.manifest_path(home)} will not open; move "
+                       f"it aside and re-run `px0 init` to rebuild it (past versions in "
+                       f"{versioning.objects_dir(home)} are kept, but their history is lost)"}
 
 
 def _check_locks(home: Path) -> dict:
@@ -104,17 +158,30 @@ def _check_locks(home: Path) -> dict:
             fcntl.flock(f, fcntl.LOCK_UN)
             return {"ok": True, "detail": "lock is free"}
         except OSError:
-            return {"ok": False, "detail": "lock is held; a run may be stuck"}
+            return {"ok": False, "detail": "lock is held; a run may be stuck",
+                    "fix": f"wait for the in-flight px0 command to finish, then re-run; if "
+                           f"nothing is running, the holder died -- delete {lock}"}
 
 
 def _check_schema(home: Path) -> dict:
     """Confirms the store's on-disk schema version matches this binary's SCHEMA_VERSION."""
     schema_file = paths.schema_path(home)
     if not schema_file.exists():
-        return {"ok": False, "detail": "no .state/schema; store not initialized"}
+        return {"ok": False, "detail": "no .state/schema; store not initialized",
+                "fix": f"initialize the store: px0 init {home}"}
     on_disk = int(schema_file.read_text().strip())
-    return {"ok": on_disk == SCHEMA_VERSION,
-            "detail": f"store schema {on_disk}, binary schema {SCHEMA_VERSION}"}
+    detail = f"store schema {on_disk}, binary schema {SCHEMA_VERSION}"
+    if on_disk == SCHEMA_VERSION:
+        return {"ok": True, "detail": detail}
+    # Which side is behind decides the fix: an old store migrates forward, but a
+    # store written by a newer px0 cannot be migrated backwards -- that install
+    # has to catch up instead.
+    if on_disk < SCHEMA_VERSION:
+        fix = "migrate the store forward: px0 update"
+    else:
+        fix = (f"this store was written by a newer px0 (schema {on_disk}); upgrade this "
+               f"install with `px0 update`, and don't run writes against it until then")
+    return {"ok": False, "detail": detail, "fix": fix}
 
 
 def _check_connections(home: Path) -> dict:
@@ -128,9 +195,14 @@ def _check_connections(home: Path) -> dict:
                 issues.append(f"{c['service']} connected_account is {status}, not ACTIVE -- finish the browser consent")
 
     if issues:
+        stale = sorted({c["service"] for c in conns
+                        if c.get("service") in ("gmail", "slack", "calendar")
+                        and c.get("status") != "ACTIVE"})
         return {
             "ok": False,
             "detail": "; ".join(issues),
+            "fix": f"re-authorize {', '.join(stale)}: the next `px0 workflows new` or `px0 workflows run` "
+                   f"needs one prints a consent link -- open it and finish the browser flow",
             "connections": conns,
         }
     return {"ok": True, "detail": f"{len(conns)} connection(s) configured", "connections": conns}
@@ -140,7 +212,7 @@ def _check_unreferenced_guidelines(home: Path) -> dict:
     """Counts guideline files that no workflow lists.
 
     Informational, never a failure: spec.md:792 puts unreferenced files in the
-    consolidation report ("to surface staleness"), which `px0 consolidate`
+    consolidation report ("to surface staleness"), which `px0 guidelines consolidate`
     already does. Failing here would also mean every freshly initialized store
     is unhealthy -- `px0 init` scaffolds guidelines but no workflows, so all of
     them start out unreferenced.
@@ -148,7 +220,7 @@ def _check_unreferenced_guidelines(home: Path) -> dict:
     files = proposals.unreferenced_guideline_files(home)
     detail = f"{len(files)} unreferenced file(s)"
     if files:
-        detail += " -- see `px0 consolidate`"
+        detail += " -- see `px0 guidelines consolidate`"
     return {"ok": True, "detail": detail, "files": files}
 
 

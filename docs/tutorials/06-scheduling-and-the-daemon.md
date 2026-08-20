@@ -3,7 +3,7 @@
 A workflow with a `trigger.schedule` doesn't fire on its own -- something
 has to be watching the clock. That something is `px0d`, a deliberately
 dumb scheduler: it polls `workflows/`, evaluates cron expressions in
-machine local time, spawns `px0 run <id> --quiet` for anything due, and
+machine local time, spawns `px0 workflows run <id> --quiet` for anything due, and
 runs one housekeeping pass a day.
 
 ## 1. Give a workflow a schedule
@@ -106,7 +106,7 @@ with `trigger: schedule` on the record:
 ```shell
 px0 runs list --workflow post-standup
 px0 runs list --failed --since 7d
-px0 why <run-id>
+px0 runs why <run-id>
 ```
 
 That's the loop for debugging a schedule that misbehaved: find the run,

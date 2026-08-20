@@ -1,4 +1,4 @@
-"""px0 ask: retrieval plus generation over knowledge/, nothing else. Never
+"""px0 knowledge ask: retrieval plus generation over knowledge/, nothing else. Never
 touches connectors or guidelines."""
 
 from datetime import datetime, timezone
@@ -20,14 +20,14 @@ def ask(home: Path, config: dict, question: str, k: int = 5) -> dict:
     Returns {"answer", "passages", "run_id"}."""
     if retrieval.index_count(home) == 0:
         raise AskError(
-            "the knowledge index is empty or missing; run `px0 search reindex` first"
+            "the knowledge index is empty or missing; run `px0 knowledge reindex` first"
         )
 
     passages = retrieval.retrieve(home, config, question, k)
     if not passages:
         raise AskError(
             "no passages matched this question; the index may be stale, "
-            "try `px0 search reindex`"
+            "try `px0 knowledge reindex`"
         )
 
     context = "\n\n".join(

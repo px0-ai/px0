@@ -52,6 +52,10 @@ class Workflow:
     path: Path
     version: int = 1
     description: str = ""
+    # The sentence the user typed into `px0 workflows new`, kept verbatim so
+    # `px0 workflows edit` can show it back to them. `description` is the
+    # model's normalized restatement, which is not what they wrote.
+    request: str = ""
     trigger: dict = field(default_factory=dict)
     guidelines: list[str] = field(default_factory=list)
     inputs: list[InputSpec] = field(default_factory=list)
@@ -89,6 +93,7 @@ def parse(path: Path) -> Workflow:
         path=path,
         version=front.get("version", 1),
         description=front.get("description", ""),
+        request=front.get("request", ""),
         trigger=front.get("trigger", {}),
         guidelines=front.get("guidelines", []) or [],
         inputs=inputs,
@@ -138,7 +143,7 @@ def validate(wf: Workflow, home: Path) -> list[str]:
 
     for inp in wf.inputs:
         if inp.kind == "tool":
-            # `home` lets tools discovered by `px0 new` resolve, not just curated ones
+            # `home` lets tools discovered by `px0 workflows new` resolve, not just curated ones
             if not tools.exists(inp.tool, home):
                 errors.append(f"input {inp.id!r} references unknown tool: {inp.tool}")
             elif tools.is_write(inp.tool, home):

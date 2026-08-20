@@ -3,7 +3,7 @@
 `px0 init` ships no workflows at all -- the point of px0 is that you
 describe what you want in plain English and get a working file back.
 
-`px0 new` runs four model passes, each with a job small enough to do
+`px0 workflows new` runs four model passes, each with a job small enough to do
 well, and asks you to confirm at the two points where a wrong answer
 would cost you something:
 
@@ -13,7 +13,7 @@ would cost you something:
 4. **Plan** -- write the workflow against exactly those tools.
 
 ```shell
-px0 new "every friday at 5pm summarize the github pull requests I reviewed this week and post it to our slack channel"
+px0 workflows new "every friday at 5pm summarize the github pull requests I reviewed this week and post it to our slack channel"
 ```
 
 ## 1. It asks what's ambiguous
@@ -59,7 +59,7 @@ is discarded.
 
 This is why the workflow gets the tool that actually fits rather than the
 nearest of px0's ten curated ones. Composio's catalogue is thousands of
-tools; `px0 new` searches all of it.
+tools; `px0 workflows new` searches all of it.
 
 `--no-discover` skips the search and restricts the plan to px0's curated
 tools.
@@ -151,7 +151,7 @@ Anything already authorized is skipped:
 ```
 
 A pending consent does **not** throw away the plan. The workflow file is
-valid either way, and re-running `px0 new` would repeat the clarify,
+valid either way, and re-running `px0 workflows new` would repeat the clarify,
 search, selection, and planning passes to arrive at the same file. So
 px0 writes it and tells you what's still waiting.
 
@@ -177,7 +177,7 @@ created friday-pr-digest
 ! authorization pending  github, slack
 
 finish the consent in your browser, then:
-  px0 run friday-pr-digest --dry-run
+  px0 workflows run friday-pr-digest --dry-run
 ```
 
 Guidelines are matched to the task by topic, and a file only gets
@@ -212,6 +212,7 @@ Summarize {{recent_prs}} as a short digest, then post it to #eng-standup.
 
 | Field | What it does |
 | --- | --- |
+| `request` | The sentence you typed, kept verbatim for `px0 workflows edit` |
 | `trigger.schedule` | Cron expression, evaluated in machine local time |
 | `guidelines` | Files inlined into the prompt verbatim, by name -- never retrieved by similarity |
 | `inputs` | Resolved before the prompt; each is a `tool`, `retrieve`, `source`, or `workflow` |
@@ -226,11 +227,92 @@ Edit any of it by hand -- there's no compile step, and the change is
 picked up on the next run. px0 versions the file itself, so
 `px0 versions list workflows/<id>.md` shows every edit, yours included.
 
+## Guidelines it offers to write for you
+
+Partway through the build, px0 may say something like:
+
+```
+guideline: PR comment voice and format
+  · The workflow posts comments publicly under your account, so the tone
+    and directness need to match how you normally write review feedback.
+[INFO] would be saved as  guidelines/pr-comment-style.md
+› Write it now? [y/N]
+```
+
+This is for standards px0 cannot guess -- what counts as worth flagging in a
+review, how blunt your comments are, the voice a summary is written in. Answer
+in your own words, a couple of lines is plenty, and finish with an empty line:
+
+```
+› How do you like your PR review comments written?
+  (finish with an empty line)
+  Blunt, no softening. Always say what to do instead of just naming the
+  problem. Never comment on formatting, that is the linter's job.
+```
+
+px0 shapes that into `##` sections, shows you the draft, and takes `again` if
+you want another pass. What gets saved is a normal guideline file: it has
+version history from v1, so `px0 guidelines log` and `px0 guidelines revert`
+work on it, and it is added to this workflow's `guidelines:` -- which means its
+text is inlined into every run from now on.
+
+Nothing is proposed for a workflow that already says what to do, and nothing on
+a topic you already have a guideline for. `--yes` skips the step entirely, since
+there is no sensible default for "what is your commit message convention".
+
 ## Inspect and run it
 
 ```shell
-px0 list workflows
-px0 run friday-pr-digest --dry-run     # write tools are stubbed, not executed
+px0 workflows list
+px0 workflows run friday-pr-digest --dry-run     # write tools are stubbed, not executed
+```
+
+Leave the id off and px0 lists what you have, to pick with the arrow keys:
+
+```shell
+px0 workflows run
+```
+
+```
+› Which workflow to run?
+  ↑/↓ to move, enter to select, q to cancel
+ ›  1. friday-pr-digest  Post a Friday digest of my PRs to #eng-standup
+    2. weekly-digest     Summarize the week
+```
+
+`j`/`k` move too, and a digit jumps straight to that row. Over a pipe it falls
+back to a numbered prompt. `--stdin` needs an explicit id -- the picker would
+otherwise read its keystrokes from the stream carrying your input.
+
+## Change what it does
+
+```shell
+px0 workflows edit friday-pr-digest
+```
+
+px0 shows the sentence you originally typed and takes a new one:
+
+```
+editing friday-pr-digest
+  original request: every friday afternoon, summarize the PRs I reviewed
+                    this week and post it to #eng
+  tools: composio:SLACK_SEND_MESSAGE
+  guidelines: pr-comment-style.md
+
+› New instructions (blank to keep the current ones):
+```
+
+This rebuilds the workflow rather than opening the file: the tools, inputs, and
+guideline list all follow from the request, so revising the request and
+regenerating keeps them consistent. Hand-editing the body is still fine for a
+small wording change -- but it will not notice that your new instruction needs a
+tool the workflow does not have.
+
+The rebuild saves under the same id, and the old version stays in history:
+
+```shell
+px0 versions list workflows/friday-pr-digest.md
+px0 versions revert workflows/friday-pr-digest.md --to v1
 ```
 
 ## Next

@@ -215,7 +215,7 @@ Everything the old design put in frontmatter is derived from position or from ve
 
 -   Scope comes from the path. A folder named after a configured repo applies to that repo, and anything under a folder named `work/` never leaves the machine (excluded from skill bundles written into repositories and from any output or tool call whose destination is not local).
 -   Identity comes from position too: a claim is addressed as `<path>#<heading-slug>`, with rename aliasing as described above.
--   Bookkeeping (evidence, provenance permalinks, when a claim was last reinforced) lives in version metadata, reconstructed on demand by `px0 why` and `px0 guidelines log`.
+-   Bookkeeping (evidence, provenance permalinks, when a claim was last reinforced) lives in version metadata, reconstructed on demand by `px0 guidelines why` and `px0 guidelines log`.
 
 ### How guidelines reach a workflow
 
@@ -229,7 +229,7 @@ guidelines:
   - code-review/go.md
 ```
 
-Paths are relative to `guidelines/`. There are no folder references, no wildcards, and no inference at run time: the list is exactly what gets inlined, in the order given. Built-in workflows ship with their lists hardcoded, and for a workflow created by `px0 new` the builder picks the relevant files during generation and writes them in, where the user can see and edit them.
+Paths are relative to `guidelines/`. There are no folder references, no wildcards, and no inference at run time: the list is exactly what gets inlined, in the order given. Built-in workflows ship with their lists hardcoded, and for a workflow created by `px0 workflows new` the builder picks the relevant files during generation and writes them in, where the user can see and edit them.
 
 At render time the runner inlines each named file's full content at the top of the prompt, or at a `{{guidelines}}` marker if the body contains one. A named file that does not exist is a validation error, caught before the run starts rather than silently producing a prompt missing its rules. Work-scoped files are dropped, with a note in the run record, when the run's output destination or tool set is not local.
 
@@ -278,7 +278,7 @@ Playlists are queued in `.state/ingest/` and processed by the daemon in the back
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#local-retrieval)
 
-Retrieval applies to `knowledge/` only. Guidelines are never retrieved by similarity; they are inlined deterministically from each workflow's declared list. RAG exists so that workflows, `px0 ask`, and the harness can pull relevant passages out of a growing library.
+Retrieval applies to `knowledge/` only. Guidelines are never retrieved by similarity; they are inlined deterministically from each workflow's declared list. RAG exists so that workflows, `px0 knowledge ask`, and the harness can pull relevant passages out of a growing library.
 
 ### Backend: qmd behind an internal interface
 
@@ -294,7 +294,7 @@ An index format change on a qmd upgrade forces a full reindex, and that is accep
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#index)
 
--   One qmd collection is pointed at `knowledge/`, all subfolders included. The index lives in `.state/index/`, is derived, and is rebuildable at any time with `px0 search reindex`.
+-   One qmd collection is pointed at `knowledge/`, all subfolders included. The index lives in `.state/index/`, is derived, and is rebuildable at any time with `px0 knowledge reindex`.
 -   Incremental indexing runs on two triggers: completion of any `px0 knowledge add` job, and a nightly daemon pass that walks the knowledge tree for manual edits. This walk is separate from the version checkpoint scan, which covers only workflows and guidelines.
 -   Embedding and reranker models are whatever qmd requires, downloaded on first index with explicit consent and a printed size. These are the only models the tool ever puts on disk.
 
@@ -308,22 +308,22 @@ Results carry the ingestion date recorded in the file header, so a passage from 
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#surfaces)
 
--   CLI: `px0 search "<query>" [--k 5] [--json]` returns raw ranked passages, plus `px0 search reindex`.
--   CLI: `px0 ask "<question>"` answers in natural language (below).
+-   CLI: `px0 knowledge search "<query>" [--k 5] [--json]` returns raw ranked passages, plus `px0 knowledge reindex`.
+-   CLI: `px0 knowledge ask "<question>"` answers in natural language (below).
 -   Workflows: an input of the form `retrieve: {query, k}` runs the same interface, and the query string may reference other inputs, so a PR-review workflow can retrieve against the diff it just fetched.
 -   Harness: qmd ships an MCP server mode, registered as a connector so the coding agent can query the knowledge base mid-session over stdio.
 
-Retrieval results included in a run are written to the run record, so `px0 why` covers them for as long as that record is retained.
+Retrieval results included in a run are written to the run record, so `px0 runs why` covers them for as long as that record is retained.
 
-## px0 ask
+## px0 knowledge ask
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#px0-ask)
 
-`px0 ask "<question>"` is question answering over the user's own library: retrieve locally with qmd, then generate an answer with the model backend, citing files.
+`px0 knowledge ask "<question>"` is question answering over the user's own library: retrieve locally with qmd, then generate an answer with the model backend, citing files.
 
 ```shell
-px0 ask "what did that Shopify post say about connection pooling?"
-px0 ask "how does our payments architecture handle idempotency?" --k 8 --sources
+px0 knowledge ask "what did that Shopify post say about connection pooling?"
+px0 knowledge ask "how does our payments architecture handle idempotency?" --k 8 --sources
 ```
 
 Semantics:
@@ -331,9 +331,9 @@ Semantics:
 1.  The question goes through the `retrieve` interface: hybrid search plus rerank over `knowledge/`.
 2.  Top passages and the question are rendered into a fixed answering prompt, and the model backend generates the answer. The prompt instructs the model to answer only from the passages and to say plainly when they do not contain the answer.
 3.  The answer cites its sources as `path#anchor` references; `--sources` prints the passages themselves below the answer.
-4.  Every ask produces a run record, so `px0 why` works on answers too.
+4.  Every ask produces a run record, so `px0 runs why` works on answers too.
 
-`px0 ask` never touches connectors or guidelines; it is retrieval plus generation over `knowledge/` and nothing else. If the index is missing or stale, it says so and points at `px0 search reindex` rather than answering from nothing.
+`px0 knowledge ask` never touches connectors or guidelines; it is retrieval plus generation over `knowledge/` and nothing else. If the index is missing or stale, it says so and points at `px0 knowledge reindex` rather than answering from nothing.
 
 ## Connections, credentials, and tools
 
@@ -417,7 +417,7 @@ A workflow declares the tools the model may call in a `tools:` allowlist. At run
 
 This is the same least-privilege shape as scopes, one level down: scopes bound what the connection can ever do, the allowlist bounds what this workflow can do with it. Since the allowlist is the only thing standing between a scheduled run and a write action, it is the field to read first when reviewing any workflow file.
 
-`px0 run <id> --dry-run` executes the run with write tools stubbed: calls are recorded with their arguments and return a synthetic success, so a posting workflow can be exercised once before it is scheduled.
+`px0 workflows run <id> --dry-run` executes the run with write tools stubbed: calls are recorded with their arguments and return a synthetic success, so a posting workflow can be exercised once before it is scheduled.
 
 ## Workflow model
 
@@ -481,7 +481,7 @@ Frontmatter fields:
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#execution-pipeline)
 
-`px0 run <id>` executes these stages. Each stage failure is written to the run record and aborts the run.
+`px0 workflows run <id>` executes these stages. Each stage failure is written to the run record and aborts the run.
 
 1.  Load and validate the workflow file against the schema: every `guidelines[]` path exists, every `inputs[].tool` and `tools[]` entry exists in the current namespace, and no input tool writes.
 2.  Acquire the store lock (flock on `.state/lock`), checkpoint hand edits to workflows and guidelines into versions, and release. The lock is reacquired later only to route a `file` output, so concurrent runs of different workflows overlap freely.
@@ -504,10 +504,55 @@ The runner treats the backend as text and tool-calls in, text out. The exact inv
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#the-builder)
 
-`px0 new "<description>"` turns a sentence into a working workflow:
+### Picking a workflow
+
+`px0 workflows run` and `px0 workflows edit` take an optional id. With none given
+they list the store's workflows and let one be chosen with the arrow keys (or
+`j`/`k`, or a digit), Enter to confirm and `q` to cancel. The list is drawn in
+place rather than in a full-screen view, so the scrollback survives. Where stdin
+is not a terminal it degrades to a numbered prompt, which keeps it usable over a
+pipe; `--stdin` requires an explicit id, since the picker would otherwise read
+its keystrokes off the stream carrying the workflow's input.
+
+### Editing a workflow
+
+The user's own sentence is stored verbatim in the workflow's `request:` field,
+alongside the model's normalized `description`. `px0 workflows edit <id>` shows
+that sentence back, takes a revised one, and re-runs the builder over it, saving
+under the same id.
+
+It is a rebuild, not a text edit. A workflow file is generated -- its tools,
+inputs, and guideline list all follow from the request -- so revising the request
+and regenerating keeps those consistent, where hand-editing the body would leave
+them describing a workflow that no longer exists. The previous version stays in
+the version history, so `px0 versions revert workflows/<id>.md --to v<N>` undoes
+it.
+
+### Authoring a guideline during a build
+
+A workflow often depends on a standard px0 cannot infer: what counts as worth
+flagging in a review, how a commit message is phrased, the voice a summary is
+written in. After the plan is settled, the builder names at most two such
+standards that no existing guideline file covers, and offers to write them.
+
+The user's answer is the content. px0 asks the question, shapes what they say
+into `## ` claim sections, shows the draft, and takes `again` for another pass
+before saving. The file is written through the guideline change path, so its
+claims have version history from v1 and `px0 guidelines log` / `why` / `revert`
+work on them immediately; the path is added to the workflow's `guidelines:`, and
+from then on the runner inlines its text into every run.
+
+This is deliberately conservative. Nothing is proposed for a workflow whose body
+already specifies what to do, nothing generic the model could have written
+without asking, and nothing on a topic a guideline already covers -- every
+guideline is inlined verbatim into every run, so an unwanted one costs tokens on
+every execution. `--yes` skips the step entirely: there is no sane default for
+"what is your commit message convention".
+
+`px0 workflows new "<description>"` turns a sentence into a working workflow:
 
 ```shell
-px0 new "every friday afternoon, summarize the PRs I reviewed this week and post it to #eng"
+px0 workflows new "every friday afternoon, summarize the PRs I reviewed this week and post it to #eng"
 ```
 
 The builder runs four phases, interactively:
@@ -528,7 +573,7 @@ Workflows compose in two equivalent ways.
 Shell piping, for ad hoc chains:
 
 ```shell
-px0 run collect-week-activity --output stdout | px0 run weekly-digest --stdin
+px0 workflows run collect-week-activity --output stdout | px0 workflows run weekly-digest --stdin
 ```
 
 `--stdin` binds the piped text to the workflow input declared `source: stdin`. `--output stdout` overrides the declared target for that invocation.
@@ -552,7 +597,7 @@ Pipeline semantics:
 
 -   Stages run sequentially; each stage's output binds to the next stage's `stdin` input.
 -   Intermediate outputs live in memory and are written only to the run log; only the terminal stage's output is routed to the declared target.
--   The pipeline gets one run id; each stage is a child record, so `px0 why` can walk into any stage.
+-   The pipeline gets one run id; each stage is a child record, so `px0 runs why` can walk into any stage.
 -   A stage failure aborts downstream stages and marks the run failed. Tool calls already made by earlier stages are not undone; a pipeline that writes should put the writing stage last.
 -   Pipelines cannot nest in v1. A pipeline may reference only leaf workflows, and cycles are rejected at validation.
 
@@ -564,7 +609,7 @@ Scheduling is owned by `px0d`, a small daemon installed by the install script or
 
 The daemon is deliberately dumb. It does five things and nothing else:
 
--   Watches `workflows/` and evaluates each `trigger.schedule` cron expression in machine local time, spawning `px0 run <id> --quiet` as a child process at fire time.
+-   Watches `workflows/` and evaluates each `trigger.schedule` cron expression in machine local time, spawning `px0 workflows run <id> --quiet` as a child process at fire time.
 -   Recovers missed fires from the current day, described below.
 -   Checks Composio connection status ahead of scheduled runs and warns on native PAT expiry.
 -   Runs the background ingest queue, the nightly knowledge reindex, the nightly version checkpoint, and the update check.
@@ -637,7 +682,7 @@ Automatic processes only file proposals; the user disposes of them in `consolida
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#provenance)
 
-`px0 why <id>` walks the chain for any run, answer, output, or claim.
+`px0 runs why <run-id>` walks the chain for any run, answer, or output; `px0 guidelines why <claim-id>` does the same for a claim. Both read the same provenance; they are listed under the entity whose id they take.
 
 -   For a run, answer, or output, it reads the run record: which workflow, which guidelines were inlined at which versions, which inputs were resolved, which tools were called and what they did, which retrieved passages were used. It says plainly when a record has aged out.
 -   For a claim id, it reads version history: every version of that file that touched the section, the evidence recorded with each, and any rename aliases, with permalinks from the evidence.
@@ -673,32 +718,63 @@ Policy: the daemon checks weekly and surfaces an available update in `px0 doctor
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#cli-surface)
 
+Every command names the entity it acts on first, then the verb: `px0 workflows
+new`, `px0 knowledge search`, `px0 guidelines review`. The four that act on the
+install rather than on anything in the store stay flat.
+
 ```shell
+# the install itself
 px0 init [dir]                  # scaffold store, install starters and daemon
-px0 new "<description>"         # builder: plan, check feasibility, connect, generate
-px0 run <workflow> [--quiet] [--stdin] [--output stdout] [--dry-run]
-px0 ask "<question>" [--k 8] [--sources]
-px0 list [workflows|guidelines|knowledge]
-px0 connect setup-composio | <service> [--native --pat] | list | rotate <service> | remove <service>
-px0 tools list [service]        # every tool across connections, read/write marked
-px0 daemon install|status|start|stop|restart|logs
+px0 doctor [--quick]            # credentials, daemon, harness, index, versions, locks, schema
+px0 update [--check|--channel|rollback]
+px0 version
+
+# workflows
+px0 workflows new "<description>"   # builder: clarify, discover, authorize, plan, generate
+px0 workflows run [<id>] [--quiet] [--stdin] [--output stdout] [--dry-run]
+px0 workflows edit [<id>]       # show the original request, take a new one, rebuild
+px0 workflows list
+
+# knowledge
+px0 knowledge add <source> [--to docs|blogs|papers] [--no-propose]
+px0 knowledge refresh <path>
+px0 knowledge list
+px0 knowledge search "<query>" [--k 5]   # raw passages
+px0 knowledge ask "<question>" [--k 8] [--sources]
+px0 knowledge reindex           # rebuild the retrieval index
+
+# guidelines
+px0 guidelines list
+px0 guidelines review [--list-only]
+px0 guidelines log <claim-id>
+px0 guidelines revert <claim-id> --to v<N>
+px0 guidelines why <claim-id>
+px0 guidelines consolidate [--list-only]
+px0 guidelines alias list|link|unlink
+
+# runs
 px0 runs [list|show|output|rerun|logs]
-px0 knowledge add <source> [--wait|--no-propose] | refresh <path>
-px0 guidelines review|log|revert|link|alias
+px0 runs why <run-id>
+
+# tools, history, and the store
+px0 tools list [service] [--status]   # every tool across connections, read/write marked
 px0 versions list|show|diff|revert|prune
 px0 changes list|show|revert
-px0 search "<query>" [--k 5]    # raw passages; also: px0 search reindex
-px0 skills build
-px0 why <id>
+px0 store list                  # workflows, guidelines, and knowledge in one pass
 px0 store export <dir>          # content and history, credentials excluded
+px0 skills build
+
+# daemon and config
+px0 daemon install|status|start|stop|restart|logs|serve
 px0 config list [--json]        # every key: current value, default, type, allowed choices
 px0 config get <key>            # e.g. px0 config get logs.retention_days
 px0 config set <key> <value>    # validated against the key's type/choices, then saved
 px0 config model                # pick a harness + model interactively, verify it responds, save
-px0 update [--check|--channel|rollback]
-px0 version
-px0 doctor                      # credentials, daemon, harness, index, versions, locks, schema
+px0 config composio [<key>]     # store and verify the Composio API key
 ```
+
+`why` appears under both `runs` and `guidelines` because it reads one provenance
+chain but takes two kinds of id; each group's help says which one it wants.
 
 All commands support `--json`. Exit codes: 0 success, 1 user error, 2 connector failure, 3 model backend failure, 4 store or version integrity failure.
 
@@ -773,12 +849,12 @@ rerank = true
 
 [](https://gist.github.com/arpitbbhayani/7d6a17cfd6d68e4741d356c1fdcd7420#milestones)
 
-1.  Store, schemas, `install.sh`, `px0 init`, the versioning layer (blobs, manifest, checkpoint scan, list, show, diff, revert, changes), `px0 run` with the harness backend, `guidelines:` inlining, `standup-summary` and `pr-precheck` working manually, piping.
+1.  Store, schemas, `install.sh`, `px0 init`, the versioning layer (blobs, manifest, checkpoint scan, list, show, diff, revert, changes), `px0 workflows run` with the harness backend, `guidelines:` inlining, `standup-summary` and `pr-precheck` working manually, piping.
 2.  `px0 connect` with Composio setup and the native GitHub PAT path, the normalized tool namespace with read/write marking and parameter listing, `px0 tools list`, tool-based inputs, per-run allowlists, `--dry-run`.
-3.  `px0d` with install, missed-fire recovery, and log retention; `px0 runs` list, output, and logs; run records and `px0 why`; `px0 guidelines review`; `px0 update` with signature verification, migrations, and rollback.
+3.  `px0d` with install, missed-fire recovery, and log retention; `px0 runs` list, output, and logs; run records and `px0 runs why`; `px0 guidelines review`; `px0 update` with signature verification, migrations, and rollback.
 4.  `consolidate` and the proposal flow end to end, `px0 guidelines review`, section-level history, rename aliasing, decay, and contradiction pairs, with `pr-precheck` verification as the first proposal source.
-5.  `px0 knowledge add` for web pages and local documents; `px0 search` and `px0 ask` with qmd behind the retrieve interface; declared pipelines; `px0 runs` TUI with re-run.
-6.  The builder (`px0 new`): plan, feasibility, connect, generate, including guideline selection.
+5.  `px0 knowledge add` for web pages and local documents; `px0 knowledge search` and `px0 knowledge ask` with qmd behind the retrieve interface; declared pipelines; `px0 runs` TUI with re-run.
+6.  The builder (`px0 workflows new`): plan, feasibility, connect, generate, including guideline selection.
 7.  YouTube ingestion with transcript stubs, playlists and the background queue; the qmd MCP connector; `skills-build`.
 
 ## Resolved decisions

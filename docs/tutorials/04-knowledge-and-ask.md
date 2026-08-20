@@ -34,18 +34,18 @@ with `--no-propose` if you just want the material filed.
 ## 2. See what's in the library
 
 ```shell
-px0 list knowledge
+px0 knowledge list
 ```
 
 ## 3. Search it directly
 
 ```shell
-px0 search reindex
-px0 search "connection pooling" --k 8
-px0 search "connection pooling" --json
+px0 knowledge reindex
+px0 knowledge search "connection pooling" --k 8
+px0 knowledge search "connection pooling" --json
 ```
 
-`reindex` rebuilds the retrieval index from scratch; run it if `px0 ask`
+`reindex` rebuilds the retrieval index from scratch; run it if `px0 knowledge ask`
 reports the index is missing or stale. The nightly daemon pass reindexes
 too, and every `knowledge add` reindexes what it just filed. Each result
 line is a `path#anchor` and a relevance score, followed by a text
@@ -67,7 +67,7 @@ connections" -- same idea, no shared keywords. That's what `qmd` is for:
 ```shell
 npm install -g @tobilu/qmd     # or: bun install -g @tobilu/qmd
 px0 config set retrieval.backend qmd
-px0 search reindex
+px0 knowledge reindex
 ```
 
 qmd needs Node.js 20 or newer. If it isn't on your `PATH`, px0 says so
@@ -111,17 +111,17 @@ on both backends. That's a hard exclusion, not a ranking penalty.
 ## 4. Ask it a question
 
 ```shell
-px0 ask "what did that Shopify post say about connection pooling?"
-px0 ask "how does our payments architecture handle idempotency?" --k 8 --sources
+px0 knowledge ask "what did that Shopify post say about connection pooling?"
+px0 knowledge ask "how does our payments architecture handle idempotency?" --k 8 --sources
 ```
 
-`px0 ask` retrieves relevant passages from `knowledge/` and generates an
+`px0 knowledge ask` retrieves relevant passages from `knowledge/` and generates an
 answer citing them -- `--sources` prints the `path#anchor` list
 alongside the answer. It never touches connectors or guidelines; it's
 retrieval plus generation over your library and nothing else.
 
 Every `ask` produces a run record like any workflow run, so it shows up
-in `px0 runs list` and `px0 why <run-id>` can explain exactly which
+in `px0 runs list` and `px0 runs why <run-id>` can explain exactly which
 passages fed the answer.
 
 ## 5. Queued playlist ingests

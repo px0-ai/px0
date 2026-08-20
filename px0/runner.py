@@ -177,7 +177,7 @@ def _tool_call_loop(
     tool_calls: list[dict] = []
     conversation = prompt
     if allowed_tools:
-        # resolve() covers tools discovered by `px0 new`, not just the curated registry
+        # resolve() covers tools discovered by `px0 workflows new`, not just the curated registry
         specs = [(t, tools.resolve(t, home)) for t in allowed_tools]
         descriptions = "\n".join(
             f"- {t}: {spec.description} (params: {spec.params})"

@@ -11,6 +11,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from px0 import (
     ask as ask_mod,
@@ -162,7 +163,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     ui.hint("try next:")
     ui.command("px0 doctor")
-    ui.command('px0 new "describe what you want"')
+    ui.command('px0 workflows new "describe what you want"')
 
 
 def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str, str]]:
@@ -295,13 +296,29 @@ def _confirm_tools(home: Path, selected: list, assume_yes: bool) -> list:
     return kept
 
 
-def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> list[str]:
-    """Authorizes each toolkit the plan needs that isn't authorized yet, asking
-    first. Returns the toolkits still waiting on a browser consent.
+class _AuthOutcome(NamedTuple):
+    """What an authorization pass ended up with, split by whether it can still finish.
 
-    Nothing is aborted over a pending consent: the workflow file is valid either
-    way, and making the user re-run `px0 new` would repeat the clarify, search,
-    selection, and planning passes just to reach the same file.
+    `waiting` is fine to build on -- a consent link is open, or the user chose to
+    deal with it later, and the workflow file is valid either way. `blocked` is
+    not: px0 asked Composio to start the flow and Composio refused, so no amount
+    of clicking finishes it, and a workflow written against those toolkits could
+    never run.
+    """
+    waiting: list[str]
+    blocked: list[tuple[str, str]]
+
+    def __add__(self, other):
+        return _AuthOutcome(self.waiting + other.waiting, self.blocked + other.blocked)
+
+
+def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> _AuthOutcome:
+    """Authorizes each toolkit that isn't authorized yet, asking first.
+
+    A pending consent never aborts: the workflow file is valid either way, and
+    making the user re-run `px0 workflows new` would repeat the clarify, search, selection,
+    and planning passes just to reach the same file. A toolkit Composio *refuses*
+    to start is reported as blocked instead -- see `_abort_if_blocked`.
     """
     pending = []
     with ui.spinner("Checking authorizations"):
@@ -313,7 +330,7 @@ def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> lis
     if not pending:
         if toolkits:
             ui.ok("already authorized", ", ".join(sorted(toolkits)))
-        return []
+        return _AuthOutcome([], [])
 
     ui.heading(f"authorization needed ({len(pending)})")
     for toolkit, status in pending:
@@ -323,39 +340,204 @@ def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> lis
         names = ", ".join(t for t, _ in pending)
         if ui.prompt(f"Start authorization for {names}? [Y/n] ").lower() in ("n", "no"):
             ui.info("skipped; the first run that needs one will offer a link")
-            return [t for t, _ in pending]
+            return _AuthOutcome([t for t, _ in pending], [])
 
-    waiting = []
+    waiting, blocked = [], []
     for toolkit, _ in pending:
         try:
             with ui.spinner(f"Preparing {toolkit} authorization"):
                 res = connect_mod.connect_composio_app(home, toolkit)
         except ValueError as e:
-            ui.err(toolkit, str(e).strip(), stream=sys.stdout)
-            waiting.append(toolkit)
+            blocked.append((toolkit, str(e).strip()))
             continue
         ui.step(toolkit, "open this and complete the consent:", stream=sys.stdout)
         ui.command(res["redirect_url"])
         waiting.append(toolkit)
-    return waiting
+    return _AuthOutcome(waiting, blocked)
+
+
+def _abort_if_blocked(outcome: _AuthOutcome) -> None:
+    """Stops `px0 workflows new` when a toolkit cannot be authorized at all.
+
+    Continuing would mean planning, prompting for, and writing a workflow whose
+    first run is guaranteed to fail on the same refusal -- so this exits rather
+    than folding the failure into the pending list, where it read as "finish this
+    in your browser" for something no browser step can finish.
+    """
+    if not outcome.blocked:
+        return
+    ui.heading(f"authorization failed ({len(outcome.blocked)})")
+    for toolkit, error in outcome.blocked:
+        ui.err(toolkit, error, stream=sys.stdout)
+    ui.hint("nothing was written -- resolve the above, then re-run this command")
+    sys.exit(EXIT_CONNECTOR_ERROR)
+
+
+def _author_guidelines(home: Path, config: dict, description: str, plan,
+                       attached: list[str], assume_yes: bool) -> list[str]:
+    """Offers to author the guidelines this workflow wants but the store lacks.
+
+    The user's own words are the content -- a review rubric or a writing voice is
+    a preference px0 cannot infer, so proposing one is only useful if it asks.
+    Returns the relative paths actually created, for the workflow's `guidelines:`.
+
+    Skipped wholesale under --yes: there is no sane default for "what is your
+    commit message convention", so a non-interactive run must not invent one.
+    """
+    if assume_yes:
+        return []
+    try:
+        with ui.spinner("Checking for standards worth writing down"):
+            proposals = builder_mod.propose_guidelines(config, description, plan, attached)
+    except (builder_mod.BuilderError, harness.HarnessError) as e:
+        # A workflow is perfectly valid without this; never fail the build over it.
+        ui.warn("could not check for new guidelines", str(e).strip(), stream=sys.stdout)
+        return []
+    if not proposals:
+        return []
+
+    created = []
+    for proposal in proposals:
+        ui.heading(f"guideline: {proposal.title}")
+        if proposal.why:
+            ui.bullet(ui.dim(proposal.why))
+        ui.info("would be saved as", f"guidelines/{proposal.path}", stream=sys.stdout)
+        if ui.prompt(f"Write it now? [y/N] ").lower() not in ("y", "yes"):
+            ui.info("skipped", stream=sys.stdout)
+            continue
+
+        path = _write_one_guideline(home, config, proposal)
+        if path:
+            created.append(path)
+    return created
+
+
+def _write_one_guideline(home: Path, config: dict, proposal) -> str | None:
+    """Asks, drafts, shows, and confirms one guideline. Returns its path, or None.
+
+    Loops on "again" rather than accepting a first draft the user doesn't like:
+    the file is about to be inlined into every run of this workflow, so it is
+    worth another pass here instead of an edit later.
+    """
+    while True:
+        answer = ui.paragraph(proposal.ask)
+        if not answer:
+            ui.info("nothing written; skipped", stream=sys.stdout)
+            return None
+        try:
+            with ui.spinner("Drafting the guideline"):
+                content = builder_mod.draft_guideline(config, proposal, answer)
+        except (builder_mod.BuilderError, harness.HarnessError) as e:
+            ui.err("could not draft it", str(e).strip(), stream=sys.stdout)
+            return None
+
+        ui.heading(f"guidelines/{proposal.path}")
+        print(content, flush=True)
+        choice = ui.prompt("Keep it? [Y/again/n] ").lower()
+        if choice in ("a", "again"):
+            continue
+        if choice in ("n", "no"):
+            ui.info("discarded", stream=sys.stdout)
+            return None
+
+        dest = builder_mod.save_guideline(home, proposal.path, content)
+        ui.ok("wrote", str(dest))
+        return proposal.path
 
 
 def cmd_new(args: argparse.Namespace) -> None:
-    """Handles `px0 new`: clarifies the request, searches Composio's catalogue for
-    the tools it needs, confirms them with the user, authorizes what isn't
-    authorized yet, then plans and writes the workflow file."""
+    """Handles `px0 workflows new`: builds a workflow from a sentence."""
     home, config = _ctx()
-    description = args.description
+    _build_workflow(home, config, args.description, args, existing_id=None)
+
+
+def cmd_workflows_edit(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows edit`: shows the original request, takes a new one,
+    and rebuilds the workflow in place.
+
+    A rebuild rather than a text edit. The file is generated -- its tools, inputs,
+    and guideline list all follow from the request -- so editing the request and
+    regenerating keeps those consistent, where hand-editing the body would leave
+    them describing a workflow that no longer exists. The old version stays in the
+    version history either way, so `px0 versions revert` undoes this.
+    """
+    home, config = _ctx()
+    workflow_id = args.workflow or _pick_workflow(home, for_stdin=False, verb="edit")
+
+    workflows = workflow_mod.load_all(home)
+    if workflow_id not in workflows:
+        ui.err(f"no workflow {workflow_id!r}")
+        ui.hint("list them with: px0 workflows list")
+        sys.exit(EXIT_USER_ERROR)
+    wf = workflows[workflow_id]
+
+    ui.heading(f"editing {workflow_id}")
+    # Workflows written before `request:` existed have nothing verbatim to show;
+    # the model's description is the closest thing on file, and saying which one
+    # the user is looking at matters more than hiding the difference.
+    if wf.request:
+        # Short requests sit on the label line; a multi-sentence one gets its own
+        # indented block, because wrapping it after a label makes it hard to read.
+        if len(wf.request) <= 68 and "\n" not in wf.request:
+            ui.kv("original request", wf.request)
+        else:
+            print(f"  {ui.dim('original request:')}", flush=True)
+            for line in wf.request.splitlines():
+                print(f"    {line}", flush=True)
+    else:
+        ui.kv("description", wf.description)
+        ui.hint("this workflow predates stored requests, so that is px0's own "
+                "restatement rather than your wording")
+    if wf.tools:
+        ui.kv("tools", ", ".join(wf.tools))
+    if wf.guidelines:
+        ui.kv("guidelines", ", ".join(wf.guidelines))
+
+    print(flush=True)
+    description = ui.paragraph("New instructions (blank to keep the current ones):").strip()
+    if not description:
+        ui.info("unchanged")
+        return
+
+    _build_workflow(home, config, description, args, existing_id=workflow_id)
+
+
+def _build_workflow(home: Path, config: dict, description: str,
+                    args: argparse.Namespace, existing_id: str | None) -> None:
+    """The build pipeline behind both `workflows new` and `workflows edit`.
+
+    Clarifies the request, discovers and confirms tools, authorizes them, plans,
+    checks feasibility, offers to author missing guidelines, and writes the file.
+
+    Authorization runs *before* planning. The plan can only draw on the tools the
+    user just confirmed, so a toolkit that cannot be authorized makes the workflow
+    unbuildable -- finding that out first avoids spending a planning call and
+    printing a plan the user is then asked to commit to anyway.
+
+    `existing_id` is set when rebuilding: it pins the id instead of prompting, so
+    an edit replaces the workflow rather than forking a near-duplicate under a
+    slightly different name.
+    """
+    assume_yes = getattr(args, "yes", False)
 
     try:
-        qa = _clarify_loop(config, description, skip=args.yes or args.no_clarify)
+        qa = _clarify_loop(config, description,
+                           skip=assume_yes or getattr(args, "no_clarify", False))
 
-        selected = [] if args.no_discover else _discover_tools(home, config, description, qa)
+        selected = [] if getattr(args, "no_discover", False) else \
+            _discover_tools(home, config, description, qa)
         if selected:
-            selected = _confirm_tools(home, selected, args.yes)
+            selected = _confirm_tools(home, selected, assume_yes)
             # Remember them before planning: the plan, its validation, and every
             # later run all resolve these ids out of the store's catalogue cache.
             catalogue_mod.remember(home, selected)
+
+        # Every provider the plan could possibly reach is a provider of a tool
+        # confirmed above, so this pass covers the discovered case in full.
+        # `_confirm_tools` has already shown which of them are write tools.
+        pre_authorized = {t.toolkit for t in selected}
+        auth = _authorize_toolkits(home, pre_authorized, assume_yes)
+        _abort_if_blocked(auth)
 
         with ui.spinner("Writing the workflow plan"):
             plan = builder_mod.generate_plan(config, description, qa, selected)
@@ -380,28 +562,43 @@ def cmd_new(args: argparse.Namespace) -> None:
         ui.warn("this workflow would be granted write tools",
                 ", ".join(writes), stream=sys.stdout)
 
-    waiting = _authorize_toolkits(home, builder_mod.required_connections(plan, home), args.yes)
+    # Whatever the plan needs that discovery didn't cover: px0's curated tools,
+    # and everything under --no-discover, where there was nothing to pre-authorize.
+    residue = builder_mod.required_connections(plan, home) - pre_authorized
+    if residue:
+        rest = _authorize_toolkits(home, residue, assume_yes)
+        _abort_if_blocked(rest)
+        auth = auth + rest
+    waiting = auth.waiting
 
-    if not args.yes:
-        if ui.prompt("Generate this workflow? [y/N] ").lower() != "y":
+    verb = "Rebuild" if existing_id else "Generate"
+    if not assume_yes:
+        if ui.prompt(f"{verb} this workflow? [y/N] ").lower() != "y":
             ui.info("cancelled")
             return
 
-    # slugify the description into a default workflow id, capped to 40 chars
-    default_id = re.sub(r"[^a-z0-9-]+", "-", plan.description.lower()).strip("-")[:40] or "new-workflow"
-    if args.id:
-        workflow_id = args.id
-    elif args.yes:
-        workflow_id = default_id
+    if existing_id:
+        workflow_id = existing_id
     else:
-        workflow_id = ui.prompt(f"workflow id {ui.dim(f'[{default_id}]')}: ") or default_id
+        # slugify the description into a default workflow id, capped to 40 chars
+        default_id = re.sub(r"[^a-z0-9-]+", "-",
+                            plan.description.lower()).strip("-")[:40] or "new-workflow"
+        if getattr(args, "id", None):
+            workflow_id = args.id
+        elif assume_yes:
+            workflow_id = default_id
+        else:
+            workflow_id = ui.prompt(f"workflow id {ui.dim(f'[{default_id}]')}: ") or default_id
 
     guidelines = builder_mod.choose_guidelines(home, description)
+    # After the commit to write, not before: nobody should be asked to author
+    # a convention for a workflow they are about to cancel.
+    guidelines += _author_guidelines(home, config, description, plan, guidelines, assume_yes)
 
-    content = builder_mod.render_workflow_file(workflow_id, plan, guidelines)
+    content = builder_mod.render_workflow_file(workflow_id, plan, guidelines, description)
     dest = builder_mod.save_workflow(home, workflow_id, content)
 
-    ui.heading(f"created {workflow_id}")
+    ui.heading(f"{'updated' if existing_id else 'created'} {workflow_id}")
     ui.ok("workflow", str(dest))
     if guidelines:
         ui.ok("guidelines", ", ".join(guidelines))
@@ -415,14 +612,40 @@ def cmd_new(args: argparse.Namespace) -> None:
         ui.hint("finish the consent in your browser, then:")
     else:
         ui.hint("try next:")
-    ui.command(f"px0 run {workflow_id} --dry-run")
+    ui.command(f"px0 workflows run {workflow_id} --dry-run")
+
+
+def _pick_workflow(home: Path, for_stdin: bool, verb: str = "run") -> str:
+    """Resolves the workflow to run when none was named, by asking.
+
+    Refuses when --stdin is in play: the picker reads keystrokes from the same
+    stdin the workflow's input is coming from, so one would consume the other.
+    """
+    workflows = sorted(workflow_mod.load_all(home).items())
+    if not workflows:
+        ui.err("no workflows yet")
+        ui.hint('describe one with `px0 workflows new "..."`')
+        sys.exit(EXIT_USER_ERROR)
+    if for_stdin:
+        ui.err("--stdin needs an explicit workflow id",
+               "the picker would read the keystrokes from that same stream")
+        ui.hint("list them with: px0 workflows list")
+        sys.exit(EXIT_USER_ERROR)
+
+    choice = ui.select(f"Which workflow to {verb}?",
+                       [(wid, wf.description) for wid, wf in workflows])
+    if choice is None:
+        ui.info("cancelled")
+        sys.exit(0)
+    return workflows[choice][0]
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    """Handles `px0 run`: executes a workflow with inputs collected from --stdin and
+    """Handles `px0 workflows run`: executes a workflow with inputs collected from --stdin and
     --input KEY=VALUE flags, then prints the outcome and, depending on --json/--quiet
     and the workflow's output target, the run's output text."""
     home, config = _ctx()
+    workflow_id = args.workflow or _pick_workflow(home, args.stdin)
     cli_inputs: dict = {}
     if args.stdin:
         cli_inputs["_stdin"] = sys.stdin.read()
@@ -434,9 +657,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     trigger = "late" if args.late_scheduled_at else "manual"
 
     try:
-        with ui.spinner(f"Running {args.workflow}", quiet=args.quiet or args.json):
+        with ui.spinner(f"Running {workflow_id}", quiet=args.quiet or args.json):
             record = runner.run(
-                home, config, args.workflow, trigger=trigger, cli_inputs=cli_inputs,
+                home, config, workflow_id, trigger=trigger, cli_inputs=cli_inputs,
                 dry_run=args.dry_run, output_override=output_override,
                 late_scheduled_at=args.late_scheduled_at,
             )
@@ -450,7 +673,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         if out.get("target") == "file":
             detail += f" -> {out.get('path')}"
         role = ui.ok if record["outcome"] == "success" else ui.err
-        role(f"{args.workflow} {record['outcome']}", detail, stream=sys.stderr)
+        role(f"{workflow_id} {record['outcome']}", detail, stream=sys.stderr)
 
     if args.json:
         _dump(args, record)
@@ -459,7 +682,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
-    """Handles `px0 ask`: answers a question via retrieval over guidelines/knowledge
+    """Handles `px0 knowledge ask`: answers a question via retrieval over guidelines/knowledge
     and prints the answer, optionally followed by source passages with --sources."""
     home, config = _ctx()
     try:
@@ -475,37 +698,66 @@ def cmd_ask(args: argparse.Namespace) -> None:
             ui.bullet(f"{p.path}{ui.dim('#' + p.anchor)}")
 
 
-def cmd_list(args: argparse.Namespace) -> None:
-    """Handles `px0 list`: prints workflows, guidelines, and/or knowledge file paths.
-    With no kind given, prints all three sections; otherwise prints just that section."""
+# --- listing --------------------------------------------------------------
+#
+# One printer per entity, each reachable both as its own verb
+# (`px0 workflows list`) and as a section of `px0 store list`. The `heading`
+# flag is what differs: a single-entity listing needs no title, because the
+# command the user typed already said what they are looking at.
+
+def _print_workflows(home: Path, heading: bool) -> None:
+    workflows = sorted(workflow_mod.load_all(home).items())
+    if heading:
+        ui.heading(f"workflows {ui.dim(f'({len(workflows)})')}")
+    width = max((len(w) for w, _ in workflows), default=0)
+    for wid, wf in workflows:
+        print(f"  {wid.ljust(width)}  {ui.dim(wf.description)}")
+    if not workflows:
+        ui.hint('none yet -- describe one with `px0 workflows new "..."`')
+
+
+def _print_guidelines(home: Path, heading: bool) -> None:
+    base = paths.guidelines_dir(home)
+    files = sorted(base.rglob("*.md"))
+    if heading:
+        ui.heading(f"guidelines {ui.dim(f'({len(files)})')}")
+    for p in files:
+        print(f"  {p.relative_to(base)}")
+
+
+def _print_knowledge(home: Path, config: dict, heading: bool) -> None:
+    base = retrieval.knowledge_path(home, config)
+    files = sorted(base.rglob("*.md")) if base.exists() else []
+    if heading:
+        ui.heading(f"knowledge {ui.dim(f'({len(files)})')}")
+    for p in files:
+        print(f"  {p.relative_to(base)}")
+
+
+def cmd_workflows_list(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows list`: every workflow id with its description."""
+    home, _ = _ctx()
+    _print_workflows(home, heading=False)
+
+
+def cmd_guidelines_list(args: argparse.Namespace) -> None:
+    """Handles `px0 guidelines list`: every guideline file, store-relative."""
+    home, _ = _ctx()
+    _print_guidelines(home, heading=False)
+
+
+def cmd_knowledge_list(args: argparse.Namespace) -> None:
+    """Handles `px0 knowledge list`: every knowledge file, store-relative."""
     home, config = _ctx()
-    kind = args.kind
+    _print_knowledge(home, config, heading=False)
 
-    if kind in (None, "workflows"):
-        workflows = sorted(workflow_mod.load_all(home).items())
-        if kind is None:
-            ui.heading(f"workflows {ui.dim(f'({len(workflows)})')}")
-        width = max((len(w) for w, _ in workflows), default=0)
-        for wid, wf in workflows:
-            print(f"  {wid.ljust(width)}  {ui.dim(wf.description)}")
-        if not workflows and kind is None:
-            ui.hint('none yet -- describe one with `px0 new "..."`')
 
-    if kind in (None, "guidelines"):
-        base = paths.guidelines_dir(home)
-        files = sorted(base.rglob("*.md"))
-        if kind is None:
-            ui.heading(f"guidelines {ui.dim(f'({len(files)})')}")
-        for p in files:
-            print(f"  {p.relative_to(base)}")
-
-    if kind in (None, "knowledge"):
-        base = retrieval.knowledge_path(home, config)
-        files = sorted(base.rglob("*.md")) if base.exists() else []
-        if kind is None:
-            ui.heading(f"knowledge {ui.dim(f'({len(files)})')}")
-        for p in files:
-            print(f"  {p.relative_to(base)}")
+def cmd_store_list(args: argparse.Namespace) -> None:
+    """Handles `px0 store list`: all three entities at once, each under a heading."""
+    home, config = _ctx()
+    _print_workflows(home, heading=True)
+    _print_guidelines(home, heading=True)
+    _print_knowledge(home, config, heading=True)
 
 
 # --- tools ---------------------------------------------------------------
@@ -522,7 +774,7 @@ _AUTH_STATE = {
 def cmd_tools(args: argparse.Namespace) -> None:
     """Handles `px0 tools list`: prints each available tool with a read/write marker,
     its id, provider, description, and parameters, optionally filtered by service."""
-    # Include tools discovered by `px0 new` when there is a store to read them
+    # Include tools discovered by `px0 workflows new` when there is a store to read them
     # from, but never require one: this listing is how you find out what px0 can
     # do before `px0 init`.
     home = paths.store_home()
@@ -888,7 +1140,7 @@ def cmd_guidelines(args: argparse.Namespace) -> None:
 
 
 def cmd_consolidate(args: argparse.Namespace) -> None:
-    """Handles `px0 consolidate`: builds a consolidation session (pending proposals,
+    """Handles `px0 guidelines consolidate`: builds a consolidation session (pending proposals,
     decayed claims, contradictions, unreferenced guideline files), prints a summary,
     then runs the same interactive review flow as `guidelines review`."""
     home, config = _ctx()
@@ -1014,18 +1266,20 @@ def cmd_changes(args: argparse.Namespace) -> None:
         return
 
 
-# --- search / skills / why / store / update / version / doctor -----------
+# --- knowledge search / skills / why / store / update / version / doctor -
+
+def cmd_reindex(args: argparse.Namespace) -> None:
+    """Handles `px0 knowledge reindex`: rebuilds the retrieval index from disk."""
+    home, config = _ctx()
+    backend = config_mod.get(config, "retrieval.backend", "local")
+    with ui.spinner(f"Reindexing knowledge ({backend})"):
+        count = retrieval.reindex(home, config)
+    ui.ok("reindexed", f"{count} passages")
+
 
 def cmd_search(args: argparse.Namespace) -> None:
-    """Handles `px0 search`: rebuilds the retrieval index when the query is literally
-    "reindex", otherwise retrieves and prints the top-k matching passages."""
+    """Handles `px0 knowledge search`: prints the top-k passages matching the query."""
     home, config = _ctx()
-    if args.query == "reindex":
-        backend = config_mod.get(config, "retrieval.backend", "local")
-        with ui.spinner(f"Reindexing knowledge ({backend})"):
-            count = retrieval.reindex(home, config)
-        ui.ok("reindexed", f"{count} passages")
-        return
     with ui.spinner(f"Searching for {args.query!r}"):
         passages = retrieval.retrieve(home, config, args.query, k=args.k)
     if args.json:
@@ -1033,7 +1287,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         return
     if not passages:
         ui.info("no matches")
-        ui.hint("if the index looks stale: px0 search reindex")
+        ui.hint("if the index looks stale: px0 knowledge reindex")
         return
     for p in passages:
         print(f"  {p.path}{ui.dim('#' + p.anchor)}  {ui.dim(str(round(p.score, 3)))}")
@@ -1091,7 +1345,7 @@ def cmd_skills(args: argparse.Namespace) -> None:
 
 
 def cmd_why(args: argparse.Namespace) -> None:
-    """Handles `px0 why <target_id>`: prints the provenance chain explaining how a
+    """Handles `px0 guidelines why` / `px0 runs why`: prints the provenance chain explaining how a
     claim, proposal, or other tracked entity came to be."""
     home, config = _ctx()
     try:
@@ -1345,6 +1599,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         (ui.ok if check["ok"] else ui.err)(
             name, check["detail"], width=width, stream=sys.stdout
         )
+        # The fix goes straight under the line that failed, not in a footer: a
+        # red line the reader can't act on is the whole complaint about doctor.
+        if not check["ok"] and check.get("fix"):
+            ui.remedy(check["fix"])
 
     failed = [n for n, c in checks.items() if not c["ok"]]
     if failed:

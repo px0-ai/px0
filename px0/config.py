@@ -281,6 +281,33 @@ def set_key(config: dict[str, Any], key: str, raw: str) -> Any:
     return value
 
 
+def key_help(include_choices: bool = True) -> str:
+    """Every settable key as an aligned block, for a subcommand's --help epilog.
+
+    Keys only -- type, and the allowed values where a key restricts them. The
+    descriptions and each key's *current* value live in `px0 config list`, which
+    needs a loaded store; --help must render without one, and a 22-key listing
+    with wrapped help for each would bury the usage text above it.
+
+    Grouped by the leading section so the shape of the config is visible: the
+    dotted keys mirror the TOML tables they are written to.
+    """
+    width = max(len(k) for k in SCHEMA)
+    lines = ["config keys:"]
+    section = None
+    for key, spec in SCHEMA.items():
+        head = key.split(".")[0]
+        if head != section:
+            lines.append("")
+            section = head
+        suffix = spec["type"].__name__
+        if include_choices and spec["choices"]:
+            suffix += "  " + "|".join(spec["choices"])
+        lines.append(f"  {key.ljust(width)}  {suffix}")
+    lines += ["", "`px0 config list` adds each key's description, current value, and default."]
+    return "\n".join(lines)
+
+
 def describe(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Returns one entry per SCHEMA key: its current value, default, type
     name, allowed choices (or None), and help text. Used by `px0 config

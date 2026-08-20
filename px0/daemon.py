@@ -1,5 +1,5 @@
 """px0d: the scheduler. Deliberately dumb -- it watches workflows/,
-evaluates cron schedules in machine local time, spawns `px0 run <id>
+evaluates cron schedules in machine local time, spawns `px0 workflows run <id>
 --quiet`, recovers missed fires, and runs the nightly housekeeping pass.
 
 Missed-fire detection here is a practical approximation: the same
@@ -82,7 +82,7 @@ def _due_fires(schedule: str, last_fire: datetime | None, now: datetime) -> list
 
 
 def tick(home: Path, config: dict, state: dict) -> dict:
-    """Check every scheduled workflow once; spawn `px0 run` for anything
+    """Check every scheduled workflow once; spawn `px0 workflows run` for anything
     due. Returns the updated schedule state."""
     now = datetime.now()
     for wf in workflow_mod.load_all(home).values():
@@ -102,11 +102,11 @@ def tick(home: Path, config: dict, state: dict) -> dict:
 
 
 def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime) -> None:
-    """Launches `px0 run <workflow_id> --quiet` as a detached subprocess, passing
-    --late-scheduled-at when the fire was recovered rather than on-time."""
+    """Launches `px0 workflows run <workflow_id> --quiet` as a detached subprocess,
+    passing --late-scheduled-at when the fire was recovered rather than on-time."""
     px0_bin = shutil.which("px0") or sys.executable
     args = [px0_bin] if px0_bin != sys.executable else [sys.executable, "-m", "px0.cli"]
-    args += ["run", workflow_id, "--quiet"]
+    args += ["workflows", "run", workflow_id, "--quiet"]
     if late:
         args += ["--late-scheduled-at", fire_time.strftime("%H:%M")]
     env = {**os.environ, "PX0_HOME": str(home)}
@@ -197,7 +197,7 @@ def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS
         os._exit(0)
 
     def reap_children(signum, frame):
-        # reaps spawned `px0 run` children so they don't linger as zombies
+        # reaps spawned `px0 workflows run` children so they don't linger as zombies
         try:
             while os.waitpid(-1, os.WNOHANG)[0] > 0:
                 pass
@@ -305,7 +305,8 @@ def crontab_block(home: Path, px0_bin: str) -> str:
     for wf in workflow_mod.load_all(home).values():
         schedule = wf.trigger.get("schedule")
         if schedule and not wf.pipeline:
-            lines.append(f"{schedule} PX0_HOME={home} {px0_bin} run {wf.id} --quiet")
+            lines.append(
+                f"{schedule} PX0_HOME={home} {px0_bin} workflows run {wf.id} --quiet")
     lines.append("# END px0-managed")
     return "\n".join(lines) + "\n"
 

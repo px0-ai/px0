@@ -46,23 +46,23 @@ entry point in `pyproject.toml`.
 
 ```shell
 px0 init
-px0 new "summarize a URL on stdin" --id summarize
-px0 run summarize --stdin <<< "https://example.com/some-post"
+px0 workflows new "summarize a URL on stdin" --id summarize
+px0 workflows run summarize --stdin <<< "https://example.com/some-post"
 ```
 
 Or skip workflows entirely and use the knowledge library:
 
 ```shell
 px0 knowledge add https://example.com/some-post
-px0 ask "what did that post say about caching?"
+px0 knowledge ask "what did that post say about caching?"
 ```
 
-`px0 init` scaffolds the store directory. `px0 new` creates a workflow
+`px0 init` scaffolds the store directory. `px0 workflows new` creates a workflow
 from your prompt (`--id` names it; otherwise px0 suggests one from the
-description). `px0 run` executes it.
+description). `px0 workflows run` executes it.
 
 ```shell
-px0 list workflows
+px0 workflows list
 px0 runs list
 ```
 

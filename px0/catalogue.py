@@ -1,14 +1,14 @@
 """Composio's tool catalogue: searching it, and remembering what was found.
 
 px0 ships a small set of curated tools (`tools.REGISTRY`), but Composio's
-catalogue is thousands of tools across hundreds of toolkits. `px0 new`
+catalogue is thousands of tools across hundreds of toolkits. `px0 workflows new`
 searches it so a workflow can use the tool that actually fits the task
 instead of the nearest curated approximation.
 
 A discovered tool is *cached in the store* rather than looked up again at run
 time. Two reasons: a workflow must keep working offline and unchanged after it
 is written, and read-vs-write has to be knowable without a network call --
-`px0 run --dry-run` decides what to stub from it.
+`px0 workflows run --dry-run` decides what to stub from it.
 
 Read/write comes from Composio's own MCP-style hints in each tool's `tags`:
 `readOnlyHint` means it only reads; its absence means it can change something;

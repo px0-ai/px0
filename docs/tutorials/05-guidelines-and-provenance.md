@@ -30,7 +30,7 @@ px0 guidelines review --list-only    # print pending proposals, don't prompt
 ## 2. Consolidate periodically
 
 ```shell
-px0 consolidate
+px0 guidelines consolidate
 ```
 
 `consolidate` is a wider sweep than `review`: it surfaces the same
@@ -66,10 +66,11 @@ px0 guidelines alias link <old-claim-id> <new-claim-id>
 ## 4. Ask why
 
 ```shell
-px0 why <run-id>
+px0 guidelines why <claim-id>
+px0 runs why <run-id>
 ```
 
-`px0 why` walks the full chain behind any run, answer, output, or claim:
+`why` walks the full chain behind a claim or a run -- the same provenance, reached under whichever entity's id you have:
 which guideline versions were inlined, which knowledge passages were
 retrieved, which tools were called, and what evidence justified any
 guideline change made along the way. It works on a bare store with
@@ -103,7 +104,7 @@ See [08-skills.md](08-skills.md).
 ## Next
 
 - [07-browsing-runs.md](07-browsing-runs.md) -- the interactive view over
-  the run records `px0 why` reads from.
+  the run records `px0 runs why` reads from.
 - [08-skills.md](08-skills.md) -- manage community agent skills and compile
   guidelines into Claude Code skill bundles.
 - Back to [01-getting-started.md](01-getting-started.md), or see
