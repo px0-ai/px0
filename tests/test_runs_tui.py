@@ -282,3 +282,31 @@ def test_suspended_restores_curses_on_the_happy_path(monkeypatch):
         events.append("body")
 
     assert events == ["endwin", "body", "refresh"]
+
+
+def test_route_output_to_output_folder(tmp_home):
+    from px0 import runner, paths
+    from datetime import date
+
+    # Default file path
+    res = runner.route_output(tmp_home, {"target": "file"}, "Hello World")
+    today = date.today().isoformat()
+    expected_file = paths.output_dir(tmp_home) / f"output-{today}.md"
+    assert res["target"] == "file"
+    assert res["path"] == f"output/output-{today}.md"
+    assert expected_file.exists()
+    assert expected_file.read_text() == "Hello World"
+
+    # Custom relative path without output prefix
+    res2 = runner.route_output(tmp_home, {"target": "file", "path": "custom/report.md"}, "Report text")
+    expected_custom = paths.output_dir(tmp_home) / "custom" / "report.md"
+    assert res2["path"] == "output/custom/report.md"
+    assert expected_custom.exists()
+    assert expected_custom.read_text() == "Report text"
+
+    # Legacy outputs/ prefix mapped to output/
+    res3 = runner.route_output(tmp_home, {"target": "file", "path": "outputs/legacy.md"}, "Legacy text")
+    expected_legacy = paths.output_dir(tmp_home) / "legacy.md"
+    assert res3["path"] == "output/legacy.md"
+    assert expected_legacy.exists()
+    assert expected_legacy.read_text() == "Legacy text"

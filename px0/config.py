@@ -13,7 +13,7 @@ DEFAULTS: dict[str, Any] = {
         "path": "~/.px0/knowledge",
     },
     "output": {
-        "path": "~/.px0/outputs",
+        "path": "~/.px0/output",
     },
     "connectors": {
         "provider": "composio",

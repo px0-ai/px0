@@ -251,9 +251,13 @@ def route_output(
     if target == "stdout":
         return {"target": "stdout", "text": text}
     if target == "file":
-        path_template = output_spec.get("path", "outputs/output-{date}.md")
+        path_template = output_spec.get("path", "output/output-{date}.md")
         rendered = path_template.replace("{date}", date.today().isoformat())
-        dest = home / rendered
+        if rendered.startswith("outputs/"):
+            rendered = "output/" + rendered.removeprefix("outputs/")
+        elif not rendered.startswith("output/") and not Path(rendered).is_absolute():
+            rendered = f"output/{rendered}"
+        dest = home / rendered if not Path(rendered).is_absolute() else Path(rendered)
         lock = paths.lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         with open(lock, "w") as lf:
@@ -263,7 +267,8 @@ def route_output(
                 dest.write_text(text)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
-        return {"target": "file", "path": str(dest.relative_to(home)), "text": text}
+        rel_path = str(dest.relative_to(home)) if dest.is_relative_to(home) else str(dest)
+        return {"target": "file", "path": rel_path, "text": text}
     raise RunError(f"unknown output target: {target}")
 
 

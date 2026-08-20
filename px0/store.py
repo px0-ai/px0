@@ -18,7 +18,7 @@ def export(home: Path, dest: Path) -> None:
     """Content plus version history, credentials excluded -- the supported
     way to move a store to another machine."""
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("workflows", "guidelines", "knowledge", "outputs", "skills", "config.toml"):
+    for name in ("workflows", "guidelines", "knowledge", "output", "outputs", "skills", "config.toml"):
         src = home / name
         if not src.exists():
             continue
@@ -54,7 +54,7 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
         home / "knowledge" / "docs",
         home / "knowledge" / "blogs",
         home / "knowledge" / "papers",
-        paths.outputs_dir(home),
+        paths.output_dir(home),
         paths.state_dir(home),
         paths.proposals_dir(home),
         paths.index_dir(home),
@@ -67,7 +67,7 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
     if not cfg_path.exists():
         initial_config = {k: dict(v) for k, v in config_mod.DEFAULTS.items()}
         initial_config["knowledge"]["path"] = str(home / "knowledge")
-        initial_config["output"]["path"] = str(home / "outputs")
+        initial_config["output"]["path"] = str(home / "output")
         if harness_cmd:
             initial_config["model"]["harness_cmd"] = harness_cmd
         config_mod.save(cfg_path, initial_config)

@@ -19,9 +19,14 @@ def guidelines_dir(home: Path | None = None) -> Path:
     return (home or store_home()) / "guidelines"
 
 
+def output_dir(home: Path | None = None) -> Path:
+    """Path to the tool-managed output folder under `home` (or the default store)."""
+    return (home or store_home()) / "output"
+
+
 def outputs_dir(home: Path | None = None) -> Path:
-    """Path to the tool-managed outputs folder under `home` (or the default store)."""
-    return (home or store_home()) / "outputs"
+    """Alias for output_dir."""
+    return output_dir(home)
 
 
 def skills_dir(home: Path | None = None) -> Path:
