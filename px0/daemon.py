@@ -23,8 +23,8 @@ from pathlib import Path
 
 from croniter import croniter
 
-from px0 import claims, config as config_mod, paths, retrieval
-from px0 import runner, runs as runs_mod
+from px0 import claims, paths, retrieval, versioning
+from px0 import runs as runs_mod
 from px0 import workflow as workflow_mod
 
 POLL_INTERVAL_SECONDS = 30
@@ -121,8 +121,10 @@ def recover_missed_fires(home: Path, config: dict) -> None:
 
 def run_nightly(home: Path, config: dict) -> dict:
     """Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, knowledge
-    reindex, and run-log retention. Reindex failures are captured in the report
-    rather than raised, so one broken index doesn't block the rest of housekeeping."""
+    reindex, draining queued playlist ingest jobs, run-log retention, and a
+    once-a-week update-availability check. Every fallible step is captured in the
+    report rather than raised, so one broken index or unreachable playlist doesn't
+    block the rest of housekeeping."""
     _log_event(config, "nightly: started housekeeping")
     report = {}
     report["checkpoint"] = claims.scan_and_process(home, force_hash=True)
@@ -155,15 +157,20 @@ def run_nightly(home: Path, config: dict) -> dict:
                 "checked_at": datetime.now().isoformat(),
                 "available_version": check_res.get("available_version")
             }, indent=2))
-    except Exception:
-        pass
+    except Exception as e:
+        # An update check is never worth failing housekeeping over, but a silent
+        # swallow means a permanently broken check is invisible -- log it. Note
+        # last_update_check is only advanced on success, so this retries tomorrow.
+        _log_event(config, f"nightly: update check skipped ({e})")
 
     cp_val = 0
     if report.get("checkpoint"):
         try:
             ch = versioning.show_change(home, report["checkpoint"])
             cp_val = len(ch.get("files", []))
-        except Exception:
+        except (OSError, ValueError, KeyError):
+            # The change exists (scan_and_process returned its id) but couldn't be
+            # read back; report it as one rather than losing the fact entirely.
             cp_val = 1
 
     reindexed_val = report.get("reindexed", 0)
@@ -202,8 +209,7 @@ def serve(home: Path, config: dict, poll_interval: float = POLL_INTERVAL_SECONDS
     signal.signal(signal.SIGCHLD, reap_children)
 
     try:
-        state = load_schedule_state(home)
-        tick(home, config, state)  # recover missed fires on start/wake
+        recover_missed_fires(home, config)
         last_nightly = None
         while True:
             time.sleep(poll_interval)

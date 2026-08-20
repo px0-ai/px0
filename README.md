@@ -23,12 +23,18 @@ See [spec.md](spec.md) for the full design.
 
 ## Install
 
-This is a Python package; install it into a virtualenv:
+```shell
+curl -fsSL https://raw.githubusercontent.com/arpitbbhayani/px0/main/install.sh | sh
+```
+
+The installer bootstraps pipx, installs px0 from PyPI, and initializes a
+store. For a development install from a clone:
 
 ```shell
 python -m venv venv
 source venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
+pytest
 ```
 
 This puts the `px0` command on your `PATH` via the `[project.scripts]`
@@ -36,14 +42,24 @@ entry point in `pyproject.toml`.
 
 ## Hello world
 
+`px0 init` ships no workflows -- you describe one and px0 writes the file:
+
 ```shell
 px0 init
-px0 new "summarize a URL on stdin"
-echo "https://example.com/some-post" | px0 run summarize --stdin
+px0 new "summarize a URL on stdin" --id summarize
+px0 run summarize --stdin <<< "https://example.com/some-post"
+```
+
+Or skip workflows entirely and use the knowledge library:
+
+```shell
+px0 knowledge add https://example.com/some-post
+px0 ask "what did that post say about caching?"
 ```
 
 `px0 init` scaffolds the store directory. `px0 new` creates a workflow
-from your prompt. `px0 run` executes it. 
+from your prompt (`--id` names it; otherwise px0 suggests one from the
+description). `px0 run` executes it.
 
 ```shell
 px0 list workflows
@@ -79,8 +95,17 @@ px0 skills build
 
 ## Documentation
 
-- [docs/tutorials/](docs/tutorials/) -- step-by-step walkthroughs:
-  getting started, building a workflow from a description, knowledge and
-  `ask`, guideline provenance, and skills management.
+Step-by-step walkthroughs live in [docs/tutorials/](docs/tutorials/):
+
+1. [Getting started](docs/tutorials/01-getting-started.md)
+2. [Building a workflow](docs/tutorials/02-building-a-workflow.md)
+3. [Connections and tools](docs/tutorials/03-connections-and-tools.md)
+4. [Knowledge and ask](docs/tutorials/04-knowledge-and-ask.md)
+5. [Guidelines and provenance](docs/tutorials/05-guidelines-and-provenance.md)
+6. [Scheduling and the daemon](docs/tutorials/06-scheduling-and-the-daemon.md)
+7. [Browsing runs](docs/tutorials/07-browsing-runs.md)
+8. [Skills and agent bundles](docs/tutorials/08-skills.md)
+9. [Updating px0](docs/tutorials/09-updating-px0.md)
+
 - `python scripts/gen_docs.py` regenerates [docs/reference.md](docs/reference.md),
   an API reference generated from the docstrings in `px0/*.py`.

@@ -25,27 +25,126 @@ Returns {"answer", "passages", "run_id"}.
 
 ## `px0.builder`
 
-px0 new: turn a sentence into a working workflow. Pure planning/
-generation functions live here; the interactive plan/confirm/connect/
-generate loop lives in the CLI, which is where user prompts belong.
+px0 new: turn a sentence into a working workflow.
+
+Building one runs four harness passes, each with a job small enough that the
+model can do it well:
+
+1. `clarify` -- ask what's ambiguous about the request. Repeated until the
+   model has no questions left (or the user stops answering), because a plan
+   built on a guess is worse than one more question.
+2. `propose_queries` -- turn the settled request into Composio catalogue
+   searches. The model knows what capabilities the task needs; it does not
+   know Composio's tool names, so it writes queries rather than guessing slugs.
+3. `select_tools` -- pick the few tools that actually fit from the candidates
+   those searches returned. Raw relevance ranking is not good enough to trust
+   blind (searching "post a message to a channel" surfaces a *delete* tool
+   first), so a model with the task in hand chooses, and a human confirms.
+4. `generate_plan` -- write the workflow against exactly those tools.
+
+Pure planning functions live here; every prompt, spinner, and confirmation
+lives in the CLI, which is where user interaction belongs.
 
 ### `class BuilderError`
 
 Raised when a workflow plan can't be generated or parsed from the harness response.
+
+### `_extract_json`
+
+```python
+def _extract_json(raw: str, want_array: bool = False)
+```
+
+Pulls the first JSON value out of a harness response.
+
+Harnesses narrate around their answers, so the JSON is located rather than
+assumed to be the whole reply.
+
+### `_qa_block`
+
+```python
+def _qa_block(qa: list[tuple[str, str]]) -> str
+```
+
+Renders the clarification history for inclusion in a later prompt.
 
 ### `class Plan`
 
 A workflow plan produced by the harness: trigger, inputs, tools, output shape,
 and the instruction body, plus the raw JSON the model returned.
 
+### `clarify`
+
+```python
+def clarify(config: dict, description: str, qa: list[tuple[str, str]]) -> list[str]
+```
+
+Asks what is still ambiguous about the request.
+
+Returns up to three questions, or an empty list when the model considers the
+request buildable. Only things that would change the generated workflow
+count as ambiguous -- the model is told not to ask for detail it can pick a
+sane default for, because an interrogation is worse than an assumption.
+
+### `propose_queries`
+
+```python
+def propose_queries(config: dict, description: str, qa: list[tuple[str, str]]) -> list[dict]
+```
+
+Turns the settled request into Composio catalogue searches.
+
+Each search is a toolkit plus a short capability phrase, because Composio's
+search filters by substring within a toolkit rather than ranking by
+relevance: a whole sentence matches almost nothing, while
+`toolkit=github` + "list pull requests" lands on the right tool. The model
+names services and actions -- never slugs, which it cannot know and would
+invent.
+
+### `describe_query`
+
+```python
+def describe_query(query: dict) -> str
+```
+
+A query as one readable line, for showing the user what px0 is searching for.
+
+### `search_candidates`
+
+```python
+def search_candidates(home: Path, queries: list[dict]) -> list[catalogue.CatalogueTool]
+```
+
+Runs each search against Composio's catalogue and pools the results.
+
+A toolkit-scoped search that comes back empty is retried without the scope,
+since the model may have guessed a toolkit slug that doesn't exist.
+De-duplicated by slug and order-preserving, so the first search's matches
+stay near the top.
+
+### `select_tools`
+
+```python
+def select_tools(config: dict, description: str, qa: list[tuple[str, str]], candidates: list[catalogue.CatalogueTool]) -> list[catalogue.CatalogueTool]
+```
+
+Picks the minimal set of candidate tools the request actually needs.
+
+Relevance ranking alone is not trustworthy -- a search for "post a message"
+can rank a delete tool first -- so the model chooses with the task in hand,
+and is told to prefer fewer tools and to avoid writes it wasn't asked for.
+
 ### `generate_plan`
 
 ```python
-def generate_plan(config: dict, description: str) -> Plan
+def generate_plan(config: dict, description: str, qa: list[tuple[str, str]] | None = None, selected: list[catalogue.CatalogueTool] | None = None) -> Plan
 ```
 
-Asks the harness to turn a natural-language request into a JSON workflow plan.
-Raises BuilderError if the harness response has no JSON object or the JSON is malformed.
+Asks the harness to turn the settled request into a JSON workflow plan.
+
+`selected` restricts it to the discovered tools the user confirmed; without
+it the plan may only use px0's curated registry. Raises BuilderError if the
+harness response has no JSON object or the JSON is malformed.
 
 ### `check_feasibility`
 
@@ -57,22 +156,63 @@ Validates a plan against reality: unknown tool ids, write tools used as inputs
 (inputs must be read-only), and an invalid cron schedule. Returns a list of
 human-readable issue strings; empty means the plan can proceed.
 
+### `plan_tool_ids`
+
+```python
+def plan_tool_ids(plan: Plan) -> list[str]
+```
+
+Every tool id the plan references, inputs and tools alike, in order.
+
 ### `required_connections`
 
 ```python
-def required_connections(plan: Plan) -> set[str]
+def required_connections(plan: Plan, home: Path | None = None) -> set[str]
 ```
 
-Returns the set of provider names (e.g. "github") the plan's inputs and tools touch.
+The provider names (e.g. "github", "slack") the plan's inputs and tools touch.
 
 ### `write_tools_named`
 
 ```python
-def write_tools_named(plan: Plan) -> list[str]
+def write_tools_named(plan: Plan, home: Path | None = None) -> list[str]
 ```
 
-Returns the subset of plan.tools that are write tools, so the CLI can warn the user
+The subset of plan.tools that are write tools, so the CLI can warn the user
 before granting them.
+
+### `_terms`
+
+```python
+def _terms(text: str) -> set[str]
+```
+
+Distinctive lowercase words in `text`: no stopwords, nothing tiny.
+
+### `_topic_hits`
+
+```python
+def _topic_hits(wanted: set[str], topic: set[str]) -> int
+```
+
+Counts topic words the request refers to, matching on a shared prefix.
+
+Prefix matching stands in for stemming, which the word forms here need:
+"summarize" has to match `summarization.md` and "pull request description"
+has to match `pr-descriptions.md`. Cheap, and wrong only for words that
+share five letters and nothing else.
+
+### `_shared_prefix`
+
+```python
+def _shared_prefix(a: str, b: str) -> int
+```
+
+Length of the leading substring `a` and `b` have in common.
+
+Compared on a shared prefix rather than "one is a prefix of the other":
+"summarize" and "summarization" share eight characters but neither contains
+the other.
 
 ### `choose_guidelines`
 
@@ -80,8 +220,14 @@ before granting them.
 def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]
 ```
 
-Match the task against topic files present in the store by simple
-keyword overlap between the description and each file's headings.
+Picks the guideline files whose topic actually matches the task.
+
+A file's headings name what it is about, so a heading match counts for much
+more than a body match, and body matches are normalized by vocabulary size
+so a long file doesn't win on sheer surface area. Files scoring below
+`_GUIDELINE_SCORE_FLOOR` are left off entirely -- attaching an unrelated
+guideline is worse than attaching none, since every one is inlined verbatim
+into the run's prompt.
 
 ### `render_workflow_file`
 
@@ -100,6 +246,134 @@ def save_workflow(home: Path, workflow_id: str, content: str) -> Path
 
 Writes a new workflow file to workflows/ and records it as a versioned change.
 Overwrites any existing file at the same id.
+
+## `px0.catalogue`
+
+Composio's tool catalogue: searching it, and remembering what was found.
+
+px0 ships a small set of curated tools (`tools.REGISTRY`), but Composio's
+catalogue is thousands of tools across hundreds of toolkits. `px0 new`
+searches it so a workflow can use the tool that actually fits the task
+instead of the nearest curated approximation.
+
+A discovered tool is *cached in the store* rather than looked up again at run
+time. Two reasons: a workflow must keep working offline and unchanged after it
+is written, and read-vs-write has to be knowable without a network call --
+`px0 run --dry-run` decides what to stub from it.
+
+Read/write comes from Composio's own MCP-style hints in each tool's `tags`:
+`readOnlyHint` means it only reads; its absence means it can change something;
+`destructiveHint` means it can delete or overwrite. Verified against the live
+catalogue on 2026-08-20 (GMAIL_FETCH_EMAILS carries readOnlyHint,
+GMAIL_SEND_EMAIL does not, GMAIL_DELETE_MESSAGE carries destructiveHint).
+
+### `class CatalogueError`
+
+Raised when Composio's catalogue can't be searched or a slug can't be read.
+
+### `class CatalogueTool`
+
+One tool from Composio's catalogue, in px0's own terms.
+
+#### `id`
+
+```python
+def id(self) -> str
+```
+
+The id a workflow file uses for this tool.
+
+### `is_catalogue_id`
+
+```python
+def is_catalogue_id(tool_id: str) -> bool
+```
+
+Whether `tool_id` names a discovered Composio tool rather than a curated one.
+
+### `slug_of`
+
+```python
+def slug_of(tool_id: str) -> str
+```
+
+The Composio slug behind a `composio:` tool id.
+
+### `_params_of`
+
+```python
+def _params_of(schema: dict) -> dict[str, str]
+```
+
+Flattens a tool's input_parameters JSON Schema into {name: type}.
+
+Required fields come first so a generated `args` block leads with what the
+tool actually needs.
+
+### `_from_api`
+
+```python
+def _from_api(item: dict) -> CatalogueTool
+```
+
+Builds a CatalogueTool from one Composio tools-API item.
+
+### `search`
+
+```python
+def search(home: Path, query: str, limit: int = SEARCH_LIMIT, toolkit: str | None = None) -> list[CatalogueTool]
+```
+
+Searches Composio's catalogue, newest-relevance first.
+
+Raises CatalogueError rather than returning nothing when the search itself
+failed -- "no tool matches" and "we could not ask" must not look alike.
+
+### `fetch`
+
+```python
+def fetch(home: Path, slug: str) -> CatalogueTool
+```
+
+Reads one tool by slug, for confirming it exists and getting its schema.
+
+### `_get`
+
+```python
+def _get(home: Path, path: str, params: dict) -> dict
+```
+
+One authenticated GET against Composio's REST API.
+
+Goes through requests rather than the SDK: the SDK models connected
+accounts and executions, not catalogue browsing.
+
+### `cache_path`
+
+```python
+def cache_path(home: Path) -> Path
+```
+
+Where discovered tool metadata lives.
+
+### `load_cached`
+
+```python
+def load_cached(home: Path) -> dict[str, CatalogueTool]
+```
+
+Every previously discovered tool, keyed by its px0 tool id.
+
+Never raises: a corrupt or missing cache means "nothing discovered yet",
+which degrades a workflow into an unknown-tool error rather than a crash.
+
+### `remember`
+
+```python
+def remember(home: Path, discovered: list[CatalogueTool]) -> None
+```
+
+Adds tools to the cache, replacing any earlier entry for the same slug.
 
 ## `px0.claims`
 
@@ -282,7 +556,7 @@ initialized and require_init is True.
 def _parse_since(text: str) -> datetime
 ```
 
-Parses a `--since` value like "7d" into an absolute datetime that many days ago.
+Parses a `--since` value like "7d" into an absolute datetime.
 
 ### `_dump`
 
@@ -291,6 +565,9 @@ def _dump(args: argparse.Namespace, data) -> None
 ```
 
 Prints data to stdout as indented JSON, coercing non-JSON-serializable values via str().
+
+Flushed, because spinners write to stderr and block-buffered stdout would
+let the two interleave out of order when piped.
 
 ### `_mask_key`
 
@@ -308,15 +585,73 @@ def cmd_init(args: argparse.Namespace) -> None
 
 Handles `px0 init`: scaffolds a new store and prints suggested next commands.
 
+### `_clarify_loop`
+
+```python
+def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str, str]]
+```
+
+Asks the model what's ambiguous and the user to resolve it, until nothing
+is left to ask (or the user stops answering).
+
+Returns the question/answer pairs, which every later pass is given so the
+plan reflects the answers rather than re-guessing them. A blank answer skips
+one question; an empty round ends the loop, because pressing Enter through
+an interrogation should not block the build.
+
+### `_describe_tool`
+
+```python
+def _describe_tool(spec_or_tool, width: int) -> str
+```
+
+One aligned line for a tool being proposed: id, access, description.
+
+### `_discover_tools`
+
+```python
+def _discover_tools(home: Path, config: dict, description: str, qa: list[tuple[str, str]]) -> list
+```
+
+Searches Composio's catalogue for the task and returns the chosen tools.
+
+Returns [] when the task needs no external service, which is a valid answer
+-- plenty of useful workflows only summarize their own input.
+
+### `_confirm_tools`
+
+```python
+def _confirm_tools(home: Path, selected: list, assume_yes: bool) -> list
+```
+
+Shows the chosen tools and their access, and gets explicit agreement.
+
+This is the gate before anything is authorized or written: the model chose
+these, and choosing a write tool the request didn't ask for is exactly the
+mistake a human should catch here.
+
+### `_authorize_toolkits`
+
+```python
+def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> list[str]
+```
+
+Authorizes each toolkit the plan needs that isn't authorized yet, asking
+first. Returns the toolkits still waiting on a browser consent.
+
+Nothing is aborted over a pending consent: the workflow file is valid either
+way, and making the user re-run `px0 new` would repeat the clarify, search,
+selection, and planning passes just to reach the same file.
+
 ### `cmd_new`
 
 ```python
 def cmd_new(args: argparse.Namespace) -> None
 ```
 
-Handles `px0 new`: generates a workflow plan from a natural-language description,
-checks feasibility and required connections, then writes the workflow file after
-interactive confirmation (unless --yes is passed).
+Handles `px0 new`: clarifies the request, searches Composio's catalogue for
+the tools it needs, confirms them with the user, authorizes what isn't
+authorized yet, then plans and writes the workflow file.
 
 ### `cmd_run`
 
@@ -346,15 +681,6 @@ def cmd_list(args: argparse.Namespace) -> None
 Handles `px0 list`: prints workflows, guidelines, and/or knowledge file paths.
 With no kind given, prints all three sections; otherwise prints just that section.
 
-### `cmd_connect`
-
-```python
-def cmd_connect(args: argparse.Namespace) -> None
-```
-
-Handles `px0 connect` and its sub-targets: setup-composio, list, remove, 
-and connecting a new service (managed via Composio).
-
 ### `cmd_tools`
 
 ```python
@@ -363,6 +689,14 @@ def cmd_tools(args: argparse.Namespace) -> None
 
 Handles `px0 tools list`: prints each available tool with a read/write marker,
 its id, provider, description, and parameters, optionally filtered by service.
+
+### `_dim_log`
+
+```python
+def _dim_log(text: str) -> str
+```
+
+Dims the leading timestamp on each log line so the message reads first.
 
 ### `cmd_daemon`
 
@@ -430,6 +764,14 @@ def _parse_version_ref(ref: str) -> tuple[str, int]
 
 Splits a `<path>@v<N>` reference into (path, version number).
 
+### `_color_diff`
+
+```python
+def _color_diff(text: str) -> str
+```
+
+Colours a unified diff the way a pager would: adds green, removes red.
+
 ### `cmd_versions`
 
 ```python
@@ -496,6 +838,18 @@ current value, default, type, and allowed choices), get <key>, set <key>
 <value>, and model (an interactive harness/model picker, see
 _select_model).
 
+### `_set_composio_key`
+
+```python
+def _set_composio_key(home: Path, key: str | None) -> None
+```
+
+Stores the Composio API key after verifying it against the live API.
+
+This is the whole of connection setup: individual apps authorize themselves
+when a workflow first needs them, so there is nothing else to configure
+per service.
+
 ### `_select_model`
 
 ```python
@@ -546,8 +900,10 @@ check. Exits with EXIT_INTEGRITY_ERROR if any check failed.
 def build_parser() -> argparse.ArgumentParser
 ```
 
-Builds the full px0 argparse tree: one subparser per top-level command, each
-wiring its own flags and a `func` default that cmd dispatches to in main().
+The px0 argparse tree, built against this module's own `cmd_*` handlers.
+
+The tree itself lives in `px0.parser`; this wrapper stays here because it is
+the name callers and tests reach for.
 
 ### `main`
 
@@ -662,17 +1018,126 @@ list`.
 
 ## `px0.connect`
 
-px0 connect: creating and managing connections.
+Connections to external apps, all brokered through Composio.
 
-All external app connections are managed through Composio.
+There is no user-facing connect command: `setup_composio` stores the one API
+key (via `px0 config composio`, or `px0 init`), and individual apps are
+authorized on demand -- a tool that needs Gmail calls
+`connect_composio_app("gmail")` itself and surfaces the returned URL, so the
+only manual step left is the human consenting in a browser.
+
+### `class ComposioUnreachable`
+
+The Composio API could not be reached. Distinct from a rejected API key:
+re-entering the key will not help, so callers must not re-prompt for one.
+
+### `_is_cert_error`
+
+```python
+def _is_cert_error(exc: BaseException) -> bool
+```
+
+True if exc (or anything it wraps) is a TLS certificate verification failure.
+
+### `_bundle_verifies`
+
+```python
+def _bundle_verifies(bundle: str, host: str = COMPOSIO_HOST) -> bool
+```
+
+True if `host`'s certificate chain validates against `bundle`.
+
+### `find_ca_bundle`
+
+```python
+def find_ca_bundle(host: str = COMPOSIO_HOST) -> str | None
+```
+
+Returns the first existing CA bundle that validates `host`, or None.
+
+### `ca_bundle`
+
+```python
+def ca_bundle(home: Path) -> str | None
+```
+
+The CA bundle TLS verification should use, or None for the default.
+
+An explicit SSL_CERT_FILE always wins; otherwise the bundle a previous
+interception detection stored in `connectors.ca_bundle`.
+
+### `apply_ca_bundle`
+
+```python
+def apply_ca_bundle(home: Path) -> str | None
+```
+
+Exports the stored CA bundle so HTTP clients pick it up, and returns it.
+
+Sets both names because the two clients px0 uses read different ones:
+httpx/OpenSSL honour SSL_CERT_FILE, while requests verifies against certifi
+unless REQUESTS_CA_BUNDLE says otherwise. A no-op when nothing is stored.
+
+### `recover_ca_bundle`
+
+```python
+def recover_ca_bundle(home: Path) -> str | None
+```
+
+Called after a TLS verification failure: find a CA bundle that trusts
+whatever is intercepting the connection, persist it, and return it.
+
+Shared by every caller that talks to Composio, so an interception detected
+once is remembered for all of them. Returns None when no known bundle helps.
+
+### `_store_ca_bundle`
+
+```python
+def _store_ca_bundle(home: Path, bundle: str) -> None
+```
+
+### `_silence_sdk_logging`
+
+```python
+def _silence_sdk_logging() -> None
+```
+
+Mutes the Composio/httpx INFO chatter ("Retrying request to ...").
+
+Those lines are the SDK narrating its own retries; they interleave with
+px0's progress output and tell the user nothing actionable. Warnings and
+errors still come through.
+
+### `short_api_error`
+
+```python
+def short_api_error(exc: BaseException) -> str
+```
+
+Composio SDK errors stringify as `Error code: N - {...whole payload...}`.
+
+Keeps the parts a human acts on -- the message and the suggested fix -- so a
+permissions problem reads as one line instead of a wall of JSON.
+
+### `_verify_key`
+
+```python
+def _verify_key(api_key: str) -> None
+```
+
+Hello world / healthcheck: fetch github toolkit info to verify the key.
 
 ### `setup_composio`
 
 ```python
-def setup_composio(home: Path, api_key: str) -> None
+def setup_composio(home: Path, api_key: str) -> dict
 ```
 
-Stores the Composio API key as a credential after validating it.
+Stores the Composio API key inside config.toml and credentials after validating it.
+
+Returns what the caller may want to report: {"ca_bundle": <path or None>},
+naming the CA bundle a TLS interception forced px0 onto. Prints nothing --
+presentation belongs to the CLI, which may be drawing a spinner over this.
 
 ### `_composio_client`
 
@@ -715,14 +1180,6 @@ def list_connections(home: Path) -> list[dict]
 ```
 
 Returns one summary dict per configured connection (service, kind, login, expiry).
-
-### `remove_connection`
-
-```python
-def remove_connection(home: Path, service: str) -> bool
-```
-
-Deletes a stored connection. Returns False if the service wasn't configured.
 
 ## `px0.consolidate`
 
@@ -871,8 +1328,10 @@ def run_nightly(home: Path, config: dict) -> dict
 ```
 
 Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, knowledge
-reindex, and run-log retention. Reindex failures are captured in the report
-rather than raised, so one broken index doesn't block the rest of housekeeping.
+reindex, draining queued playlist ingest jobs, run-log retention, and a
+once-a-week update-availability check. Every fallible step is captured in the
+report rather than raised, so one broken index or unreachable playlist doesn't
+block the rest of housekeeping.
 
 ### `serve`
 
@@ -1029,8 +1488,25 @@ Reports configured connections. Checks if any Composio connection is not ACTIVE.
 def _check_unreferenced_guidelines(home: Path) -> dict
 ```
 
-Flags guideline files that no workflow lists, since they're inlined into
-prompts by reference and are otherwise dead weight.
+Counts guideline files that no workflow lists.
+
+Informational, never a failure: spec.md:792 puts unreferenced files in the
+consolidation report ("to surface staleness"), which `px0 consolidate`
+already does. Failing here would also mean every freshly initialized store
+is unhealthy -- `px0 init` scaffolds guidelines but no workflows, so all of
+them start out unreferenced.
+
+### `_check_update`
+
+```python
+def _check_update(home: Path) -> dict
+```
+
+Reports the newer version the daemon's weekly check found, if any.
+
+Informational, never a failure -- being a release behind is not a broken
+store. Reads what the nightly pass recorded rather than calling PyPI, so
+`doctor` stays offline-safe.
 
 ### `run`
 
@@ -1255,6 +1731,26 @@ def process_ingest_queue(home: Path, config: dict) -> dict
 ```
 
 Processes any queued YouTube playlist ingest jobs under .state/ingest/.
+
+## `px0.parser`
+
+The px0 argparse tree: what the CLI accepts, separated from what it does.
+
+Kept out of `cli.py` so the ~200 lines of declarative flag wiring don't sit in
+the middle of the command handlers. The dependency runs one way -- `cli`
+imports this, never the reverse -- so `build` is handed the module holding the
+handlers rather than importing them.
+
+### `build`
+
+```python
+def build(handlers) -> argparse.ArgumentParser
+```
+
+Builds the full px0 argparse tree: one subparser per top-level command, each
+wiring its own flags and a `func` default that main() dispatches to.
+
+`handlers` is the module providing the `cmd_*` functions.
 
 ## `px0.paths`
 
@@ -1540,13 +2036,17 @@ The `retrieve` interface over `knowledge/`: query, k, filters in;
 ranked passages with file path and anchor out. Guidelines are never
 retrieved by similarity -- only knowledge.
 
-Backend: SQLite FTS5 with BM25 ranking, embedded, no server. This is a
-pure-python-reachable subset of what the spec asks of qmd (hybrid keyword
-+ vector search, rerank): only the keyword/BM25 half is implemented here,
-since the vector and rerank stages need GGUF embedding models the spec
-gates behind explicit, printed-size consent. `[retrieval] backend` names
-this the "local" backend so a real qmd integration can be swapped in later
-behind this same function signature.
+Two backends sit behind `retrieve()`, selected by `retrieval.backend`:
+
+- "local" (default): SQLite FTS5 with BM25 ranking, embedded, no server.
+  Keyword matching only -- no vectors, no rerank, nothing to download.
+- "qmd": shells out to the qmd CLI (`retrieval.qmd_cmd`) for hybrid
+  keyword + vector search with reranking. Needs qmd installed separately
+  and gates its ~2GB of GGUF models behind explicit, printed-size
+  consent on the first reindex.
+
+Either way `local_only=True` (the default at every call site) excludes
+`knowledge/work/`, which never leaves the machine.
 
 ### `class RetrievalBackendError`
 
@@ -1822,6 +2322,19 @@ configurable log directory, both subject to retention -- never inside the
 store, so raw prompts and connector responses stay out of any folder the
 user might copy or sync.
 
+### `parse_since`
+
+```python
+def parse_since(text: str) -> datetime
+```
+
+Parses an age like "7d", "-7d", "2w", or "12h" into an absolute datetime.
+
+The leading minus is optional because it reads naturally as "7 days back"
+and the TUI's own prompt suggests it; rejecting it was a bug. Lives here
+rather than in the CLI so `runs_tui` can use it without importing the CLI,
+which imports `runs_tui`.
+
 ### `resolve_logs_path`
 
 ```python
@@ -1938,13 +2451,36 @@ breaks out (e.g. on a terminal run outcome, or KeyboardInterrupt).
 
 ## `px0.runs_tui`
 
+The `px0 runs` interactive browser: a curses list/detail view over run
+records. The list is newest-first and filterable by workflow, outcome,
+write activity, and age; the detail view adds the rendered prompt recovered
+from the raw log, the guideline versions inlined, and per-tool-call
+timings, with one keystroke each to rerun, page the log, show the output,
+and trace provenance. Row text comes from `format_row`, shared with
+`px0 runs list` so both render identically.
+
+### `column_widths`
+
+```python
+def column_widths(records: list[dict]) -> dict[str, int]
+```
+
+Widths that align a whole batch of rows into columns.
+
+Computed once by the caller and passed to every `format_row` so both the
+plain listing and the TUI lay out identically; without it each row would be
+formatted in isolation and the columns would jitter.
+
 ### `format_row`
 
 ```python
-def format_row(r: dict) -> str
+def format_row(r: dict, widths: dict[str, int] | None = None) -> str
 ```
 
-Formats one run record into a single list row string, shared between CLI and TUI.
+Formats one run record into a single list row, shared between CLI and TUI.
+
+Columns are separated by two spaces and padded to `widths` when given, so a
+listing reads as a table; without widths the fields are simply joined.
 
 ### `extract_rendered_prompt`
 
@@ -1972,6 +2508,68 @@ def run(home: Path, config: dict) -> None
 ```
 
 Entry point for the px0 runs curses TUI.
+
+### `_init_palette`
+
+```python
+def _init_palette() -> bool
+```
+
+Sets up colour pairs. False on a terminal without colour, so callers fall
+back to A_DIM/A_BOLD attributes instead.
+
+### `_attr`
+
+```python
+def _attr(pair: int, fallback: int = 0) -> int
+```
+
+The attribute for a palette entry, or `fallback` when colour is unavailable.
+
+### `_suspended`
+
+```python
+def _suspended(prompt: str = '\nPress any key to resume...')
+```
+
+Drops out of curses for a block that writes to the real terminal.
+
+Restores curses on the way out whatever happened, so an exception in a
+keystroke handler can never leave the terminal in raw mode with no cursor.
+Errors are shown to the user and swallowed: a failed pager or a missing
+record should return you to the list, not tear the TUI down.
+
+### `_dim_sep`
+
+```python
+def _dim_sep() -> str
+```
+
+The separator between header fields.
+
+### `_filter_summary`
+
+```python
+def _filter_summary(workflow, outcome, write_only, since_raw) -> str
+```
+
+One dim line naming only the filters actually in effect.
+
+### `_outcome_attr`
+
+```python
+def _outcome_attr(record: dict) -> int
+```
+
+Colours a row by its outcome: failures red, everything else plain.
+
+### `_addkeys`
+
+```python
+def _addkeys(stdscr, y: int, width: int, keys: list[tuple[str, str]]) -> None
+```
+
+Renders the key hints: each key accented, its label dim.
 
 ### `_main`
 
@@ -2064,12 +2662,12 @@ Returns a list of human-readable lines describing what was created.
 ## `px0.tools`
 
 The normalized tool namespace. Every input `tool:` and every workflow
-`tools:` entry names something from here. The native GitHub adapter calls
-the GitHub REST API directly with a stored PAT. Composio-backed tools
-(calendar, gmail, slack) are listed in the namespace with the read/write
-shape the spec describes, but this build does not implement a live
-Composio client -- calling one raises ConnectorNotConfigured rather than
-guessing at an unverified API shape.
+`tools:` entry names something from here. Every tool executes through the
+Composio SDK against a connected account -- the GitHub tools proxy the
+GitHub REST API through Composio rather than holding their own PAT.
+A tool whose app is not authorized yet prepares that app's authorization
+itself and raises ConnectorNotConfigured carrying the URL to consent at --
+there is no separate connect step to run first.
 
 ### `class ConnectorError`
 
@@ -2153,13 +2751,36 @@ def github_create_review_comment(args: dict, ctx: Context) -> dict
 Posts a single-line review comment on a pull request. Write tool: mutates the PR
 on GitHub. Resolves the PR's head sha itself so the caller only needs the URL.
 
+### `_needs_connection`
+
+```python
+def _needs_connection(home, app: str, reason: str) -> ConnectorNotConfigured
+```
+
+Builds the error raised when `app` isn't usable yet, with a live auth link.
+
+There is no `px0 connect` to send the user to: a tool that needs an app
+triggers that app's authorization itself, so the only thing missing is the
+human opening the URL. Minting a link is idempotent -- the underlying auth
+config is created once and cached -- and grants nothing until someone
+consents in the browser.
+
+### `_composio_credentials`
+
+```python
+def _composio_credentials(home)
+```
+
+The stored Composio credentials, or a ConnectorNotConfigured explaining how
+to set the API key up.
+
 ### `_composio_execute`
 
 ```python
 def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any
 ```
 
-Executes a Composio tool using the stored API key and connected account ID.
+Executes a Composio tool, authorizing the app on demand if it isn't yet.
 
 ### `calendar_list_events`
 
@@ -2201,29 +2822,56 @@ def slack_post_message(args: dict, ctx: Context) -> Any
 
 Post a message to a slack channel.
 
+### `_discovered_spec`
+
+```python
+def _discovered_spec(tool) -> ToolSpec
+```
+
+Wraps a catalogue tool as a ToolSpec with a generic Composio handler.
+
+Every discovered tool executes through the same path the curated Composio
+tools use, so authorization-on-demand, retries, and dry-run stubbing all
+behave identically whether a tool was hand-written or found by `px0 new`.
+
+### `resolve`
+
+```python
+def resolve(tool_id: str, home = None) -> ToolSpec | None
+```
+
+The ToolSpec for a tool id, curated or discovered, or None if unknown.
+
+`home` is needed to see discovered tools -- their metadata lives in the
+store's catalogue cache, not in this module.
+
 ### `list_tools`
 
 ```python
-def list_tools(service: str | None = None) -> list[ToolSpec]
+def list_tools(service: str | None = None, home = None) -> list[ToolSpec]
 ```
 
-Returns all registered tools, or only those for one provider, sorted by id.
+Every usable tool -- curated, plus any discovered by `px0 new` when `home`
+is given -- optionally narrowed to one provider, sorted by id.
 
 ### `exists`
 
 ```python
-def exists(tool_id: str) -> bool
+def exists(tool_id: str, home = None) -> bool
 ```
 
-Whether tool_id is a known entry in the registry.
+Whether tool_id names a usable tool.
 
 ### `is_write`
 
 ```python
-def is_write(tool_id: str) -> bool
+def is_write(tool_id: str, home = None) -> bool
 ```
 
 Whether the given tool mutates external state (used to gate what a workflow may call).
+
+Raises KeyError for an unknown id, matching the previous registry-only
+behaviour -- callers check `exists` first.
 
 ### `call`
 
@@ -2234,9 +2882,276 @@ def call(home, config: dict, tool_id: str, args: dict) -> Any
 Dispatches to a tool's handler by id. Raises ConnectorError for an unknown tool id;
 the handler itself may raise ConnectorError/ConnectorNotConfigured.
 
+## `px0.ui`
+
+Terminal presentation: colors, status glyphs, and the spinner.
+
+Everything user-facing goes through here so the CLI has one voice. Two
+rules shape the design:
+
+1. **Subtle by default.** Colour marks meaning -- a failure, a value you
+   can act on -- and nothing else. Labels and chrome are dim; values are
+   plain. A screen of px0 output should read as mostly grey with a few
+   deliberate accents, never as a colour test page.
+2. **Plain when not a terminal.** Pipe px0 anywhere and every escape
+   sequence disappears, glyphs fall back to ASCII (`[OK]`, `[FAIL]`), and
+   the spinner goes silent. Output stays greppable, so scripts parsing it
+   never see a byte of styling.
+
+Honours `NO_COLOR` (any value disables), `FORCE_COLOR` (any value
+enables, even when piped), `TERM=dumb`, and `--no-color`.
+
+### `set_color`
+
+```python
+def set_color(enabled: bool | None) -> None
+```
+
+Forces colour on/off for the process. None restores auto-detection.
+
+### `is_tty`
+
+```python
+def is_tty(stream = None) -> bool
+```
+
+True when `stream` is a real terminal, regardless of colour settings.
+
+Separate from `color_enabled` on purpose: FORCE_COLOR should add colour to
+piped output, but carriage-return redraws only make sense on a terminal, so
+the spinner gates on this instead.
+
+### `color_enabled`
+
+```python
+def color_enabled(stream = None) -> bool
+```
+
+True when `stream` (default stdout) should receive escape sequences.
+
+### `paint`
+
+```python
+def paint(text: str, code: str, bold: bool = False, stream = None) -> str
+```
+
+Wraps text in an SGR sequence, or returns it untouched when colour is off.
+
+### `dim`
+
+```python
+def dim(text: str, **kw) -> str
+```
+
+Secondary text: labels, units, anything the eye should skip.
+
+### `faint`
+
+```python
+def faint(text: str, **kw) -> str
+```
+
+Chrome: rules and separators.
+
+### `accent`
+
+```python
+def accent(text: str, **kw) -> str
+```
+
+px0's own voice -- a value the user will act on.
+
+### `strong`
+
+```python
+def strong(text: str, **kw) -> str
+```
+
+Emphasis without colour, for headings inside a plain block.
+
+### `glyph`
+
+```python
+def glyph(role: str, stream = None) -> str
+```
+
+The status marker for `role`, coloured on a terminal, bracketed ASCII when piped.
+
+### `_status`
+
+```python
+def _status(role: str, message: str, detail: str = '', width: int = 0, stream = None) -> None
+```
+
+### `ok`
+
+```python
+def ok(message: str, detail: str = '', **kw) -> None
+```
+
+A check that passed, a thing that got created.
+
+### `err`
+
+```python
+def err(message: str, detail: str = '', **kw) -> None
+```
+
+A failure. Goes to stderr by default -- errors are not output.
+
+### `warn`
+
+```python
+def warn(message: str, detail: str = '', **kw) -> None
+```
+
+Something worth knowing that isn't a failure.
+
+### `info`
+
+```python
+def info(message: str, detail: str = '', **kw) -> None
+```
+
+Neutral progress narration.
+
+### `step`
+
+```python
+def step(message: str, detail: str = '', **kw) -> None
+```
+
+One step in a multi-step flow.
+
+### `heading`
+
+```python
+def heading(text: str, stream = None) -> None
+```
+
+A section title. One blank line above, never a box or a banner.
+
+### `rule`
+
+```python
+def rule(stream = None) -> None
+```
+
+A full-width faint separator. Skipped entirely when not a terminal.
+
+### `kv`
+
+```python
+def kv(label: str, value, width: int = 0, stream = None) -> None
+```
+
+A dim label and a plain value, aligned when `width` is given.
+
+### `bullet`
+
+```python
+def bullet(text: str, stream = None) -> None
+```
+
+One item in a list.
+
+### `hint`
+
+```python
+def hint(text: str, stream = None) -> None
+```
+
+A next step. Dim, indented, always after a blank line.
+
+### `command`
+
+```python
+def command(text: str, stream = None) -> None
+```
+
+A command the user can copy and run.
+
+### `prompt`
+
+```python
+def prompt(text: str) -> str
+```
+
+A styled input prompt. Returns what the user typed, stripped.
+
+### `class Spinner`
+
+An animated progress indicator with an elapsed-seconds counter.
+
+A no-op unless stderr is a terminal: piped output gets one plain line
+at the start instead of a stream of redraws, and nothing at all when
+the caller asked for silence. Always writes to stderr so a spinner
+never lands in output the user is capturing.
+
+#### `__init__`
+
+```python
+def __init__(self, message: str, quiet: bool = False, stream = None)
+```
+
+#### `_spin`
+
+```python
+def _spin(self) -> None
+```
+
+#### `start`
+
+```python
+def start(self) -> 'Spinner'
+```
+
+#### `_erase`
+
+```python
+def _erase(self) -> None
+```
+
+#### `stop`
+
+```python
+def stop(self, final: str | None = None, role: str = 'ok') -> None
+```
+
+Stops the animation. `final` replaces the line with a status line.
+
+#### `update`
+
+```python
+def update(self, message: str) -> None
+```
+
+Changes the message mid-spin.
+
+### `spinner`
+
+```python
+def spinner(message: str, done: str | None = None, quiet: bool = False, stream = None)
+```
+
+Runs a block under a spinner, clearing it on success or failure.
+
+    with ui.spinner("Verifying key", done="key verified"):
+        verify()
+
+On an exception the line is erased before it propagates, so a traceback
+or error message never lands on top of a half-drawn spinner.
+
 ## `px0.update`
 
-px0 update / px0 version.
+px0 update / px0 version: PyPI-backed version checks and self-update.
+
+`check()` reads the published versions from PyPI's JSON API; `run_update()`
+upgrades in place through whichever mechanism installed px0 (pipx or pip),
+applies any pending store-schema MIGRATIONS, appends the result to
+`.state/update-history.json`, restarts a running daemon, and finishes with
+a quick doctor pass. `rollback()` reinstalls the last entry's from_version
+and pops it; schema migrations are forward-only and are not undone.
 
 ### `class UpdateError`
 
@@ -2251,13 +3166,22 @@ def version_info(home: Path, config: dict) -> dict
 Reports installed px0/schema versions and whether the configured
 harness binary is actually on PATH.
 
+### `class PyPIUnreachable`
+
+PyPI could not be queried. Distinct from "no newer version exists":
+reporting an unreachable index as "up to date" is a lie the user acts on.
+
 ### `_pypi_latest_version`
 
 ```python
 def _pypi_latest_version(channel: str) -> str | None
 ```
 
-Queries PyPI JSON API and returns the latest available version for the channel.
+The newest version published on `channel`, or None if px0 isn't on PyPI yet.
+
+Raises PyPIUnreachable when the index could not be read at all -- network
+down, proxy, TLS interception. Collapsing that into None would report
+"already up to date" to someone who is actually several releases behind.
 
 ### `check`
 
@@ -2265,7 +3189,25 @@ Queries PyPI JSON API and returns the latest available version for the channel.
 def check(config: dict) -> dict
 ```
 
-Reports update availability.
+Reports update availability. Raises PyPIUnreachable if PyPI can't be read.
+
+The result always carries both keys, and they mean different things:
+`available_version` is the newest version published on the channel (None if
+px0 isn't published there at all), and `update_available` says whether that
+is newer than what's installed. Callers gate on `update_available` -- an
+earlier version of this returned `available_version: None` when current,
+which made "up to date" and "not published" indistinguishable.
+
+### `_load_history`
+
+```python
+def _load_history(path: Path) -> list
+```
+
+The update history, or [] when it's missing or unreadable.
+
+An unreadable history costs a rollback target, not correctness, so it
+degrades rather than raising.
 
 ### `_detect_install_mechanism`
 

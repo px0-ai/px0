@@ -1,7 +1,12 @@
 import argparse
-from pathlib import Path
 import pytest
 from px0 import cli, credentials as creds_mod, connect
+
+
+def _fake_setup_composio(home, key):
+    """Stand-in for the real thing, matching its return contract."""
+    creds_mod.set_service(home, "composio", {"api_key": key})
+    return {"ca_bundle": None}
 
 
 def test_mask_key():
@@ -33,7 +38,9 @@ def test_cmd_init_with_existing_key_keeps_as_is_on_empty_input(tmp_path, monkeyp
     cli.cmd_init(args)
 
     assert len(prompt_displayed) == 1
-    assert "Composio API key [exis..._123 - press Enter to keep current]: " in prompt_displayed[0]
+    assert "Composio API key" in prompt_displayed[0]
+    assert "exis..._123" in prompt_displayed[0]      # masked, never the whole key
+    assert "existing_secret_key_123" not in prompt_displayed[0]
 
     # Verify key was kept as-is
     creds = creds_mod.load(home)
@@ -45,7 +52,7 @@ def test_cmd_init_with_existing_key_updates_on_new_input(tmp_path, monkeypatch):
     creds_mod.set_service(home, "composio", {"api_key": "existing_secret_key_123"})
 
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
-    monkeypatch.setattr(connect, "setup_composio", lambda h, key: creds_mod.set_service(h, "composio", {"api_key": key}))
+    monkeypatch.setattr(connect, "setup_composio", _fake_setup_composio)
 
     prompt_displayed = []
 
@@ -59,7 +66,9 @@ def test_cmd_init_with_existing_key_updates_on_new_input(tmp_path, monkeypatch):
     cli.cmd_init(args)
 
     assert len(prompt_displayed) == 1
-    assert "Composio API key [exis..._123 - press Enter to keep current]: " in prompt_displayed[0]
+    assert "Composio API key" in prompt_displayed[0]
+    assert "exis..._123" in prompt_displayed[0]      # masked, never the whole key
+    assert "existing_secret_key_123" not in prompt_displayed[0]
 
     # Verify key was updated
     creds = creds_mod.load(home)
@@ -70,7 +79,7 @@ def test_cmd_init_fresh_prompts_without_brackets(tmp_path, monkeypatch):
     home = tmp_path / "test_store"
 
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
-    monkeypatch.setattr(connect, "setup_composio", lambda h, key: creds_mod.set_service(h, "composio", {"api_key": key}))
+    monkeypatch.setattr(connect, "setup_composio", _fake_setup_composio)
 
     prompt_displayed = []
 
@@ -84,7 +93,9 @@ def test_cmd_init_fresh_prompts_without_brackets(tmp_path, monkeypatch):
     cli.cmd_init(args)
 
     assert len(prompt_displayed) == 1
-    assert prompt_displayed[0] == "Composio API key: "
+    # no [brackets] when there is no existing key to keep
+    assert prompt_displayed[0].endswith("Composio API key: ")
+    assert "[" not in prompt_displayed[0]
 
     creds = creds_mod.load(home)
     assert creds["composio"]["api_key"] == "fresh_api_key_789"
@@ -101,7 +112,7 @@ def test_cmd_init_retry_on_invalid_key(tmp_path, monkeypatch):
         attempts += 1
         if attempts == 1:
             raise ValueError("Invalid API key")
-        creds_mod.set_service(h, "composio", {"api_key": key})
+        return _fake_setup_composio(h, key)
 
     monkeypatch.setattr(connect, "setup_composio", mock_setup)
 
@@ -119,7 +130,7 @@ def test_cmd_init_retry_on_invalid_key(tmp_path, monkeypatch):
 def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     home = tmp_path / "test_store"
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
-    monkeypatch.setattr(connect, "setup_composio", lambda h, key: creds_mod.set_service(h, "composio", {"api_key": key}))
+    monkeypatch.setattr(connect, "setup_composio", _fake_setup_composio)
 
     args = argparse.Namespace(dir=str(home), harness=None, composio_key="cli_passed_key")
     cli.cmd_init(args)
@@ -128,50 +139,149 @@ def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     assert creds["composio"]["api_key"] == "cli_passed_key"
 
 
-def test_store_init_updates_and_syncs_skills(tmp_path, monkeypatch):
+def test_store_init_does_not_touch_skills(tmp_path, monkeypatch):
     from px0 import store
     import subprocess
-    import shutil
-    from pathlib import Path
 
     home = tmp_path / "test_store"
     home.mkdir()
 
-    # Pre-create skills.json in store home
-    skills_json = home / "skills.json"
-    skills_json.write_text('{"skills": {"some_skill": "version_1"}}')
-
-    # Mock shutil.which to return True for npx
-    monkeypatch.setattr(shutil, "which", lambda cmd: True if cmd == "npx" else False)
-
-    # Mock global agents_skill_lock path
-    fake_global_lock = tmp_path / "fake_skill_lock"
-    
-    orig_expanduser = Path.expanduser
-    def mock_expanduser(self):
-        if ".skill-lock.json" in str(self):
-            return fake_global_lock
-        return orig_expanduser(self)
-        
-    monkeypatch.setattr(Path, "expanduser", mock_expanduser)
-
-    # Track subprocess calls
     ran_commands = []
-    def mock_run(args, **kwargs):
-        ran_commands.append(args)
-        # Simulate creating/updating the skill lock during the run
-        fake_global_lock.write_text('{"skills": {"some_skill": "version_1", "another": "v2"}}')
-        return subprocess.CompletedProcess(args, 0)
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: ran_commands.append(args))
 
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    # Run store.init
     store.init(home)
 
-    # Check that only npx skills update was called
-    assert len(ran_commands) == 1
-    assert ran_commands[0] == ["npx", "--yes", "skills@latest", "update", "-g", "-y"]
+    assert ran_commands == []
+    assert not (home / "skills.json").exists()
 
-    # Verify that the local skills.json was updated with final state synced back from fake_global_lock
-    assert "another" in skills_json.read_text()
 
+def _isolate_ssl_env(monkeypatch):
+    """Unsets SSL_CERT_FILE for the test and guarantees it is restored afterwards.
+
+    setenv first so monkeypatch records the original value; delenv on an already-unset
+    var records nothing, so a value written during the test would leak into later ones.
+    """
+    monkeypatch.setenv("SSL_CERT_FILE", "")
+    monkeypatch.delenv("SSL_CERT_FILE")
+
+
+def _fake_cert_error():
+    import ssl
+    inner = ssl.SSLCertVerificationError(
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate"
+    )
+    outer = RuntimeError("Connection error.")
+    outer.__cause__ = inner
+    return outer
+
+
+def test_setup_composio_recovers_from_intercepted_tls(tmp_path, monkeypatch):
+    """A corporate MITM proxy must be detected and worked around, not reported as a bad key."""
+    import os
+    from px0 import connect, store, config as config_mod, paths
+
+    home = tmp_path / "store"
+    store.init(home)
+    _isolate_ssl_env(monkeypatch)
+
+    bundle = str(tmp_path / "corp-ca.pem")
+    open(bundle, "w").close()
+    monkeypatch.setattr(connect, "CA_BUNDLE_CANDIDATES", (bundle,))
+    monkeypatch.setattr(connect, "_bundle_verifies", lambda b, host=None: b == bundle)
+
+    calls = []
+
+    def fake_verify(api_key):
+        calls.append(os.environ.get("SSL_CERT_FILE"))
+        if os.environ.get("SSL_CERT_FILE") != bundle:
+            raise _fake_cert_error()
+
+    monkeypatch.setattr(connect, "_verify_key", fake_verify)
+
+    connect.setup_composio(home, "ak_test")
+
+    assert calls == [None, bundle]  # failed on certifi, retried with the corporate bundle
+    cfg = config_mod.load(paths.config_path(home))
+    assert config_mod.get(cfg, "connectors.ca_bundle") == bundle
+
+
+def test_setup_composio_raises_unreachable_when_no_bundle_helps(tmp_path, monkeypatch):
+    from px0 import connect, store
+
+    home = tmp_path / "store"
+    store.init(home)
+    _isolate_ssl_env(monkeypatch)
+    monkeypatch.setattr(connect, "CA_BUNDLE_CANDIDATES", ())
+    monkeypatch.setattr(connect, "_verify_key", lambda k: (_ for _ in ()).throw(_fake_cert_error()))
+
+    with pytest.raises(connect.ComposioUnreachable):
+        connect.setup_composio(home, "ak_test")
+
+
+def test_setup_composio_offline_is_unreachable_not_invalid_key(tmp_path, monkeypatch):
+    from px0 import connect, store
+
+    home = tmp_path / "store"
+    store.init(home)
+    monkeypatch.setattr(
+        connect, "_verify_key", lambda k: (_ for _ in ()).throw(RuntimeError("Connection error."))
+    )
+
+    with pytest.raises(connect.ComposioUnreachable):
+        connect.setup_composio(home, "ak_test")
+
+
+def test_cmd_init_exits_instead_of_reprompting_when_unreachable(tmp_path, monkeypatch):
+    """Re-typing the key cannot fix a network fault, so init must not loop on it."""
+    from px0 import connect
+
+    home = tmp_path / "store"
+    monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: [])
+    monkeypatch.setattr(
+        connect, "setup_composio",
+        lambda h, k: (_ for _ in ()).throw(connect.ComposioUnreachable("no route")),
+    )
+
+    args = argparse.Namespace(dir=str(home), harness=None, composio_key="ak_test")
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_init(args)
+    assert exc.value.code == cli.EXIT_USER_ERROR
+
+
+def test_cmd_init_survives_non_interactive_stdin(tmp_path, monkeypatch, capsys):
+    """install.sh runs `px0 init` under `curl | sh`, where stdin has no terminal.
+
+    An unhandled EOFError there aborted the installer with a traceback and left
+    the user without the "you still need a Composio key" instruction.
+    """
+    home = tmp_path / "store"
+    monkeypatch.setattr("builtins.input", lambda *a: (_ for _ in ()).throw(EOFError()))
+
+    args = argparse.Namespace(dir=str(home), harness=None, composio_key=None)
+    cli.cmd_init(args)  # must not raise
+
+    err = capsys.readouterr().err
+    assert "skipping Composio setup" in err
+    assert (home / "config.toml").exists()
+
+
+def test_doctor_passes_on_a_freshly_initialized_store(tmp_path, monkeypatch):
+    """Phase 5 AC1: `px0 doctor` exits 0 right after install.
+
+    `px0 init` scaffolds guidelines but no workflows, so every guideline starts
+    out unreferenced; counting that as an integrity failure made a clean install
+    unhealthy by construction. spec.md:792 puts unreferenced files in the
+    consolidation report, which `px0 consolidate` already surfaces.
+    """
+    from px0 import store, doctor, config as config_mod, paths, proposals
+
+    home = tmp_path / "store"
+    store.init(home)
+    config = config_mod.load(paths.config_path(home))
+
+    report = doctor.run(home, config, quick=True)
+
+    assert proposals.unreferenced_guideline_files(home), "starter guidelines should be unreferenced"
+    assert report["checks"]["unreferenced_guidelines"]["ok"] is True
+    assert report["checks"]["unreferenced_guidelines"]["files"]  # still reported, just not fatal
+    assert report["all_ok"] is True, report["checks"]

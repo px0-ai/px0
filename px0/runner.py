@@ -12,7 +12,6 @@ import fcntl
 import json
 import re
 import time
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -178,9 +177,11 @@ def _tool_call_loop(
     tool_calls: list[dict] = []
     conversation = prompt
     if allowed_tools:
+        # resolve() covers tools discovered by `px0 new`, not just the curated registry
+        specs = [(t, tools.resolve(t, home)) for t in allowed_tools]
         descriptions = "\n".join(
-            f"- {t}: {tools.REGISTRY[t].description} (params: {tools.REGISTRY[t].params})"
-            for t in allowed_tools if t in tools.REGISTRY
+            f"- {t}: {spec.description} (params: {spec.params})"
+            for t, spec in specs if spec is not None
         )
         conversation = (
             f"{prompt}\n\n---\nYou may call these tools, one at a time:\n{descriptions}\n\n"
@@ -204,7 +205,7 @@ def _tool_call_loop(
         except (json.JSONDecodeError, KeyError):
             return output, tool_calls  # malformed tool call: treat the raw output as the final answer
 
-        is_write = tools.exists(tool_id) and tools.is_write(tool_id)
+        is_write = tools.exists(tool_id, home) and tools.is_write(tool_id, home)
         if tool_id not in allowed_tools:
             result: Any = {"error": f"{tool_id} is not in this workflow's tools: allowlist"}
         elapsed = 0.0

@@ -1,9 +1,5 @@
-import pytest
 import time
 import argparse
-import os
-import signal
-from pathlib import Path
 from unittest.mock import MagicMock
 from px0 import daemon as daemon_mod, runs as runs_mod, cli, paths, config as config_mod
 
@@ -96,3 +92,21 @@ def test_cmd_runs_logs_follow_stops_at_terminal_outcome(tmp_home, monkeypatch, c
     captured = capsys.readouterr()
     assert "Line 1 from run" in captured.out
     assert "Line 2 from run" in captured.out
+
+
+def test_nightly_reports_the_real_checkpoint_file_count(tmp_home, monkeypatch):
+    """`versioning` was never imported here, so the count fell into a bare
+    except and every nightly line logged `checkpoint=1` regardless."""
+    from px0 import daemon as daemon_mod, versioning, claims, retrieval, runs as runs_module
+
+    monkeypatch.setattr(claims, "scan_and_process", lambda h, force_hash=False: "chg_1")
+    monkeypatch.setattr(versioning, "show_change",
+                        lambda h, cid: {"files": ["a.md", "b.md", "c.md"]})
+    monkeypatch.setattr(retrieval, "reindex", lambda h, c: 7)
+    monkeypatch.setattr(runs_module, "apply_retention", lambda c: {"logs": 0})
+
+    config = {"logs": {"path": str(tmp_home / "logs")}}
+    daemon_mod.run_nightly(tmp_home, config)
+
+    log = (tmp_home / "logs" / "daemon.log").read_text()
+    assert "checkpoint=3 changed" in log, log

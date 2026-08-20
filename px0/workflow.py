@@ -3,7 +3,6 @@ Markdown body as the prompt the model receives."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import yaml
 from croniter import croniter
@@ -139,14 +138,15 @@ def validate(wf: Workflow, home: Path) -> list[str]:
 
     for inp in wf.inputs:
         if inp.kind == "tool":
-            if not tools.exists(inp.tool):
+            # `home` lets tools discovered by `px0 new` resolve, not just curated ones
+            if not tools.exists(inp.tool, home):
                 errors.append(f"input {inp.id!r} references unknown tool: {inp.tool}")
-            elif tools.is_write(inp.tool):
+            elif tools.is_write(inp.tool, home):
                 errors.append(f"input {inp.id!r} tool {inp.tool!r} is a write tool; "
                                f"inputs must be read-only, use tools: instead")
 
     for t in wf.tools:
-        if not tools.exists(t):
+        if not tools.exists(t, home):
             errors.append(f"tools[] references unknown tool: {t}")
 
     if wf.pipeline:

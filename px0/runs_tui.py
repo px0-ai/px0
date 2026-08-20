@@ -1,20 +1,52 @@
+"""The `px0 runs` interactive browser: a curses list/detail view over run
+records. The list is newest-first and filterable by workflow, outcome,
+write activity, and age; the detail view adds the rendered prompt recovered
+from the raw log, the guideline versions inlined, and per-tool-call
+timings, with one keystroke each to rerun, page the log, show the output,
+and trace provenance. Row text comes from `format_row`, shared with
+`px0 runs list` so both render identically.
+"""
+
 import curses
 import os
-import sys
-import shutil
-import json
 import re
-from datetime import datetime, timezone
+import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 
-from px0 import runs as runs_mod, runner, provenance, config as config_mod, paths
-from px0.cli import _parse_since
+from px0 import runs as runs_mod, runner, provenance
 
-def format_row(r: dict) -> str:
-    """Formats one run record into a single list row string, shared between CLI and TUI."""
+def column_widths(records: list[dict]) -> dict[str, int]:
+    """Widths that align a whole batch of rows into columns.
+
+    Computed once by the caller and passed to every `format_row` so both the
+    plain listing and the TUI lay out identically; without it each row would be
+    formatted in isolation and the columns would jitter.
+    """
+    return {
+        "id": max((len(r.get("id", "")) for r in records), default=0),
+        "workflow_id": max((len(str(r.get("workflow_id") or "")) for r in records), default=0),
+        "trigger": max((len(str(r.get("trigger") or "")) for r in records), default=0),
+    }
+
+
+def format_row(r: dict, widths: dict[str, int] | None = None) -> str:
+    """Formats one run record into a single list row, shared between CLI and TUI.
+
+    Columns are separated by two spaces and padded to `widths` when given, so a
+    listing reads as a table; without widths the fields are simply joined.
+    """
+    widths = widths or {}
     wrote = any(c.get("is_write") for c in r.get("tool_calls", []))
-    marker = " [write]" if wrote else ""
-    return f"{r['id']}\t{r.get('workflow_id')}\t{r['trigger']}\t{r.get('outcome')}{marker}"
+    marker = "  [write]" if wrote else ""
+    fields = [
+        r.get("id", "").ljust(widths.get("id", 0)),
+        str(r.get("workflow_id") or "").ljust(widths.get("workflow_id", 0)),
+        str(r.get("trigger") or "").ljust(widths.get("trigger", 0)),
+        str(r.get("outcome") or ""),
+    ]
+    return ("  ".join(fields) + marker).rstrip()
 
 
 def extract_rendered_prompt(raw_log_text: str) -> str:
@@ -59,8 +91,106 @@ def run(home: Path, config: dict) -> None:
         pass
 
 
+# curses colour-pair ids, mirroring ui.py's palette so the TUI and the plain
+# commands read as one program.
+_P_ACCENT, _P_OK, _P_ERR, _P_WARN, _P_DIM, _P_FAINT = range(1, 7)
+
+
+def _init_palette() -> bool:
+    """Sets up colour pairs. False on a terminal without colour, so callers fall
+    back to A_DIM/A_BOLD attributes instead."""
+    try:
+        curses.start_color()
+        curses.use_default_colors()
+    except curses.error:
+        return False
+    if not curses.has_colors():
+        return False
+    for pair, fg in ((_P_ACCENT, 208), (_P_OK, 71), (_P_ERR, 167),
+                     (_P_WARN, 179), (_P_DIM, 245), (_P_FAINT, 240)):
+        try:
+            curses.init_pair(pair, fg, -1)  # -1 keeps the terminal's own background
+        except curses.error:
+            return False
+    return True
+
+
+def _attr(pair: int, fallback: int = 0) -> int:
+    """The attribute for a palette entry, or `fallback` when colour is unavailable."""
+    return curses.color_pair(pair) if _HAS_COLOR else fallback
+
+
+_HAS_COLOR = False
+
+
+@contextmanager
+def _suspended(prompt: str = "\nPress any key to resume..."):
+    """Drops out of curses for a block that writes to the real terminal.
+
+    Restores curses on the way out whatever happened, so an exception in a
+    keystroke handler can never leave the terminal in raw mode with no cursor.
+    Errors are shown to the user and swallowed: a failed pager or a missing
+    record should return you to the list, not tear the TUI down.
+    """
+    curses.endwin()
+    try:
+        yield
+    except Exception as e:
+        print(f"\n{e}")
+    finally:
+        print(prompt)
+        try:
+            sys.stdin.read(1)
+        except (OSError, ValueError):
+            pass
+        curses.initscr().refresh()
+
+
+def _dim_sep() -> str:
+    """The separator between header fields."""
+    return "·"
+
+
+def _filter_summary(workflow, outcome, write_only, since_raw) -> str:
+    """One dim line naming only the filters actually in effect."""
+    parts = []
+    if workflow:
+        parts.append(f"workflow={workflow}")
+    if outcome and outcome != "all":
+        parts.append(f"outcome={outcome}")
+    if write_only:
+        parts.append("writes only")
+    if since_raw:
+        parts.append(f"since={since_raw}")
+    return "  ".join(parts) if parts else "no filters"
+
+
+def _outcome_attr(record: dict) -> int:
+    """Colours a row by its outcome: failures red, everything else plain."""
+    if record.get("outcome") == "failed":
+        return _attr(_P_ERR)
+    if record.get("outcome") not in ("success", "failed"):
+        return _attr(_P_DIM, curses.A_DIM)  # still running, or an old record
+    return 0
+
+
+def _addkeys(stdscr, y: int, width: int, keys: list[tuple[str, str]]) -> None:
+    """Renders the key hints: each key accented, its label dim."""
+    x = 1
+    for key, label in keys:
+        chunk = len(key) + len(label) + 3
+        if x + chunk >= width:
+            break
+        stdscr.addstr(y, x, key, _attr(_P_ACCENT, curses.A_BOLD))
+        x += len(key) + 1
+        stdscr.addstr(y, x, label, _attr(_P_DIM, curses.A_DIM))
+        x += len(label) + 2
+
+
 def _main(stdscr, home: Path, config: dict) -> None:
+    global _HAS_COLOR
     # Setup curses settings
+    _HAS_COLOR = _init_palette()
     curses.curs_set(0)
     stdscr.nodelay(False)
     stdscr.keypad(True)
@@ -82,11 +212,13 @@ def _main(stdscr, home: Path, config: dict) -> None:
         stdscr.clear()
         height, width = stdscr.getmaxyx()
 
-        # Render Header
-        filter_str = f"Filters: [W]orkflow: {workflow_filter or 'None'} | [F]outcome: {outcome_filter} | [A]ctivity (write): {'True' if write_only_filter else 'False'} | [S]ince: {since_filter_raw or 'None'}"
-        stdscr.addstr(0, 0, "px0 runs TUI - List View".center(width)[:width], curses.A_REVERSE)
-        stdscr.addstr(1, 0, filter_str[:width], curses.A_DIM)
-        stdscr.addstr(2, 0, "=" * width, curses.A_DIM)
+        # Render Header: title left, count right, active filters below, then a rule
+        title = f" px0 runs {_dim_sep()} {len(visible_records)} of {len(all_records)}"
+        stdscr.addstr(0, 0, title[:width], _attr(_P_ACCENT, curses.A_BOLD) | curses.A_BOLD)
+        active = _filter_summary(workflow_filter, outcome_filter,
+                                write_only_filter, since_filter_raw)
+        stdscr.addstr(1, 1, active[:width - 1], _attr(_P_DIM, curses.A_DIM))
+        stdscr.addstr(2, 0, "─" * width, _attr(_P_FAINT, curses.A_DIM))
 
         # Render list rows
         max_rows = height - 5
@@ -96,7 +228,8 @@ def _main(stdscr, home: Path, config: dict) -> None:
         if not visible_records:
             selected_index = 0
             scroll_offset = 0
-            stdscr.addstr(4, 2, "No run records match current filters.")
+            stdscr.addstr(4, 2, "no runs match these filters",
+                          _attr(_P_DIM, curses.A_DIM))
         else:
             selected_index = max(0, min(selected_index, len(visible_records) - 1))
             if selected_index < scroll_offset:
@@ -104,20 +237,25 @@ def _main(stdscr, home: Path, config: dict) -> None:
             elif selected_index >= scroll_offset + max_rows:
                 scroll_offset = selected_index - max_rows + 1
 
+            widths = column_widths(visible_records)
             for idx in range(scroll_offset, min(scroll_offset + max_rows, len(visible_records))):
                 rec = visible_records[idx]
-                row_str = format_row(rec)
-                # truncate or pad
-                row_str = row_str.replace("\t", "   ")[:width - 4]
+                row_str = format_row(rec, widths)[:width - 4]
                 y = 4 + (idx - scroll_offset)
-                if idx == selected_index:
-                    stdscr.addstr(y, 2, f"> {row_str}", curses.A_REVERSE)
-                else:
-                    stdscr.addstr(y, 2, f"  {row_str}")
+                selected = idx == selected_index
+                # the selection is a pointer, not a highlight bar -- less flicker,
+                # and the row's own outcome colour stays readable
+                marker = "›" if selected else " "
+                row_attr = curses.A_BOLD if selected else _outcome_attr(rec)
+                stdscr.addstr(y, 1, marker, _attr(_P_ACCENT, curses.A_BOLD))
+                stdscr.addstr(y, 3, row_str, row_attr)
 
         # Footer / Hotkeys
-        footer = "Keys: ↑/↓ Move | Enter Detail | / Workflow | f Outcome | a WriteOnly | s Since | c Clear | q Quit"
-        stdscr.addstr(height - 1, 0, footer[:width], curses.A_REVERSE)
+        stdscr.addstr(height - 2, 0, "─" * width, _attr(_P_FAINT, curses.A_DIM))
+        _addkeys(stdscr, height - 1, width, [
+            ("↑↓", "move"), ("enter", "detail"), ("/", "workflow"), ("f", "outcome"),
+            ("a", "writes"), ("s", "since"), ("c", "clear"), ("q", "quit"),
+        ])
 
         # Handle keyboard input
         try:
@@ -156,13 +294,14 @@ def _main(stdscr, home: Path, config: dict) -> None:
             selected_index = 0
 
         elif key in (ord('s'), ord('S')):
-            ans = _prompt(stdscr, height - 1, "Filter Since (e.g. -7d): ")
+            ans = _prompt(stdscr, height - 1, "since (e.g. 7d, 2w, 12h): ")
             if ans:
                 try:
-                    since_filter = _parse_since(ans)
+                    since_filter = runs_mod.parse_since(ans)
                     since_filter_raw = ans
                 except ValueError:
-                    _status_err(stdscr, height - 1, "Invalid since format. Use e.g. -7d")
+                    _status_err(stdscr, height - 1,
+                                "invalid age -- use e.g. 7d, 2w, 12h")
             selected_index = 0
 
         elif key in (ord('c'), ord('C')):
@@ -185,7 +324,7 @@ def _prompt(stdscr, y, prompt_text) -> str | None:
     height, width = stdscr.getmaxyx()
     stdscr.move(y, 0)
     stdscr.clrtoeol()
-    stdscr.addstr(y, 0, prompt_text, curses.A_REVERSE)
+    stdscr.addstr(y, 0, prompt_text, _attr(_P_ACCENT, curses.A_BOLD))
     
     stdscr.nodelay(False)
     stdscr.keypad(True)
@@ -202,7 +341,7 @@ def _prompt(stdscr, y, prompt_text) -> str | None:
 def _status_err(stdscr, y, text) -> None:
     stdscr.move(y, 0)
     stdscr.clrtoeol()
-    stdscr.addstr(y, 0, f"Error: {text}", curses.A_REVERSE)
+    stdscr.addstr(y, 0, f"✗ {text}", _attr(_P_ERR, curses.A_BOLD))
     stdscr.getch()
 
 
@@ -226,117 +365,95 @@ def _detail_view(stdscr, home: Path, config: dict, record_brief: dict) -> None:
         except Exception:
             pass
 
-        stdscr.addstr(0, 0, f"px0 runs TUI - Detail View: {run_id}".center(width)[:width], curses.A_REVERSE)
+        stdscr.addstr(0, 0, f" {run_id}"[:width],
+                      _attr(_P_ACCENT, curses.A_BOLD) | curses.A_BOLD)
         
-        # Metadata
+        # Metadata. Labels stay lowercase and aligned to match the plain commands.
         lines = [
-            f"Workflow ID: {record.get('workflow_id', 'None')}",
-            f"Trigger:     {record.get('trigger', 'None')}",
-            f"Outcome:     {record.get('outcome', 'None')}",
-            f"Duration:    {record.get('duration_seconds', 'n/a')}s",
+            f"workflow: {record.get('workflow_id') or '-'}",
+            f"trigger:  {record.get('trigger') or '-'}",
+            f"outcome:  {record.get('outcome') or '-'}",
+            f"duration: {record.get('duration_seconds', 'n/a')}s",
         ]
-        
+
         # Render prompt
         prompt = extract_rendered_prompt(raw_log)
+        lines.append("")
         if prompt:
-            lines.append("Rendered Prompt:")
+            lines.append("rendered prompt")
             lines.append("  " + prompt.replace("\n", "\n  ")[:500] + ("..." if len(prompt) > 500 else ""))
         else:
-            lines.append("Rendered Prompt: not available (log retention expired)")
+            lines.append("rendered prompt")
+            lines.append("  not available -- log retention removed it")
 
-        # Guidelines inlined
-        lines.append("Guidelines Inlined:")
-        for g in record.get("guidelines_inlined", []):
-            lines.append(f"  - {g[0]} @ {g[1][:8] if len(g) > 1 else 'latest'}")
+        guidelines = record.get("guidelines_inlined", [])
+        lines.append("")
+        lines.append(f"guidelines inlined ({len(guidelines)})")
+        for g in guidelines:
+            lines.append(f"  {g[0]} @ {g[1][:8] if len(g) > 1 else 'latest'}")
+        if not guidelines:
+            lines.append("  none")
 
-        # Tool calls & timing
-        lines.append("Tool Calls & Timings:")
-        for tc in record.get("tool_calls", []):
-            timing = f" ({tc['elapsed_seconds']}s)" if tc.get("elapsed_seconds") is not None else ""
-            lines.append(f"  - {tc.get('tool')}{timing} -> {tc.get('result_summary', '')[:80]}")
+        calls = record.get("tool_calls", [])
+        lines.append("")
+        lines.append(f"tool calls ({len(calls)})")
+        for tc in calls:
+            timing = f" {tc['elapsed_seconds']}s" if tc.get("elapsed_seconds") is not None else ""
+            write = "  [write]" if tc.get("is_write") else ""
+            lines.append(f"  {tc.get('tool')}{timing}{write} -> {tc.get('result_summary', '')[:80]}")
+        if not calls:
+            lines.append("  none")
 
-        # Render detail pane
-        max_y = height - 2
+        # Render detail pane. A line is either "Label: value" (label dimmed so the
+        # value reads first) or a section title / indented continuation.
+        max_y = height - 4
         for idx, line in enumerate(lines[:max_y]):
+            y = 2 + idx
             try:
-                stdscr.addstr(2 + idx, 2, line[:width - 4])
+                if line.startswith("  "):
+                    stdscr.addstr(y, 2, line[:width - 4], _attr(_P_DIM, curses.A_DIM))
+                elif ":" in line and not line.endswith(":"):
+                    label, _, value = line.partition(":")
+                    stdscr.addstr(y, 2, f"{label}:", _attr(_P_DIM, curses.A_DIM))
+                    stdscr.addstr(y, 2 + len(label) + 2, value.strip()[:width - 6],
+                                  _outcome_attr(record) if label == "outcome" else 0)
+                else:
+                    stdscr.addstr(y, 2, line[:width - 4], curses.A_BOLD)
             except curses.error:
                 pass
 
-        footer = "[r] rerun | [l] log page | [o] output | [w] why provenance | Esc/q back"
-        stdscr.addstr(height - 1, 0, footer[:width], curses.A_REVERSE)
+        stdscr.addstr(height - 2, 0, "─" * width, _attr(_P_FAINT, curses.A_DIM))
+        _addkeys(stdscr, height - 1, width, [
+            ("r", "rerun"), ("l", "log"), ("o", "output"),
+            ("w", "why"), ("esc", "back"),
+        ])
 
         key = stdscr.getch()
         if key in (27, ord('q'), ord('Q')):
             break
 
         elif key in (ord('r'), ord('R')):
-            # Rerun
-            try:
-                # Suspend curses
-                curses.endwin()
-                print(f"Rerunning workflow {record['workflow_id']}...")
-                new_run_id = runner.run(home, config, record["workflow_id"], trigger="manual")
-                print(f"Spawned rerun with run ID: {new_run_id}")
-                print("\nPress any key to resume TUI...")
-                sys.stdin.read(1)
-            except Exception as e:
-                print(f"Rerun failed: {e}")
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            finally:
-                # Resume curses
-                stdscr = curses.initscr()
-                stdscr.refresh()
-                # Set run_id to new rerun
-                if 'new_run_id' in locals() and new_run_id:
-                    run_id = new_run_id
+            new_run_id = None
+            with _suspended():
+                print(f"Rerunning {record['workflow_id']}...")
+                # runner.run returns the whole record, not an id
+                new_run_id = runner.run(
+                    home, config, record["workflow_id"], trigger="manual")["id"]
+                print(f"Spawned {new_run_id}")
+            if new_run_id:
+                run_id = new_run_id  # follow the rerun, so the view shows the new record
 
         elif key in (ord('l'), ord('L')):
-            # Page full raw log
-            curses.endwin()
-            try:
-                log_path = runs_mod.log_path(config, run_id)
+            with _suspended():
                 pager = os.environ.get("PAGER", "less")
-                subprocess.run([pager, str(log_path)])
-            except Exception as e:
-                print(f"Error paging log: {e}")
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            finally:
-                stdscr = curses.initscr()
-                stdscr.refresh()
+                subprocess.run([pager, str(runs_mod.log_path(config, run_id))])
 
         elif key in (ord('o'), ord('O')):
-            # Print output
-            curses.endwin()
-            try:
-                print("--- Output Text ---")
-                text_out = record.get("output", {}).get("text", "")
-                print(text_out)
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            except Exception as e:
-                print(f"Error printing output: {e}")
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            finally:
-                stdscr = curses.initscr()
-                stdscr.refresh()
+            with _suspended():
+                print("--- output ---")
+                print(record.get("output", {}).get("text", ""))
 
         elif key in (ord('w'), ord('W')):
-            # Prove why
-            curses.endwin()
-            try:
-                print("--- Provenance Chain ---")
-                prov_text = provenance.why(home, config, run_id)
-                print(prov_text)
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            except Exception as e:
-                print(f"Error checking provenance why: {e}")
-                print("\nPress any key to resume...")
-                sys.stdin.read(1)
-            finally:
-                stdscr = curses.initscr()
-                stdscr.refresh()
+            with _suspended():
+                print("--- provenance ---")
+                print(provenance.why(home, config, run_id))

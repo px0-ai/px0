@@ -1,7 +1,14 @@
-"""px0 update / px0 version."""
+"""px0 update / px0 version: PyPI-backed version checks and self-update.
+
+`check()` reads the published versions from PyPI's JSON API; `run_update()`
+upgrades in place through whichever mechanism installed px0 (pipx or pip),
+applies any pending store-schema MIGRATIONS, appends the result to
+`.state/update-history.json`, restarts a running daemon, and finishes with
+a quick doctor pass. `rollback()` reinstalls the last entry's from_version
+and pops it; schema migrations are forward-only and are not undone.
+"""
 
 import json
-import os
 import sys
 import shutil
 import subprocess
@@ -49,33 +56,40 @@ def version_info(home: Path, config: dict) -> dict:
     }
 
 
+class PyPIUnreachable(UpdateError):
+    """PyPI could not be queried. Distinct from "no newer version exists":
+    reporting an unreachable index as "up to date" is a lie the user acts on."""
+
+
 def _pypi_latest_version(channel: str) -> str | None:
-    """Queries PyPI JSON API and returns the latest available version for the channel."""
+    """The newest version published on `channel`, or None if px0 isn't on PyPI yet.
+
+    Raises PyPIUnreachable when the index could not be read at all -- network
+    down, proxy, TLS interception. Collapsing that into None would report
+    "already up to date" to someone who is actually several releases behind.
+    """
     url = "https://pypi.org/pypi/px0/json"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 404:
-            return None
+            return None  # genuinely not published
         resp.raise_for_status()
         data = resp.json()
-    except Exception:
-        return None
+    except requests.RequestException as e:
+        raise PyPIUnreachable(f"could not reach PyPI: {e}") from e
+    except ValueError as e:
+        raise PyPIUnreachable(f"PyPI returned a malformed response: {e}") from e
 
     if channel == "stable":
         return data.get("info", {}).get("version")
 
     # beta channel: highest release including pre-releases
-    releases = data.get("releases", {})
-    if not releases:
-        return None
-
     parsed_versions = []
-    for ver_str in releases.keys():
+    for ver_str in data.get("releases", {}):
         try:
             parsed_versions.append((version.parse(ver_str), ver_str))
-        except Exception:
-            pass
-
+        except version.InvalidVersion:
+            continue  # PyPI can carry legacy non-PEP440 version strings
     if not parsed_versions:
         return None
 
@@ -84,7 +98,15 @@ def _pypi_latest_version(channel: str) -> str | None:
 
 
 def check(config: dict) -> dict:
-    """Reports update availability."""
+    """Reports update availability. Raises PyPIUnreachable if PyPI can't be read.
+
+    The result always carries both keys, and they mean different things:
+    `available_version` is the newest version published on the channel (None if
+    px0 isn't published there at all), and `update_available` says whether that
+    is newer than what's installed. Callers gate on `update_available` -- an
+    earlier version of this returned `available_version: None` when current,
+    which made "up to date" and "not published" indistinguishable.
+    """
     channel = config_mod.get(config, "update.channel", "stable")
     latest = _pypi_latest_version(channel)
     if not latest:
@@ -92,23 +114,34 @@ def check(config: dict) -> dict:
             "channel": channel,
             "current_version": __version__,
             "available_version": None,
-            "message": "Package not published on PyPI or unreachable.",
+            "update_available": False,
+            "message": f"px0 is not published on the {channel} channel yet.",
         }
 
-    current = version.parse(__version__)
-    available = version.parse(latest)
-
-    if available > current:
-        msg = f"Update available: {latest} on channel {channel}."
-    else:
-        msg = "Already up to date."
-
+    update_available = version.parse(latest) > version.parse(__version__)
     return {
         "channel": channel,
         "current_version": __version__,
-        "available_version": latest if available > current else None,
-        "message": msg,
+        "available_version": latest,
+        "update_available": update_available,
+        "message": (f"Update available: {latest} on channel {channel}."
+                    if update_available else "Already up to date."),
     }
+
+
+def _load_history(path: Path) -> list:
+    """The update history, or [] when it's missing or unreadable.
+
+    An unreadable history costs a rollback target, not correctness, so it
+    degrades rather than raising.
+    """
+    if not path.exists():
+        return []
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    return loaded if isinstance(loaded, list) else []
 
 
 def _detect_install_mechanism(home: Path) -> str:
@@ -131,20 +164,15 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
     if check_only:
         return result
 
+    if not result.get("update_available"):
+        return result  # nothing newer published; never "upgrade" to what's installed
     latest = result["available_version"]
-    if not latest:
-        return result
 
     mechanism = _detect_install_mechanism(home)
     channel = result["channel"]
 
     history_path = paths.update_history_path(home)
-    history = []
-    if history_path.exists():
-        try:
-            history = json.loads(history_path.read_text())
-        except Exception:
-            pass
+    history = _load_history(history_path)
 
     # Run installer command
     if mechanism == "pipx":
@@ -160,10 +188,10 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
 
     try:
         sub_res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if sub_res.returncode != 0:
-            raise UpdateError(f"Install failed: {sub_res.stderr.strip()[:200]}")
     except Exception as e:
-        raise UpdateError(f"Upgrade subprocess error: {e}")
+        raise UpdateError(f"Upgrade subprocess error: {e}") from e
+    if sub_res.returncode != 0:
+        raise UpdateError(f"Install failed: {sub_res.stderr.strip()[:200]}")
 
     # Log successful update to history
     history_entry = {
@@ -179,8 +207,12 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
     if schema_file.exists():
         try:
             current_schema = int(schema_file.read_text().strip())
-        except Exception:
-            pass
+        except (OSError, ValueError) as e:
+            # Assuming 1 here would re-run every migration against a store that
+            # may already be migrated. Refuse instead.
+            raise UpdateError(
+                f"cannot read the store schema version from {schema_file}: {e}"
+            ) from e
 
     applied_migrations = []
     for mig_ver in sorted(MIGRATIONS.keys()):
@@ -212,12 +244,7 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
 def rollback(home: Path, config: dict) -> None:
     """Restores the previously installed px0 version from update history."""
     history_path = paths.update_history_path(home)
-    history = []
-    if history_path.exists():
-        try:
-            history = json.loads(history_path.read_text())
-        except Exception:
-            pass
+    history = _load_history(history_path)
 
     if not history:
         raise UpdateError("rollback is not available (no update history exists)")
@@ -233,16 +260,19 @@ def rollback(home: Path, config: dict) -> None:
 
     try:
         sub_res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if sub_res.returncode != 0:
-            raise UpdateError(f"Rollback install failed: {sub_res.stderr.strip()[:200]}")
     except Exception as e:
-        raise UpdateError(f"Rollback subprocess error: {e}")
+        raise UpdateError(f"Rollback subprocess error: {e}") from e
+    if sub_res.returncode != 0:
+        raise UpdateError(f"Rollback install failed: {sub_res.stderr.strip()[:200]}")
 
     history.pop()
     history_path.write_text(json.dumps(history, indent=2))
 
     print(f"\nSuccessfully rolled back to px0 version {target_version}.")
-    print("Note: Store schema migrations are forward-only and have NOT been rolled back.")
+    if last_entry.get("migrations_applied"):
+        applied = ", ".join(f"v{m}" for m in last_entry["migrations_applied"])
+        print(f"Note: schema migrations ({applied}) are forward-only and have NOT been "
+              "rolled back; the restored version may see a newer store schema.")
     print("Run `px0 doctor` to confirm store layout integrity.")
 
     daemon_mod.restart_if_running(home, config)

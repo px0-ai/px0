@@ -8,7 +8,7 @@ import json
 import re
 import secrets
 from dataclasses import dataclass, asdict
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from px0 import claims, harness

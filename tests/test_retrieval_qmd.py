@@ -1,7 +1,4 @@
 import pytest
-import subprocess
-import json
-from pathlib import Path
 from px0 import retrieval, doctor, paths
 
 def test_qmd_ensure_collection_skips_when_exists(tmp_home, monkeypatch):
@@ -137,3 +134,85 @@ def test_doctor_check_qmd_version_mismatch(tmp_home, monkeypatch):
     v_check = doctor._check_qmd_version(tmp_home, {"retrieval": {"backend": "qmd"}})
     assert v_check["ok"] is False
     assert "does not match pinned" in v_check["detail"]
+
+
+def test_local_only_returns_k_results_when_work_rows_rank_higher(tmp_home):
+    """The work/ exclusion must not eat into the k budget.
+
+    Regression: filtering after the SQL LIMIT meant a query whose top matches all
+    live under work/ returned fewer passages -- silently degraded recall on top of
+    the intended exclusion.
+    """
+    from px0 import retrieval
+
+    base = retrieval.knowledge_path(tmp_home, {})
+    (base / "work").mkdir(parents=True, exist_ok=True)
+    # work/ rows are inserted first and repeated, so BM25 ranks them at the top
+    for i in range(5):
+        (base / "work" / f"secret{i}.md").write_text(
+            "---\nsource: local\nretrieved: 2026-08-20\n---\n\npooling pooling pooling\n"
+        )
+    for i in range(3):
+        (base / f"public{i}.md").write_text(
+            "---\nsource: local\nretrieved: 2026-08-20\n---\n\npooling\n"
+        )
+
+    retrieval.reindex(tmp_home, {})
+
+    got = retrieval.retrieve(tmp_home, {}, "pooling", k=3, local_only=True)
+    assert [p.path for p in got] and all(not p.path.startswith("work/") for p in got)
+    assert len(got) == 3, "work/ exclusion must not consume the k budget"
+
+    # local_only=False still sees them
+    unrestricted = retrieval.retrieve(tmp_home, {}, "pooling", k=8, local_only=False)
+    assert any(p.path.startswith("work/") for p in unrestricted)
+
+
+def test_qmd_query_uses_format_json_flag(tmp_home, monkeypatch):
+    """qmd has no `--json`; JSON output comes from `--format json`.
+
+    Verified against qmd 2.8.3's own `--help`. The old `--json` made the whole
+    qmd backend fail at the first query with an unknown-flag exit.
+    """
+    seen = []
+
+    def mock_run(config, *args, **kwargs):
+        seen.append(args)
+        return "[]"
+
+    monkeypatch.setattr(retrieval, "_qmd_ensure_collection", lambda h, c: None)
+    monkeypatch.setattr(retrieval, "_qmd_run", mock_run)
+
+    retrieval._qmd_retrieve(tmp_home, {}, "pooling", 7)
+
+    args = seen[0]
+    assert "--json" not in args
+    assert args[:2] == ("query", "pooling")
+    assert "--format" in args and args[args.index("--format") + 1] == "json"
+    assert args[args.index("-n") + 1] == "7"
+    assert args[args.index("-c") + 1] == "px0-knowledge"
+
+
+def test_doctor_check_qmd_version_parses_real_version_output(tmp_home, monkeypatch):
+    """`qmd --version` prints "qmd 2.8.3 (facd35e)", not a bare version number."""
+    monkeypatch.setattr(
+        retrieval, "_qmd_run",
+        lambda config, *a, **kw: f"qmd {retrieval.QMD_PINNED_VERSION} (facd35e)\n",
+    )
+
+    v_check = doctor._check_qmd_version(tmp_home, {"retrieval": {"backend": "qmd"}})
+    assert v_check["ok"] is True, v_check["detail"]
+
+
+def test_doctor_check_qmd_version_reports_unparseable_output(tmp_home, monkeypatch):
+    monkeypatch.setattr(retrieval, "_qmd_run", lambda config, *a, **kw: "not a version\n")
+
+    v_check = doctor._check_qmd_version(tmp_home, {"retrieval": {"backend": "qmd"}})
+    assert v_check["ok"] is False
+    assert "could not parse" in v_check["detail"]
+
+
+def test_qmd_pinned_version_is_a_published_release():
+    """0.1.0 was never published; guard against another placeholder pin."""
+    from packaging import version
+    assert version.parse(retrieval.QMD_PINNED_VERSION) >= version.parse("0.9.0")

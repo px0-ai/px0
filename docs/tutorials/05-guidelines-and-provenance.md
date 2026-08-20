@@ -79,14 +79,32 @@ For the file-level view (rather than the section-level view `guidelines
 log` gives you), the same idea applies to any versioned file:
 
 ```shell
-px0 versions list workflows/pr-precheck.md
-px0 versions diff workflows/pr-precheck.md 2 3
+px0 versions list workflows/post-standup.md
+px0 versions diff workflows/post-standup.md 2 3
+px0 versions revert workflows/post-standup.md --to 2
 px0 changes list --since 7d
 ```
 
+`px0 changes list` is the store-wide view: every recorded change across
+workflows, guidelines, and config, newest first. `px0 changes show <id>`
+prints one change's files, and `px0 changes revert <id>` undoes it.
+
+## 5. Guidelines your editor sees too
+
+The same guideline files can be compiled into skill bundles your coding
+agent loads in ordinary interactive sessions, not just inside px0 runs:
+
+```shell
+px0 skills build
+```
+
+See [08-skills.md](08-skills.md).
+
 ## Next
 
-- [05-skills.md](05-skills.md) -- manage community agent skills and compile
+- [07-browsing-runs.md](07-browsing-runs.md) -- the interactive view over
+  the run records `px0 why` reads from.
+- [08-skills.md](08-skills.md) -- manage community agent skills and compile
   guidelines into Claude Code skill bundles.
 - Back to [01-getting-started.md](01-getting-started.md), or see
   [02-building-a-workflow.md](02-building-a-workflow.md) if you haven't

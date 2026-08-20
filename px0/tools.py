@@ -1,17 +1,15 @@
 """The normalized tool namespace. Every input `tool:` and every workflow
-`tools:` entry names something from here. The native GitHub adapter calls
-the GitHub REST API directly with a stored PAT. Composio-backed tools
-(calendar, gmail, slack) are listed in the namespace with the read/write
-shape the spec describes, but this build does not implement a live
-Composio client -- calling one raises ConnectorNotConfigured rather than
-guessing at an unverified API shape."""
+`tools:` entry names something from here. Every tool executes through the
+Composio SDK against a connected account -- the GitHub tools proxy the
+GitHub REST API through Composio rather than holding their own PAT.
+A tool whose app is not authorized yet prepares that app's authorization
+itself and raises ConnectorNotConfigured carrying the URL to consent at --
+there is no separate connect step to run first."""
 
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
-
-import requests
 
 from px0 import credentials as creds_mod
 
@@ -49,18 +47,17 @@ _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<
 
 def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any:
     """Issues one authenticated GitHub API request via Composio's proxy."""
-    creds = creds_mod.load(ctx.home)
-    composio = creds.get("composio")
-    if not composio or not composio.get("api_key"):
-        raise ConnectorNotConfigured("Composio API key is not configured; run `px0 connect setup-composio <key>`")
-    
+    composio = _composio_credentials(ctx.home)
+
     connected_accounts = composio.get("connected_accounts", {})
     if "github" not in connected_accounts:
-        raise ConnectorNotConfigured("github is not connected; run `px0 connect github`")
-        
+        raise _needs_connection(ctx.home, "github", "is not connected yet")
+
     connected_account_id = connected_accounts["github"]
     
+    from px0 import connect as connect_mod
     from composio import Composio
+    connect_mod._silence_sdk_logging()
     client = Composio(api_key=composio["api_key"])
 
     endpoint = f"https://api.github.com{path}"
@@ -110,7 +107,8 @@ def _github_request(ctx: Context, method: str, path: str, **kwargs) -> Any:
 
     fake_resp = FakeResponse(resp)
     if fake_resp.status_code == 401:
-        raise ConnectorError("github token rejected (401); you may need to reconnect via `px0 connect github`")
+        raise ConnectorError("github rejected the request (401); its authorization "
+                             "may have been revoked -- the next run will offer a fresh link")
     if fake_resp.status_code >= 400:
         raise ConnectorError(f"github {method} {path} -> {fake_resp.status_code}: {fake_resp.text[:200]}")
     return fake_resp
@@ -196,38 +194,85 @@ def github_create_review_comment(args: dict, ctx: Context) -> dict:
     return {"id": resp.json()["id"], "url": resp.json()["html_url"]}
 
 
-def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any:
-    """Executes a Composio tool using the stored API key and connected account ID."""
-    creds = creds_mod.load(ctx.home)
+# Composio tool slugs, each resolved against the live catalogue
+# (GET /api/v3/tools/{slug} returning 200) rather than inferred from the tool
+# name -- Composio's naming is not predictable from pattern. Verified 2026-08-20.
+# Argument keys below come from each tool's own `input_parameters` schema.
+_TOOL_SLUGS: dict[str, str] = {
+    "calendar.list_events": "GOOGLECALENDAR_EVENTS_LIST",
+    "gmail.search_messages": "GMAIL_FETCH_EMAILS",
+    # not GMAIL_GET_EMAIL, which does not exist in the catalogue (404)
+    "gmail.get_message": "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+    "gmail.send_message": "GMAIL_SEND_EMAIL",
+    "slack.post_message": "SLACK_SEND_MESSAGE",
+}
+
+
+def _needs_connection(home, app: str, reason: str) -> ConnectorNotConfigured:
+    """Builds the error raised when `app` isn't usable yet, with a live auth link.
+
+    There is no `px0 connect` to send the user to: a tool that needs an app
+    triggers that app's authorization itself, so the only thing missing is the
+    human opening the URL. Minting a link is idempotent -- the underlying auth
+    config is created once and cached -- and grants nothing until someone
+    consents in the browser.
+    """
+    from px0 import connect as connect_mod
+
+    try:
+        res = connect_mod.connect_composio_app(home, app)
+    except Exception as e:
+        # Couldn't even prepare the link: say why rather than dangling a dead URL.
+        return ConnectorNotConfigured(
+            f"{app} {reason}, and preparing its authorization failed: {e}"
+        )
+    return ConnectorNotConfigured(
+        f"{app} {reason}. Authorize it by opening:\n  {res['redirect_url']}"
+    )
+
+
+def _composio_credentials(home):
+    """The stored Composio credentials, or a ConnectorNotConfigured explaining how
+    to set the API key up."""
+    creds = creds_mod.load(home)
     composio = creds.get("composio")
     if not composio or not composio.get("api_key"):
         raise ConnectorNotConfigured(
-            "Composio API key is not configured; run `px0 connect setup-composio <key>`"
+            "Composio API key is not configured; run `px0 config composio <key>`"
         )
+    return composio
+
+
+def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any:
+    """Executes a Composio tool, authorizing the app on demand if it isn't yet."""
+    composio = _composio_credentials(ctx.home)
 
     connected_accounts = composio.get("connected_accounts", {})
     if app not in connected_accounts:
-        raise ConnectorNotConfigured(
-            f"{app} is not connected; run `px0 connect {app}`"
-        )
+        raise _needs_connection(ctx.home, app, "is not connected yet")
 
     connected_account_id = connected_accounts[app]
     api_key = composio["api_key"]
     
+    from px0 import connect as connect_mod
     from composio import Composio
+    connect_mod._silence_sdk_logging()
     client = Composio(api_key=api_key)
 
     try:
         account = client.connected_accounts.get(connected_account_id)
         if account.status == "INITIATED":
-            raise ConnectorNotConfigured(f"{app} connection is INITIATED, not ACTIVE -- finish the browser consent")
+            raise ConnectorNotConfigured(
+                f"{app} authorization was started but never completed -- open the URL "
+                "px0 printed for it and finish the browser consent"
+            )
         if account.status != "ACTIVE":
-            raise ConnectorNotConfigured(f"{app} connection is {account.status}, not ACTIVE -- run `px0 connect {app}` and complete OAuth")
+            raise _needs_connection(ctx.home, app, f"connection is {account.status}, not ACTIVE")
     except ConnectorNotConfigured:
         raise
     except Exception as e:
         if "404" in str(e) or "not found" in str(e).lower():
-            raise ConnectorNotConfigured(f"{app} connection not found on Composio; run `px0 connect {app}`")
+            raise _needs_connection(ctx.home, app, "connection no longer exists on Composio")
         raise ConnectorError(f"Composio API error: {e}") from e
 
     try:
@@ -273,7 +318,7 @@ def calendar_list_events(args: dict, ctx: Context) -> Any:
         "timeMax": timeMax,
         "singleEvents": True,
     }
-    return _composio_execute(ctx, "calendar", "GOOGLECALENDAR_EVENTS_LIST", arguments)
+    return _composio_execute(ctx, "calendar", _TOOL_SLUGS["calendar.list_events"], arguments)
 
 
 def gmail_search_messages(args: dict, ctx: Context) -> Any:
@@ -282,17 +327,15 @@ def gmail_search_messages(args: dict, ctx: Context) -> Any:
     arguments = {
         "query": query,
     }
-    return _composio_execute(ctx, "gmail", "GMAIL_FETCH_EMAILS", arguments)
+    return _composio_execute(ctx, "gmail", _TOOL_SLUGS["gmail.search_messages"], arguments)
 
 
 def gmail_get_message(args: dict, ctx: Context) -> Any:
     """Fetch one gmail message."""
-    msg_id = args.get("id", "")
     arguments = {
-        "id": msg_id,
-        "message_id": msg_id,
+        "message_id": args.get("id", ""),  # the schema's only required field
     }
-    return _composio_execute(ctx, "gmail", "GMAIL_GET_EMAIL", arguments)
+    return _composio_execute(ctx, "gmail", _TOOL_SLUGS["gmail.get_message"], arguments)
 
 
 def gmail_send_message(args: dict, ctx: Context) -> Any:
@@ -302,16 +345,16 @@ def gmail_send_message(args: dict, ctx: Context) -> Any:
         "subject": args.get("subject", ""),
         "body": args.get("body", ""),
     }
-    return _composio_execute(ctx, "gmail", "GMAIL_SEND_EMAIL", arguments)
+    return _composio_execute(ctx, "gmail", _TOOL_SLUGS["gmail.send_message"], arguments)
 
 
 def slack_post_message(args: dict, ctx: Context) -> Any:
     """Post a message to a slack channel."""
     arguments = {
         "channel": args.get("channel", ""),
-        "message": args.get("text", ""),
+        "text": args.get("text", ""),  # SLACK_SEND_MESSAGE has no `message` field
     }
-    return _composio_execute(ctx, "slack", "SLACK_SEND_MESSAGE", arguments)
+    return _composio_execute(ctx, "slack", _TOOL_SLUGS["slack.post_message"], arguments)
 
 
 REGISTRY: dict[str, ToolSpec] = {
@@ -349,28 +392,79 @@ REGISTRY: dict[str, ToolSpec] = {
 }
 
 
-def list_tools(service: str | None = None) -> list[ToolSpec]:
-    """Returns all registered tools, or only those for one provider, sorted by id."""
-    tools = list(REGISTRY.values())
+def _discovered_spec(tool) -> ToolSpec:
+    """Wraps a catalogue tool as a ToolSpec with a generic Composio handler.
+
+    Every discovered tool executes through the same path the curated Composio
+    tools use, so authorization-on-demand, retries, and dry-run stubbing all
+    behave identically whether a tool was hand-written or found by `px0 new`.
+    """
+    def handler(args: dict, ctx: Context, _tool=tool) -> Any:
+        return _composio_execute(ctx, _tool.toolkit, _tool.slug, args)
+
+    return ToolSpec(
+        id=tool.id,
+        provider=tool.toolkit,
+        description=tool.description[:200],
+        params=tool.params,
+        is_write=tool.is_write,
+        handler=handler,
+    )
+
+
+def resolve(tool_id: str, home=None) -> ToolSpec | None:
+    """The ToolSpec for a tool id, curated or discovered, or None if unknown.
+
+    `home` is needed to see discovered tools -- their metadata lives in the
+    store's catalogue cache, not in this module.
+    """
+    if tool_id in REGISTRY:
+        return REGISTRY[tool_id]
+    if home is None:
+        return None
+    from px0 import catalogue
+
+    if not catalogue.is_catalogue_id(tool_id):
+        return None
+    tool = catalogue.load_cached(home).get(tool_id)
+    return _discovered_spec(tool) if tool else None
+
+
+def list_tools(service: str | None = None, home=None) -> list[ToolSpec]:
+    """Every usable tool -- curated, plus any discovered by `px0 new` when `home`
+    is given -- optionally narrowed to one provider, sorted by id."""
+    specs = list(REGISTRY.values())
+    if home is not None:
+        from px0 import catalogue
+
+        specs += [_discovered_spec(t) for t in catalogue.load_cached(home).values()]
     if service:
-        tools = [t for t in tools if t.provider == service]
-    return sorted(tools, key=lambda t: t.id)
+        specs = [t for t in specs if t.provider == service]
+    return sorted(specs, key=lambda t: t.id)
 
 
-def exists(tool_id: str) -> bool:
-    """Whether tool_id is a known entry in the registry."""
-    return tool_id in REGISTRY
+def exists(tool_id: str, home=None) -> bool:
+    """Whether tool_id names a usable tool."""
+    return resolve(tool_id, home) is not None
 
 
-def is_write(tool_id: str) -> bool:
-    """Whether the given tool mutates external state (used to gate what a workflow may call)."""
-    return REGISTRY[tool_id].is_write
+def is_write(tool_id: str, home=None) -> bool:
+    """Whether the given tool mutates external state (used to gate what a workflow may call).
+
+    Raises KeyError for an unknown id, matching the previous registry-only
+    behaviour -- callers check `exists` first.
+    """
+    spec = resolve(tool_id, home)
+    if spec is None:
+        raise KeyError(tool_id)
+    return spec.is_write
 
 
 def call(home, config: dict, tool_id: str, args: dict) -> Any:
     """Dispatches to a tool's handler by id. Raises ConnectorError for an unknown tool id;
     the handler itself may raise ConnectorError/ConnectorNotConfigured."""
-    if tool_id not in REGISTRY:
+    spec = resolve(tool_id, home)
+    if spec is None:
         raise ConnectorError(f"no such tool: {tool_id}")
     ctx = Context(home=home, config=config)
-    return REGISTRY[tool_id].handler(args, ctx)
+    return spec.handler(args, ctx)

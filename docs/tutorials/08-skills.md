@@ -37,7 +37,10 @@ subcommand you pass to `px0 skills` (except `build`) is forwarded directly to
 `npx --yes skills@latest <args> -g`.
 
 `px0` automatically maintains your installed skill state in your store's
-`.px0/skills.json` (synchronized with `~/.agents/.skill-lock.json`).
+`skills.json` (synchronized with `~/.agents/.skill-lock.json`) whenever
+you run a `px0 skills` command. `px0 init` does not touch your installed
+skills -- initializing a store never installs, updates, or reconciles
+anything in your global agent environment.
 
 ### Search for skills
 
@@ -116,6 +119,8 @@ When you run `px0 skills build`:
    any files in `guidelines/work/`), it inspects the section headings and
    generates a `SKILL.md` file containing a `name` and derived `description`.
 2. **Builds bundles**: Writes each bundle into `~/.px0/skills/<name>/SKILL.md`.
+   Nested guideline paths are flattened with a dash, so
+   `guidelines/code-review/go.md` becomes `skills/code-review-go/SKILL.md`.
 3. **Claude Code integration**: If your configured model harness is Claude Code
    (`claude -p`), `px0` creates symlinks in `~/.claude/skills/px0-<name>`
    pointing to the compiled bundles. This allows Claude Code to automatically
@@ -129,7 +134,30 @@ built skills/code-review/common.md
 built skills/code-review/go.md
 built skills/code-review/python.md
 built skills/commit-messages.md
+built skills/pr-descriptions.md
+built skills/summarization.md
 ```
+
+Each bundle is a `SKILL.md` whose frontmatter Claude Code reads to decide
+when to load it:
+
+```markdown
+---
+name: px0-code-review-go
+description: "Guidelines: Wrap errors with %w; Context is the first parameter"
+---
+```
+
+If a path in `~/.claude/skills/` is already taken by something that
+isn't px0's symlink, px0 warns and leaves it alone rather than
+overwriting it.
+
+## 4. What is not compiled
+
+`guidelines/work/` is excluded from every build. Those files still reach
+the model at run time -- they're inlined into prompts like any other
+guideline -- but they are never written into a bundle that a coding agent
+could carry into a repository.
 
 ## Summary
 

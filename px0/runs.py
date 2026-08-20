@@ -4,14 +4,34 @@ store, so raw prompts and connector responses stay out of any folder the
 user might copy or sync."""
 
 import json
-import os
+import re
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
 from px0 import config as config_mod
+
+
+_SINCE_RE = re.compile(r"-?(\d+)([dwh])")
+
+
+def parse_since(text: str) -> datetime:
+    """Parses an age like "7d", "-7d", "2w", or "12h" into an absolute datetime.
+
+    The leading minus is optional because it reads naturally as "7 days back"
+    and the TUI's own prompt suggests it; rejecting it was a bug. Lives here
+    rather than in the CLI so `runs_tui` can use it without importing the CLI,
+    which imports `runs_tui`.
+    """
+    match = _SINCE_RE.fullmatch(text.strip())
+    if not match:
+        raise ValueError(f"unsupported since format: {text!r} (use e.g. 7d, 2w, 12h)")
+    amount, unit = int(match.group(1)), match.group(2)
+    delta = {"h": timedelta(hours=amount),
+             "d": timedelta(days=amount),
+             "w": timedelta(weeks=amount)}[unit]
+    return datetime.now() - delta
 
 
 def resolve_logs_path(config: dict) -> Path:
@@ -139,7 +159,6 @@ def apply_retention(config: dict) -> dict:
     record_retention_days = config_mod.get(config, "logs.record_retention_days", 365)
 
     removed = {"logs": 0, "records": 0}
-    base = resolve_logs_path(config)
 
     for rec in list_records(config):
         wrote = any(c.get("is_write") for c in rec.get("tool_calls", []))

@@ -1,6 +1,4 @@
-import pytest
 import yaml
-import shutil
 from pathlib import Path
 from px0 import skills, paths, config as config_mod
 

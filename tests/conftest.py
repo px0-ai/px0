@@ -1,9 +1,8 @@
 import pytest
-from pathlib import Path
 import json
 import requests
 import httpx
-from px0 import store, config as config_mod
+from px0 import store
 
 class MockResponse:
     def __init__(self, status_code, json_data, text_data=""):

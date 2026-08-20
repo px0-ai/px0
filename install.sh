@@ -6,8 +6,10 @@ set -e
 # Detect uninstall
 if [ "$1" = "--uninstall" ]; then
     echo "Uninstalling px0..."
+    # Either arm may fail (px0 not installed, pipx itself broken); uninstall is
+    # idempotent by intent, so report and carry on rather than aborting on set -e.
     if command -v pipx >/dev/null 2>&1; then
-        pipx uninstall px0
+        pipx uninstall px0 || echo "pipx could not uninstall px0 (already gone?)"
     else
         python3 -m pipx uninstall px0 >/dev/null 2>&1 || true
     fi
@@ -50,17 +52,21 @@ echo "Initializing px0 store..."
 px0 init
 
 # Daemon offer
-if [ "$PX0_NO_DAEMON" != "true" ]; then
+# Only offer the daemon when there is a terminal to answer on. Under
+# `curl ... | sh` stdin is the script itself, so `read` hits EOF and would
+# abort the installer on set -e just before it prints success.
+if [ "$PX0_NO_DAEMON" != "true" ] && [ -t 0 ]; then
     echo -n "Install the px0 scheduler daemon now? [y/N]: "
-    read -r ans
-    if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+    if read -r ans && { [ "$ans" = "y" ] || [ "$ans" = "Y" ]; }; then
         px0 daemon install
     fi
+elif [ "$PX0_NO_DAEMON" != "true" ]; then
+    echo "Not a terminal; skipping the daemon prompt. Run \`px0 daemon install\` to enable it."
 fi
 
 echo ""
 echo "px0 has been installed successfully!"
 echo "Try running these next:"
-echo "  px0 list workflows"
 echo "  px0 doctor"
-echo "  px0 run pr-precheck --stdin < some.diff"
+echo "  px0 new          # describe a job, get a workflow"
+echo "  px0 list workflows"

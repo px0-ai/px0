@@ -1,6 +1,4 @@
-import pytest
 import json
-from pathlib import Path
 from px0 import knowledge, paths, config as config_mod
 
 def test_process_ingest_queue_happy_path(tmp_home, monkeypatch):

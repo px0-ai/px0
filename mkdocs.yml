@@ -6,10 +6,14 @@ theme:
 
 nav:
   - Home: index.md
-  - Reference: reference.md
   - Tutorials:
     - Getting Started: tutorials/01-getting-started.md
     - Building a Workflow: tutorials/02-building-a-workflow.md
-    - Knowledge and Ask: tutorials/03-knowledge-and-ask.md
-    - Guidelines and Provenance: tutorials/04-guidelines-and-provenance.md
-    - Skills and Agent Bundles: tutorials/05-skills.md
+    - Connections and Tools: tutorials/03-connections-and-tools.md
+    - Knowledge and Ask: tutorials/04-knowledge-and-ask.md
+    - Guidelines and Provenance: tutorials/05-guidelines-and-provenance.md
+    - Scheduling and the Daemon: tutorials/06-scheduling-and-the-daemon.md
+    - Browsing Runs: tutorials/07-browsing-runs.md
+    - Skills and Agent Bundles: tutorials/08-skills.md
+    - Updating px0: tutorials/09-updating-px0.md
+  - API Reference: reference.md

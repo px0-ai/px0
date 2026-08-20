@@ -105,30 +105,4 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
 
     versioning.record_change(home, "builder", file_changes)
 
-    # Sync and update community skills
-    skills_json = home / "skills.json"
-    import shutil
-    import subprocess
-    agents_skill_lock = Path("~/.agents/.skill-lock.json").expanduser()
-
-    if shutil.which("npx"):
-        print("Updating AI skills...")
-        try:
-            # If we have a local backup, copy it to the global lock first to restore
-            if skills_json.exists():
-                agents_skill_lock.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(str(skills_json), str(agents_skill_lock))
-            
-            # Update global skills
-            subprocess.run(["npx", "--yes", "skills@latest", "update", "-g", "-y"], check=True)
-            
-            # Sync the final state back to .px0/skills.json
-            if agents_skill_lock.exists():
-                shutil.copy(str(agents_skill_lock), str(skills_json))
-                created.append("skills synced to skills.json")
-        except subprocess.CalledProcessError:
-            created.append("warning: failed to sync/update skills using npx")
-    else:
-        created.append("warning: npx not found, skipping skill sync")
-
     return created

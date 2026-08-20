@@ -19,6 +19,7 @@ DEFAULTS: dict[str, Any] = {
         "provider": "composio",
         "retries": 3,
         "composio_api_key": "",
+        "ca_bundle": "",
     },
     "proposals": {
         "max_per_consolidation": 10,
@@ -155,8 +156,8 @@ SCHEMA: dict[str, dict[str, Any]] = {
     },
     "connectors.provider": {
         "type": str, "choices": ["composio", "native"],
-        "help": "intended default for brokering tool connections; not yet enforced in this build "
-                "-- `px0 connect` chooses per call (--native vs setup-composio)",
+        "help": "intended default for brokering tool connections; not yet enforced in this "
+                "build -- every toolkit currently routes through Composio",
     },
     "connectors.retries": {
         "type": int, "choices": None,
@@ -165,6 +166,11 @@ SCHEMA: dict[str, dict[str, Any]] = {
     "connectors.composio_api_key": {
         "type": str, "choices": None,
         "help": "Composio API key used to authenticate external app connections",
+    },
+    "connectors.ca_bundle": {
+        "type": str, "choices": None,
+        "help": "CA bundle used to verify TLS to connector APIs; set automatically when a "
+                "intercepting proxy (e.g. Zscaler) makes certifi's bundle insufficient",
     },
     "proposals.max_per_consolidation": {
         "type": int, "choices": None,

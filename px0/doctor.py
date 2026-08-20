@@ -2,6 +2,7 @@
 
 import fcntl
 import stat
+import re
 from pathlib import Path
 
 from px0 import __version__, SCHEMA_VERSION
@@ -39,7 +40,12 @@ def _check_qmd_version(home: Path, config: dict) -> dict:
     """Runs qmd --version and compares against QMD_PINNED_VERSION."""
     try:
         out = retrieval._qmd_run(config, "--version")
-        version = out.strip()
+        # qmd prints "qmd 2.8.3 (facd35e)", so compare the parsed number, not the
+        # whole line -- the raw string never equals a bare pinned version.
+        m = re.search(r"(\d+\.\d+\.\d+(?:[-.\w]*)?)", out)
+        if not m:
+            return {"ok": False, "detail": f"could not parse qmd version from {out.strip()!r}"}
+        version = m.group(1)
         pinned = retrieval.QMD_PINNED_VERSION
         if version != pinned:
             return {"ok": False, "detail": f"qmd version {version} does not match pinned {pinned}"}
@@ -131,10 +137,45 @@ def _check_connections(home: Path) -> dict:
 
 
 def _check_unreferenced_guidelines(home: Path) -> dict:
-    """Flags guideline files that no workflow lists, since they're inlined into
-    prompts by reference and are otherwise dead weight."""
+    """Counts guideline files that no workflow lists.
+
+    Informational, never a failure: spec.md:792 puts unreferenced files in the
+    consolidation report ("to surface staleness"), which `px0 consolidate`
+    already does. Failing here would also mean every freshly initialized store
+    is unhealthy -- `px0 init` scaffolds guidelines but no workflows, so all of
+    them start out unreferenced.
+    """
     files = proposals.unreferenced_guideline_files(home)
-    return {"ok": len(files) == 0, "detail": f"{len(files)} unreferenced file(s)", "files": files}
+    detail = f"{len(files)} unreferenced file(s)"
+    if files:
+        detail += " -- see `px0 consolidate`"
+    return {"ok": True, "detail": detail, "files": files}
+
+
+def _check_update(home: Path) -> dict:
+    """Reports the newer version the daemon's weekly check found, if any.
+
+    Informational, never a failure -- being a release behind is not a broken
+    store. Reads what the nightly pass recorded rather than calling PyPI, so
+    `doctor` stays offline-safe.
+    """
+    import json
+
+    check_path = paths.update_check_path(home)
+    if not check_path.exists():
+        return {"ok": True, "detail": f"{__version__} (no update check recorded yet)"}
+    try:
+        data = json.loads(check_path.read_text())
+    except (OSError, ValueError):
+        return {"ok": True, "detail": f"{__version__} (update check unreadable)"}
+
+    available = data.get("available_version")
+    checked_at = (data.get("checked_at") or "")[:10]
+    if available and available != __version__:
+        return {"ok": True,
+                "detail": f"{__version__}; {available} available as of {checked_at} "
+                          "-- run `px0 update`"}
+    return {"ok": True, "detail": f"{__version__} is current as of {checked_at}"}
 
 
 def run(home: Path, config: dict, quick: bool = False) -> dict:
@@ -148,6 +189,7 @@ def run(home: Path, config: dict, quick: bool = False) -> dict:
         "schema": _check_schema(home),
         "connections": _check_connections(home),
         "unreferenced_guidelines": _check_unreferenced_guidelines(home),
+        "update": _check_update(home),
     }
     if not quick:
         checks["daemon"] = _check_daemon(home, config)

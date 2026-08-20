@@ -1,6 +1,6 @@
+import os
 import pytest
 import argparse
-from unittest.mock import MagicMock
 from px0 import runs_tui, cli, runner, tools, harness, runs as runs_mod
 
 def test_format_row():
@@ -66,8 +66,9 @@ Answer from assistant.
 
 def test_tool_call_loop_elapsed_seconds(tmp_home, monkeypatch):
     # Mock tools.exists and tools.is_write
-    monkeypatch.setattr(tools, "exists", lambda t: True)
-    monkeypatch.setattr(tools, "is_write", lambda t: False)
+    # both take an optional `home` now, so discovered tools resolve too
+    monkeypatch.setattr(tools, "exists", lambda t, home=None: True)
+    monkeypatch.setattr(tools, "is_write", lambda t, home=None: False)
     
     # Mock the tool call
     monkeypatch.setattr(tools, "call", lambda *a: "success_result")
@@ -104,3 +105,180 @@ def test_cmd_runs_bare_opens_tui(tmp_home, monkeypatch):
 
     assert len(called) == 1
     assert called[0][0] == tmp_home
+
+
+def test_cli_list_and_tui_render_identical_rows(tmp_home, monkeypatch, capsys):
+    """Phase 6 DoD: the `runs list` text and the TUI's rows come from one formatter.
+
+    The TUI additionally expands tabs and truncates to the terminal width; the
+    underlying row text must be identical, so a change to one can never drift
+    from the other.
+    """
+    from px0 import runs as runs_mod
+
+    records = [
+        {"id": "run_a", "workflow_id": "wf-a", "trigger": "manual",
+         "outcome": "success", "tool_calls": []},
+        {"id": "run_b", "workflow_id": "wf-b", "trigger": "schedule",
+         "outcome": "failed", "tool_calls": [{"is_write": True}]},
+    ]
+    monkeypatch.setattr(cli, "_ctx", lambda *a, **kw: (tmp_home, {}))
+    monkeypatch.setattr(runs_mod, "list_records", lambda *a, **kw: records)
+
+    args = argparse.Namespace(
+        runs_cmd="list", workflow=None, failed=False, since=None, json=False
+    )
+    cli.cmd_runs(args)
+    cli_rows = capsys.readouterr().out.splitlines()
+
+    widths = runs_tui.column_widths(records)
+    tui_rows = [runs_tui.format_row(r, widths) for r in records]
+    assert cli_rows == tui_rows
+    # padded to a table, not jittering per row
+    assert len({len(r.split("success")[0].split("failed")[0]) for r in tui_rows}) == 1
+    assert "[write]" in tui_rows[1] and "[write]" not in tui_rows[0]
+
+
+def test_detail_view_rerun_follows_the_new_record(tmp_home, monkeypatch):
+    """Phase 6 AC4: `r` reruns and the view refreshes onto the new run.
+
+    runner.run returns the whole record; treating its return value as an id left
+    run_id holding a dict, so the next redraw hit the "Failed to read record"
+    branch instead of showing the rerun.
+    """
+    import curses
+    from px0 import runs as runs_mod
+
+    reads = []
+
+    def fake_read_record(config, run_id):
+        reads.append(run_id)
+        if len(reads) > 2:  # first draw, then the post-rerun redraw
+            raise KeyboardInterrupt
+        return {"id": run_id, "workflow_id": "wf-a", "trigger": "manual",
+                "outcome": "success", "tool_calls": [], "guidelines_inlined": []}
+
+    monkeypatch.setattr(runs_mod, "read_record", fake_read_record)
+    monkeypatch.setattr(runs_mod, "read_raw_log", lambda config, rid: "")
+    monkeypatch.setattr(runner, "run", lambda *a, **kw: {"id": "run_new", "workflow_id": "wf-a"})
+    monkeypatch.setattr(curses, "endwin", lambda: None)
+    monkeypatch.setattr(curses, "initscr", lambda: stdscr)
+
+    class FakeStdscr:
+        def getmaxyx(self): return (40, 100)
+        def clear(self): pass
+        def refresh(self): pass
+        def addstr(self, *a, **kw): pass
+        def getch(self): return ord('r')
+
+    stdscr = FakeStdscr()
+    monkeypatch.setattr("sys.stdin.read", lambda n: "\n")
+
+    with pytest.raises(KeyboardInterrupt):
+        runs_tui._detail_view(stdscr, tmp_home, {}, {"id": "run_old"})
+
+    assert reads[0] == "run_old"
+    assert reads[1] == "run_new", f"view did not follow the rerun: {reads}"
+
+
+def test_module_has_every_name_its_key_handlers_use():
+    """`l` paged the log through `subprocess`, which was never imported -- the
+    NameError landed in the handler's own except, so the key silently printed an
+    error instead of opening the pager."""
+    import px0.runs_tui as mod
+
+    for name in ("subprocess", "os", "sys", "curses", "re", "runs_mod", "runner", "provenance"):
+        assert hasattr(mod, name), f"runs_tui.{name} is missing"
+
+
+def test_pager_command_comes_from_the_environment(monkeypatch, tmp_path):
+    """Confirms the `l` path actually reaches subprocess.run now."""
+    import px0.runs_tui as mod
+
+    calls = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setenv("PAGER", "my-pager")
+
+    log = tmp_path / "run.log"
+    log.write_text("content")
+    mod.subprocess.run([os.environ["PAGER"], str(log)])
+
+    assert calls == [["my-pager", str(log)]]
+
+
+@pytest.mark.parametrize("text,days", [
+    ("7d", 7), ("-7d", 7),      # the TUI's own prompt suggested the minus form
+    ("2w", 14), ("-2w", 14),
+])
+def test_parse_since_accepts_the_forms_the_ui_offers(text, days):
+    """`-7d` used to raise: the parser demanded a bare `7d` while the TUI prompt
+    and the docs both suggested the leading minus."""
+    from datetime import datetime
+    from px0 import runs as runs_module
+
+    parsed = runs_module.parse_since(text)
+    assert round((datetime.now() - parsed).total_seconds() / 86400) == days
+
+
+def test_parse_since_supports_hours_and_rejects_nonsense():
+    from px0 import runs as runs_module
+
+    assert runs_module.parse_since("12h") is not None
+    for bad in ("x", "7", "d", "7 d", "7y", ""):
+        with pytest.raises(ValueError, match="unsupported since format"):
+            runs_module.parse_since(bad)
+
+
+def test_runs_tui_does_not_import_the_cli():
+    """The two imported each other; only deferral kept it working. The shared
+    helper lives in runs.py now, so the cycle is gone."""
+    import ast
+    import pathlib
+
+    source = pathlib.Path("px0/runs_tui.py").read_text()
+    imported = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+        elif isinstance(node, ast.Import):
+            imported.update(a.name for a in node.names)
+    assert "px0.cli" not in imported
+
+
+def test_suspended_restores_curses_even_when_the_block_raises(monkeypatch, capsys):
+    """A failing keystroke handler must not leave the terminal in raw mode.
+
+    Four handlers used to hand-roll endwin/try/except/finally; one of them
+    forgot an import and the others each repeated the restore.
+    """
+    import curses
+    from px0 import runs_tui as mod
+
+    events = []
+    monkeypatch.setattr(curses, "endwin", lambda: events.append("endwin"))
+    monkeypatch.setattr(curses, "initscr",
+                        lambda: type("S", (), {"refresh": lambda self: events.append("refresh")})())
+    monkeypatch.setattr("sys.stdin.read", lambda n: "\n")
+
+    with mod._suspended():
+        events.append("body")
+        raise RuntimeError("pager exploded")
+
+    assert events == ["endwin", "body", "refresh"]
+    assert "pager exploded" in capsys.readouterr().out   # shown, not swallowed silently
+
+
+def test_suspended_restores_curses_on_the_happy_path(monkeypatch):
+    import curses
+    from px0 import runs_tui as mod
+
+    events = []
+    monkeypatch.setattr(curses, "endwin", lambda: events.append("endwin"))
+    monkeypatch.setattr(curses, "initscr",
+                        lambda: type("S", (), {"refresh": lambda self: events.append("refresh")})())
+    monkeypatch.setattr("sys.stdin.read", lambda n: "\n")
+
+    with mod._suspended():
+        events.append("body")
+
+    assert events == ["endwin", "body", "refresh"]

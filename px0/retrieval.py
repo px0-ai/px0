@@ -2,13 +2,17 @@
 ranked passages with file path and anchor out. Guidelines are never
 retrieved by similarity -- only knowledge.
 
-Backend: SQLite FTS5 with BM25 ranking, embedded, no server. This is a
-pure-python-reachable subset of what the spec asks of qmd (hybrid keyword
-+ vector search, rerank): only the keyword/BM25 half is implemented here,
-since the vector and rerank stages need GGUF embedding models the spec
-gates behind explicit, printed-size consent. `[retrieval] backend` names
-this the "local" backend so a real qmd integration can be swapped in later
-behind this same function signature.
+Two backends sit behind `retrieve()`, selected by `retrieval.backend`:
+
+- "local" (default): SQLite FTS5 with BM25 ranking, embedded, no server.
+  Keyword matching only -- no vectors, no rerank, nothing to download.
+- "qmd": shells out to the qmd CLI (`retrieval.qmd_cmd`) for hybrid
+  keyword + vector search with reranking. Needs qmd installed separately
+  and gates its ~2GB of GGUF models behind explicit, printed-size
+  consent on the first reindex.
+
+Either way `local_only=True` (the default at every call site) excludes
+`knowledge/work/`, which never leaves the machine.
 """
 
 import re
@@ -19,7 +23,21 @@ from pathlib import Path
 from px0 import config as config_mod
 from px0 import paths
 
-QMD_PINNED_VERSION = "0.1.0"
+# CLI surface verified against a real install of qmd 2.8.3 (npm `@tobilu/qmd`,
+# `qmd --version` -> "qmd 2.8.3 (facd35e)"), which is the current published
+# release; 0.1.0 -- the placeholder this pin previously held -- was never
+# published at all (the registry starts at 0.9.0), so every real install
+# reported version drift. Verified from `qmd --help` at that version:
+#   * `-n <num>`               max results
+#   * `-c, --collection <name>` collection filter
+#   * `--format <kind>`         cli | json | csv | md | xml | files
+#     -- there is NO `--json` flag; JSON comes from `--format json`
+#   * `collection add <path> --name <name> --mask <glob>`
+#   * `update [--pull]`, `embed [-f] [-c <name>]`
+# Not verified: the JSON result schema and `collection list` output format --
+# every qmd subcommand segfaults (exit 139) on the darwin/node-22 box used for
+# this pass, so `_parse_qmd_result` stays defensive about field names on purpose.
+QMD_PINNED_VERSION = "2.8.3"
 
 
 class RetrievalBackendError(Exception):
@@ -242,7 +260,9 @@ def _parse_qmd_result(home: Path, config: dict, raw_json: str) -> list[Passage]:
 def _qmd_retrieve(home: Path, config: dict, query: str, k: int) -> list[Passage]:
     """Retrieves passages using the qmd query command."""
     _qmd_ensure_collection(home, config)
-    raw_json = _qmd_run(config, "query", query, "--json", "-n", str(k), "-c", "px0-knowledge")
+    raw_json = _qmd_run(
+        config, "query", query, "--format", "json", "-n", str(k), "-c", "px0-knowledge"
+    )
     return _parse_qmd_result(home, config, raw_json)
 
 
@@ -330,6 +350,11 @@ def retrieve(
                 "WHERE passages MATCH ?"
             )
             args: list = [_fts_query(query)]
+            if local_only:
+                # Exclude work/ inside the query, not after it: filtering post-LIMIT
+                # would silently return fewer than k passages whenever work/ rows
+                # rank highest.
+                sql += " AND is_work = 0"
             sql += " ORDER BY score LIMIT ?"
             args.append(k)
             rows = conn.execute(sql, args).fetchall()
@@ -343,5 +368,7 @@ def retrieve(
         ]
 
     if local_only:
+        # Belt and braces: the local backend already excluded work/ in SQL, and qmd
+        # has no is_work column to filter on, so this is the qmd path's only guard.
         results = [p for p in results if not p.path.startswith("work/")]
     return results
