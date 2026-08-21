@@ -101,7 +101,7 @@ def _qmd_install_fix() -> str:
 
 
 def _check_index(home: Path, config: dict) -> dict:
-    """Flags a stale retrieval index: knowledge files exist but nothing is indexed."""
+    """Flags a stale retrieval index: brain files exist but nothing is indexed."""
     backend = config_mod.get(config, "retrieval.backend", "local")
     if backend == "qmd":
         v_check = _check_qmd_version(home, config)
@@ -120,16 +120,56 @@ def _check_index(home: Path, config: dict) -> dict:
         consent_str = "semantic search consented" if consented else "semantic search not consented"
         return {"ok": True, "detail": f"qmd backend configured (version: {retrieval.QMD_PINNED_VERSION}, {consent_str})"}
 
-    base = retrieval.knowledge_path(home, config)
-    file_count = len(list(base.rglob("*.md"))) if base.exists() else 0
+    base = retrieval.brain_path(home, config)
+    # Count what retrieval would actually index, not every .md on disk. Pointed
+    # at a notes vault, the raw count includes the app's own state and deleted
+    # notes -- which inflates the number and, for a vault holding nothing but
+    # ignored files, demanded a reindex that could never fix it.
+    globs = retrieval.ignore_globs(config)
+    file_count = 0
+    if base.exists():
+        file_count = sum(
+            1 for p in base.rglob("*.md")
+            if not retrieval.is_ignored(str(p.relative_to(base)), globs)
+        )
     indexed = retrieval.index_count(home)
-    detail = f"{file_count} knowledge files, {indexed} indexed passages"
+    detail = f"{file_count} brain files, {indexed} indexed passages"
     if indexed > 0 or file_count == 0:
         return {"ok": True, "detail": detail}
     return {"ok": False, "detail": detail,
-            "fix": "build the index: px0 knowledge reindex -- until then "
-                   "`px0 knowledge ask` and `px0 knowledge search` have nothing "
+            "fix": "build the index: px0 brain reindex -- until then "
+                   "`px0 brain ask` and `px0 brain search` have nothing "
                    "to retrieve from"}
+
+
+def _check_private_folder(home: Path, config: dict) -> dict:
+    """Reports how much the private folder is holding back from retrieval.
+
+    Worth its own line because the exclusion is invisible in normal use: the
+    default name, `work/`, means "never leaves this machine" to px0 and "my work
+    notes" to every notes app, so a brain pointed at an existing vault can have
+    a whole folder quietly missing from every search.
+    """
+    folder = retrieval.private_folder(config)
+    if not folder:
+        return {"ok": True, "detail": "no private folder configured"}
+
+    base = retrieval.brain_path(home, config)
+    target = base / folder
+    if not target.is_dir():
+        return {"ok": True, "detail": f"{folder}/ (none yet)"}
+
+    globs = retrieval.ignore_globs(config)
+    held = sum(
+        1 for p in target.rglob("*.md")
+        if not retrieval.is_ignored(str(p.relative_to(base)), globs)
+    )
+    detail = f"{folder}/ holds {held} file(s) back from retrieval"
+    if held == 0:
+        return {"ok": True, "detail": detail}
+    # Not a failure: this is the folder doing its job. But say so out loud.
+    return {"ok": True, "detail": detail + " -- by design; "
+            f"`px0 config set brain.private_folder \"\"` if {folder}/ is ordinary notes"}
 
 
 def _check_versions(home: Path) -> dict:
@@ -289,6 +329,7 @@ def run(home: Path, config: dict, quick: bool = False) -> dict:
         checks["daemon"] = _check_daemon(home, config)
         checks["harness"] = _check_harness(config)
         checks["index"] = _check_index(home, config)
+        checks["private_folder"] = _check_private_folder(home, config)
 
     return {
         "px0_version": __version__,

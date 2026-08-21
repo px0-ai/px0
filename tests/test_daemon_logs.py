@@ -40,9 +40,9 @@ def test_run_nightly_with_queue(tmp_home, monkeypatch):
     config = config_mod.load(paths.config_path(tmp_home))
     monkeypatch.setattr(daemon_mod, "_log_event", MagicMock())
     
-    # Mock knowledge_mod.process_ingest_queue
+    # Mock brain_mod.process_ingest_queue
     mock_processed = {"jobs_processed": 5, "videos_ingested": 10, "jobs_given_up": 0}
-    monkeypatch.setattr("px0.knowledge.process_ingest_queue", lambda *a: mock_processed)
+    monkeypatch.setattr("px0.brain.process_ingest_queue", lambda *a: mock_processed)
 
     report = daemon_mod.run_nightly(tmp_home, config)
     assert report["ingest_queue"] == mock_processed

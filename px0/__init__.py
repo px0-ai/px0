@@ -1,7 +1,7 @@
 """px0: a local-first CLI where everything the system does is a workflow.
 
 Everything px0 knows lives in two folders inside the store: guidelines/
-for how the user works, knowledge/ for what the user has read and kept.
+for how the user works, brain/ for what the user has read and kept.
 """
 
 from pathlib import Path
@@ -16,4 +16,4 @@ else:
     except Exception as _err:
         raise RuntimeError("px0 version could not be determined. VERSION file missing and package not installed.") from _err
 
-SCHEMA_VERSION = 1  # on-disk store schema version; bumped when the store layout changes in a way old stores can't read
+SCHEMA_VERSION = 2  # on-disk store schema version; bumped when the store layout changes in a way old stores can't read

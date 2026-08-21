@@ -30,9 +30,81 @@ class UpdateError(Exception):
     pass
 
 
-# Registry for forward-only migrations
+def _drop_stale_qmd_collection(home: Path) -> None:
+    """Removes the `px0-knowledge` collection left behind by the rename.
+
+    Only relevant to stores on the qmd backend. The collection points at the
+    `knowledge/` path that no longer exists, and qmd would keep serving results
+    from it alongside the new `px0-brain` one. Best-effort: qmd is optional, and
+    a store that never used it has nothing to clean up.
+    """
+    try:
+        config = config_mod.load(paths.config_path(home))
+        if config_mod.get(config, "retrieval.backend", "local") != "qmd":
+            return
+        from px0 import retrieval
+        if "px0-knowledge" in retrieval._qmd_run(config, "collection", "list"):
+            retrieval._qmd_run(config, "collection", "remove", "px0-knowledge")
+    except Exception:
+        # A missing or unhappy qmd must not fail the store migration.
+        pass
+
+
+def _migrate_v1_to_v2(home: Path) -> list[Any]:
+    """v1 -> v2: `knowledge/` became `brain/`, and `knowledge.path` became `brain.path`.
+
+    Moves the folder and rewrites the config key, so a store written before the
+    rename keeps every file it had. The retrieval index needs no fixing: indexed
+    paths are relative to the library root, which is what moved.
+    """
+    from px0 import versioning
+
+    changes: list[Any] = []
+    old_dir, new_dir = home / "knowledge", home / "brain"
+    if old_dir.is_dir() and not new_dir.exists():
+        old_dir.rename(new_dir)
+    elif old_dir.is_dir() and new_dir.is_dir():
+        # Both present (a partially-migrated store, or a hand-made brain/): merge
+        # rather than clobber, and leave anything that would collide in place.
+        for src in sorted(old_dir.rglob("*")):
+            dest = new_dir / src.relative_to(old_dir)
+            if src.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif not dest.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest))
+        shutil.rmtree(old_dir, ignore_errors=True)
+
+    # A v2 store should have the v2 layout, not just the v1 one renamed: work/
+    # postdates the folders an older store was scaffolded with, and it is the one
+    # with a privacy guarantee attached, so it should exist to be filed into.
+    for folder in ("docs", "blogs", "papers", "work"):
+        (new_dir / folder).mkdir(parents=True, exist_ok=True)
+
+    _drop_stale_qmd_collection(home)
+
+    cfg_path = paths.config_path(home)
+    if cfg_path.exists():
+        config = config_mod.load(cfg_path)
+        old_value = (config.pop("knowledge", None) or {}).get("path")
+        if old_value:
+            # Only rewrite a path that pointed at the store's own folder; a
+            # library kept elsewhere (a notes vault) is left exactly where it is.
+            if Path(old_value).expanduser() == old_dir:
+                old_value = str(new_dir)
+            config.setdefault("brain", {})["path"] = old_value
+        config_mod.save(cfg_path, config)
+        changes.append(
+            versioning.FileChange(str(cfg_path.relative_to(home)), cfg_path.read_bytes())
+        )
+    return changes
+
+
+# Registry for forward-only migrations, keyed by the schema version each one
+# produces -- the runner applies every key greater than the store's current
+# version, so a v1 -> v2 migration is keyed 2, not 1.
 MIGRATIONS: dict[int, Callable[[Path], list[Any]]] = {
-    # 1: _migrate_v1_to_v2,
+    2: _migrate_v1_to_v2,
 }
 
 

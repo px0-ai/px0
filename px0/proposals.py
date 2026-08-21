@@ -19,7 +19,7 @@ from px0 import workflow as workflow_mod
 @dataclass
 class Proposal:
     """One pending guideline edit awaiting user review, with the evidence that
-    generated it (a knowledge source, or a manual correction)."""
+    generated it (a brain source, or a manual correction)."""
     id: str
     target_file: str        # relative to guidelines/
     action: str              # new | amend | retire
@@ -67,13 +67,13 @@ def dismiss(home: Path, proposal_id: str) -> None:
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 
-def propose_from_knowledge(home: Path, config: dict, knowledge_file: Path) -> list[Proposal]:
-    """Asks the harness to read one knowledge file and propose zero or more
+def propose_from_brain(home: Path, config: dict, brain_file: Path) -> list[Proposal]:
+    """Asks the harness to read one brain file and propose zero or more
     guideline edits, saving each as a pending Proposal. Returns [] if the model
     response has no JSON array (rather than raising)."""
-    from px0 import knowledge as knowledge_mod
+    from px0 import brain as brain_mod
 
-    header, body = knowledge_mod.read_header(knowledge_file)
+    header, body = brain_mod.read_header(brain_file)
     guideline_files = sorted(
         str(p.relative_to(paths.guidelines_dir(home)))
         for p in paths.guidelines_dir(home).rglob("*.md")
@@ -88,7 +88,7 @@ def propose_from_knowledge(home: Path, config: dict, knowledge_file: Path) -> li
         "\"claim\": short heading text, \"body\": 1-3 sentence claim body, "
         "\"evidence_anchor\": a heading or short locator in the material}.\n"
         "If nothing is worth proposing, respond with [].\n\n"
-        f"--- material ({knowledge_file.name}) ---\n{body[:6000]}"
+        f"--- material ({brain_file.name}) ---\n{body[:6000]}"
     )
     raw = harness.invoke(config, prompt, timeout=90)
     match = _JSON_ARRAY_RE.search(raw)
@@ -105,7 +105,7 @@ def propose_from_knowledge(home: Path, config: dict, knowledge_file: Path) -> li
             action=item.get("action", "new"),
             claim=item["claim"],
             body=item["body"],
-            evidence_source=str(knowledge_file),
+            evidence_source=str(brain_file),
             evidence_anchor=item.get("evidence_anchor", ""),
             evidence_quote=item.get("evidence_quote", ""),
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -213,7 +213,7 @@ def find_contradictions(config: dict, home: Path) -> list[dict]:
     if len(all_claims) < 2:
         return []
     prompt = (
-        "Here are guideline claims from a personal engineering knowledge base. "
+        "Here are guideline claims from a personal engineering brain. "
         "Find pairs that contradict each other. Respond with ONLY a JSON array "
         "of {\"a\": claim_id, \"b\": claim_id, \"why\": short reason}. "
         "Empty array if none.\n\n" + "\n".join(all_claims)

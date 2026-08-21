@@ -19,16 +19,16 @@ Workflows do not stop at your laptop, though. Through [Composio](https://composi
 
 Each of these is one sentence you type into `px0 workflows new`, and each becomes a file you can edit and put on a schedule.
 
-| What you want | Apps it touches |
-| --------------------------------------------------------------------- | ------------------------------ |
-| Every Friday, summarize the pull requests I reviewed and post it to #eng-standup | GitHub, Slack |
-| Each morning, brief me on today's meetings and the emails I have not replied to | Google Calendar, Gmail |
-| Turn last night's error spike into a triaged bug ticket | Sentry, Linear |
-| Post a Monday sprint status from our issue tracker to the team channel | Jira, Slack |
-| Draft release notes from the commits since the last tag and file them as a page | GitHub, Notion |
-| Log this week's revenue and refunds into the finance sheet | Stripe, Google Sheets |
-| Group this week's support tickets by theme and open issues for the top three | Zendesk, Linear |
-| Save every newsletter I star to my reading library | Gmail, px0 knowledge |
+| What you want                                                                    | Apps it touches        |
+| -------------------------------------------------------------------------------- | ---------------------- |
+| Every Friday, summarize the pull requests I reviewed and post it to #eng-standup | GitHub, Slack          |
+| Each morning, brief me on today's meetings and the emails I have not replied to  | Google Calendar, Gmail |
+| Turn last night's error spike into a triaged bug ticket                          | Sentry, Linear         |
+| Post a Monday sprint status from our issue tracker to the team channel           | Jira, Slack            |
+| Draft release notes from the commits since the last tag and file them as a page  | GitHub, Notion         |
+| Log this week's revenue and refunds into the finance sheet                       | Stripe, Google Sheets  |
+| Group this week's support tickets by theme and open issues for the top three     | Zendesk, Linear        |
+| Save every newsletter I star to my reading library                               | Gmail, px0 brain       |
 
 ## Install
 
@@ -113,15 +113,62 @@ px0 runs why <run-id>   # how a run reached its result
 
 ## Build your knowledge base
 
-px0 includes a private, local knowledge base that indexes the articles, docs, papers, and transcripts you care about so you and your workflows can query them anytime.
+The brain needs nothing beyond `px0 init`:
 
 ```shell
-px0 knowledge add https://example.com/some-post   # ingest web page, doc, PDF, or YouTube video
-px0 knowledge ask "what did that post say about caching?"  # Q&A across your knowledge
+px0 brain add https://example.com/some-post
+px0 brain ask "what did that post say about caching?"
 ```
 
 - **Local extraction**: Ingests text from web pages, local documents, PDFs, and YouTube transcripts directly on your machine.
 - **Workflow-ready**: Workflows can query your knowledge base to summarize recent reads, look up reference material, or draft content backed by your own sources.
+
+`brain add` takes a URL, a YouTube link, or a local file — `.md`, `.txt`, `.rst`, `.org`, `.pdf`, `.docx`, `.odt`, or a saved `.html` page. Extraction runs on your machine and needs no API key. `pdftotext` and `pandoc` are used when installed, but nothing depends on them being there.
+
+Ingests are filed by what they are — `papers/` for PDFs, `blogs/` for web pages, `docs/` for everything else — and `--to` overrides that with any folder you like, including one your own vault already uses:
+
+```shell
+px0 brain add ./paper.pdf --to "Personal/Reading"
+```
+
+Each file records what it came from in its frontmatter, so you can narrow a search or a question to one kind of material:
+
+```shell
+px0 brain search "quorum" --kind paper
+px0 brain ask "what did I read about backpressure?" --kind blog
+```
+
+The kinds are `blog`, `paper`, `doc`, `video`, and `stub`. Files px0 did not write carry no kind, so `--kind` never matches them.
+
+Anything filed under `brain/work/` is excluded from retrieval by default and never leaves the machine:
+
+```shell
+px0 brain add ./internal-pricing.md --to work
+```
+
+### Already keep notes somewhere? Point px0 at them
+
+A px0 brain and an Obsidian vault are the same thing on disk — a folder of Markdown — so you can point one at the other and keep writing where you already write:
+
+```shell
+px0 config set brain.path ~/Documents/MyVault
+px0 brain reindex
+```
+
+Any folder of Markdown works: an Obsidian vault, a Logseq graph, a `notes/` directory in a repo. px0 reads it in place — `reindex`, `search`, and `ask` never write to it.
+
+It skips what a real vault carries beside the notes: every dot-folder (`.obsidian/`, `.trash/`, `.git/`, `.stversions/`) and drawings stored as Markdown (`*.excalidraw.md`). Add your own patterns if you want:
+
+```shell
+px0 config set brain.ignore "*.excalidraw.md,Templates/*"
+```
+
+**One thing to know.** `work/` is px0's never-leaves-this-machine folder, so if your vault already has a top-level `work/`, those notes are held back from every search. `px0 config set brain.path` tells you when it spots this, `px0 brain list` marks such files `(private)`, and `px0 doctor` reports the count. To turn it off, or move it somewhere that will not collide:
+
+```shell
+px0 config set brain.private_folder ""            # nothing is held back
+px0 config set brain.private_folder px0-private   # hold back this folder instead
+```
 
 ## Teach it how you work
 
@@ -142,12 +189,12 @@ px0 guidelines review
 
 Your store is `~/.px0`. Set `PX0_HOME` to move it.
 
-| Folder       | What is in it              |
-| ------------ | -------------------------- |
-| `workflows/` | The jobs px0 can run       |
-| `guidelines/`| How you work               |
-| `knowledge/` | What you have read and kept|
-| `output/`    | What runs produced         |
+| Folder        | What is in it                                                         |
+| ------------- | --------------------------------------------------------------------- |
+| `workflows/`  | The jobs px0 can run                                                  |
+| `guidelines/` | How you work                                                          |
+| `brain/`      | What you have read and kept (or point `brain.path` at your own vault) |
+| `output/`     | What runs produced                                                    |
 
 All of it is plain Markdown you can open in any editor. Edit a workflow by hand and the next run picks it up, with no compile step. px0 keeps its own history, so you can see what changed and undo it:
 
@@ -158,20 +205,20 @@ px0 changes list
 
 ## Everyday commands
 
-| Command                            | What it does                                  |
-| ---------------------------------- | --------------------------------------------- |
-| `px0 workflows new`                | Turn a sentence into a workflow               |
-| `px0 workflows run`                | Run one now                                   |
-| `px0 workflows edit`               | Revise a workflow and rebuild it              |
-| `px0 knowledge add`                | Save a URL or file to your library            |
-| `px0 knowledge ask`                | Ask a question across your library            |
-| `px0 guidelines review`            | Accept or reject proposed conventions         |
-| `px0 runs`                         | Browse past runs                              |
-| `px0 tools list --status`          | What workflows can call, and what is connected|
-| `px0 daemon install`               | Run workflows on a schedule                   |
-| `px0 config list`                  | Every setting, with its default               |
-| `px0 doctor`                       | Check that everything is wired up             |
-| `px0 update`                       | Upgrade px0                                   |
+| Command                   | What it does                                   |
+| ------------------------- | ---------------------------------------------- |
+| `px0 workflows new`       | Turn a sentence into a workflow                |
+| `px0 workflows run`       | Run one now                                    |
+| `px0 workflows edit`      | Revise a workflow and rebuild it               |
+| `px0 brain add`           | Save a URL or file to your brain               |
+| `px0 brain ask`           | Ask a question across your brain               |
+| `px0 guidelines review`   | Accept or reject proposed conventions          |
+| `px0 runs`                | Browse past runs                               |
+| `px0 tools list --status` | What workflows can call, and what is connected |
+| `px0 daemon install`      | Run workflows on a schedule                    |
+| `px0 config list`         | Every setting, with its default                |
+| `px0 doctor`              | Check that everything is wired up              |
+| `px0 update`              | Upgrade px0                                    |
 
 Add `--help` to any of them.
 

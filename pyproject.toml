@@ -16,7 +16,11 @@ dependencies = [
     "zstandard>=0.22",
     "croniter>=2.0",
     "beautifulsoup4>=4.12",
-    "youtube-transcript-api>=0.6",
+    "pypdf>=4.0",
+    # >=1.0, not >=0.6: the instance-based `.fetch()` this code calls did not
+    # exist before 1.0, and the 0.6 static `get_transcript` is gone in 1.x. A
+    # resolver landing on 0.6 would make every video ingest as a stub.
+    "youtube-transcript-api>=1.0",
     "composio>=0.1.0",
     "packaging>=23.0",
 ]
@@ -32,6 +36,12 @@ dev = [
     "twine>=4.0.0",
 ]
 
+# Optional. With yt-dlp installed, a YouTube playlist enumerates in full;
+# without it, px0 scrapes the playlist page and sees only its first ~100 videos.
+playlists = [
+    "yt-dlp>=2024.1.1",
+]
+
 [project.scripts]
 px0 = "px0.cli:main"
 
@@ -41,3 +51,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["px0"]
+
+[tool.pytest.ini_options]
+markers = [
+    "allow_harness: test may call harness.invoke (the real coding-agent subprocess)",
+]

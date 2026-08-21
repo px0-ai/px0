@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from px0 import claims, config as config_mod, knowledge, paths, runner, runs, store
+from px0 import claims, config as config_mod, brain, paths, runner, runs, store
 from px0 import workflow as workflow_mod
 
 
@@ -234,7 +234,7 @@ def test_route_output_contains_an_absolute_path(tmp_home):
     assert written.is_relative_to(paths.output_dir(tmp_home))
 
 
-# --- knowledge ---------------------------------------------------------
+# --- brain ---------------------------------------------------------
 
 @pytest.mark.parametrize("name,kind", [
     ("note.md", "text"),
@@ -244,7 +244,7 @@ def test_route_output_contains_an_absolute_path(tmp_home):
     ("doc.docx", "document"),
 ])
 def test_detect_kind_accepts_local_files(name, kind):
-    assert knowledge._detect_kind(name)[0] == kind
+    assert brain._detect_kind(name)[0] == kind
 
 
 def test_local_files_do_not_collide_on_a_long_path(tmp_home, tmp_path):
@@ -255,7 +255,7 @@ def test_local_files_do_not_collide_on_a_long_path(tmp_home, tmp_path):
     a.write_text("# Alpha\n")
     b.write_text("# Beta\n")
 
-    assert knowledge._slug_from_source(str(a)) != knowledge._slug_from_source(str(b))
+    assert brain._slug_from_source(str(a)) != brain._slug_from_source(str(b))
 
 
 def test_add_reads_a_markdown_file(tmp_home, tmp_path, monkeypatch):
@@ -264,7 +264,7 @@ def test_add_reads_a_markdown_file(tmp_home, tmp_path, monkeypatch):
     src.write_text("# Caching\n\nWrite-through keeps both in sync.\n")
     config = config_mod.load(paths.config_path(tmp_home))
 
-    result = knowledge.add(tmp_home, config, str(src), no_propose=True)
+    result = brain.add(tmp_home, config, str(src), no_propose=True)
 
     assert result.path.exists()
     assert "Write-through" in result.path.read_text()
@@ -279,26 +279,26 @@ def test_fetch_turns_http_errors_into_ingest_error(monkeypatch):
             raise requests.exceptions.HTTPError(response=self)
 
     monkeypatch.setattr(requests, "get", lambda *a, **k: Boom())
-    with pytest.raises(knowledge.IngestError) as e:
-        knowledge._fetch("https://example.com/missing")
+    with pytest.raises(brain.IngestError) as e:
+        brain._fetch("https://example.com/missing")
     assert "404" in str(e.value)
 
 
-def test_resolve_knowledge_path_accepts_library_relative(tmp_home):
+def test_resolve_brain_path_accepts_library_relative(tmp_home):
     config = config_mod.load(paths.config_path(tmp_home))
-    base = knowledge.knowledge_path(tmp_home, config)
+    base = brain.brain_path(tmp_home, config)
     target = base / "blogs" / "post.md"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("---\nsource: https://x.test\n---\nbody\n")
 
-    for form in ("blogs/post.md", "knowledge/blogs/post.md", "post.md", str(target)):
-        assert knowledge.resolve_knowledge_path(tmp_home, config, form) == target
+    for form in ("blogs/post.md", "brain/blogs/post.md", "post.md", str(target)):
+        assert brain.resolve_brain_path(tmp_home, config, form) == target
 
 
-def test_resolve_knowledge_path_reports_a_miss(tmp_home):
+def test_resolve_brain_path_reports_a_miss(tmp_home):
     config = config_mod.load(paths.config_path(tmp_home))
-    with pytest.raises(knowledge.IngestError):
-        knowledge.resolve_knowledge_path(tmp_home, config, "nope.md")
+    with pytest.raises(brain.IngestError):
+        brain.resolve_brain_path(tmp_home, config, "nope.md")
 
 
 # --- run records ------------------------------------------------------

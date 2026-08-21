@@ -6,7 +6,7 @@ the reverse -- so `build` is handed the module holding the handlers rather than
 importing them.
 
 Shape: **entity first, then the verb acting on it** -- `px0 workflows new`,
-`px0 knowledge search`, `px0 guidelines review`. The only flat commands are the
+`px0 brain search`, `px0 guidelines review`. The only flat commands are the
 four that act on the install rather than on anything in the store: `init`,
 `doctor`, `version`, `update`.
 
@@ -19,6 +19,7 @@ import argparse
 
 from px0 import config as config_mod
 from px0 import harness
+from px0 import retrieval
 
 
 def build(handlers) -> argparse.ArgumentParser:
@@ -129,36 +130,53 @@ def build(handlers) -> argparse.ArgumentParser:
     rp4.set_defaults(func=handlers.cmd_why)
     sp.set_defaults(func=handlers.cmd_runs)
 
-    sp = sub.add_parser("knowledge", help="ingest, search, and ask over knowledge")
-    knowledge_sub = sp.add_subparsers(dest="knowledge_cmd", required=True)
-    kp = knowledge_sub.add_parser("add", help="ingest a URL or file into the store")
+    sp = sub.add_parser("brain", help="ingest, search, and ask over your brain")
+    brain_sub = sp.add_subparsers(dest="brain_cmd", required=True)
+    kp = brain_sub.add_parser("add", help="ingest a URL or file into your brain")
     kp.add_argument("source")
-    kp.add_argument("--to", choices=["docs", "blogs", "papers"])
+    # Any relative subfolder, not a fixed set: a brain pointed at an existing
+    # vault should be able to file into the structure that vault already has
+    # (`--to "Personal/Reading"`). `work` is included in the suggestion because
+    # brain/work/ never leaves the machine, and while it was absent from a
+    # closed choices list it was the one folder with a privacy guarantee that
+    # nothing could be filed into.
+    kp.add_argument(
+        "--to", metavar="FOLDER",
+        help="subfolder of the brain to file into, e.g. docs, blogs, papers, work, "
+             "or any path of your own like \"Personal/Reading\"",
+    )
     kp.add_argument("--no-propose", action="store_true")
-    kp.set_defaults(func=handlers.cmd_knowledge)
+    kp.set_defaults(func=handlers.cmd_brain)
 
-    kp = knowledge_sub.add_parser("refresh", help="re-fetch an already-ingested source")
+    kp = brain_sub.add_parser("refresh", help="re-fetch an already-ingested source")
     kp.add_argument("path")
-    kp.set_defaults(func=handlers.cmd_knowledge)
+    kp.add_argument("--no-propose", action="store_true")
+    kp.set_defaults(func=handlers.cmd_brain)
 
-    kp = knowledge_sub.add_parser("list", help="every knowledge file in the store")
-    kp.set_defaults(func=handlers.cmd_knowledge_list)
+    kp = brain_sub.add_parser("list", help="every file in your brain")
+    kp.set_defaults(func=handlers.cmd_brain_list)
 
-    kp = knowledge_sub.add_parser("search", help="retrieve matching passages")
+    kp = brain_sub.add_parser("search", help="retrieve matching passages")
     kp.add_argument("query")
-    kp.add_argument("--k", type=int, default=5)
+    # Defaulted in the handler, not here, so `retrieval.k_default` is actually
+    # consulted -- an argparse default would silently win over the config key.
+    kp.add_argument("--k", type=int, default=None)
+    kp.add_argument("--kind", choices=list(retrieval.KINDS), default=None,
+                    help="only passages from material of this kind")
     kp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     kp.set_defaults(func=handlers.cmd_search)
 
-    kp = knowledge_sub.add_parser("ask", help="answer a question from the knowledge store")
+    kp = brain_sub.add_parser("ask", help="answer a question from your brain")
     kp.add_argument("question")
-    kp.add_argument("--k", type=int, default=5)
+    kp.add_argument("--k", type=int, default=None)
+    kp.add_argument("--kind", choices=list(retrieval.KINDS), default=None,
+                    help="only answer from material of this kind")
     kp.add_argument("--sources", action="store_true")
     kp.set_defaults(func=handlers.cmd_ask)
 
     # Its own verb rather than the old magic `search reindex` query value, which
     # made "reindex" a word you could not search for.
-    kp = knowledge_sub.add_parser("reindex", help="rebuild the retrieval index")
+    kp = brain_sub.add_parser("reindex", help="rebuild the retrieval index")
     kp.set_defaults(func=handlers.cmd_reindex)
 
     sp = sub.add_parser("guidelines", help="review, trace, and consolidate guidelines")
@@ -237,8 +255,8 @@ def build(handlers) -> argparse.ArgumentParser:
     ep.add_argument("dir")
     ep.set_defaults(func=handlers.cmd_store)
     # Where the flat `px0 list` overview went: workflows, guidelines, and
-    # knowledge in one pass. The per-entity `list` verbs print one section each.
-    lp2 = store_sub.add_parser("list", help="workflows, guidelines, and knowledge at once")
+    # brain in one pass. The per-entity `list` verbs print one section each.
+    lp2 = store_sub.add_parser("list", help="workflows, guidelines, and brain at once")
     lp2.set_defaults(func=handlers.cmd_store_list)
 
     sp = sub.add_parser("config", help="read and write store configuration")

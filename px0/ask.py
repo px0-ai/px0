@@ -1,4 +1,4 @@
-"""px0 knowledge ask: retrieval plus generation over knowledge/, nothing else. Never
+"""px0 brain ask: retrieval plus generation over brain/, nothing else. Never
 touches connectors or guidelines."""
 
 from datetime import datetime, timezone
@@ -12,22 +12,24 @@ class AskError(Exception):
     pass
 
 
-def ask(home: Path, config: dict, question: str, k: int = 5) -> dict:
-    """Retrieves the top-k passages from knowledge/, asks the harness to
+def ask(home: Path, config: dict, question: str, k: int = 5,
+        kind: str | None = None) -> dict:
+    """Retrieves the top-k passages from brain/, asks the harness to
     answer using only those passages, and records the exchange as a run.
 
     Raises AskError if the index is empty/missing or nothing matches.
     Returns {"answer", "passages", "run_id"}."""
     if retrieval.index_count(home) == 0:
         raise AskError(
-            "the knowledge index is empty or missing; run `px0 knowledge reindex` first"
+            "the brain index is empty or missing; run `px0 brain reindex` first"
         )
 
-    passages = retrieval.retrieve(home, config, question, k)
+    passages = retrieval.retrieve(home, config, question, k, kind=kind)
     if not passages:
+        of_kind = f" of kind {kind!r}" if kind else ""
         raise AskError(
-            "no passages matched this question; the index may be stale, "
-            "try `px0 knowledge reindex`"
+            f"no passages{of_kind} matched this question; the index may be "
+            f"stale, try `px0 brain reindex`"
         )
 
     context = "\n\n".join(
@@ -35,7 +37,7 @@ def ask(home: Path, config: dict, question: str, k: int = 5) -> dict:
     )
     prompt = (
         "Answer the question using ONLY the passages below, from the "
-        "user's own knowledge library. Cite sources inline as "
+        "user's own brain. Cite sources inline as "
         "path#anchor. If the passages do not contain the answer, say so "
         "plainly instead of guessing.\n\n"
         f"--- passages ---\n{context}\n\n--- question ---\n{question}"

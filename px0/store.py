@@ -76,7 +76,7 @@ def export(home: Path, dest: Path) -> None:
     export carries no API key in either the live file or the blobs.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("workflows", "guidelines", "knowledge", "output", "outputs", "skills"):
+    for name in ("workflows", "guidelines", "brain", "output", "outputs", "skills"):
         src = home / name
         if not src.exists():
             continue
@@ -110,9 +110,13 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
     for d in (
         paths.workflows_dir(home),
         paths.guidelines_dir(home),
-        home / "knowledge" / "docs",
-        home / "knowledge" / "blogs",
-        home / "knowledge" / "papers",
+        home / "brain" / "docs",
+        home / "brain" / "blogs",
+        home / "brain" / "papers",
+        # work/ is scaffolded like the rest: retrieval already treats it as the
+        # never-leaves-this-machine folder, so it should exist to be filed into
+        # rather than having to be guessed at and created by hand.
+        home / "brain" / "work",
         paths.output_dir(home),
         paths.state_dir(home),
         paths.proposals_dir(home),
@@ -125,7 +129,7 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
     cfg_path = paths.config_path(home)
     if not cfg_path.exists():
         initial_config = {k: dict(v) for k, v in config_mod.DEFAULTS.items()}
-        initial_config["knowledge"]["path"] = str(home / "knowledge")
+        initial_config["brain"]["path"] = str(home / "brain")
         initial_config["output"]["path"] = str(home / "output")
         if harness_cmd:
             initial_config["model"]["harness_cmd"] = harness_cmd

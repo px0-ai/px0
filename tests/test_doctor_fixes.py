@@ -37,20 +37,20 @@ def test_tight_credentials_carry_no_fix(tmp_home):
     assert res["ok"] is True and "fix" not in res
 
 
-def test_empty_index_over_existing_knowledge_points_at_reindex(tmp_home):
+def test_empty_index_over_existing_brain_points_at_reindex(tmp_home):
     """The reported case: files on disk, nothing indexed, no hint what to run."""
-    (tmp_home / "knowledge").mkdir(exist_ok=True)
-    (tmp_home / "knowledge" / "note.md").write_text("# note\n\nbody\n")
+    (tmp_home / "brain").mkdir(exist_ok=True)
+    (tmp_home / "brain" / "note.md").write_text("# note\n\nbody\n")
 
     res = doctor._check_index(tmp_home, {})
 
     assert res["ok"] is False
-    assert "px0 knowledge reindex" in res["fix"]
+    assert "px0 brain reindex" in res["fix"]
 
 
 def test_a_populated_index_passes_with_no_fix(tmp_home):
-    (tmp_home / "knowledge").mkdir(exist_ok=True)
-    (tmp_home / "knowledge" / "note.md").write_text("# note\n\nbody\n")
+    (tmp_home / "brain").mkdir(exist_ok=True)
+    (tmp_home / "brain" / "note.md").write_text("# note\n\nbody\n")
     retrieval.reindex(tmp_home, {})
 
     res = doctor._check_index(tmp_home, {})
@@ -147,7 +147,7 @@ def test_the_fix_is_printed_under_the_line_that_failed(monkeypatch, capsys):
         "all_ok": False,
         "checks": {
             "index": {"ok": False, "detail": "8 files, 0 passages",
-                      "fix": "build the index: px0 knowledge reindex"},
+                      "fix": "build the index: px0 brain reindex"},
             "locks": {"ok": True, "detail": "lock is free"},
         },
     })
@@ -158,7 +158,7 @@ def test_the_fix_is_printed_under_the_line_that_failed(monkeypatch, capsys):
     out = capsys.readouterr().out
     lines = [l for l in out.splitlines() if l.strip()]
     failing = next(i for i, l in enumerate(lines) if "8 files" in l)
-    assert "px0 knowledge reindex" in lines[failing + 1]
+    assert "px0 brain reindex" in lines[failing + 1]
     assert exc.value.code != 0
 
 
@@ -181,14 +181,14 @@ def test_json_output_carries_the_fix_for_machine_callers(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ctx", lambda: (paths.store_home(), {}))
     monkeypatch.setattr(doctor, "run", lambda *a, **k: {
         "px0_version": "0.0.0", "all_ok": False,
-        "checks": {"index": {"ok": False, "detail": "d", "fix": "px0 knowledge reindex"}},
+        "checks": {"index": {"ok": False, "detail": "d", "fix": "px0 brain reindex"}},
     })
 
     with pytest.raises(SystemExit):
         cli.cmd_doctor(_Args(json=True))
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["checks"]["index"]["fix"] == "px0 knowledge reindex"
+    assert payload["checks"]["index"]["fix"] == "px0 brain reindex"
 
 
 class _Args:

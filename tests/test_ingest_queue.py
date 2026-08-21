@@ -1,5 +1,5 @@
 import json
-from px0 import knowledge, paths, config as config_mod
+from px0 import brain, paths, config as config_mod
 
 def test_process_ingest_queue_happy_path(tmp_home, monkeypatch):
     config = config_mod.load(paths.config_path(tmp_home))
@@ -17,17 +17,17 @@ def test_process_ingest_queue_happy_path(tmp_home, monkeypatch):
 
     # Mock enumerate_playlist and add
     videos = ["https://youtube.com/watch?v=abc", "https://youtube.com/watch?v=def"]
-    monkeypatch.setattr(knowledge, "enumerate_playlist", lambda *a: videos)
+    monkeypatch.setattr(brain, "enumerate_playlist", lambda *a: videos)
 
     added = []
-    def mock_add(home, cfg, source, to=None):
+    def mock_add(home, cfg, source, to=None, **kw):
         added.append((source, to))
-        dest = knowledge._dest_path(home, cfg, to or "docs", source)
+        dest = brain._dest_path(home, cfg, to or "docs", source)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("canned content")
-    monkeypatch.setattr(knowledge, "add", mock_add)
+    monkeypatch.setattr(brain, "add", mock_add)
 
-    res = knowledge.process_ingest_queue(tmp_home, config)
+    res = brain.process_ingest_queue(tmp_home, config)
     assert res["jobs_processed"] == 1
     assert res["videos_ingested"] == 2
     assert res["jobs_given_up"] == 0
@@ -55,22 +55,22 @@ def test_process_ingest_queue_skips_already_ingested(tmp_home, monkeypatch):
     }))
 
     videos = ["https://youtube.com/watch?v=abc", "https://youtube.com/watch?v=def"]
-    monkeypatch.setattr(knowledge, "enumerate_playlist", lambda *a: videos)
+    monkeypatch.setattr(brain, "enumerate_playlist", lambda *a: videos)
 
     # Pre-create the first video's dest path
-    dest1 = knowledge._dest_path(tmp_home, config, "blogs", "https://youtube.com/watch?v=abc")
+    dest1 = brain._dest_path(tmp_home, config, "blogs", "https://youtube.com/watch?v=abc")
     dest1.parent.mkdir(parents=True, exist_ok=True)
     dest1.write_text("existing")
 
     added = []
-    def mock_add(home, cfg, source, to=None):
+    def mock_add(home, cfg, source, to=None, **kw):
         added.append((source, to))
-        dest = knowledge._dest_path(home, cfg, to or "docs", source)
+        dest = brain._dest_path(home, cfg, to or "docs", source)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("canned")
-    monkeypatch.setattr(knowledge, "add", mock_add)
+    monkeypatch.setattr(brain, "add", mock_add)
 
-    res = knowledge.process_ingest_queue(tmp_home, config)
+    res = brain.process_ingest_queue(tmp_home, config)
     assert res["jobs_processed"] == 1
     assert res["videos_ingested"] == 1 # Only 1 actually ingested because other skipped
     assert added == [("https://youtube.com/watch?v=def", "blogs")]
@@ -91,17 +91,17 @@ def test_process_ingest_queue_partial_failure_increments_attempts(tmp_home, monk
     }))
 
     videos = ["https://youtube.com/watch?v=abc", "https://youtube.com/watch?v=def"]
-    monkeypatch.setattr(knowledge, "enumerate_playlist", lambda *a: videos)
+    monkeypatch.setattr(brain, "enumerate_playlist", lambda *a: videos)
 
-    def mock_add(home, cfg, source, to=None):
+    def mock_add(home, cfg, source, to=None, **kw):
         if "abc" in source:
-            raise knowledge.IngestError("Stub or transcript missing")
-        dest = knowledge._dest_path(home, cfg, to or "docs", source)
+            raise brain.IngestError("Stub or transcript missing")
+        dest = brain._dest_path(home, cfg, to or "docs", source)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("canned")
-    monkeypatch.setattr(knowledge, "add", mock_add)
+    monkeypatch.setattr(brain, "add", mock_add)
 
-    res = knowledge.process_ingest_queue(tmp_home, config)
+    res = brain.process_ingest_queue(tmp_home, config)
     assert res["jobs_processed"] == 1
     assert res["videos_ingested"] == 1
     assert res["jobs_given_up"] == 0
@@ -127,12 +127,12 @@ def test_process_ingest_queue_max_attempts_moves_to_failed(tmp_home, monkeypatch
         "attempts": 2
     }))
 
-    monkeypatch.setattr(knowledge, "enumerate_playlist", lambda *a: ["https://youtube.com/watch?v=abc"])
-    def mock_add(home, cfg, source, to=None):
-        raise knowledge.IngestError("Permanent fail")
-    monkeypatch.setattr(knowledge, "add", mock_add)
+    monkeypatch.setattr(brain, "enumerate_playlist", lambda *a: ["https://youtube.com/watch?v=abc"])
+    def mock_add(home, cfg, source, to=None, **kw):
+        raise brain.IngestError("Permanent fail")
+    monkeypatch.setattr(brain, "add", mock_add)
 
-    res = knowledge.process_ingest_queue(tmp_home, config)
+    res = brain.process_ingest_queue(tmp_home, config)
     assert res["jobs_processed"] == 1
     assert res["videos_ingested"] == 0
     assert res["jobs_given_up"] == 1

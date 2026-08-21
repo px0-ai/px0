@@ -9,8 +9,10 @@ DEFAULTS: dict[str, Any] = {
     "model": {
         "harness_cmd": "claude -p",
     },
-    "knowledge": {
-        "path": "~/.px0/knowledge",
+    "brain": {
+        "path": "~/.px0/brain",
+        "private_folder": "work",
+        "ignore": ["*.excalidraw.md"],
     },
     "output": {
         "path": "~/.px0/output",
@@ -146,9 +148,21 @@ SCHEMA: dict[str, dict[str, Any]] = {
                 "(claude, gemini, pi, opencode) expands to its full command, or pass any "
                 "literal command. `px0 config model` sets this interactively.",
     },
-    "knowledge.path": {
+    "brain.path": {
         "type": str, "choices": None,
-        "help": "directory the knowledge library lives in (any folder, e.g. an existing notes vault)",
+        "help": "directory the brain lives in -- point it at an Obsidian vault (or any "
+                "folder of Markdown) and px0 reads what is already there; dot-folders "
+                "like .obsidian/ and .trash/ are skipped",
+    },
+    "brain.private_folder": {
+        "type": str, "choices": None,
+        "help": "brain subfolder withheld from retrieval and never sent anywhere; "
+                "set to \"\" to disable, or rename it if your vault already has a "
+                "folder by this name that you do want searched",
+    },
+    "brain.ignore": {
+        "type": list, "choices": None,
+        "help": "glob patterns never indexed, on top of the always-skipped dot-folders",
     },
     "output.path": {
         "type": str, "choices": None,
@@ -257,6 +271,11 @@ def _coerce(key: str, raw: str) -> Any:
             return int(raw)
         except ValueError:
             raise ValueError(f"{key} expects an integer, got {raw!r}") from None
+    if t is list:
+        # A comma-separated list is what fits on a command line. Without this the
+        # raw string was stored whole, so a multi-pattern value silently became
+        # one nonsense pattern that matched nothing.
+        return [item.strip() for item in raw.split(",") if item.strip()]
     return raw
 
 

@@ -3,6 +3,7 @@ every subcommand delegates to the module that actually does the work."""
 
 import argparse
 import copy
+import dataclasses
 import json
 import os
 import re
@@ -25,7 +26,7 @@ from px0 import (
     daemon as daemon_mod,
     doctor as doctor_mod,
     harness,
-    knowledge as knowledge_mod,
+    brain as brain_mod,
     paths,
     proposals as proposals_mod,
     provenance,
@@ -75,7 +76,7 @@ def _ctx(require_init: bool = True, scan: bool = True) -> tuple[Path, dict]:
         os.environ["COMPOSIO_API_KEY"] = composio_api_key
 
     # Every outbound HTTPS call gets the stored bundle, not just the Composio
-    # ones: on a TLS-intercepting network `knowledge add <url>` failed while
+    # ones: on a TLS-intercepting network `brain add <url>` failed while
     # Composio worked, because only the Composio paths applied it.
     connect_mod.apply_ca_bundle(home)
 
@@ -184,6 +185,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     ui.hint("try next:")
     ui.command("px0 doctor")
     ui.command('px0 workflows new "describe what you want"')
+
+    # Surfaced here because a fresh store is exactly when someone who already
+    # keeps notes somewhere would want to know they need not move them.
+    ui.hint("already keep notes in Obsidian, Logseq, or any folder of Markdown?")
+    ui.command("px0 config set brain.path ~/path/to/your/vault")
 
 
 def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str, str]]:
@@ -702,12 +708,14 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
-    """Handles `px0 knowledge ask`: answers a question via retrieval over guidelines/knowledge
+    """Handles `px0 brain ask`: answers a question via retrieval over brain/
     and prints the answer, optionally followed by source passages with --sources."""
     home, config = _ctx()
+    k = args.k if args.k is not None else config_mod.get(config, "retrieval.k_default", 5)
     try:
-        with ui.spinner("Searching knowledge"):
-            result = ask_mod.ask(home, config, args.question, k=args.k)
+        with ui.spinner("Searching your brain"):
+            result = ask_mod.ask(home, config, args.question, k=k,
+                                 kind=getattr(args, "kind", None))
     except ask_mod.AskError as e:
         ui.err(str(e))
         sys.exit(EXIT_USER_ERROR)
@@ -754,15 +762,74 @@ def _print_guidelines(home: Path, heading: bool) -> None:
                 "`px0 workflows new` propose one")
 
 
-def _print_knowledge(home: Path, config: dict, heading: bool) -> None:
-    base = retrieval.knowledge_path(home, config)
-    files = sorted(base.rglob("*.md")) if base.exists() else []
+def _report_brain_path(home: Path, config: dict) -> None:
+    """Says what px0 found after `brain.path` is pointed somewhere new.
+
+    Printed at the moment of setting because that is when the answer is useful.
+    The collision it warns about is the one real trap in pointing the brain at an
+    existing vault: `work/` means "never leaves this machine" to px0 and "my work
+    notes" to every notes app, so without this the user's work folder simply
+    stops appearing in searches and nothing says why.
+    """
+    base = retrieval.brain_path(home, config)
+    if not base.exists():
+        ui.warn("no such directory yet", str(base), stream=sys.stdout)
+        ui.hint("it will be created on the first `px0 brain add`")
+        return
+
+    globs = retrieval.ignore_globs(config)
+    private = retrieval.private_folder(config)
+    found = skipped = private_count = 0
+    for p in base.rglob("*.md"):
+        rel = str(p.relative_to(base))
+        if retrieval.is_ignored(rel, globs):
+            skipped += 1
+        elif retrieval.is_private(rel, private):
+            private_count += 1
+        else:
+            found += 1
+
+    ui.info(f"{found} Markdown file(s) found", str(base))
+    if skipped:
+        ui.hint(f"{skipped} skipped as tool state (.obsidian/, .trash/, ...) or by brain.ignore")
+    if (base / ".obsidian").is_dir():
+        ui.info("this looks like an Obsidian vault", "px0 reads it in place and writes nothing you did not ask for")
+    if private_count:
+        ui.warn(f"{private_count} file(s) under {private}/ will be held back from every search",
+                stream=sys.stdout)
+        ui.hint(f"{private}/ is the never-leaves-this-machine folder. If that is not what "
+                f"you meant by it:")
+        ui.command('px0 config set brain.private_folder ""')
+    if found:
+        ui.hint("build the index: px0 brain reindex")
+
+
+def _print_brain(home: Path, config: dict, heading: bool) -> None:
+    base = retrieval.brain_path(home, config)
+    globs = retrieval.ignore_globs(config)
+    private = retrieval.private_folder(config)
+
+    rows, skipped = [], 0
+    for p in sorted(base.rglob("*.md")) if base.exists() else []:
+        rel = str(p.relative_to(base))
+        # Listing what retrieval ignores would misreport the brain: pointed at a
+        # vault, most of what `rglob` finds is the notes app's own state.
+        if retrieval.is_ignored(rel, globs):
+            skipped += 1
+            continue
+        rows.append((rel, retrieval.is_private(rel, private)))
+
     if heading:
-        ui.heading(f"knowledge {ui.dim(f'({len(files)})')}")
-    for p in files:
-        print(f"  {p.relative_to(base)}")
-    if not files:
-        ui.hint("none yet -- add something with `px0 knowledge add <url-or-file>`")
+        ui.heading(f"brain {ui.dim(f'({len(rows)})')}")
+    for rel, priv in rows:
+        # Marked, not hidden. A file silently absent from every search is the
+        # single most confusing thing about pointing the brain at a vault that
+        # already has a folder named like the private one.
+        print(f"  {rel}" + (ui.dim("  (private)") if priv else ""))
+    if skipped:
+        ui.hint(f"{skipped} file(s) skipped as tool state or by brain.ignore")
+    if not rows:
+        ui.hint("none yet -- add something with `px0 brain add <url-or-file>`")
 
 
 def cmd_workflows_list(args: argparse.Namespace) -> None:
@@ -777,10 +844,10 @@ def cmd_guidelines_list(args: argparse.Namespace) -> None:
     _print_guidelines(home, heading=False)
 
 
-def cmd_knowledge_list(args: argparse.Namespace) -> None:
-    """Handles `px0 knowledge list`: every knowledge file, store-relative."""
+def cmd_brain_list(args: argparse.Namespace) -> None:
+    """Handles `px0 brain list`: every brain file, store-relative."""
     home, config = _ctx()
-    _print_knowledge(home, config, heading=False)
+    _print_brain(home, config, heading=False)
 
 
 def cmd_store_list(args: argparse.Namespace) -> None:
@@ -788,7 +855,7 @@ def cmd_store_list(args: argparse.Namespace) -> None:
     home, config = _ctx()
     _print_workflows(home, heading=True)
     _print_guidelines(home, heading=True)
-    _print_knowledge(home, config, heading=True)
+    _print_brain(home, config, heading=True)
 
 
 # --- tools ---------------------------------------------------------------
@@ -1077,35 +1144,37 @@ def cmd_runs(args: argparse.Namespace) -> None:
         return
 
 
-# --- knowledge -----------------------------------------------------------
+# --- brain -----------------------------------------------------------
 
-def cmd_knowledge(args: argparse.Namespace) -> None:
-    """Handles `px0 knowledge add` and `refresh`: ingests a source (URL, file, etc.)
-    into the knowledge library or re-fetches an already-ingested source."""
+def cmd_brain(args: argparse.Namespace) -> None:
+    """Handles `px0 brain add` and `refresh`: ingests a source (URL, file, etc.)
+    into the brain or re-fetches an already-ingested source."""
     home, config = _ctx()
 
-    if args.knowledge_cmd == "add":
+    if args.brain_cmd == "add":
         try:
             with ui.spinner(f"Ingesting {args.source}"):
-                result = knowledge_mod.add(
+                result = brain_mod.add(
                     home, config, args.source, to=args.to, no_propose=args.no_propose
                 )
-        except knowledge_mod.IngestError as e:
+        except brain_mod.IngestError as e:
             ui.err("ingest failed", str(e))
             sys.exit(EXIT_USER_ERROR)
         if result.is_stub:
             ui.warn("ingested as metadata only", str(result.path), stream=sys.stdout)
             ui.hint("no transcript published yet; retry later with:")
-            ui.command(f"px0 knowledge refresh {result.path}")
+            ui.command(f"px0 brain refresh {result.path}")
         else:
             ui.ok("ingested", str(result.path))
         return
 
-    if args.knowledge_cmd == "refresh":
+    if args.brain_cmd == "refresh":
         try:
             with ui.spinner(f"Refreshing {args.path}"):
-                result = knowledge_mod.refresh(home, config, Path(args.path))
-        except knowledge_mod.IngestError as e:
+                result = brain_mod.refresh(
+                    home, config, Path(args.path), no_propose=args.no_propose
+                )
+        except brain_mod.IngestError as e:
             ui.err("refresh failed", str(e))
             sys.exit(EXIT_USER_ERROR)
         ui.ok("refreshed", str(result.path))
@@ -1324,28 +1393,37 @@ def cmd_changes(args: argparse.Namespace) -> None:
         return
 
 
-# --- knowledge search / skills / why / store / update / version / doctor -
+# --- brain search / skills / why / store / update / version / doctor -
 
 def cmd_reindex(args: argparse.Namespace) -> None:
-    """Handles `px0 knowledge reindex`: rebuilds the retrieval index from disk."""
+    """Handles `px0 brain reindex`: rebuilds the retrieval index from disk."""
     home, config = _ctx()
     backend = config_mod.get(config, "retrieval.backend", "local")
-    with ui.spinner(f"Reindexing knowledge ({backend})"):
+    with ui.spinner(f"Reindexing brain ({backend})"):
         count = retrieval.reindex(home, config)
     ui.ok("reindexed", f"{count} passages")
 
 
 def cmd_search(args: argparse.Namespace) -> None:
-    """Handles `px0 knowledge search`: prints the top-k passages matching the query."""
+    """Handles `px0 brain search`: prints the top-k passages matching the query."""
     home, config = _ctx()
+    k = args.k if args.k is not None else config_mod.get(config, "retrieval.k_default", 5)
+    kind = getattr(args, "kind", None)
     with ui.spinner(f"Searching for {args.query!r}"):
-        passages = retrieval.retrieve(home, config, args.query, k=args.k)
+        passages = retrieval.retrieve(home, config, args.query, k=k, kind=kind)
     if args.json:
-        _dump(args, passages)
+        # dataclasses.asdict, not the raw Passage: `_dump`'s default=str would
+        # otherwise stringify each one into its own repr, making --json a list
+        # of unparseable strings rather than objects a script can read.
+        _dump(args, [dataclasses.asdict(p) for p in passages])
         return
     if not passages:
         ui.info("no matches")
-        ui.hint("if the index looks stale: px0 knowledge reindex")
+        if kind:
+            # Otherwise a --kind that matches nothing looks like an empty brain.
+            ui.hint(f"nothing of kind {kind!r} matched; files px0 did not write "
+                    f"carry no kind and are never matched by --kind")
+        ui.hint("if the index looks stale: px0 brain reindex")
         return
     for p in passages:
         print(f"  {p.path}{ui.dim('#' + p.anchor)}  {ui.dim(str(round(p.score, 3)))}")
@@ -1466,6 +1544,8 @@ def cmd_config(args: argparse.Namespace) -> None:
             sys.exit(EXIT_USER_ERROR)
         config_mod.save(paths.config_path(home), config)
         ui.ok(args.key, f"= {value!r}")
+        if args.key == "brain.path":
+            _report_brain_path(home, config)
         return
 
     if args.config_cmd == "model":

@@ -50,17 +50,17 @@ def proposals_dir(home: Path | None = None) -> Path:
 
 
 def index_dir(home: Path | None = None) -> Path:
-    """Path to the retrieval index over `knowledge/`."""
+    """Path to the retrieval index over `brain/`."""
     return state_dir(home) / "index"
 
 
 def ingest_dir(home: Path | None = None) -> Path:
-    """Path to the knowledge ingest queue/workspace."""
+    """Path to the brain ingest queue/workspace."""
     return state_dir(home) / "ingest"
 
 
 def ingest_failed_dir(home: Path | None = None) -> Path:
-    """Path to the directory holding failed knowledge ingest jobs."""
+    """Path to the directory holding failed brain ingest jobs."""
     return ingest_dir(home) / "failed"
 
 

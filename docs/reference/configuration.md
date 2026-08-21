@@ -1,0 +1,110 @@
+# Configuration keys
+
+`config.toml` lives at the store root. Read and write it with
+[`px0 config`](../commands/config.md) — every key is validated against its type
+and allowed values before it is saved.
+
+```shell
+px0 config list          # every key, with its value, default, and help
+px0 config get <KEY>
+px0 config set <KEY> <VALUE>
+```
+
+Writing booleans, integers, and lists is covered in
+[`px0 config set`](../commands/config.md#px0-config-set).
+
+## `[model]`
+
+Which coding agent px0 shells out to.
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `model.harness_cmd` | str | `claude -p` | coding agent CLI invocation, e.g. 'claude -p'; a known harness name (claude, gemini, pi, opencode) expands to its full command, or pass any literal command. `px0 config model` sets this interactively. |
+
+## `[brain]`
+
+Where the brain lives and what is read from it. See [`px0 brain`](../commands/brain.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `brain.path` | str | `~/.px0/brain` | directory the brain lives in -- point it at an Obsidian vault (or any folder of Markdown) and px0 reads what is already there; dot-folders like .obsidian/ and .trash/ are skipped |
+| `brain.private_folder` | str | `work` | brain subfolder withheld from retrieval and never sent anywhere; set to "" to disable, or rename it if your vault already has a folder by this name that you do want searched |
+| `brain.ignore` | list | `["*.excalidraw.md"]` | glob patterns never indexed, on top of the always-skipped dot-folders |
+
+## `[output]`
+
+Where workflow file outputs are written.
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `output.path` | str | `~/.px0/output` | default directory for workflow file outputs |
+
+## `[connectors]`
+
+How external app calls are brokered and authorized. See [`px0 tools`](../commands/tools.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `connectors.provider` | str — `composio` / `native` | `composio` | intended default for brokering tool connections; not yet enforced in this build -- every toolkit currently routes through Composio |
+| `connectors.retries` | int | `3` | per-run transient connector retries, exponential backoff |
+| `connectors.composio_api_key` | str | `""` | Composio API key used to authenticate external app connections |
+| `connectors.ca_bundle` | str | `""` | CA bundle used to verify TLS for every outbound request; set automatically when an intercepting proxy (e.g. Zscaler) makes certifi's bundle insufficient |
+
+## `[proposals]`
+
+Guideline proposal review. See [`px0 guidelines`](../commands/guidelines.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `proposals.max_per_consolidation` | int | `10` | cap on proposals surfaced per consolidation session |
+
+## `[versions]`
+
+The store's own file history. See [`px0 versions`](../commands/versions.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `versions.keep_all` | bool | `true` | true keeps every version forever; false enables the max_versions_per_file cap |
+| `versions.max_versions_per_file` | int | `200` | per-file version cap applied by `px0 versions prune` when keep_all is false |
+
+## `[logs]`
+
+Run logs and record retention. See [`px0 runs`](../commands/runs.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `logs.path` | str | `/var/log/px0` | run log directory, kept outside the versioned store |
+| `logs.retention_days` | int | `14` | days to keep logs for successful runs |
+| `logs.retention_days_failed` | int | `60` | days to keep logs for failed runs |
+| `logs.record_retention_days` | int | `365` | days to keep run records (outlives the logs themselves) |
+| `logs.max_file_size_mb` | int | `20` | single log file rotation size cap, in MB |
+
+## `[update]`
+
+Upgrades and the weekly availability check. See [`px0 update`](../commands/update.md).
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `update.channel` | str — `stable` / `beta` | `stable` | release channel; not functionally checked in this build -- `px0 update` reports that no release manifest is configured |
+| `update.check` | bool | `true` | whether the daemon checks weekly for an available update |
+| `update.auto_install` | bool | `false` | install updates automatically instead of only surfacing them |
+
+## `[retrieval]`
+
+The search backend behind `brain search` and `brain ask`.
+
+| Key | Type | Default | What it does |
+| --- | ---- | ------- | ------------ |
+| `retrieval.backend` | str — `local` / `qmd` | `local` | retrieval backend; either 'local' (SQLite FTS5/BM25) or 'qmd' |
+| `retrieval.qmd_cmd` | str | `qmd` | command prefix used to run the qmd CLI |
+| `retrieval.k_default` | int | `5` | default number of passages retrieved per query |
+| `retrieval.rerank` | bool | `true` | reserved for a future rerank stage; not yet wired in this build |
+
+## Keys that are declared but not yet wired
+
+Named here so the list is honest about what the current build actually does:
+
+- `connectors.provider` — every toolkit routes through Composio regardless.
+- `update.channel` — not functionally checked; `px0 update` reports when no
+  release manifest is configured.
+- `retrieval.rerank` — reserved for a future rerank stage.

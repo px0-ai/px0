@@ -18,7 +18,7 @@ FLAT = {"init", "doctor", "version", "update"}
 # here too, so the surface stays something you can read in one place.
 GROUPS = {
     "workflows":  {"new", "run", "edit", "list"},
-    "knowledge":  {"add", "refresh", "list", "search", "ask", "reindex"},
+    "brain":  {"add", "refresh", "list", "search", "ask", "reindex"},
     "guidelines": {"list", "review", "log", "revert", "why", "consolidate", "alias"},
     "runs":       {"list", "show", "output", "rerun", "logs", "why"},
     "versions":   {"list", "show", "diff", "revert", "prune"},
@@ -73,11 +73,11 @@ def test_the_old_flat_verbs_are_gone(gone):
     (["workflows", "new", "a thing"], "cmd_new"),
     (["workflows", "run", "wf"], "cmd_run"),
     (["workflows", "list"], "cmd_workflows_list"),
-    (["knowledge", "add", "https://x"], "cmd_knowledge"),
-    (["knowledge", "list"], "cmd_knowledge_list"),
-    (["knowledge", "search", "q"], "cmd_search"),
-    (["knowledge", "ask", "q"], "cmd_ask"),
-    (["knowledge", "reindex"], "cmd_reindex"),
+    (["brain", "add", "https://x"], "cmd_brain"),
+    (["brain", "list"], "cmd_brain_list"),
+    (["brain", "search", "q"], "cmd_search"),
+    (["brain", "ask", "q"], "cmd_ask"),
+    (["brain", "reindex"], "cmd_reindex"),
     (["guidelines", "list"], "cmd_guidelines_list"),
     (["guidelines", "review"], "cmd_guidelines"),
     (["guidelines", "consolidate"], "cmd_consolidate"),
@@ -100,15 +100,15 @@ def test_why_takes_a_claim_id_under_guidelines_and_a_run_id_under_runs():
 
 
 def test_a_group_with_no_verb_is_an_error_not_a_no_op():
-    """`px0 knowledge` alone must say what it wants; only `runs` defaults."""
+    """`px0 brain` alone must say what it wants; only `runs` defaults."""
     with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["knowledge"])
+        cli.build_parser().parse_args(["brain"])
     assert cli.build_parser().parse_args(["runs"]).runs_cmd is None
 
 
 def test_reindex_is_a_verb_so_reindex_is_still_a_searchable_word():
     """The old `px0 search reindex` made its own name unsearchable."""
-    args = cli.build_parser().parse_args(["knowledge", "search", "reindex"])
+    args = cli.build_parser().parse_args(["brain", "search", "reindex"])
     assert args.func.__name__ == "cmd_search" and args.query == "reindex"
 
 

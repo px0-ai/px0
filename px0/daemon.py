@@ -120,7 +120,7 @@ def recover_missed_fires(home: Path, config: dict) -> None:
 
 
 def run_nightly(home: Path, config: dict) -> dict:
-    """Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, knowledge
+    """Runs the once-a-day housekeeping pass: hand-edit checkpoint scan, brain
     reindex, draining queued playlist ingest jobs, run-log retention, and a
     once-a-week update-availability check. Every fallible step is captured in the
     report rather than raised, so one broken index or unreachable playlist doesn't
@@ -133,8 +133,8 @@ def run_nightly(home: Path, config: dict) -> dict:
     except Exception as e:
         report["reindex_error"] = str(e)
     try:
-        from px0 import knowledge as knowledge_mod
-        report["ingest_queue"] = knowledge_mod.process_ingest_queue(home, config)
+        from px0 import brain as brain_mod
+        report["ingest_queue"] = brain_mod.process_ingest_queue(home, config)
     except Exception as e:
         report["ingest_error"] = str(e)
     report["retention"] = runs_mod.apply_retention(config)
