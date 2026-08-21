@@ -14,7 +14,6 @@ from tests.conftest import build_docx, build_minimal_pdf, build_odt
 
 
 def _add(tmp_home, brain_config, source, **kw):
-    kw.setdefault("no_propose", True)
     return brain.add(tmp_home, brain_config, str(source), **kw)
 
 
@@ -358,19 +357,6 @@ def test_a_video_with_no_transcript_lands_as_a_stub(tmp_home, brain_config, monk
     assert "px0 brain refresh" in body
 
 
-def test_a_stub_is_not_sent_to_the_proposal_pass(tmp_home, brain_config, monkeypatch):
-    """There is nothing to learn from metadata, and the pass costs a model call."""
-    monkeypatch.setattr(brain, "_extract_youtube", lambda url: ("T", None, {}))
-    called = []
-    monkeypatch.setattr(
-        "px0.proposals.propose_from_brain", lambda *a, **k: called.append(a)
-    )
-
-    brain.add(tmp_home, brain_config, "https://youtu.be/dQw4w9WgXcQ", no_propose=False)
-
-    assert called == []
-
-
 # --- web --------------------------------------------------------------------
 
 def test_a_web_page_ingests_its_readable_text(tmp_home, brain_config, monkeypatch):
@@ -438,7 +424,7 @@ def test_refresh_re_reads_a_local_text_file(tmp_home, brain_config, tmp_path):
     result = _add(tmp_home, brain_config, src)
 
     src.write_text("# V2\n\nsecond version\n")
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     body = _body_of(refreshed)
     assert "second version" in body and "first version" not in body
@@ -450,7 +436,7 @@ def test_refresh_re_reads_a_local_html_file(tmp_home, brain_config, tmp_path):
     result = _add(tmp_home, brain_config, src)
 
     src.write_text("<html><title>T</title><body><p>after</p></body></html>")
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     assert "after" in _body_of(refreshed)
 
@@ -461,7 +447,7 @@ def test_refresh_re_extracts_a_pdf(tmp_home, brain_config, tmp_path, no_external
     result = _add(tmp_home, brain_config, src)
 
     src.write_bytes(build_minimal_pdf("revised draft"))
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     assert "revised draft" in _body_of(refreshed)
 
@@ -472,7 +458,7 @@ def test_refresh_re_extracts_a_docx(tmp_home, brain_config, tmp_path, no_externa
     result = _add(tmp_home, brain_config, src)
 
     src.write_bytes(build_docx(["amended wording"]))
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     assert "amended wording" in _body_of(refreshed)
 
@@ -490,7 +476,7 @@ def test_refresh_re_fetches_a_web_page(tmp_home, brain_config, monkeypatch):
     monkeypatch.setattr(brain, "_fetch", lambda url, **k: _Resp())
     result = _add(tmp_home, brain_config, "https://example.com/p")
 
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     assert "new copy" in _body_of(refreshed)
 
@@ -505,7 +491,7 @@ def test_refresh_promotes_a_stub_once_a_transcript_appears(
     monkeypatch.setattr(
         brain, "_extract_youtube", lambda url: ("Talk", "now transcribed", {})
     )
-    refreshed = brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+    refreshed = brain.refresh(tmp_home, brain_config, result.path)
 
     header, body = brain.read_header(refreshed.path)
     assert header["kind"] == "video" and "now transcribed" in body
@@ -517,7 +503,7 @@ def test_refresh_on_a_still_untranscribed_stub_says_so(tmp_home, brain_config, m
     result = _add(tmp_home, brain_config, "https://youtu.be/dQw4w9WgXcQ")
 
     with pytest.raises(brain.IngestError, match="still no transcript"):
-        brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+        brain.refresh(tmp_home, brain_config, result.path)
 
 
 def test_refresh_needs_a_recorded_source(tmp_home, brain_config):
@@ -526,7 +512,7 @@ def test_refresh_needs_a_recorded_source(tmp_home, brain_config):
     hand_written.write_text("# Mine\n\nwritten by hand, fetched from nowhere\n")
 
     with pytest.raises(brain.IngestError, match="no source"):
-        brain.refresh(tmp_home, brain_config, hand_written, no_propose=True)
+        brain.refresh(tmp_home, brain_config, hand_written)
 
 
 def test_refresh_reports_a_vanished_original(tmp_home, brain_config, tmp_path):
@@ -536,7 +522,7 @@ def test_refresh_reports_a_vanished_original(tmp_home, brain_config, tmp_path):
     src.unlink()
 
     with pytest.raises(brain.IngestError, match="gone"):
-        brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
+        brain.refresh(tmp_home, brain_config, result.path)
 
 
 # --- resolving a path the user typed ----------------------------------------

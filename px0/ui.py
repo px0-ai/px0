@@ -344,6 +344,23 @@ def _ellipsize(text: str, budget: int) -> str:
     return text[:budget - 1] + "\u2026" if budget > 1 else text[:budget]
 
 
+def numbered(items: list[tuple[str, str]], stream=None) -> None:
+    """Prints `items` as the rows `select` would draw, without the cursor.
+
+    Shares `select_row` with the picker deliberately: a listing and the picker
+    over the same things should read as the same list, so the number beside a
+    row here is the number that picks it there.
+    """
+    stream = stream or sys.stdout
+    if not items:
+        return
+    width = max(len(name) for name, _ in items)
+    cols = shutil.get_terminal_size((80, 24)).columns
+    for i, (name, detail) in enumerate(items):
+        print(select_row(i, name, detail, selected=False,
+                         name_width=width, cols=cols, stream=stream), file=stream)
+
+
 def select_action(key: str, cursor: int, count: int) -> tuple[int, str]:
     """Maps a key name to (new cursor, action) for `select`.
 

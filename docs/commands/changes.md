@@ -1,9 +1,13 @@
 # `px0 changes`
 
-A change is one atomic write across the store — a workflow build, a reviewed
-batch of guideline proposals, a migration. Where [`versions`](versions.md) shows
-one file's history, `changes` shows the log of what happened, and lets you undo a
-whole change at once.
+A change is one atomic write across the store — a workflow build, a guideline
+the build wrote, a hand edit px0 noticed, a migration. It is the store's log of
+what happened and its unit of undo: `changes` shows each one, with a per-file
+diff, and reverts a whole change at once.
+
+Every file still carries a full version chain underneath, and `changes show`
+reads it to build its diffs — but a change, not a single file's version, is what
+you address.
 
 Implemented by `px0/versioning.py`.
 

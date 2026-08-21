@@ -6,7 +6,7 @@ the reverse -- so `build` is handed the module holding the handlers rather than
 importing them.
 
 Shape: **entity first, then the verb acting on it** -- `px0 workflows new`,
-`px0 brain search`, `px0 guidelines review`. The only flat commands are the ones
+`px0 brain search`, `px0 guidelines list`. The only flat commands are the ones
 that act on the install rather than on anything in the store: `init`, `doctor`,
 `version`, `update`, plus `status` (which reports across every group) and
 `completion` (which emits a shell script).
@@ -55,7 +55,9 @@ def build(handlers) -> argparse.ArgumentParser:
     sp = sub.add_parser("workflows", help="build, run, and list workflows")
     wf_sub = sp.add_subparsers(dest="workflows_cmd", required=True)
     wp = wf_sub.add_parser("new", help="describe a workflow and have px0 build it")
-    wp.add_argument("description")
+    # Optional: with no description, `cmd_new` interviews the user for one.
+    wp.add_argument("description", nargs="?",
+                    help="what the workflow should do; omit to be asked")
     wp.add_argument("--yes", action="store_true",
                     help="skip every prompt: no clarifying questions, no confirmations")
     wp.add_argument("--id", help="workflow id to save as")
@@ -209,9 +211,6 @@ def build(handlers) -> argparse.ArgumentParser:
     rp3 = runs_sub.add_parser("logs")
     rp3.add_argument("run_id")
     rp3.add_argument("--follow", "-f", action="store_true", help="follow run log tail")
-    # `why` reads a run id here and a claim id under `guidelines`. One handler
-    # serves both -- provenance.why already branches on the id's shape -- but it
-    # is listed under each entity so the help says which id that group takes.
     rp4 = runs_sub.add_parser("why", help="how a run reached its result")
     rp4.add_argument("target_id", metavar="run_id")
     rp4.set_defaults(func=handlers.cmd_why)
@@ -232,14 +231,12 @@ def build(handlers) -> argparse.ArgumentParser:
         help="subfolder of the brain to file into, e.g. docs, blogs, papers, work, "
              "or any path of your own like \"Personal/Reading\"",
     )
-    kp.add_argument("--no-propose", action="store_true")
     kp.add_argument("--from-file", metavar="PATH",
                     help="read sources from a file, one per line, and ingest all of them")
     kp.set_defaults(func=handlers.cmd_brain)
 
     kp = brain_sub.add_parser("refresh", help="re-fetch an already-ingested source")
     kp.add_argument("path", nargs="?", help="brain file; omit with --all or --stale")
-    kp.add_argument("--no-propose", action="store_true")
     kp.add_argument("--all", action="store_true", help="re-fetch everything that records a source")
     kp.add_argument("--stale", action="store_true",
                     help="re-fetch what was retrieved longer ago than --days, plus every stub")
@@ -288,16 +285,13 @@ def build(handlers) -> argparse.ArgumentParser:
     kp = brain_sub.add_parser("reindex", help="rebuild the retrieval index")
     kp.set_defaults(func=handlers.cmd_reindex)
 
-    sp = sub.add_parser("guidelines", help="review, trace, and consolidate guidelines")
+    # No `new` verb: a guideline is written by `px0 workflows new`, which knows
+    # what the workflow leans on and drafts it. What is left here are the
+    # operations on a file that already exists.
+    sp = sub.add_parser("guidelines", help="the conventions px0 follows when it works")
     g_sub = sp.add_subparsers(dest="guidelines_cmd", required=True)
     gp = g_sub.add_parser("list", help="every guideline file in the store")
     gp.set_defaults(func=handlers.cmd_guidelines_list)
-
-    gp = g_sub.add_parser("new", help="create a guideline file")
-    gp.add_argument("name")
-    gp.add_argument("--from-file", metavar="PATH", help="use this file's contents as the body")
-    gp.add_argument("--no-edit", action="store_true", help="write the template without opening an editor")
-    gp.set_defaults(func=handlers.cmd_guidelines_file)
 
     gp = g_sub.add_parser("edit", help="open a guideline in your editor")
     gp.add_argument("name")
@@ -312,54 +306,9 @@ def build(handlers) -> argparse.ArgumentParser:
     gp.add_argument("--yes", action="store_true", help="skip the confirmation")
     gp.set_defaults(func=handlers.cmd_guidelines_file)
 
-    gp = g_sub.add_parser("review", help="accept or reject pending proposals")
-    gp.add_argument("--list-only", action="store_true", help="print pending proposals without prompting")
-    gp.set_defaults(func=handlers.cmd_guidelines)
-
     gp = g_sub.add_parser("log", help="a claim's edit history")
     gp.add_argument("claim_id")
     gp.set_defaults(func=handlers.cmd_guidelines)
-
-    gp = g_sub.add_parser("revert", help="restore a claim to an earlier version")
-    gp.add_argument("claim_id")
-    gp.add_argument("--to", type=lambda s: int(s.lstrip("v")), required=True)
-    gp.set_defaults(func=handlers.cmd_guidelines)
-
-    gp = g_sub.add_parser("why", help="how a claim came to say what it says")
-    gp.add_argument("target_id", metavar="claim_id")
-    gp.set_defaults(func=handlers.cmd_why)
-
-    gp = g_sub.add_parser("consolidate", help="merge overlap and surface stale files")
-    gp.add_argument("--list-only", action="store_true")
-    gp.set_defaults(func=handlers.cmd_consolidate)
-
-    gp = g_sub.add_parser("alias", help="manage claim-id aliases")
-    alias_sub = gp.add_subparsers(dest="alias_cmd", required=True)
-    alias_sub.add_parser("list")
-    lp = alias_sub.add_parser("link")
-    lp.add_argument("old")
-    lp.add_argument("new")
-    up = alias_sub.add_parser("unlink")
-    up.add_argument("old")
-    gp.set_defaults(func=handlers.cmd_guidelines)
-
-    sp = sub.add_parser("versions")
-    v_sub = sp.add_subparsers(dest="versions_cmd", required=True)
-    vp = v_sub.add_parser("list")
-    vp.add_argument("path")
-    vp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    vp = v_sub.add_parser("show")
-    vp.add_argument("ref", help="<path>@v<N>")
-    vp = v_sub.add_parser("diff")
-    vp.add_argument("path")
-    vp.add_argument("v1", type=int)
-    vp.add_argument("v2", type=int)
-    vp = v_sub.add_parser("revert")
-    vp.add_argument("path")
-    vp.add_argument("--to", type=lambda s: int(s.lstrip("v")), required=True)
-    vp = v_sub.add_parser("prune")
-    vp.add_argument("--dry-run", action="store_true")
-    sp.set_defaults(func=handlers.cmd_versions)
 
     sp = sub.add_parser("changes")
     c_sub = sp.add_subparsers(dest="changes_cmd", required=True)
@@ -372,10 +321,6 @@ def build(handlers) -> argparse.ArgumentParser:
     cp = c_sub.add_parser("revert")
     cp.add_argument("change_id")
     sp.set_defaults(func=handlers.cmd_changes)
-
-    sp = sub.add_parser("skills")
-    sp.add_argument("skills_args", nargs=argparse.REMAINDER, help="Arguments to pass to npx skills")
-    sp.set_defaults(func=handlers.cmd_skills)
 
     sp = sub.add_parser("store", help="the store as a whole")
     store_sub = sp.add_subparsers(dest="store_cmd", required=True)
@@ -443,17 +388,6 @@ def build(handlers) -> argparse.ArgumentParser:
     cop = config_sub.add_parser("composio")
     cop.add_argument("key", nargs="?", help="Composio API key; prompted for if omitted")
     sp.set_defaults(func=handlers.cmd_config)
-
-    sp = sub.add_parser("secrets", help="values a workflow may use without storing them in its file")
-    sec_sub = sp.add_subparsers(dest="secrets_cmd", required=True)
-    scp = sec_sub.add_parser("set", help="store a secret")
-    scp.add_argument("name", help="uppercase name, e.g. GITHUB_TOKEN")
-    scp.add_argument("value", nargs="?", help="the value; prompted for, unechoed, if omitted")
-    scp = sec_sub.add_parser("list", help="every secret name; values are never printed")
-    scp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    scp = sec_sub.add_parser("unset", help="remove a secret")
-    scp.add_argument("name")
-    sp.set_defaults(func=handlers.cmd_secrets)
 
     sp = sub.add_parser("status", help="whether anything needs attention")
     sp.add_argument("--hours", type=int, help="how far back failures still count (default 24)")

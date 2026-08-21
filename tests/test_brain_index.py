@@ -466,28 +466,6 @@ def test_an_explicit_k_still_wins_over_the_config(
     assert seen["k"] == 7
 
 
-def test_brain_refresh_takes_no_propose():
-    """Refreshing fired a model call every time with no way to decline."""
-    args = cli.build_parser().parse_args(["brain", "refresh", "blogs/x.md", "--no-propose"])
-
-    assert args.no_propose is True
-
-
-def test_refresh_honours_no_propose(tmp_home, brain_config, tmp_path, monkeypatch):
-    src = tmp_path / "note.md"
-    src.write_text("# Note\n\nbody\n")
-    result = brain.add(tmp_home, brain_config, str(src), no_propose=True)
-
-    called = []
-    monkeypatch.setattr(
-        "px0.proposals.propose_from_brain", lambda *a, **k: called.append(a)
-    )
-
-    brain.refresh(tmp_home, brain_config, result.path, no_propose=True)
-
-    assert called == []
-
-
 def test_brain_add_offers_work_as_a_destination():
     """Leaving it out of --to made the one private folder the unreachable one."""
     args = cli.build_parser().parse_args(["brain", "add", "x.md", "--to", "work"])

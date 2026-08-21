@@ -413,6 +413,227 @@ def test_clarify_loop_skipped_asks_nothing(monkeypatch):
     assert cli._clarify_loop({}, "x", skip=True) == []
 
 
+# --- intake: `px0 workflows new` with nothing to go on ---------------------
+
+def test_intake_asks_while_something_is_missing(monkeypatch):
+    monkeypatch.setattr(builder_mod.harness, "invoke",
+                        lambda *a, **k: '{"question": "Which repository?"}')
+
+    assert builder_mod.intake({}, [("What do you want?", "digest my PRs")]) == {
+        "question": "Which repository?"}
+
+
+def test_intake_writes_the_request_once_it_has_enough(monkeypatch):
+    monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k:
+                        '{"description": "Every Friday, digest merged PRs in '
+                        'razorpay/api and post them to #eng."}')
+
+    step = builder_mod.intake({}, [("q", "a")])
+
+    assert step["description"].startswith("Every Friday")
+    assert "question" not in step
+
+
+def test_a_wrap_up_turn_will_not_accept_another_question(monkeypatch):
+    """The user has stopped answering; asking again is not an option."""
+    monkeypatch.setattr(builder_mod.harness, "invoke",
+                        lambda *a, **k: '{"question": "One more thing?"}')
+
+    with pytest.raises(builder_mod.BuilderError, match="neither a question nor a request"):
+        builder_mod.intake({}, [("q", "a")], wrap_up=True)
+
+
+def test_an_unusable_intake_answer_is_an_error_not_an_empty_request(monkeypatch):
+    monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: "sorry, no")
+
+    with pytest.raises(builder_mod.BuilderError):
+        builder_mod.intake({}, [("q", "a")])
+
+
+def _recording_harness(monkeypatch, reply):
+    """Patches harness.invoke to return `reply` and hand back the prompt it saw."""
+    seen = {}
+
+    def invoke(config, prompt, **kw):
+        seen["p"] = prompt
+        return reply
+
+    monkeypatch.setattr(builder_mod.harness, "invoke", invoke)
+    return seen
+
+
+def test_the_interview_is_driven_by_what_a_workflow_file_needs(monkeypatch):
+    """The checklist is the spec, so the questions are the plan's own fields."""
+    seen = _recording_harness(monkeypatch, '{"question": "q"}')
+
+    builder_mod.intake({}, [("What do you want px0 to do?", "watch my inbox")])
+
+    assert builder_mod.WORKFLOW_SPEC in seen["p"]
+    assert "watch my inbox" in seen["p"], "the transcript has to reach the model"
+
+
+def test_clarify_drives_at_the_same_checklist(monkeypatch):
+    """Two definitions of "what is missing" would ask two different interviews."""
+    seen = _recording_harness(monkeypatch, "[]")
+
+    builder_mod.clarify({}, "digest my PRs", [])
+
+    assert builder_mod.WORKFLOW_SPEC in seen["p"]
+
+
+def test_intake_loop_asks_until_the_request_is_written(monkeypatch, capsys):
+    steps = [{"question": "Which repository?"},
+             {"question": "How often?"},
+             {"description": "Digest razorpay/api PRs every Friday."}]
+    seen_transcripts = []
+
+    def fake_intake(config, transcript, wrap_up=False):
+        seen_transcripts.append(list(transcript))
+        return steps.pop(0)
+
+    monkeypatch.setattr(builder_mod, "intake", fake_intake)
+    answers = iter(["digest my PRs", "razorpay/api", "every Friday", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+
+    description = cli._intake_loop({})
+
+    assert description == "Digest razorpay/api PRs every Friday."
+    # every answer is carried forward, so a later question can build on it
+    assert seen_transcripts[-1] == [
+        ("What do you want px0 to do for you?", "digest my PRs"),
+        ("Which repository?", "razorpay/api"),
+        ("How often?", "every Friday"),
+    ]
+
+
+def test_a_blank_answer_wraps_the_interview_up_rather_than_asking_on(monkeypatch):
+    """Enter is the way out of any interview px0 puts up."""
+    calls = []
+
+    def fake_intake(config, transcript, wrap_up=False):
+        calls.append(wrap_up)
+        if wrap_up:
+            return {"description": "what there was"}
+        return {"question": "Which repository?"}
+
+    monkeypatch.setattr(builder_mod, "intake", fake_intake)
+    # the job, then Enter on the follow-up, then Enter to accept the write-up
+    answers = iter(["digest my PRs", "", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+
+    assert cli._intake_loop({}) == "what there was"
+    assert calls == [False, True], calls
+
+
+def test_a_blank_first_answer_builds_nothing(monkeypatch):
+    monkeypatch.setattr(builder_mod, "intake",
+                        lambda *a, **k: pytest.fail("nothing to work from"))
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: "")
+
+    with pytest.raises(SystemExit):
+        cli._intake_loop({})
+
+
+def test_the_interview_is_bounded(monkeypatch):
+    """A model that never stops asking must not hold the user forever."""
+    rounds = []
+
+    def fake_intake(config, transcript, wrap_up=False):
+        rounds.append(wrap_up)
+        return {"description": "settled"} if wrap_up else {"question": "another?"}
+
+    monkeypatch.setattr(builder_mod, "intake", fake_intake)
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: "an answer")
+
+    assert cli._intake_loop({}) == "settled"
+    assert rounds.count(False) == builder_mod.MAX_INTAKE_ROUNDS
+    assert rounds[-1] is True, "the last turn writes up what there is"
+
+
+def test_the_request_can_be_rewritten_before_anything_is_built(monkeypatch):
+    monkeypatch.setattr(builder_mod, "intake",
+                        lambda *a, **k: {"description": "not quite right"})
+    answers = iter(["digest my PRs", "edit", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "exactly right")
+
+    assert cli._intake_loop({}) == "exactly right"
+
+
+def test_declining_the_request_builds_nothing(monkeypatch):
+    monkeypatch.setattr(builder_mod, "intake", lambda *a, **k: {"description": "d"})
+    answers = iter(["digest my PRs", "n"])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+
+    with pytest.raises(SystemExit) as e:
+        cli._intake_loop({})
+    assert e.value.code == 0, "cancelling is not a failure"
+
+
+class _NewArgs:
+    """`px0 workflows new` with nothing typed after it."""
+    description = None
+    from_file = None
+    yes = False
+    id = None
+    no_clarify = False
+    no_discover = False
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _record_build(monkeypatch, seen):
+    monkeypatch.setattr(cli, "_build_workflow",
+                        lambda home, config, desc, args, existing_id=None, **kw:
+                        seen.update(desc=desc, kw=kw))
+
+
+def test_new_with_no_description_interviews_and_does_not_ask_twice(monkeypatch, tmp_home):
+    """The intake settles exactly what clarify asks, so clarify must be skipped."""
+    monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
+    monkeypatch.setattr(cli, "_intake_loop", lambda config: "the settled request")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    seen = {}
+    _record_build(monkeypatch, seen)
+
+    cli.cmd_new(_NewArgs())
+
+    assert seen["desc"] == "the settled request"
+    assert seen["kw"]["already_clarified"] is True
+
+
+def test_a_typed_description_goes_straight_to_the_build(monkeypatch, tmp_home):
+    monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
+    monkeypatch.setattr(cli, "_intake_loop",
+                        lambda config: pytest.fail("must not interview"))
+    seen = {}
+    _record_build(monkeypatch, seen)
+
+    cli.cmd_new(_NewArgs(description="digest my PRs"))
+
+    assert seen["desc"] == "digest my PRs"
+    assert not seen["kw"].get("already_clarified")
+
+
+@pytest.mark.parametrize("args, isatty", [
+    (_NewArgs(yes=True), True),    # --yes answers no questions
+    (_NewArgs(), False),           # a pipe has no keystrokes to read
+])
+def test_no_description_and_nobody_to_ask_is_a_user_error(monkeypatch, tmp_home,
+                                                          args, isatty):
+    monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: isatty)
+    monkeypatch.setattr(cli, "_intake_loop",
+                        lambda config: pytest.fail("nobody to interview"))
+    monkeypatch.setattr(cli, "_build_workflow",
+                        lambda *a, **k: pytest.fail("nothing to build from"))
+
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_new(args)
+    assert exc.value.code == 1
+
+
 def test_confirm_tools_accepts_all_on_empty_answer(tmp_home, monkeypatch, capsys):
     selected = [catalogue._from_api(_api_item("A_ONE", ["readOnlyHint"])),
                 catalogue._from_api(_api_item("B_TWO", []))]

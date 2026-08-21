@@ -251,10 +251,9 @@ def _write_to_disk(home: Path, rel_path: str, content: bytes | None) -> None:
     `record_change` is the history writer and touches nothing in the working
     tree, which is right for capturing an edit that has already happened and
     wrong for a revert: reverting used to record the old content as a new
-    version and leave the file alone, so `px0 versions revert` and
-    `px0 changes revert` both reported success and changed nothing. The next
-    checkpoint scan then captured the untouched file again, quietly discarding
-    the revert.
+    version and leave the file alone, so `px0 changes revert` reported success
+    and changed nothing. The next checkpoint scan then captured the untouched
+    file again, quietly discarding the revert.
 
     Paths come out of the manifest, so they are confined to the store before
     anything is written -- a manifest row is data, and data does not get to
@@ -269,15 +268,6 @@ def _write_to_disk(home: Path, rel_path: str, content: bytes | None) -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
-
-
-def revert_file(home: Path, rel_path: str, to_version: int, actor: str) -> str | None:
-    """Reverts a file to a prior version: writes that content back to disk and
-    records it as a new version, because history is never rewritten. Returns the
-    new change id, or None if the content is already what the file has."""
-    content = show_version(home, rel_path, to_version)
-    _write_to_disk(home, rel_path, content)
-    return record_change(home, actor, [FileChange(rel_path, content)])
 
 
 def list_changes(home: Path, since: datetime | None = None, actor: str | None = None) -> list[dict]:
@@ -431,70 +421,6 @@ def checkpoint_scan(home: Path, actor: str = "user:manual", force_hash: bool = F
             file_changes.append(FileChange(rel, None))
 
     return record_change(home, actor, file_changes)
-
-
-def prune(home: Path, config: dict, dry_run: bool = False) -> dict:
-    """Apply [versions] retention policy: drop the oldest version rows
-    beyond max_versions_per_file, never the current version of a live
-    file. No-op when keep_all is true. Followed by blob garbage collection
-    over anything no longer referenced."""
-    from px0 import config as config_mod
-
-    if config_mod.get(config, "versions.keep_all", True):
-        return {"pruned": 0, "note": "versions.keep_all is true; nothing to prune"}
-    max_n = config_mod.get(config, "versions.max_versions_per_file", 200)
-
-    conn = connect(home)
-    try:
-        file_paths = [r["path"] for r in conn.execute("SELECT DISTINCT path FROM versions").fetchall()]
-        pruned = 0
-        for path in file_paths:
-            rows = conn.execute(
-                "SELECT version FROM versions WHERE path = ? ORDER BY version", (path,)
-            ).fetchall()
-            excess = len(rows) - max_n
-            if excess <= 0:
-                continue
-            for r in rows[:excess]:
-                if not dry_run:
-                    conn.execute(
-                        "DELETE FROM versions WHERE path = ? AND version = ?",
-                        (path, r["version"]),
-                    )
-                pruned += 1
-        if not dry_run:
-            conn.commit()
-    finally:
-        conn.close()
-
-    blobs_removed = 0 if dry_run else _gc_blobs(home)
-    return {"pruned": pruned, "blobs_removed": blobs_removed, "dry_run": dry_run}
-
-
-def _gc_blobs(home: Path) -> int:
-    """Deletes any blob in the objects store not referenced by any version row.
-    Returns the number of blobs removed."""
-    conn = connect(home)
-    try:
-        referenced = {
-            r["hash"] for r in conn.execute(
-                "SELECT DISTINCT hash FROM versions WHERE hash IS NOT NULL"
-            ).fetchall()
-        }
-    finally:
-        conn.close()
-    obj_dir = objects_dir(home)
-    if not obj_dir.exists():
-        return 0
-    removed = 0
-    for sub in obj_dir.iterdir():
-        if not sub.is_dir():
-            continue
-        for blob in sub.iterdir():
-            if blob.name not in referenced:
-                blob.unlink()
-                removed += 1
-    return removed
 
 
 def ensure_secure_permissions(path: Path) -> None:

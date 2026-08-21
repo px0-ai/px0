@@ -47,9 +47,9 @@ px0 store export ~/backups/px0-2026-08-21
 
 ### What is included
 
-`workflows/`, `guidelines/`, `brain/`, `output/`, `skills/`, `config.toml`, and
-the parts of `.state/` that matter for continuity: version history, pending
-proposals, the schema marker, and the schedule.
+`workflows/`, `guidelines/`, `brain/`, `output/`, `config.toml`, and
+the parts of `.state/` that matter for continuity: version history, the schema
+marker, and the schedule.
 
 ### What is excluded
 
@@ -62,7 +62,7 @@ Credentials, deliberately and thoroughly:
 
 That last point is the one that matters: the Composio key is written to
 `config.toml`, and `config.toml` is versioned, so redacting only the live file
-would leave the key one `px0 versions show` away. Both are scrubbed, or
+would leave the key one change-log entry away. Both are scrubbed, or
 "credentials excluded" would be a false promise.
 
 The retrieval index is not exported. Run `px0 brain reindex` after importing.

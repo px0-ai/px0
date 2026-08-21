@@ -183,6 +183,69 @@ def test_detail_view_rerun_follows_the_new_record(tmp_home, monkeypatch):
     assert reads[1] == "run_new", f"view did not follow the rerun: {reads}"
 
 
+def _detail_view_pressing_r(tmp_home, monkeypatch, record, reads_before_exit=1):
+    """Drives `_detail_view` with `r` held down, over a record of our choosing.
+
+    Returns the (args, kwargs) of every runner.run call the keypress made.
+    """
+    import curses
+    from px0 import runs as runs_mod
+
+    reads, calls = [], []
+
+    def fake_read_record(config, run_id):
+        reads.append(run_id)
+        if len(reads) > reads_before_exit:
+            raise KeyboardInterrupt
+        return dict(record, id=run_id)
+
+    monkeypatch.setattr(runs_mod, "read_record", fake_read_record)
+    monkeypatch.setattr(runs_mod, "read_raw_log", lambda config, rid: "")
+    monkeypatch.setattr(runner, "run",
+                        lambda *a, **kw: (calls.append((a, kw)), {"id": "run_new"})[1])
+
+    class FakeStdscr:
+        def getmaxyx(self): return (40, 100)
+        def clear(self): pass
+        def refresh(self): pass
+        def addstr(self, *a, **kw): pass
+        def getch(self): return ord('r')
+
+    stdscr = FakeStdscr()
+    monkeypatch.setattr(curses, "endwin", lambda: None)
+    monkeypatch.setattr(curses, "initscr", lambda: stdscr)
+    monkeypatch.setattr("sys.stdin.read", lambda n: "\n")
+
+    with pytest.raises(KeyboardInterrupt):
+        runs_tui._detail_view(stdscr, tmp_home, {}, {"id": record["id"]})
+    return calls
+
+
+def test_detail_view_refuses_to_rerun_an_ask(tmp_home, monkeypatch):
+    """An ask run names no workflow, so `r` handed the runner None -- which wrote
+    a phantom "no such workflow: None" record into the history before failing.
+    `px0 runs rerun` already refused this; the browser did not."""
+    ask = {"id": "ask_1", "workflow_id": None, "trigger": "ask",
+           "outcome": "success", "tool_calls": [], "guidelines_inlined": []}
+
+    calls = _detail_view_pressing_r(tmp_home, monkeypatch, ask)
+
+    assert calls == [], "an ask run must never reach the runner"
+
+
+def test_detail_view_replays_a_dry_run_as_a_dry_run(tmp_home, monkeypatch):
+    """Replaying a rehearsal as a live run would fire the write tools the
+    original deliberately stubbed. `px0 runs rerun` guards this too."""
+    rehearsal = {"id": "run_old", "workflow_id": "wf-a", "trigger": "manual",
+                 "outcome": "success", "dry_run": True, "tool_calls": [],
+                 "guidelines_inlined": []}
+
+    calls = _detail_view_pressing_r(tmp_home, monkeypatch, rehearsal, reads_before_exit=2)
+
+    assert calls, "the rerun must reach the runner"
+    assert all(kw.get("dry_run") is True for _, kw in calls), calls
+
+
 def test_module_has_every_name_its_key_handlers_use():
     """`l` paged the log through `subprocess`, which was never imported -- the
     NameError landed in the handler's own except, so the key silently printed an

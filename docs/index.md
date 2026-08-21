@@ -36,7 +36,6 @@ Your store is `~/.px0` unless `PX0_HOME` says otherwise.
 | `brain/`      | What you have read and kept                            |
 | `output/`     | What runs produced                                     |
 | `tools/`      | Tools you declared yourself, one TOML file each         |
-| `skills/`     | Guidelines compiled into agent skill bundles           |
 | `.state/`     | Runtime internals: version history, index, credentials |
 
 `config.toml` sits at the store root. See [Store layout](reference/store-layout.md).

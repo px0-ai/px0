@@ -597,13 +597,12 @@ def _dest_path(home: Path, config: dict, folder: str, source: str) -> Path:
 
 def add(
     home: Path, config: dict, source: str, to: str | None = None,
-    no_propose: bool = False, reindex: bool = True,
+    reindex: bool = True,
 ) -> IngestResult:
     """Ingests one source into the brain: detects its kind, extracts
     text (or queues a playlist for background processing), writes the brain
-    file, best-effort proposes guideline edits from it (unless no_propose), and
-    reindexes retrieval. A YouTube video with no published transcript is written
-    as a stub rather than failing.
+    file, and reindexes retrieval. A YouTube video with no published transcript
+    is written as a stub rather than failing.
 
     `reindex=False` skips the index rebuild, leaving it to the caller. Reindexing
     rewrites the whole table, so doing it per file made a batch quadratic in the
@@ -690,13 +689,6 @@ def add(
     else:
         raise IngestError(f"unhandled kind: {kind}")
 
-    if not is_stub and not no_propose:
-        try:
-            from px0 import proposals as proposals_mod
-            proposals_mod.propose_from_brain(home, config, dest)
-        except Exception:
-            pass  # proposal pass is best-effort; ingestion itself already succeeded
-
     if reindex:
         retrieval.reindex(home, config)
     return IngestResult(dest, folder, is_stub)
@@ -734,7 +726,7 @@ def resolve_brain_path(home: Path, config: dict, path: str | Path) -> Path:
 
 
 def refresh(
-    home: Path, config: dict, path: Path, no_propose: bool = False, reindex: bool = True,
+    home: Path, config: dict, path: Path, reindex: bool = True,
 ) -> IngestResult:
     """Re-fetches an already-ingested source and rewrites the file in place.
 
@@ -794,15 +786,6 @@ def refresh(
         else:
             raise IngestError(f"cannot re-fetch a {kind} source")
         write_file(path, new_header, new_body)
-    # Same opt-out as `add`: refreshing used to fire a model call every time
-    # with no way to decline, which made re-fetching a page cost a round trip
-    # to the harness whether or not anything new was worth proposing.
-    if not no_propose:
-        try:
-            from px0 import proposals as proposals_mod
-            proposals_mod.propose_from_brain(home, config, path)
-        except Exception:
-            pass
     if reindex:
         retrieval.reindex(home, config)
     return IngestResult(path, path.parent.name, False)
@@ -1006,7 +989,7 @@ def stale(home: Path, config: dict, days: int = 30) -> list[Path]:
     return out
 
 
-def refresh_many(home: Path, config: dict, targets: list[Path], no_propose: bool = True) -> dict:
+def refresh_many(home: Path, config: dict, targets: list[Path]) -> dict:
     """Re-fetches several files, reindexing once at the end.
 
     Reindexing rewrites the whole table, so doing it per file makes a batch
@@ -1016,7 +999,7 @@ def refresh_many(home: Path, config: dict, targets: list[Path], no_propose: bool
     done, failed = [], []
     for path in targets:
         try:
-            refresh(home, config, path, no_propose=no_propose, reindex=False)
+            refresh(home, config, path, reindex=False)
             done.append(str(path))
         except Exception as e:
             failed.append({"path": str(path), "error": str(e)})
@@ -1031,8 +1014,8 @@ def refresh_many(home: Path, config: dict, targets: list[Path], no_propose: bool
     return {"refreshed": done, "failed": failed, "reindexed": passages}
 
 
-def add_many(home: Path, config: dict, sources: list[str], to: str | None = None,
-             no_propose: bool = True) -> dict:
+def add_many(home: Path, config: dict, sources: list[str],
+             to: str | None = None) -> dict:
     """Ingests several sources, reindexing once at the end.
 
     A reading backlog is a list, not one URL at a time.
@@ -1040,7 +1023,7 @@ def add_many(home: Path, config: dict, sources: list[str], to: str | None = None
     added, failed = [], []
     for source in sources:
         try:
-            result = add(home, config, source, to=to, no_propose=no_propose, reindex=False)
+            result = add(home, config, source, to=to, reindex=False)
             added.append(result)
         except Exception as e:
             failed.append({"source": source, "error": str(e)})

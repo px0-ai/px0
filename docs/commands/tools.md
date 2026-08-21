@@ -191,8 +191,6 @@ Print the result as JSON rather than formatted text.
 
 - **Input:** flag, no value. Default off.
 
-Stored secrets are redacted out of the result before it is printed.
-
 ---
 
 ## `px0 tools connect`

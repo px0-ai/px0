@@ -32,7 +32,7 @@ def test_cmd_init_with_existing_key_keeps_as_is_on_empty_input(tmp_path, monkeyp
     config_mod.set_key(config, "connectors.composio_api_key", "existing_secret_key_123")
     config_mod.save(cfg_path, config)
 
-    # Mock store.init to avoid npx network calls during unit test
+    # Mock store.init so the unit test does not touch the filesystem
     monkeypatch.setattr("px0.store.init", lambda h, harness_cmd=None: ["store at " + str(h)])
 
     # Mock input to return empty string (user presses Enter)
@@ -157,16 +157,6 @@ def test_cmd_init_with_cli_flag(tmp_path, monkeypatch):
     assert cfg["connectors"]["composio_api_key"] == "cli_passed_key"
 
 
-def test_store_init_does_not_create_skills_folder(tmp_path):
-    from px0 import store
-
-    home = tmp_path / "test_store"
-    store.init(home)
-
-    assert not (home / "skills").exists()
-    assert not (home / "skills.json").exists()
-
-
 def test_store_init_does_not_create_guidelines_files(tmp_path):
     from px0 import store, paths
 
@@ -184,22 +174,6 @@ def test_store_init_does_not_create_credentials_file(tmp_path):
     store.init(home)
 
     assert not paths.credentials_path(home).exists()
-
-
-def test_store_init_does_not_touch_skills(tmp_path, monkeypatch):
-    from px0 import store
-    import subprocess
-
-    home = tmp_path / "test_store"
-    home.mkdir()
-
-    ran_commands = []
-    monkeypatch.setattr(subprocess, "run", lambda args, **kw: ran_commands.append(args))
-
-    store.init(home)
-
-    assert ran_commands == []
-    assert not (home / "skills.json").exists()
 
 
 def _isolate_ssl_env(monkeypatch):

@@ -1,17 +1,14 @@
-"""Tools that run on this machine, and the secrets they are allowed to see.
+"""Tools that run on this machine.
 
-Two things are being pinned here. The file tools must not read or write outside
+Two things are being pinned here: the file tools must not read or write outside
 an allowed root, however the path is spelled -- and the shell must stay off
 until the store says otherwise, because a workflow that can run a shell can do
-anything its user can. Secrets must reach a run and not reach the run record.
+anything its user can.
 """
-
-import json
 
 import pytest
 
-from px0 import (config as config_mod, localtools, paths, runner, secrets as secrets_mod,
-                 tools)
+from px0 import config as config_mod, localtools, paths, tools
 
 
 @pytest.fixture
@@ -185,54 +182,3 @@ def test_the_scaffolded_example_is_not_loaded_as_a_tool(tmp_home):
     # It ships as .toml.sample precisely so a fresh store has no tool nobody asked for.
     assert (paths.tools_dir(tmp_home) / "example.toml.sample").exists()
     assert localtools.load_user_tools(tmp_home) == ({}, [])
-
-
-# --- secrets --------------------------------------------------------------
-
-def test_a_secret_round_trips_and_is_listed_by_name(tmp_home):
-    secrets_mod.set_secret(tmp_home, "GITHUB_TOKEN", "ghp_realvalue")
-    assert secrets_mod.names(tmp_home) == ["GITHUB_TOKEN"]
-    assert secrets_mod.all_secrets(tmp_home)["GITHUB_TOKEN"] == "ghp_realvalue"
-
-
-@pytest.mark.parametrize("bad", ["lowercase", "with space", "1LEADING", "", "with-dash"])
-def test_a_name_that_would_not_read_as_a_constant_is_refused(tmp_home, bad):
-    with pytest.raises(secrets_mod.SecretError):
-        secrets_mod.set_secret(tmp_home, bad, "x")
-
-
-def test_unsetting_something_absent_is_not_an_error(tmp_home):
-    assert secrets_mod.unset_secret(tmp_home, "NOPE") is False
-
-
-def test_the_redactor_removes_every_value_from_nested_data(tmp_home):
-    secrets_mod.set_secret(tmp_home, "TOKEN", "ghp_realvalue")
-    redact = secrets_mod.redactor(tmp_home)
-
-    out = redact({"args": ["Authorization: Bearer ghp_realvalue"], "n": 1})
-
-    assert "ghp_realvalue" not in json.dumps(out)
-    assert secrets_mod.REDACTED in out["args"][0]
-    assert out["n"] == 1
-
-
-def test_a_very_short_secret_is_left_alone_rather_than_mangling_text(tmp_home):
-    secrets_mod.set_secret(tmp_home, "SHORT", "ab")
-    assert secrets_mod.redactor(tmp_home)("nabber") == "nabber"
-
-
-def test_a_secret_reaches_a_template_and_not_the_record(tmp_home, monkeypatch):
-    """The whole point: usable in args, absent from what lands on disk."""
-    secrets_mod.set_secret(tmp_home, "TOKEN", "ghp_realvalue")
-    config = config_mod.load(paths.config_path(tmp_home))
-
-    context, _meta = runner.resolve_inputs(
-        tmp_home, config,
-        type("W", (), {"inputs": []})(), {})
-    assert context["secrets"]["TOKEN"] == "ghp_realvalue"
-
-    rendered = runner.render_value({"header": "Bearer {{secrets.TOKEN}}"}, context)
-    assert rendered["header"] == "Bearer ghp_realvalue"
-
-    redact = secrets_mod.redactor(tmp_home)
-    assert "ghp_realvalue" not in redact(json.dumps(rendered))

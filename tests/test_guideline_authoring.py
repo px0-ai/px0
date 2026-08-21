@@ -1,13 +1,16 @@
-"""`px0 workflows new` should offer to write down the standards it depends on.
+"""`px0 workflows new` is the only thing that writes a guideline.
 
-A review rubric or a writing voice is the user's own preference -- px0 cannot
-infer it, so the build asks, saves the answer as a guideline, lists it on the
-workflow, and the runner inlines it into every run.
+There is no `px0 guidelines new`, so the build has to notice that a workflow
+leans on a durable convention, draft it from the workflow itself, save it, list
+it on the workflow, and let the runner inline it into every run.
 """
+
+import re
 
 import pytest
 
-from px0 import builder as builder_mod, claims, runner, versioning, workflow as wf_mod
+from px0 import (builder as builder_mod, claims, cli, paths, runner, ui,
+                 versioning, workflow as wf_mod)
 
 
 def _plan(body="Review each open PR and comment.", description="Review my PRs"):
@@ -44,8 +47,8 @@ def test_a_traversal_attempt_cannot_escape_the_guidelines_directory(tmp_home):
 
 def test_proposals_never_duplicate_a_guideline_the_store_already_has(monkeypatch):
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: """
-      [{"path": "commit-messages.md", "title": "Commit style", "why": "w", "ask": "a"},
-       {"path": "review-rubric.md",   "title": "Review rubric", "why": "w", "ask": "a"}]
+      [{"path": "commit-messages.md", "title": "Commit style", "why": "w"},
+       {"path": "review-rubric.md",   "title": "Review rubric", "why": "w"}]
     """)
 
     out = builder_mod.propose_guidelines({}, "d", _plan(), existing=["commit-messages.md"])
@@ -55,8 +58,8 @@ def test_proposals_never_duplicate_a_guideline_the_store_already_has(monkeypatch
 
 def test_two_proposals_for_the_same_file_collapse_to_one(monkeypatch):
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: """
-      [{"path": "style.md", "title": "Style", "why": "w", "ask": "a"},
-       {"path": "Style.MD", "title": "Style again", "why": "w", "ask": "a"}]
+      [{"path": "style.md", "title": "Style", "why": "w"},
+       {"path": "Style.MD", "title": "Style again", "why": "w"}]
     """)
 
     assert len(builder_mod.propose_guidelines({}, "d", _plan(), [])) == 1
@@ -64,10 +67,10 @@ def test_two_proposals_for_the_same_file_collapse_to_one(monkeypatch):
 
 def test_a_proposal_missing_a_path_or_title_is_dropped(monkeypatch):
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: """
-      [{"path": "", "title": "No path", "why": "w", "ask": "a"},
-       {"path": "ok.md", "title": "", "why": "w", "ask": "a"},
+      [{"path": "", "title": "No path", "why": "w"},
+       {"path": "ok.md", "title": "", "why": "w"},
        "just a string",
-       {"path": "good.md", "title": "Good", "why": "w", "ask": "a"}]
+       {"path": "good.md", "title": "Good", "why": "w"}]
     """)
 
     assert [p.path for p in builder_mod.propose_guidelines({}, "d", _plan(), [])] == ["good.md"]
@@ -79,17 +82,20 @@ def test_no_proposals_is_a_normal_answer(monkeypatch):
     assert builder_mod.propose_guidelines({}, "d", _plan(), []) == []
 
 
-def test_a_proposal_with_no_ask_still_gets_a_usable_question(monkeypatch):
+def test_a_proposal_needs_only_a_path_and_a_title(monkeypatch):
+    """`why` is explanatory; a proposal without one is still worth drafting."""
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k:
                         '[{"path": "x.md", "title": "Commit style"}]')
 
-    assert builder_mod.propose_guidelines({}, "d", _plan(), [])[0].ask
+    out = builder_mod.propose_guidelines({}, "d", _plan(), [])
+
+    assert [(p.path, p.title, p.why) for p in out] == [("x.md", "Commit style", "")]
 
 
 def test_at_most_two_proposals_reach_the_user(monkeypatch):
-    """Authoring is interactive; a build must not turn into an interview."""
+    """Every draft costs a model call and a decision; a build is not an interview."""
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: str(
-        [{"path": f"g{i}.md", "title": f"T{i}", "why": "w", "ask": "a"} for i in range(5)]
+        [{"path": f"g{i}.md", "title": f"T{i}", "why": "w"} for i in range(5)]
     ).replace("'", '"'))
 
     assert len(builder_mod.propose_guidelines({}, "d", _plan(), [])) == 2
@@ -98,7 +104,8 @@ def test_at_most_two_proposals_reach_the_user(monkeypatch):
 # --- drafting ---------------------------------------------------------------
 
 _PROPOSAL = builder_mod.GuidelineProposal(
-    path="review-rubric.md", title="Review rubric", why="w", ask="What do you look for?")
+    path="review-rubric.md", title="Review rubric",
+    why="the workflow comments on PRs and has no rubric to comment against")
 
 
 def test_a_draft_is_trimmed_to_start_at_its_first_section(monkeypatch):
@@ -106,7 +113,7 @@ def test_a_draft_is_trimmed_to_start_at_its_first_section(monkeypatch):
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k:
                         "Sure! Here's the guideline:\n\n## Flag only real breakage\n\nBody.\n")
 
-    content = builder_mod.draft_guideline({}, _PROPOSAL, "only real breakage")
+    content = builder_mod.draft_guideline({}, _PROPOSAL, "review my PRs", _plan())
 
     assert content.startswith("## Flag only real breakage")
     assert "Sure!" not in content
@@ -117,26 +124,28 @@ def test_a_draft_with_no_sections_is_refused(monkeypatch):
                         lambda *a, **k: "I could not write that guideline.")
 
     with pytest.raises(builder_mod.BuilderError, match="`## `"):
-        builder_mod.draft_guideline({}, _PROPOSAL, "something")
+        builder_mod.draft_guideline({}, _PROPOSAL, "review my PRs", _plan())
 
 
-def test_the_users_answer_is_what_reaches_the_model(monkeypatch):
-    """The user's words are the authority; the pass only shapes them."""
+def test_the_workflow_is_what_reaches_the_model(monkeypatch):
+    """Nobody is interviewed, so the workflow itself has to carry the context."""
     seen = {}
     monkeypatch.setattr(builder_mod.harness, "invoke",
                         lambda cfg, prompt, **k: seen.setdefault("p", prompt) or "## H\n\nb\n")
 
-    builder_mod.draft_guideline({}, _PROPOSAL, "never comment on formatting")
+    builder_mod.draft_guideline({}, _PROPOSAL, "review my PRs",
+                                _plan(body="Review each open PR and comment."))
 
-    assert "never comment on formatting" in seen["p"]
-    assert "What do you look for?" in seen["p"], "the question gives the answer context"
+    assert "Review rubric" in seen["p"]
+    assert "Review each open PR and comment." in seen["p"], "the plan body is the context"
+    assert _PROPOSAL.why in seen["p"], "why it is needed narrows what to write"
 
 
 # --- saving -----------------------------------------------------------------
 
 def test_a_saved_guideline_gets_version_and_claim_history(tmp_home):
     """Written through the guideline change path, not as a bare file, so
-    `guidelines log` / `why` / `revert` work on it from version 1."""
+    `px0 guidelines log` works on it from version 1."""
     content = "## Flag only real breakage\n\nOnly production breakage.\n"
 
     dest = builder_mod.save_guideline(tmp_home, "review-rubric.md", content)
@@ -169,3 +178,100 @@ def test_an_authored_guideline_is_listed_and_then_inlined_at_run_time(tmp_home):
 
     prompt = runner.render_prompt(wf, {"review-rubric.md": content}, {})
     assert "Never comment on spacing." in prompt, "the content must reach the run"
+
+
+# --- the build's authoring pass: draft, show, keep / again / skip ------------
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _proposal(path="review-rubric.md", title="Review rubric"):
+    return builder_mod.GuidelineProposal(path=path, title=title, why="no rubric yet")
+
+
+def test_the_build_drafts_a_needed_guideline_without_interviewing_anyone(
+        tmp_home, monkeypatch, capsys):
+    """The whole point of dropping `guidelines new`: nobody is asked to compose
+    a convention from a blank page, so the draft comes from the workflow."""
+    monkeypatch.setattr(builder_mod, "propose_guidelines",
+                        lambda *a, **k: [_proposal()])
+    monkeypatch.setattr(builder_mod, "draft_guideline",
+                        lambda *a, **k: "## Flag only real breakage\n\nOnly that.\n")
+    monkeypatch.setattr(ui, "prompt", lambda *a, **k: "")   # empty answer keeps it
+
+    created = cli._author_guidelines(tmp_home, {}, "review my PRs", _plan(), [], False)
+
+    assert created == ["review-rubric.md"]
+    dest = paths.guidelines_dir(tmp_home) / "review-rubric.md"
+    assert "Only that." in dest.read_text()
+    out = capsys.readouterr().out
+    assert "guidelines/review-rubric.md" in out, "the user is told where it landed"
+
+
+def test_a_draft_the_user_rejects_is_not_written(tmp_home, monkeypatch):
+    monkeypatch.setattr(builder_mod, "propose_guidelines",
+                        lambda *a, **k: [_proposal()])
+    monkeypatch.setattr(builder_mod, "draft_guideline", lambda *a, **k: "## H\n\nb\n")
+    monkeypatch.setattr(ui, "prompt", lambda *a, **k: "n")
+
+    created = cli._author_guidelines(tmp_home, {}, "d", _plan(), [], False)
+
+    assert created == []
+    assert not (paths.guidelines_dir(tmp_home) / "review-rubric.md").exists()
+
+
+def test_again_redraws_before_anything_is_saved(tmp_home, monkeypatch):
+    drafts = iter(["## First\n\na\n", "## Second\n\nb\n"])
+    answers = iter(["again", ""])
+    monkeypatch.setattr(builder_mod, "propose_guidelines",
+                        lambda *a, **k: [_proposal()])
+    monkeypatch.setattr(builder_mod, "draft_guideline", lambda *a, **k: next(drafts))
+    monkeypatch.setattr(ui, "prompt", lambda *a, **k: next(answers))
+
+    cli._author_guidelines(tmp_home, {}, "d", _plan(), [], False)
+
+    assert (paths.guidelines_dir(tmp_home) / "review-rubric.md").read_text() \
+        .startswith("## Second")
+
+
+def test_a_non_interactive_build_writes_no_guideline(tmp_home, monkeypatch):
+    """Under --yes there is nobody to show a draft to, so nothing is guessed at."""
+    monkeypatch.setattr(builder_mod, "propose_guidelines",
+                        lambda *a, **k: pytest.fail("must not even ask"))
+
+    assert cli._author_guidelines(tmp_home, {}, "d", _plan(), [], True) == []
+
+
+def test_a_failed_draft_does_not_fail_the_build(tmp_home, monkeypatch, capsys):
+    monkeypatch.setattr(builder_mod, "propose_guidelines",
+                        lambda *a, **k: [_proposal()])
+    monkeypatch.setattr(builder_mod, "draft_guideline",
+                        lambda *a, **k: (_ for _ in ()).throw(builder_mod.BuilderError("nope")))
+
+    assert cli._author_guidelines(tmp_home, {}, "d", _plan(), [], False) == []
+    # routed to stdout with the rest of the build's narration, not to stderr
+    assert "could not draft it" in capsys.readouterr().out
+
+
+# --- the listing ------------------------------------------------------------
+
+def test_guidelines_are_listed_as_numbered_rows_with_their_first_rule(
+        tmp_home, monkeypatch, capsys):
+    """Same rows as the `workflows run` picker: a short list you scan and name."""
+    monkeypatch.setattr(ui, "_forced", False)
+    base = paths.guidelines_dir(tmp_home)
+    (base / "voice.md").write_text("## Say it plainly\n\nShort sentences.\n")
+    (base / "review-rubric.md").write_text("## Flag only real breakage\n\nOnly that.\n")
+
+    cli._print_guidelines(tmp_home, heading=False)
+
+    lines = [_ANSI.sub("", ln).strip() for ln in capsys.readouterr().out.splitlines() if ln.strip()]
+    assert lines == [
+        "1. review-rubric.md  Flag only real breakage",
+        "2. voice.md          Say it plainly",
+    ]
+
+
+def test_an_empty_store_says_where_guidelines_come_from(tmp_home, capsys):
+    cli._print_guidelines(tmp_home, heading=False)
+    assert "px0 workflows new" in capsys.readouterr().out

@@ -25,24 +25,20 @@ from px0 import (
     claims,
     config as config_mod,
     connect as connect_mod,
-    consolidate as consolidate_mod,
     credentials as creds_mod,
     daemon as daemon_mod,
     localtools,
     mcp as mcp_mod,
     notify as notify_mod,
-    secrets as secrets_mod,
     status as status_mod,
     doctor as doctor_mod,
     harness,
     brain as brain_mod,
     paths,
-    proposals as proposals_mod,
     provenance,
     retrieval,
     runner,
     runs as runs_mod,
-    skills as skills_mod,
     store as store_mod,
     tools,
     parser as parser_mod,
@@ -67,9 +63,9 @@ def _ctx(require_init: bool = True, scan: bool = True) -> tuple[Path, dict]:
     Also captures hand edits as versions before the command reads anything
     (spec.md: "before any command that reads store content"). It used to run
     only inside a workflow run and the daemon's nightly pass, so editing a file
-    and then asking `px0 versions list` about it showed history without the
-    edit. The scan compares size and mtime over the few dozen versioned files
-    and hashes only what differs, so it is cheap enough to run unconditionally.
+    and then asking `px0 changes list` about it showed a log without the edit.
+    The scan compares size and mtime over the few dozen versioned files and
+    hashes only what differs, so it is cheap enough to run unconditionally.
     """
     home = paths.store_home()
     if require_init and not store_mod.is_initialized(home):
@@ -234,11 +230,6 @@ def cmd_init(args: argparse.Namespace) -> None:
     for line in created:
         ui.ok(line)
 
-    import shutil
-    if not shutil.which("npx"):
-        ui.warn("npx not found on PATH",
-                "Node.js is required for `px0 skills` -- https://nodejs.org")
-
     ui.hint("try next:")
     ui.command("px0 doctor")
     ui.command('px0 workflows new "describe what you want"')
@@ -285,6 +276,95 @@ def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str,
         if not answered:
             break  # the user is done answering; build with what we have
     return qa
+
+
+# The one question px0 can ask without help: with an empty transcript there is
+# nothing for the model to reason about, so spending a call to have it ask
+# "what do you want?" only adds latency.
+_OPENING_QUESTION = "What do you want px0 to do for you?"
+
+
+def _intake_loop(config: dict) -> str:
+    """Interviews the user into a workflow request, when they named none.
+
+    `px0 workflows new` with no description opens this. px0 asks for one thing
+    at a time until every field a workflow file has to pin down is settled --
+    the job, what it reads, where the result goes, when it runs, and what makes
+    the output right -- then writes the request back for approval.
+
+    The loop is the model's to drive: it sees the transcript and decides what is
+    still missing, so answering "the razorpay/api repo, every Friday" in one
+    breath skips the two questions that would have asked for those separately.
+    A blank answer ends it early and the request is written from what there is,
+    because the way out of an interview should always be Enter.
+    """
+    ui.heading("new workflow")
+    ui.hint("answer in your own words; press Enter on a blank line to stop")
+
+    transcript: list[tuple[str, str]] = []
+    question = _OPENING_QUESTION
+    wrap_up = False
+
+    for _ in range(builder_mod.MAX_INTAKE_ROUNDS):
+        try:
+            answer = ui.prompt(f"{question}\n  ")
+        except EOFError:
+            print(file=sys.stderr)
+            answer = ""
+        if not answer:
+            if not transcript:
+                ui.err("nothing to build")
+                ui.hint('describe it inline instead: px0 workflows new "..."')
+                sys.exit(EXIT_USER_ERROR)
+            wrap_up = True
+        else:
+            transcript.append((question, answer))
+
+        try:
+            with ui.spinner("Working out what else it needs"):
+                step = builder_mod.intake(config, transcript, wrap_up=wrap_up)
+        except (builder_mod.BuilderError, harness.HarnessError) as e:
+            # The interview is the only way in when no description was given,
+            # so a failed turn cannot fall through to a build with nothing.
+            ui.err("could not continue the interview", str(e).strip())
+            ui.hint('describe it inline instead: px0 workflows new "..."')
+            sys.exit(EXIT_MODEL_ERROR)
+
+        if "description" in step:
+            return _confirm_request(config, step["description"], transcript)
+        question = step["question"]
+
+    # Out of rounds with the model still asking. Settle for what was gathered
+    # rather than asking a ninth question.
+    try:
+        with ui.spinner("Writing up the request"):
+            step = builder_mod.intake(config, transcript, wrap_up=True)
+    except (builder_mod.BuilderError, harness.HarnessError) as e:
+        ui.err("could not write up the request", str(e).strip())
+        sys.exit(EXIT_MODEL_ERROR)
+    return _confirm_request(config, step["description"], transcript)
+
+
+def _confirm_request(config: dict, description: str,
+                     transcript: list[tuple[str, str]]) -> str:
+    """Shows the request the interview produced and lets the user fix it.
+
+    Printed before the build spends a single planning call, because this
+    paragraph is what every later pass reads -- and the one thing the user is
+    better placed than the model to judge is whether it says what they meant.
+    """
+    while True:
+        ui.heading("the request")
+        print(description, flush=True)
+        choice = ui.prompt("Build this? [Y/edit/n] ").lower()
+        if choice in ("n", "no"):
+            ui.info("cancelled")
+            sys.exit(0)
+        if choice not in ("e", "edit"):
+            return description
+        edited = ui.paragraph("Rewrite it (blank keeps it as it is):")
+        if edited:
+            description = edited
 
 
 def _describe_tool(spec_or_tool, width: int) -> str:
@@ -458,14 +538,19 @@ def _abort_if_blocked(outcome: _AuthOutcome) -> None:
 
 def _author_guidelines(home: Path, config: dict, description: str, plan,
                        attached: list[str], assume_yes: bool) -> list[str]:
-    """Offers to author the guidelines this workflow wants but the store lacks.
+    """Writes the guidelines this workflow depends on that the store lacks.
 
-    The user's own words are the content -- a review rubric or a writing voice is
-    a preference px0 cannot infer, so proposing one is only useful if it asks.
+    There is no `px0 guidelines new`: this is where a guideline comes from. The
+    build decides whether the workflow leans on a durable convention, drafts it,
+    and links it -- so the standard is written once, here, instead of being
+    restated in the body of every workflow that needs it.
+
+    Nothing lands unseen. Each draft is printed with the path it would take, and
+    the user keeps it, redraws it, or skips it. Under --yes there is nobody to
+    show it to, so the pass is skipped rather than writing a file the user never
+    had a chance to read.
+
     Returns the relative paths actually created, for the workflow's `guidelines:`.
-
-    Skipped wholesale under --yes: there is no sane default for "what is your
-    commit message convention", so a non-interactive run must not invent one.
     """
     if assume_yes:
         return []
@@ -476,60 +561,54 @@ def _author_guidelines(home: Path, config: dict, description: str, plan,
         # A workflow is perfectly valid without this; never fail the build over it.
         ui.warn("could not check for new guidelines", str(e).strip(), stream=sys.stdout)
         return []
-    if not proposals:
-        return []
 
     created = []
     for proposal in proposals:
-        ui.heading(f"guideline: {proposal.title}")
-        if proposal.why:
-            ui.bullet(ui.dim(proposal.why))
-        ui.info("would be saved as", f"guidelines/{proposal.path}", stream=sys.stdout)
-        if ui.prompt(f"Write it now? [y/N] ").lower() not in ("y", "yes"):
-            ui.info("skipped", stream=sys.stdout)
-            continue
-
-        path = _write_one_guideline(home, config, proposal)
+        path = _write_one_guideline(home, config, proposal, description, plan)
         if path:
             created.append(path)
     return created
 
 
-def _write_one_guideline(home: Path, config: dict, proposal) -> str | None:
-    """Asks, drafts, shows, and confirms one guideline. Returns its path, or None.
+def _write_one_guideline(home: Path, config: dict, proposal, description: str,
+                         plan) -> str | None:
+    """Drafts, shows, and confirms one guideline. Returns its path, or None.
 
-    Loops on "again" rather than accepting a first draft the user doesn't like:
-    the file is about to be inlined into every run of this workflow, so it is
-    worth another pass here instead of an edit later.
+    Loops on "again" rather than making the user live with a first draft: the
+    file is about to be inlined into every run of this workflow, so it is worth
+    another pass here instead of an edit later.
     """
     while True:
-        answer = ui.paragraph(proposal.ask)
-        if not answer:
-            ui.info("nothing written; skipped", stream=sys.stdout)
-            return None
         try:
-            with ui.spinner("Drafting the guideline"):
-                content = builder_mod.draft_guideline(config, proposal, answer)
+            with ui.spinner(f"Drafting {proposal.title}"):
+                content = builder_mod.draft_guideline(config, proposal, description, plan)
         except (builder_mod.BuilderError, harness.HarnessError) as e:
             ui.err("could not draft it", str(e).strip(), stream=sys.stdout)
             return None
 
-        ui.heading(f"guidelines/{proposal.path}")
+        ui.heading(f"guideline: {proposal.title}")
+        if proposal.why:
+            ui.bullet(ui.dim(proposal.why))
+        ui.info("would be saved as", f"guidelines/{proposal.path}", stream=sys.stdout)
+        print()
         print(content, flush=True)
         choice = ui.prompt("Keep it? [Y/again/n] ").lower()
         if choice in ("a", "again"):
             continue
         if choice in ("n", "no"):
-            ui.info("discarded", stream=sys.stdout)
+            ui.info("skipped", stream=sys.stdout)
             return None
 
         dest = builder_mod.save_guideline(home, proposal.path, content)
         ui.ok("wrote", str(dest))
+        ui.hint(f"reword it any time with `px0 guidelines edit {Path(proposal.path).stem}`")
         return proposal.path
 
 
-def _description_arg(args: argparse.Namespace) -> str:
+def _description_arg(args: argparse.Namespace) -> str | None:
     """The workflow description, from the argument or from --from-file.
+
+    None when neither was given, which `px0 workflows new` answers by asking.
 
     A carefully written description is a paragraph, and a paragraph does not
     want to survive shell quoting.
@@ -545,9 +624,32 @@ def _description_arg(args: argparse.Namespace) -> str:
 
 
 def cmd_new(args: argparse.Namespace) -> None:
-    """Handles `px0 workflows new`: builds a workflow from a sentence."""
+    """Handles `px0 workflows new`: builds a workflow from a sentence, or from an
+    interview when no sentence was given.
+
+    A description is the fast path for someone who already knows what to type.
+    Without one, px0 asks -- which is the honest default, because "what should
+    this read, and when does it run" are questions the user has to answer either
+    way and a blank prompt is a worse place to answer them than a question is.
+    """
     home, config = _ctx()
-    _build_workflow(home, config, _description_arg(args), args, existing_id=None)
+    description = _description_arg(args)
+    if description is not None:
+        _build_workflow(home, config, description, args, existing_id=None)
+        return
+
+    if getattr(args, "yes", False) or not sys.stdin.isatty():
+        # Nobody to interview: --yes answers no questions, and a pipe has no
+        # keystrokes to read.
+        ui.err("no description given, and nothing to ask")
+        ui.hint("describe it inline, or from a file:")
+        ui.command('px0 workflows new "every Friday, post a PR digest to #eng"')
+        ui.command("px0 workflows new --from-file ./request.txt")
+        sys.exit(EXIT_USER_ERROR)
+
+    # The interview settles what `--no-clarify` would otherwise re-ask.
+    _build_workflow(home, config, _intake_loop(config), args,
+                    existing_id=None, already_clarified=True)
 
 
 def cmd_workflows_edit(args: argparse.Namespace) -> None:
@@ -557,8 +659,8 @@ def cmd_workflows_edit(args: argparse.Namespace) -> None:
     A rebuild rather than a text edit. The file is generated -- its tools, inputs,
     and guideline list all follow from the request -- so editing the request and
     regenerating keeps those consistent, where hand-editing the body would leave
-    them describing a workflow that no longer exists. The old version stays in the
-    version history either way, so `px0 versions revert` undoes this.
+    them describing a workflow that no longer exists. The old version stays in
+    the store's history either way, so `px0 changes revert` undoes this.
     """
     home, config = _ctx()
     workflow_id = args.workflow or _pick_workflow(home, for_stdin=False, verb="edit")
@@ -602,7 +704,8 @@ def cmd_workflows_edit(args: argparse.Namespace) -> None:
 
 
 def _build_workflow(home: Path, config: dict, description: str,
-                    args: argparse.Namespace, existing_id: str | None) -> None:
+                    args: argparse.Namespace, existing_id: str | None,
+                    already_clarified: bool = False) -> None:
     """The build pipeline behind both `workflows new` and `workflows edit`.
 
     Clarifies the request, discovers and confirms tools, authorizes them, plans,
@@ -616,12 +719,17 @@ def _build_workflow(home: Path, config: dict, description: str,
     `existing_id` is set when rebuilding: it pins the id instead of prompting, so
     an edit replaces the workflow rather than forking a near-duplicate under a
     slightly different name.
+
+    `already_clarified` is set when the description came out of the intake
+    interview, which has just settled the same questions the clarify pass asks.
+    Running both would put the user through the interrogation twice.
     """
     assume_yes = getattr(args, "yes", False)
 
     try:
         qa = _clarify_loop(config, description,
-                           skip=assume_yes or getattr(args, "no_clarify", False))
+                           skip=assume_yes or already_clarified
+                           or getattr(args, "no_clarify", False))
 
         selected = [] if getattr(args, "no_discover", False) else \
             _discover_tools(home, config, description, qa)
@@ -700,7 +808,8 @@ def _build_workflow(home: Path, config: dict, description: str,
     ui.heading(f"{'updated' if existing_id else 'created'} {workflow_id}")
     ui.ok("workflow", str(dest))
     if guidelines:
-        ui.ok("guidelines", ", ".join(guidelines))
+        ui.ok("guidelines", ", ".join(f"guidelines/{g}" for g in guidelines))
+        ui.hint("each is inlined verbatim into every run of this workflow")
     if plan.trigger.get("schedule"):
         ui.ok("schedule", plan.trigger["schedule"])
     if selected:
@@ -825,16 +934,34 @@ def _print_workflows(home: Path, heading: bool) -> None:
         ui.hint('none yet -- describe one with `px0 workflows new "..."`')
 
 
+def _first_rule(path: Path) -> str:
+    """A guideline's first `## ` heading, as the one-line detail beside its name.
+
+    The headings are the rules, so the first one says more about what the file
+    holds than a byte count or a claim tally would.
+    """
+    try:
+        for line in path.read_text().splitlines():
+            if line.startswith("## "):
+                return line[3:].strip()
+    except OSError:
+        return "unreadable"
+    return ""
+
+
 def _print_guidelines(home: Path, heading: bool) -> None:
+    """Every guideline, numbered the way `workflows run` numbers its picker.
+
+    Same rows as the picker on purpose: guidelines are a short list you scan and
+    then name, so it should look like the other short list px0 shows you.
+    """
     base = paths.guidelines_dir(home)
     files = sorted(base.rglob("*.md"))
     if heading:
         ui.heading(f"guidelines {ui.dim(f'({len(files)})')}")
-    for p in files:
-        print(f"  {p.relative_to(base)}")
+    ui.numbered([(str(p.relative_to(base)), _first_rule(p)) for p in files])
     if not files:
-        ui.hint("none yet -- write one in guidelines/, or let "
-                "`px0 workflows new` propose one")
+        ui.hint("none yet -- `px0 workflows new` drafts one when a workflow needs it")
 
 
 def _report_brain_path(home: Path, config: dict) -> None:
@@ -1354,13 +1481,12 @@ def _tools_call(args: argparse.Namespace) -> None:
         ui.err(f"{spec.id} failed", str(e))
         sys.exit(EXIT_CONNECTOR_ERROR)
 
-    redact = secrets_mod.redactor(home)
     if getattr(args, "json", False):
-        _dump(args, redact(result) if isinstance(result, (dict, list, str)) else result)
+        _dump(args, result)
         return
     ui.ok("called", spec.id)
-    text = result if isinstance(result, str) else json.dumps(result, indent=2, default=str)
-    print(redact(text))
+    print(result if isinstance(result, str)
+          else json.dumps(result, indent=2, default=str))
 
 
 def _tools_connect(args: argparse.Namespace) -> None:
@@ -1754,8 +1880,7 @@ def cmd_brain(args: argparse.Namespace) -> None:
             ui.err(f"{args.from_file} lists no sources")
             sys.exit(EXIT_USER_ERROR)
         with ui.spinner(f"Ingesting {len(sources)} source(s)"):
-            result = brain_mod.add_many(home, config, sources, to=args.to,
-                                         no_propose=args.no_propose)
+            result = brain_mod.add_many(home, config, sources, to=args.to)
         ui.ok("ingested", f"{len(result['added'])} of {len(sources)}")
         for failure in result["failed"]:
             ui.err(failure["source"], failure["error"])
@@ -1775,8 +1900,7 @@ def cmd_brain(args: argparse.Namespace) -> None:
             ui.info("nothing to refresh", "no file records a source that has gone stale")
             return
         with ui.spinner(f"Re-fetching {len(targets)} file(s)"):
-            result = brain_mod.refresh_many(home, config, targets,
-                                            no_propose=args.no_propose)
+            result = brain_mod.refresh_many(home, config, targets)
         ui.ok("refreshed", f"{len(result['refreshed'])} of {len(targets)}")
         for failure in result["failed"]:
             ui.err(Path(failure["path"]).name, failure["error"])
@@ -1792,9 +1916,7 @@ def cmd_brain(args: argparse.Namespace) -> None:
     if args.brain_cmd == "add":
         try:
             with ui.spinner(f"Ingesting {args.source}"):
-                result = brain_mod.add(
-                    home, config, args.source, to=args.to, no_propose=args.no_propose
-                )
+                result = brain_mod.add(home, config, args.source, to=args.to)
         except brain_mod.IngestError as e:
             ui.err("ingest failed", str(e))
             sys.exit(EXIT_USER_ERROR)
@@ -1809,9 +1931,7 @@ def cmd_brain(args: argparse.Namespace) -> None:
     if args.brain_cmd == "refresh":
         try:
             with ui.spinner(f"Refreshing {args.path}"):
-                result = brain_mod.refresh(
-                    home, config, Path(args.path), no_propose=args.no_propose
-                )
+                result = brain_mod.refresh(home, config, Path(args.path))
         except brain_mod.IngestError as e:
             ui.err("refresh failed", str(e))
             sys.exit(EXIT_USER_ERROR)
@@ -1819,56 +1939,16 @@ def cmd_brain(args: argparse.Namespace) -> None:
         return
 
 
-# --- guidelines / consolidate --------------------------------------------
-
-def _interactive_review(home: Path, proposal_list: list, non_interactive: bool) -> None:
-    """Walks the user through each pending proposal, prompting accept/edit/dismiss
-    unless non_interactive is set (in which case proposals are only printed, not
-    acted on). Accepted/edited proposals are applied together as one change."""
-    if not proposal_list:
-        ui.info("nothing pending")
-        return
-    decisions = []
-    total = len(proposal_list)
-    for n, p in enumerate(proposal_list, 1):
-        ui.heading(f"{p.target_file} {ui.dim(f'({n}/{total})')}")
-        ui.kv(p.action, p.claim)
-        print()
-        print(p.body)
-        ui.kv("evidence", ui.dim(f"{p.evidence_source}#{p.evidence_anchor}"))
-        if non_interactive:
-            continue
-        choice = ui.prompt("accept / edit / dismiss? [a/e/d] ").lower()
-        if choice == "a":
-            decisions.append({"proposal": p, "edited_body": None})
-        elif choice == "e":
-            ui.hint("type the replacement body; a blank line finishes")
-            lines = []
-            while True:
-                line = input()
-                if not line:
-                    break  # blank line terminates multi-line entry
-                lines.append(line)
-            decisions.append({"proposal": p, "edited_body": "\n".join(lines)})
-        else:
-            proposals_mod.dismiss(home, p.id)
-            ui.info("dismissed", p.claim)
-
-    if decisions:
-        change_id = proposals_mod.apply_many(home, "user:manual", decisions)
-        print()
-        ui.ok(f"applied {len(decisions)} change(s)", change_id)
-    elif not non_interactive:
-        print()
-        ui.info("nothing accepted")
-
+# --- guidelines ----------------------------------------------------------
 
 def cmd_guidelines_file(args: argparse.Namespace) -> None:
-    """Handles `px0 guidelines new`, `edit`, `show`, and `rm`.
+    """Handles `px0 guidelines edit`, `show`, and `rm`.
 
-    Guidelines are the one thing px0 asks you to write by hand, and until now
-    the instruction was literally to open the store in an editor. These are the
-    same operations, with the store's history kept in step.
+    There is no `new`: a guideline is written by `px0 workflows new`, when the
+    build finds the workflow leaning on a convention the store has no file for.
+    These are the operations on what is already there, with the store's version
+    history kept in step -- which is the whole reason to go through px0 rather
+    than an editor and `rm`.
     """
     home, config = _ctx()
     verb = args.guidelines_cmd
@@ -1878,27 +1958,6 @@ def cmd_guidelines_file(args: argparse.Namespace) -> None:
         ui.err(str(e))
         sys.exit(EXIT_USER_ERROR)
     rel = str(path.relative_to(home))
-
-    if verb == "new":
-        if path.exists():
-            ui.err(f"{rel} already exists")
-            ui.hint(f"open it with `px0 guidelines edit {path.stem}`")
-            sys.exit(EXIT_USER_ERROR)
-        if getattr(args, "from_file", None):
-            body = _read_text_arg(args.from_file)
-        else:
-            title = path.stem.replace("-", " ").replace("_", " ").strip().capitalize()
-            body = authoring.GUIDELINE_TEMPLATE.format(title=title)
-        authoring.write_file(home, path, body, evidence="created via cli")
-        ui.ok("created", rel)
-        if not getattr(args, "from_file", None) and not getattr(args, "no_edit", False):
-            if _open_in_editor(path):
-                # The editor wrote the real content; capture it as a version.
-                authoring.write_file(home, path, path.read_text(), evidence="written in editor")
-            else:
-                ui.hint(f"write it: {path}")
-        ui.hint("a workflow that names it inlines the whole file verbatim")
-        return
 
     if not path.exists():
         ui.err(f"no guideline named {args.name}")
@@ -1939,144 +1998,25 @@ def cmd_guidelines_file(args: argparse.Namespace) -> None:
 
 
 def cmd_guidelines(args: argparse.Namespace) -> None:
-    """Handles `px0 guidelines` subcommands: review (pending proposals), log (claim
-    history), revert (roll a claim back to an earlier version), and alias
-    (list/link/unlink claim aliases)."""
+    """Handles `px0 guidelines log`: one claim's edit history.
+
+    A `## ` heading in a guideline is a claim with its own id and version chain,
+    so a rule that changed can be read back on its own rather than as a diff of
+    the whole file.
+    """
     home, config = _ctx()
-
-    if args.guidelines_cmd == "review":
-        _interactive_review(home, proposals_mod.list_proposals(home), args.list_only)
-        return
-
-    if args.guidelines_cmd == "log":
-        entries = claims.guidelines_log(home, args.claim_id)
-        _dump(args, entries)
-        return
-
-    if args.guidelines_cmd == "revert":
-        try:
-            change_id = claims.guidelines_revert(home, args.claim_id, args.to, "user:manual")
-        except ValueError as e:
-            ui.err(str(e))
-            sys.exit(EXIT_USER_ERROR)
-        ui.ok("reverted", change_id)
-        return
-
-    if args.guidelines_cmd == "alias":
-        if args.alias_cmd == "list":
-            aliases = claims.list_aliases(home)
-            if not aliases:
-                ui.info("no claim aliases")
-                return
-            for a in aliases:
-                print(f"  {a['old_claim']} {ui.faint('->')} {a['new_claim']}")
-        elif args.alias_cmd == "link":
-            claims.add_alias(home, args.old, args.new)
-            ui.ok("linked", f"{args.old} -> {args.new}")
-        elif args.alias_cmd == "unlink":
-            claims.remove_alias(home, args.old)
-            ui.ok("unlinked", args.old)
-        return
+    entries = claims.guidelines_log(home, args.claim_id)
+    _dump(args, entries)
 
 
-def cmd_consolidate(args: argparse.Namespace) -> None:
-    """Handles `px0 guidelines consolidate`: builds a consolidation session (pending proposals,
-    decayed claims, contradictions, unreferenced guideline files), prints a summary,
-    then runs the same interactive review flow as `guidelines review`."""
-    home, config = _ctx()
-    with ui.spinner("Building consolidation session"):
-        session = consolidate_mod.build_session(home, config)
-
-    deferred = session["proposals_overflow"]
-    ui.heading("consolidation")
-    ui.ok(f"{len(session['proposals'])} proposal(s) pending",
-          f"{deferred} deferred to the next session" if deferred else "")
-    for c in session["decayed_claims"]:
-        ui.warn(f"decayed: {c['claim']}",
-                f"{c['days_since_reinforced']}d since last touched", stream=sys.stdout)
-    for c in session["contradictions"]:
-        ui.warn(f"contradiction: {c}", stream=sys.stdout)
-    for f in session["unreferenced_files"]:
-        ui.info(f"unreferenced: guidelines/{f}", "no workflow lists it", stream=sys.stdout)
-
-    _interactive_review(home, session["proposals"], args.list_only)
-
-
-# --- versions / changes --------------------------------------------------
-
-def _parse_version_ref(ref: str) -> tuple[str, int]:
-    """Splits a `<path>@v<N>` reference into (path, version number)."""
-    if "@v" not in ref:
-        raise ValueError(f"expected <path>@v<N>, got {ref!r}")
-    path, v = ref.rsplit("@v", 1)
-    return path, int(v)
-
-
-def _color_diff(text: str) -> str:
-    """Colours a unified diff the way a pager would: adds green, removes red."""
-    if not ui.color_enabled():
-        return text
-    out = []
-    for line in text.splitlines(keepends=True):
-        if line.startswith("+++") or line.startswith("---"):
-            out.append(ui.strong(line.rstrip("\n")) + "\n")
-        elif line.startswith("@@"):
-            out.append(ui.dim(line.rstrip("\n")) + "\n")
-        elif line.startswith("+"):
-            out.append(ui.paint(line.rstrip("\n"), "71") + "\n")
-        elif line.startswith("-"):
-            out.append(ui.paint(line.rstrip("\n"), "167") + "\n")
-        else:
-            out.append(line)
-    return "".join(out)
-
-
-def cmd_versions(args: argparse.Namespace) -> None:
-    """Handles `px0 versions` subcommands: list, show, diff, revert, prune -- the
-    per-file version history maintained by the tool's own versioning system."""
-    home, config = _ctx()
-
-    if args.versions_cmd == "list":
-        entries = versioning.list_versions(home, args.path)
-        if args.json:
-            _dump(args, entries)
-            return
-        if not entries:
-            ui.info(f"no versions recorded for {args.path}")
-            return
-        for v in entries:
-            tag = ui.dim("  (deleted)") if v["deleted"] else ""
-            print(f"  {ui.accent('v' + str(v['version'])):<6} {v['actor']:<14} "
-                  f"{ui.dim(v['change_id'])}  {ui.dim(v['timestamp'])}{tag}")
-        return
-
-    if args.versions_cmd == "show":
-        path, v = _parse_version_ref(args.ref)
-        content = versioning.show_version(home, path, v)
-        print(content.decode() if content is not None else "(deleted at this version)")
-        return
-
-    if args.versions_cmd == "diff":
-        print(_color_diff(versioning.diff_versions(home, args.path, args.v1, args.v2)))
-        return
-
-    if args.versions_cmd == "revert":
-        change_id = versioning.revert_file(home, args.path, args.to, "user:manual")
-        if change_id:
-            ui.ok("reverted", change_id)
-        else:
-            ui.info("already at that content")
-        return
-
-    if args.versions_cmd == "prune":
-        result = versioning.prune(home, config, dry_run=args.dry_run)
-        _dump(args, result)
-        return
-
+# --- changes -------------------------------------------------------------
 
 def cmd_changes(args: argparse.Namespace) -> None:
-    """Handles `px0 changes` subcommands: list, show, revert -- multi-file changesets
-    (as opposed to `versions`, which tracks a single file's history)."""
+    """Handles `px0 changes` subcommands: list, show, revert.
+
+    A change is the unit of undo: one atomic write across the store, reverted
+    whole. `show` prints a per-file diff against what each file held before.
+    """
     home, config = _ctx()
 
     if args.changes_cmd == "list":
@@ -2106,7 +2046,7 @@ def cmd_changes(args: argparse.Namespace) -> None:
         return
 
 
-# --- brain search / skills / why / store / update / version / doctor -
+# --- brain search / why / store / update / version / doctor ---------
 
 def cmd_reindex(args: argparse.Namespace) -> None:
     """Handles `px0 brain reindex`: rebuilds the retrieval index from disk."""
@@ -2143,62 +2083,12 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(f"    {ui.dim(p.text[:200].strip())}")
 
 
-def cmd_skills(args: argparse.Namespace) -> None:
-    """Handles `px0 skills`: acts as a proxy for the `npx skills` utility to discover,
-    install, list, update, and remove community agent skills, or runs local `build` to compile
-    guidelines into Claude Code skill bundles (`SKILL.md`)."""
-    home, config = _ctx()
-    
-    skills_args = getattr(args, "skills_args", [])
-    if skills_args and skills_args[0] == "build":
-        with ui.spinner("Compiling guidelines"):
-            written = skills_mod.build(home)
-        if not written:
-            ui.info("no guidelines found to build")
-            return
-        for w in written:
-            ui.ok("built", f"skills/{w}")
-        return
-
-    import subprocess
-    import shutil
-
-    if not shutil.which("npx"):
-        ui.err("npx not found on PATH",
-               "Node.js is required for `px0 skills` -- https://nodejs.org")
-        sys.exit(EXIT_USER_ERROR)
-
-    skills_json = home / "skills.json"
-    agents_skill_lock = Path("~/.agents/.skill-lock.json").expanduser()
-
-    # Sync local .px0/skills.json -> ~/.agents/.skill-lock.json before running npx
-    if skills_json.exists():
-        agents_skill_lock.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(str(skills_json), str(agents_skill_lock))
-
-    # We always want global mode (-g) for px0 skills proxies, because we're managing the user's AI state.
-    run_args = ["npx", "--yes", "skills@latest"] + skills_args
-    if "-g" not in skills_args and "--global" not in skills_args:
-        run_args.append("-g")
-
-    try:
-        subprocess.run(run_args, check=True)
-    except subprocess.CalledProcessError as e:
-        sys.exit(e.returncode)
-    except KeyboardInterrupt:
-        sys.exit(130)
-    finally:
-        # Sync back ~/.agents/.skill-lock.json -> .px0/skills.json
-        if agents_skill_lock.exists():
-            shutil.copy(str(agents_skill_lock), str(skills_json))
-
-
 def cmd_why(args: argparse.Namespace) -> None:
-    """Handles `px0 guidelines why` / `px0 runs why`: prints the provenance chain explaining how a
-    claim, proposal, or other tracked entity came to be."""
+    """Handles `px0 runs why`: prints the provenance chain explaining how a run
+    reached the result it did."""
     home, config = _ctx()
     try:
-        result = provenance.why(home, config, args.target_id)
+        result = provenance.why(config, args.target_id)
     except provenance.WhyError as e:
         ui.err(str(e))
         sys.exit(EXIT_USER_ERROR)
@@ -2342,8 +2232,9 @@ def cmd_config(args: argparse.Namespace) -> None:
             config_mod.load(path)
         except Exception as e:
             ui.err("config.toml no longer parses", str(e))
-            ui.remedy(f"px0 versions revert config.toml --to "
-                      f"v{versioning.latest_version_number(home, 'config.toml') or 1}")
+            # The edit is already on disk and the parse error names the line,
+            # so the fix is another pass over the same file.
+            ui.remedy(f"fix the syntax in {path}, then `px0 config edit` to check it")
             sys.exit(EXIT_USER_ERROR)
         ui.ok("saved", str(path))
         return
@@ -2557,67 +2448,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 # --- argument parser -----------------------------------------------------
 
-# --- secrets, status, completion, mcp -------------------------------------
-
-def cmd_secrets(args: argparse.Namespace) -> None:
-    """Handles `px0 secrets set|list|unset`.
-
-    A workflow file is versioned, diffed, and exported, so a token does not
-    belong in one. These live with the connector credentials and are reachable
-    from a workflow as {{secrets.NAME}}.
-    """
-    home, config = _ctx()
-
-    if args.secrets_cmd == "set":
-        value = args.value
-        if value is None:
-            import getpass
-
-            try:
-                value = getpass.getpass(f"Value for {args.name} (not echoed): ")
-            except (EOFError, KeyboardInterrupt):
-                print(file=sys.stderr)
-                ui.err("no value given")
-                sys.exit(EXIT_USER_ERROR)
-        try:
-            name = secrets_mod.set_secret(home, args.name, value)
-        except secrets_mod.SecretError as e:
-            ui.err(str(e))
-            sys.exit(EXIT_USER_ERROR)
-        ui.ok("stored", name)
-        ui.hint(f"use it in a workflow as {{{{secrets.{name}}}}}; it is redacted "
-                "out of every run record and log")
-        return
-
-    if args.secrets_cmd == "list":
-        names = secrets_mod.names(home)
-        if getattr(args, "json", False):
-            _dump(args, {"secrets": names})
-            return
-        if not names:
-            ui.info("no secrets stored", "add one with `px0 secrets set NAME`")
-            return
-        for name in names:
-            print(f"  {name}")
-        ui.hint("values are never printed; they live in .state/credentials.toml")
-        return
-
-    if args.secrets_cmd == "unset":
-        try:
-            removed = secrets_mod.unset_secret(home, args.name)
-        except secrets_mod.SecretError as e:
-            ui.err(str(e))
-            sys.exit(EXIT_USER_ERROR)
-        if not removed:
-            ui.info("nothing to remove", args.name)
-            return
-        ui.ok("removed", args.name)
-        users = [wf.id for wf in workflow_mod.load_all(home).values()
-                 if f"secrets.{args.name}" in wf.path.read_text()]
-        if users:
-            ui.warn("still referenced by", ", ".join(sorted(users)))
-        return
-
+# --- status, completion, mcp ---------------------------------------------
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Handles `px0 status`: is anything broken, in one screen.
@@ -2743,7 +2574,7 @@ def main(argv: list[str] | None = None) -> None:
     except catalogue_mod.CatalogueError as e:
         ui.err(str(e))
         sys.exit(EXIT_CONNECTOR_ERROR)
-    except (authoring.AuthoringError, secrets_mod.SecretError, store_mod.StoreError,
+    except (authoring.AuthoringError, store_mod.StoreError,
             localtools.LocalToolError) as e:
         ui.err(str(e))
         sys.exit(EXIT_USER_ERROR)

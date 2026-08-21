@@ -22,8 +22,8 @@ def is_initialized(home: Path) -> bool:
 SECRET_CONFIG_KEYS = ("connectors.composio_api_key",)
 
 # What an export carries, and therefore what an import looks for.
-EXPORT_CONTENT = ("workflows", "guidelines", "brain", "output", "outputs", "skills", "tools")
-EXPORT_STATE = ("versions", "proposals", "schema", "schedule.json")
+EXPORT_CONTENT = ("workflows", "guidelines", "brain", "output", "outputs", "tools")
+EXPORT_STATE = ("versions", "schema", "schedule.json")
 
 
 def _redact_config(src: Path, target: Path) -> None:
@@ -40,7 +40,7 @@ def _purge_versioned_config(state_dest: Path) -> None:
     the blobs it alone referenced.
 
     config.toml's history holds every value the key ever had, so redacting only
-    the live file would leave the secret one `px0 versions show` away. Blobs are
+    the live file would leave the secret one change-log entry away. Blobs are
     content-addressed and shared, so a blob is removed only when no surviving
     version still points at it.
     """
@@ -91,7 +91,7 @@ def export(home: Path, dest: Path) -> None:
 
     state_dest = dest / ".state"
     state_dest.mkdir(parents=True, exist_ok=True)
-    for name in ("versions", "proposals", "schema", "schedule.json"):
+    for name in EXPORT_STATE:
         src = paths.state_dir(home) / name
         if not src.exists():
             continue
@@ -215,13 +215,15 @@ def verify(home: Path) -> dict:
             wf = workflow_mod.parse(path)
         except Exception as e:
             problems.append({"kind": "workflow", "detail": str(e),
-                             "fix": f"edit {path.relative_to(home)} or restore it with `px0 versions revert`"})
+                             "fix": f"edit {path.relative_to(home)}, or undo the change that broke it "
+                                    f"with `px0 changes revert <id>`"})
             continue
         for name in wf.guidelines:
             if not (paths.guidelines_dir(home) / name).exists():
                 problems.append({
                     "kind": "guideline", "detail": f"{wf.id} references missing guidelines/{name}",
-                    "fix": f"create it with `px0 guidelines new {name}` or remove the reference",
+                    "fix": f"restore guidelines/{name}, or rebuild the workflow with "
+                           f"`px0 workflows edit {wf.id}` so it stops naming it",
                 })
 
     manifest = paths.versions_dir(home) / "manifest.sqlite"
@@ -239,12 +241,13 @@ def verify(home: Path) -> dict:
         for path, version in missing[:20]:
             problems.append({
                 "kind": "blob", "detail": f"{path}@v{version} has no stored content",
-                "fix": "the version cannot be shown or reverted to; `px0 versions prune` clears the record",
+                "fix": "that version's content is gone; the file on disk and its later "
+                       "versions are unaffected",
             })
         if len(missing) > 20:
             problems.append({"kind": "blob",
                              "detail": f"and {len(missing) - 20} more missing version blobs",
-                             "fix": "run `px0 versions prune`"})
+                             "fix": "history this old cannot be read back; current content is intact"})
 
     from px0 import localtools
 
@@ -276,7 +279,6 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
         home / "brain" / "work",
         paths.output_dir(home),
         paths.state_dir(home),
-        paths.proposals_dir(home),
         paths.index_dir(home),
         paths.ingest_dir(home),
         paths.tools_dir(home),

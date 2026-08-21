@@ -98,10 +98,6 @@ px0 version
 
 ```
 px0_version:           0.1.0
-schema_version_binary: 2
-schema_version_store:  2
-harness_cmd:           claude -p
-harness_found:         True
 ```
 
 A store version behind the binary means a migration is pending: run `px0 update`.

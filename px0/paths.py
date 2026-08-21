@@ -34,11 +34,6 @@ def tools_dir(home: Path | None = None) -> Path:
     return (home or store_home()) / "tools"
 
 
-def skills_dir(home: Path | None = None) -> Path:
-    """Path to the derived skills build output under `home` (or the default store)."""
-    return (home or store_home()) / "skills"
-
-
 def state_dir(home: Path | None = None) -> Path:
     """Path to `.state/`, the runtime-internal folder not meant for hand-editing."""
     return (home or store_home()) / ".state"
@@ -47,11 +42,6 @@ def state_dir(home: Path | None = None) -> Path:
 def versions_dir(home: Path | None = None) -> Path:
     """Path to the version history store under `.state/`."""
     return state_dir(home) / "versions"
-
-
-def proposals_dir(home: Path | None = None) -> Path:
-    """Path to pending guideline-edit proposals awaiting review."""
-    return state_dir(home) / "proposals"
 
 
 def index_dir(home: Path | None = None) -> Path:
@@ -70,7 +60,7 @@ def ingest_failed_dir(home: Path | None = None) -> Path:
 
 
 def credentials_path(home: Path | None = None) -> Path:
-    """Path to `credentials.toml`, mode 0600, holding connector secrets."""
+    """Path to `credentials.toml`, mode 0600, holding connector authorizations."""
     return state_dir(home) / "credentials.toml"
 
 

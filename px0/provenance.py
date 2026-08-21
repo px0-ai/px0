@@ -1,37 +1,23 @@
-"""px0 guidelines why / px0 runs why: walk the chain for any run, answer, output, or claim."""
+"""px0 runs why: walk the chain behind the result a run produced."""
 
-from pathlib import Path
-
-from px0 import claims, runs as runs_mod
+from px0 import runs as runs_mod
 
 
 class WhyError(Exception):
-    """Raised when why() cannot resolve the given target id to a claim or run."""
+    """Raised when why() cannot resolve the given target id to a run."""
     pass
 
 
-def why(home: Path, config: dict, target_id: str) -> dict:
-    """Resolves a target_id to its provenance: a claim id (containing '#')
-    returns its full edit history and current resolution, anything else is
-    looked up as a run id and returns that run's record.
+def why(config: dict, target_id: str) -> dict:
+    """Resolves a run id to its record: the workflow version the run used, the
+    guidelines it inlined, the passages it retrieved, and the calls it made.
 
-    Raises WhyError if the claim has no history or the run id doesn't exist."""
-    if "#" in target_id:
-        log = claims.guidelines_log(home, target_id)
-        resolved = claims.resolve_claim(home, target_id)
-        if not log:
-            raise WhyError(f"no history found for claim {target_id!r}")
-        return {"kind": "claim", "claim_id": target_id, "resolved_to": resolved, "history": log}
-
+    Raises WhyError if the id is not shaped like a run id, or names a run this
+    store has no record of -- a record that aged out under retention reads the
+    same as one that never existed, so the message says so.
+    """
     try:
         record = runs_mod.read_record(config, target_id)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, runs_mod.RunIdError) as e:
         raise WhyError(str(e))
-    except runs_mod.RunIdError as e:
-        # Neither a claim id (no '#') nor a run id: say what both look like
-        # rather than letting the run-id parse error stand as the whole answer.
-        raise WhyError(
-            f"{e} If you meant a guideline claim, ids look like "
-            "<file>.md#<section-slug>."
-        )
     return {"kind": "run", "record": record}

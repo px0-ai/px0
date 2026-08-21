@@ -85,7 +85,15 @@ px0 ships no workflows. You describe what you want:
 px0 workflows new "every friday at 5pm, summarize the github pull requests I reviewed this week and post it to #eng-standup"
 ```
 
-px0 asks about anything genuinely ambiguous, finds the tools the job needs, and shows you the list before authorizing anything. Tools that can post or send get called out, so you can drop the ones you did not ask for. Then it writes the workflow file and prints its id. Pass `--id <name>` to choose the id yourself.
+Or run it with nothing and be asked instead:
+
+```shell
+px0 workflows new
+```
+
+That opens an interview — one question at a time, until px0 has the job, what it reads, where the result goes, when it runs, and what makes the output right. It writes the request back for you to approve or reword before anything is built. Enter on a blank line ends the questions early.
+
+Either way, px0 asks about anything still genuinely ambiguous, finds the tools the job needs, and shows you the list before authorizing anything. Tools that can post or send get called out, so you can drop the ones you did not ask for. Then it writes the workflow file and prints its id. Pass `--id <name>` to choose the id yourself.
 
 ### 3. Run it
 
@@ -230,28 +238,15 @@ It shows up in `px0 tools list` immediately, and `px0 workflows new` can use it.
 Arguments are substituted into argv, never into a shell, so a value with a
 semicolon in it stays a value.
 
-Values you would rather not write into a workflow file live outside it:
-
-```shell
-px0 secrets set GITHUB_TOKEN        # prompts, unechoed
-```
-
-A workflow reads it as `{{secrets.GITHUB_TOKEN}}`, and px0 redacts it out of
-every run record and log.
-
 ## Teach it how you work
 
 Guidelines are Markdown files describing your conventions: how you word a commit message, what your Go reviews check. Workflows that need a guideline inline it verbatim, so output comes back in your voice instead of the model's default.
 
+You never write one from scratch. When `px0 workflows new` finds that a workflow leans on a convention you have no file for, it drafts that guideline from the workflow, shows it to you, and lists it on the workflow so every run inlines it. Editing the draft is how it becomes yours:
+
 ```shell
 px0 guidelines list
-$EDITOR ~/.px0/guidelines/commit-messages.md
-```
-
-px0 notices patterns in what you read and how you edit its output, then proposes guideline updates. It never edits your files on its own. You accept or reject each one:
-
-```shell
-px0 guidelines review
+px0 guidelines edit commit-messages
 ```
 
 ## Where your data lives
@@ -269,28 +264,27 @@ Your store is `~/.px0`. Set `PX0_HOME` to move it.
 All of it is plain Markdown you can open in any editor. Edit a workflow by hand and the next run picks it up, with no compile step. px0 keeps its own history, so you can see what changed and undo it:
 
 ```shell
-px0 versions list workflows/friday-pr-digest.md
 px0 changes list
+px0 changes show <change-id>
 ```
 
 ## Everyday commands
 
 | Command                   | What it does                                   |
 | ------------------------- | ---------------------------------------------- |
-| `px0 workflows new`       | Turn a sentence into a workflow                |
+| `px0 workflows new`       | Turn a sentence into a workflow, or be asked for one |
 | `px0 workflows run`       | Run one now                                    |
 | `px0 workflows edit`      | Revise a workflow and rebuild it               |
 | `px0 workflows disable`   | Park one without deleting it                   |
 | `px0 status`              | Whether anything needs attention               |
 | `px0 brain add`           | Save a URL or file to your brain               |
 | `px0 brain ask`           | Ask a question across your brain               |
-| `px0 guidelines new`      | Write down a convention                        |
-| `px0 guidelines review`   | Accept or reject proposed conventions          |
+| `px0 guidelines list`     | The conventions px0 follows                     |
+| `px0 guidelines edit`     | Reword one in your own words                    |
 | `px0 runs`                | Browse past runs                               |
 | `px0 tools search`        | Find a tool in Composio's catalogue            |
 | `px0 tools connect`       | Authorize an app                               |
 | `px0 tools list --status` | What workflows can call, and what is connected |
-| `px0 secrets set`         | Store a value a workflow may use               |
 | `px0 daemon install`      | Run workflows on a schedule                    |
 | `px0 config list`         | Every setting, with its default                |
 | `px0 completion zsh`      | Shell completion                               |

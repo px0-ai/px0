@@ -18,7 +18,6 @@ from typing import Any
 
 from px0 import claims, config as config_mod, harness, paths, retrieval
 from px0 import runs as runs_mod
-from px0 import secrets as secrets_mod
 from px0 import tools, versioning
 from px0 import workflow as workflow_mod
 
@@ -109,10 +108,7 @@ def resolve_inputs(
     outcomes for the run record. An optional input that fails resolves to None
     and is marked degraded rather than aborting the run; a required input that
     fails raises RunError."""
-    context: dict = {"config": config, "input": cli_inputs,
-                     # Reachable as {{secrets.NAME}} in any args value or in the
-                     # body; never written to a record or a log.
-                     "secrets": secrets_mod.all_secrets(home)}
+    context: dict = {"config": config, "input": cli_inputs}
     meta: list[dict] = []
 
     for inp in wf.inputs:
@@ -170,7 +166,7 @@ def render_prompt(wf: workflow_mod.Workflow, guideline_texts: dict[str, str], co
 
 def _tool_call_loop(
     home: Path, config: dict, prompt: str, allowed_tools: list[str],
-    dry_run: bool, timeout: float, run_id: str, redact=None
+    dry_run: bool, timeout: float, run_id: str
 ) -> tuple[str, list[dict], dict]:
     """Drives the model through up to MAX_TOOL_TURNS turns, feeding it a
     `TOOL_CALL: {...}` protocol line-by-line since the harness backend is a
@@ -182,7 +178,6 @@ def _tool_call_loop(
     plain subprocess that reports no token counts, so what a run cost is
     approximated from the characters sent and received, and labelled as an
     estimate rather than passed off as a measurement."""
-    redact = redact or (lambda x: x)
     usage = {"model_calls": 0, "prompt_chars": 0, "output_chars": 0,
              "estimated_tokens": 0, "estimated": True}
     tool_calls: list[dict] = []
@@ -204,10 +199,10 @@ def _tool_call_loop(
     output = ""
     for turn in range(MAX_TOOL_TURNS):
         runs_mod.append_raw_log(config, run_id,
-                                 f"--- turn {turn + 1} PROMPT ---\n{redact(conversation)}")
+                                 f"--- turn {turn + 1} PROMPT ---\n{conversation}")
         output = harness.invoke(config, conversation, timeout=timeout)
         runs_mod.append_raw_log(config, run_id,
-                                 f"--- turn {turn + 1} OUTPUT ---\n{redact(output)}")
+                                 f"--- turn {turn + 1} OUTPUT ---\n{output}")
         usage["model_calls"] += 1
         usage["prompt_chars"] += len(conversation)
         usage["output_chars"] += len(output or "")
@@ -241,9 +236,9 @@ def _tool_call_loop(
             elapsed = time_mod.monotonic() - t0
 
         tool_calls.append({
-            "tool": tool_id, "args": redact(args), "is_write": is_write,
+            "tool": tool_id, "args": args, "is_write": is_write,
             "stubbed": bool(dry_run and is_write),
-            "timestamp": _now().isoformat(), "result_summary": redact(str(result))[:500],
+            "timestamp": _now().isoformat(), "result_summary": str(result)[:500],
             "elapsed_seconds": round(elapsed, 3),
         })
         conversation += (
@@ -479,11 +474,10 @@ def _run_once(
             fcntl.flock(lf, fcntl.LOCK_UN)
 
     # Stage 3: resolve inputs
-    redact = secrets_mod.redactor(home)
     try:
         context, inputs_meta = resolve_inputs(home, config, wf, cli_inputs)
     except RunError as e:
-        raise fail(redact(str(e)), inputs_resolved=redact(e.record.get("inputs_resolved", [])))
+        raise fail(str(e), inputs_resolved=e.record.get("inputs_resolved", []))
 
     # Stage 4: render prompt
     guideline_texts, guidelines_inlined = {}, []
@@ -502,10 +496,10 @@ def _run_once(
         raise fail(f"invalid timeout: {timeout_override or wf.timeout!r}")
     try:
         output_text, tool_calls, usage = _tool_call_loop(
-            home, config, prompt, wf.tools, dry_run, timeout, run_id, redact
+            home, config, prompt, wf.tools, dry_run, timeout, run_id
         )
     except harness.HarnessError as e:
-        raise fail(redact(str(e)), inputs_resolved=inputs_meta,
+        raise fail(str(e), inputs_resolved=inputs_meta,
                    guidelines_inlined=guidelines_inlined)
 
     # Stage 7: route output

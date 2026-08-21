@@ -23,13 +23,6 @@ DEFAULTS: dict[str, Any] = {
         "composio_api_key": "",
         "ca_bundle": "",
     },
-    "proposals": {
-        "max_per_consolidation": 10,
-    },
-    "versions": {
-        "keep_all": True,
-        "max_versions_per_file": 200,
-    },
     "logs": {
         "path": "/var/log/px0",
         "retention_days": 14,
@@ -200,18 +193,6 @@ SCHEMA: dict[str, dict[str, Any]] = {
         "type": str, "choices": None,
         "help": "CA bundle used to verify TLS for every outbound request; set automatically when an "
                 "intercepting proxy (e.g. Zscaler) makes certifi's bundle insufficient",
-    },
-    "proposals.max_per_consolidation": {
-        "type": int, "choices": None,
-        "help": "cap on proposals surfaced per consolidation session",
-    },
-    "versions.keep_all": {
-        "type": bool, "choices": None,
-        "help": "true keeps every version forever; false enables the max_versions_per_file cap",
-    },
-    "versions.max_versions_per_file": {
-        "type": int, "choices": None,
-        "help": "per-file version cap applied by `px0 versions prune` when keep_all is false",
     },
     "logs.path": {
         "type": str, "choices": None,

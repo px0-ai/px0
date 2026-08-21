@@ -14,7 +14,6 @@ points. Created by [`px0 init`](../commands/init.md).
     papers/
     work/
   output/
-  skills/
   .state/
 ```
 
@@ -53,10 +52,8 @@ See [pointing the brain at a vault](../commands/brain.md#pointing-the-brain-at-a
 | Path | What it holds |
 | ---- | ------------- |
 | `output/` | What runs produced, when a workflow's output target is `file` |
-| `skills/` | Guidelines compiled into agent skill bundles by `px0 skills build` |
 
-`skills/` is rebuilt from `guidelines/`, so edit the guideline rather than the
-bundle. `output/` is where `output.path` points by default.
+`output/` is where `output.path` points by default.
 
 ## `.state/` — runtime internals
 
@@ -66,11 +63,10 @@ history px0 manages itself.
 | Path | What it holds | Rebuildable |
 | ---- | ------------- | ----------- |
 | `.state/versions/` | The version manifest (SQLite) and content-addressed blobs | No — this is the history |
-| `.state/proposals/` | Guideline edit proposals awaiting review | No |
 | `.state/index/index.sqlite` | The retrieval index over `brain/` | Yes — `px0 brain reindex` |
 | `.state/ingest/` | Queued playlist ingest jobs, drained by the daemon | Yes |
 | `.state/ingest/failed/` | Ingest jobs given up on after repeated failures, with the reason | — |
-| `.state/credentials.toml` | Connector authorizations and the secrets `px0 secrets set` stores, mode 0600 | No |
+| `.state/credentials.toml` | Connector authorizations, mode 0600 | No |
 | `.state/schema` | The store's on-disk schema version | No |
 | `.state/schedule.json` | The daemon's persisted scheduling state | Yes |
 | `.state/update-history.json` | What was installed when, and which migrations ran | No |
@@ -93,11 +89,11 @@ releases. `px0 doctor` reports an empty index and names `px0 brain reindex`.
 ## What `px0 store export` copies
 
 Content, history, and configuration — `workflows/`, `guidelines/`, `brain/`,
-`output/`, `skills/`, `tools/`, `config.toml`, and the parts of `.state/` that
-matter for continuity — with credentials stripped from both the live
-`config.toml` and its version history. Secrets are never copied: they live in
-`.state/credentials.toml`, which an export does not touch. The retrieval index is
-not copied; reindex after importing.
+`output/`, `tools/`, `config.toml`, and the parts of `.state/` that
+matter for continuity — with the Composio API key stripped from both the live
+`config.toml` and its version history. Connector authorizations are never
+copied: they live in `.state/credentials.toml`, which an export does not touch.
+The retrieval index is not copied; reindex after importing.
 
 Load one back with
 [`px0 store import`](../commands/store.md#px0-store-import), and check what

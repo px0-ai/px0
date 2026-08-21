@@ -66,16 +66,15 @@ px0 init --composio-key ak_...
   guidelines/         starter guidelines
   brain/{docs,blogs,papers,work}/
   output/
-  .state/{proposals,index,ingest}/
+  .state/{index,ingest}/
   .state/schema       the on-disk schema version
   config.toml
 ```
 
 ## Output
 
-Lists what was created, then points at the next step. If Node.js is missing it
-says so, because `px0 skills` needs `npx`. It closes by mentioning that
-`brain.path` can point at an existing Markdown folder — see
+Lists what was created, then points at the next step. It closes by mentioning
+that `brain.path` can point at an existing Markdown folder — see
 [`px0 brain`](brain.md#pointing-the-brain-at-an-existing-vault).
 
 ## Exit codes

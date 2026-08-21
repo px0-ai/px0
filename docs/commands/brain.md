@@ -8,8 +8,8 @@ Implemented by `px0/brain.py` (ingestion), `px0/retrieval.py` (indexing and
 search), and `px0/ask.py` (retrieval plus generation).
 
 ```
-px0 brain add <source> [--to FOLDER] [--from-file PATH] [--no-propose]
-px0 brain refresh [path] [--all] [--stale] [--days N] [--no-propose]
+px0 brain add <source> [--to FOLDER] [--from-file PATH]
+px0 brain refresh [path] [--all] [--stale] [--days N]
 px0 brain list
 px0 brain show <path> [--json]
 px0 brain rm <path> [--yes]
@@ -24,7 +24,7 @@ px0 brain reindex
 ## `px0 brain add`
 
 Ingest one source: extract its text, write it as Markdown with frontmatter
-recording where it came from, propose guideline edits from it, and reindex.
+recording where it came from, and reindex.
 
 Extraction always runs locally and needs no API key.
 
@@ -85,21 +85,6 @@ px0 brain add ./internal-pricing.md --to work
 
 `work/` is the private folder: see [Private material](#private-material).
 
-### `--no-propose`
-
-Skip the guideline-proposal pass.
-
-- **Input:** flag, no value.
-- **Default:** off — after a successful ingest, px0 reads the new material and
-  proposes guideline edits for `px0 guidelines review`.
-- The pass costs one call to the coding-agent harness. Use this to ingest in bulk
-  or when offline. Stubs never trigger it: there is nothing to learn from
-  metadata.
-
-```shell
-px0 brain add https://example.com/post --no-propose
-```
-
 ---
 
 ## `px0 brain refresh`
@@ -126,12 +111,6 @@ px0 brain refresh example-post.md
 
 Fails with a clear message when the file records no `source`, when the original
 local file is gone, or when a stub still has no transcript.
-
-### `--no-propose`
-
-As for `add`: skip the guideline-proposal pass. Default off.
-
----
 
 ### `--from-file PATH` (on `add`)
 

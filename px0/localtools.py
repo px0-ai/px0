@@ -235,8 +235,7 @@ def brain_add(args: dict, ctx) -> dict:
     if not source:
         raise LocalToolError("brain.add needs a source")
     try:
-        result = brain_mod.add(ctx.home, ctx.config, source, to=args.get("to"),
-                                no_propose=True)
+        result = brain_mod.add(ctx.home, ctx.config, source, to=args.get("to"))
     except Exception as e:
         raise LocalToolError(f"could not ingest {source}: {e}") from e
     fields = ("path", "kind", "title", "source", "note")

@@ -204,29 +204,45 @@ def test_setting_a_key_that_exists_rewrites_it_once():
     assert "enabled: false" in out
 
 
-# --- guidelines are the one thing you write by hand ----------------------
+# --- guidelines: written by the build, edited by hand --------------------
 
-def test_guidelines_new_writes_a_template_and_records_it(ctx, capsys):
+def test_editing_a_guideline_records_the_new_version(ctx, monkeypatch, capsys):
     home, _config = ctx
+    path = paths.guidelines_dir(home) / "voice.md"
+    path.write_text("## Say it plainly\n\nShort sentences.\n")
 
-    cli.cmd_guidelines_file(argparse.Namespace(
-        guidelines_cmd="new", name="commit-messages", from_file=None, no_edit=True))
+    monkeypatch.setattr(cli, "_open_in_editor",
+                        lambda p: bool(p.write_text("## Say it plainly\n\nShorter.\n")) or True)
+    cli.cmd_guidelines_file(argparse.Namespace(guidelines_cmd="edit", name="voice"))
 
-    path = paths.guidelines_dir(home) / "commit-messages.md"
-    assert path.exists()
-    assert versioning.latest_version_number(home, "guidelines/commit-messages.md") == 1
-    assert "Commit messages" in path.read_text()
+    assert "Shorter." in path.read_text()
+    assert versioning.latest_version_number(home, "guidelines/voice.md") >= 1
+    assert "saved" in capsys.readouterr().out
 
 
-def test_guidelines_new_refuses_to_clobber(ctx):
+def test_a_guideline_the_build_filed_under_a_folder_is_editable_by_name(ctx, monkeypatch):
+    """`px0 workflows new` may file one in a subfolder, and it is reported by
+    that path -- so `edit` has to find it the way `workflows edit` does."""
     home, _config = ctx
-    (paths.guidelines_dir(home) / "x.md").write_text("mine")
+    nested = paths.guidelines_dir(home) / "code-review" / "go.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("## Flag real breakage\n\nOnly that.\n")
+
+    monkeypatch.setattr(cli, "_open_in_editor",
+                        lambda p: bool(p.write_text("## Changed\n\nnew.\n")) or True)
+    cli.cmd_guidelines_file(argparse.Namespace(guidelines_cmd="edit", name="go"))
+
+    assert nested.read_text() == "## Changed\n\nnew.\n"
+
+
+def test_a_guideline_that_is_not_there_is_an_error_not_a_new_file(ctx):
+    """With `new` gone, a typo must not quietly scaffold an empty guideline."""
+    home, _config = ctx
 
     with pytest.raises(SystemExit):
-        cli.cmd_guidelines_file(argparse.Namespace(
-            guidelines_cmd="new", name="x", from_file=None, no_edit=True))
+        cli.cmd_guidelines_file(argparse.Namespace(guidelines_cmd="show", name="nope"))
 
-    assert (paths.guidelines_dir(home) / "x.md").read_text() == "mine"
+    assert not (paths.guidelines_dir(home) / "nope.md").exists()
 
 
 def test_removing_a_guideline_warns_about_the_workflows_naming_it(ctx, monkeypatch, capsys):

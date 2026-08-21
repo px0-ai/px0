@@ -50,23 +50,6 @@ How external app calls are brokered and authorized. See [`px0 tools`](../command
 | `connectors.composio_api_key` | str | `""` | Composio API key used to authenticate external app connections |
 | `connectors.ca_bundle` | str | `""` | CA bundle used to verify TLS for every outbound request; set automatically when an intercepting proxy (e.g. Zscaler) makes certifi's bundle insufficient |
 
-## `[proposals]`
-
-Guideline proposal review. See [`px0 guidelines`](../commands/guidelines.md).
-
-| Key | Type | Default | What it does |
-| --- | ---- | ------- | ------------ |
-| `proposals.max_per_consolidation` | int | `10` | cap on proposals surfaced per consolidation session |
-
-## `[versions]`
-
-The store's own file history. See [`px0 versions`](../commands/versions.md).
-
-| Key | Type | Default | What it does |
-| --- | ---- | ------- | ------------ |
-| `versions.keep_all` | bool | `true` | true keeps every version forever; false enables the max_versions_per_file cap |
-| `versions.max_versions_per_file` | int | `200` | per-file version cap applied by `px0 versions prune` when keep_all is false |
-
 ## `[logs]`
 
 Run logs and record retention. See [`px0 runs`](../commands/runs.md).

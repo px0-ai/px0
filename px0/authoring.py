@@ -62,16 +62,29 @@ def workflow_path(home: Path, workflow_id: str) -> Path:
 
 
 def guideline_path(home: Path, name: str) -> Path:
-    """Where a guideline file with this name lives, whether or not it exists yet."""
-    return paths.guidelines_dir(home) / f"{check_id(name, 'guideline name')}.md"
+    """Where a guideline file with this name lives, whether or not it exists yet.
+
+    Searched the same way as `workflow_path`, because guidelines sit in
+    subdirectories too: `px0 workflows new` may file a drafted guideline under a
+    folder, and a file the build wrote has to be addressable by the name it was
+    reported under.
+    """
+    base = paths.guidelines_dir(home)
+    direct = base / f"{check_id(name, 'guideline name')}.md"
+    if direct.exists():
+        return direct
+    matches = [p for p in sorted(base.rglob(f"{name}.md")) if p.is_file()]
+    if len(matches) == 1:
+        return matches[0]
+    return direct
 
 
 def remove_file(home: Path, path: Path, evidence: str = "") -> dict:
     """Deletes a versioned file and tombstones it in the version chain.
 
-    The content is still in the object store, so `px0 versions show <path>@vN`
-    and `px0 changes revert` both keep working after a removal. That is the
-    whole reason to remove through px0 rather than with `rm`.
+    The content is still in the object store, so `px0 changes revert` keeps
+    working after a removal. That is the whole reason to remove through px0
+    rather than with `rm`.
     """
     if not path.exists():
         raise AuthoringError(f"no such file: {path}")
@@ -151,24 +164,3 @@ def set_frontmatter_key(text: str, key: str, value) -> str:
         lines.append(f"{key}: {literal}")
         lines.append("")
     return "---" + "\n".join(lines) + "---" + body
-
-
-GUIDELINE_TEMPLATE = '''# {title}
-
-<!-- What this file is for: the conventions px0 should follow when it does this
-kind of work. Written for a reader who has to apply it, not for a spec. -->
-
-## When this applies
-
-Describe the situation. A workflow that needs this guideline inlines the whole
-file verbatim, so say plainly what it covers.
-
-## Rules
-
-- One rule per line, in the imperative.
-- Say what to do, not what to avoid, where both are possible.
-
-## Example
-
-Show one, and keep it real. An example is what gets copied.
-'''

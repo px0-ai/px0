@@ -81,7 +81,7 @@ Validate and save one key.
 ```shell
 px0 config set brain.path ~/Documents/MyVault
 px0 config set retrieval.k_default 8
-px0 config set versions.keep_all false
+px0 config set logs.retention_days 30
 px0 config set brain.ignore "*.excalidraw.md,Templates/*"
 ```
 
@@ -121,9 +121,9 @@ that exists.
 
 - **Arguments:** none.
 - What you save is checked for parseability before px0 reports success. If it no
-  longer parses, px0 says so and prints the `px0 versions revert` command that
-  restores the last good version — `config.toml` is versioned like everything
-  else.
+  longer parses, px0 says so and names the file to fix — the parse error carries
+  the line. The edit is still recorded, so `px0 changes revert` is there if you
+  would rather drop it wholesale.
 
 ```shell
 px0 config edit

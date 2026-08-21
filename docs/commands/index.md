@@ -7,9 +7,9 @@ Every command follows the same shape: a **group** naming the entity, then a
 px0 <group> <verb> [arguments] [options]
 ```
 
-`px0 brain add`, `px0 workflows run`, `px0 guidelines review`. The only flat
+`px0 brain add`, `px0 workflows run`, `px0 guidelines list`. The only flat
 commands — no verb — are the ones that act on the install rather than on anything
-in the store: `init`, `skills`, `update`, `version`, `doctor`, `status`, and
+in the store: `init`, `update`, `version`, `doctor`, `status`, and
 `completion`.
 
 ## Groups
@@ -19,16 +19,13 @@ in the store: `init`, `skills`, `update`, `version`, `doctor`, `status`, and
 | [`init`](init.md) | Scaffolding a new store | `px0/store.py` |
 | [`workflows`](workflows.md) | Building, running, and editing workflows | `px0/workflow.py`, `px0/builder.py`, `px0/runner.py` |
 | [`brain`](brain.md) | Ingesting, searching, and asking over your material | `px0/brain.py`, `px0/retrieval.py`, `px0/ask.py` |
-| [`guidelines`](guidelines.md) | Reviewing proposals and tracing claims | `px0/proposals.py`, `px0/claims.py` |
+| [`guidelines`](guidelines.md) | The conventions px0 follows when it works | `px0/authoring.py`, `px0/claims.py` |
 | [`tools`](tools.md) | What workflows can call, and what is authorized | `px0/tools.py`, `px0/connect.py` |
 | [`runs`](runs.md) | Inspecting and replaying past executions | `px0/runs.py`, `px0/runs_tui.py` |
 | [`daemon`](daemon.md) | Running workflows on a schedule | `px0/daemon.py` |
-| [`versions`](versions.md) | Per-file history of the store | `px0/versioning.py` |
 | [`changes`](changes.md) | The store's change log, across files | `px0/versioning.py` |
 | [`store`](store.md) | The store as a whole | `px0/store.py` |
-| [`secrets`](secrets.md) | Values a workflow may use without storing them in its file | `px0/secrets.py` |
 | [`config`](config.md) | Reading and writing `config.toml` | `px0/config.py` |
-| [`skills`](skills.md) | Agent skill bundles | `px0/skills.py` |
 | [`update`](update.md) | Upgrading px0 and migrating the store | `px0/update.py` |
 | [`status`](status.md) | Whether anything needs attention | `px0/status.py` |
 | [`completion`](completion.md) | Shell completion scripts | `px0/completion.py` |
@@ -73,8 +70,8 @@ nothing else, so it can be piped into `jq`. Progress spinners are written to
 stderr and never interleave with it.
 
 Available on: `runs list`, `runs show`, `brain search`, `brain show`,
-`versions list`, `changes list`, `config list`, `config get`, `config path`,
-`doctor`, `status`, `store path`, `store verify`, `secrets list`, `tools list`,
+`changes list`, `config list`, `config get`, `config path`,
+`doctor`, `status`, `store path`, `store verify`, `tools list`,
 `tools search`, `tools call`, `workflows run`, `workflows show`,
 `workflows validate`.
 

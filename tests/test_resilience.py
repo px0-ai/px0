@@ -194,9 +194,9 @@ def test_why_explains_an_unusable_id(tmp_home):
 
     config = config_mod.load(paths.config_path(tmp_home))
     with pytest.raises(provenance.WhyError) as e:
-        provenance.why(tmp_home, config, "nope")
-    # Should name both shapes rather than surfacing an IndexError.
-    assert "claim" in str(e.value)
+        provenance.why(config, "nope")
+    # Should say what a run id looks like rather than surfacing an IndexError.
+    assert "nope" in str(e.value)
 
 
 # --- output paths ------------------------------------------------------
@@ -264,7 +264,7 @@ def test_add_reads_a_markdown_file(tmp_home, tmp_path, monkeypatch):
     src.write_text("# Caching\n\nWrite-through keeps both in sync.\n")
     config = config_mod.load(paths.config_path(tmp_home))
 
-    result = brain.add(tmp_home, config, str(src), no_propose=True)
+    result = brain.add(tmp_home, config, str(src))
 
     assert result.path.exists()
     assert "Write-through" in result.path.read_text()

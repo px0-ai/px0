@@ -8,7 +8,7 @@ Implemented by `px0/workflow.py` (the file format), `px0/builder.py` (building
 from a description), and `px0/runner.py` (execution).
 
 ```
-px0 workflows new <description> [--id ID] [--from-file PATH] [--yes] [--no-clarify] [--no-discover]
+px0 workflows new [description] [--id ID] [--from-file PATH] [--yes] [--no-clarify] [--no-discover]
 px0 workflows run [workflow] [--input K=V] [--output {stdout,file}] [--timeout DURATION] [--no-retry] [--dry-run] [--stdin] [--quiet] [--json]
 px0 workflows edit [workflow] [--yes] [--no-clarify] [--no-discover]
 px0 workflows list
@@ -29,16 +29,71 @@ Turn a description into a workflow file. px0 asks what is ambiguous, finds the
 tools the job needs, authorizes them, writes the workflow, and saves it under
 `workflows/`.
 
-### `description` (required)
+Run it with no description and px0 asks for one — see
+[Starting with no description](#starting-with-no-description).
+
+### `description` (optional)
 
 What you want the workflow to do.
 
 - **Input:** a sentence, quoted. Write it the way you would ask a colleague —
   what should happen, to what, and when.
+- **Default:** omitted, px0 interviews you for it.
 
 ```shell
 px0 workflows new "every Friday, summarize merged PRs and post to Slack"
+px0 workflows new
 ```
+
+### Starting with no description
+
+`px0 workflows new` on its own opens an interview. px0 asks for one thing at a
+time until it has what a workflow file must pin down:
+
+| | |
+| --- | --- |
+| The job | what should happen |
+| The sources | what it reads: which service, account, repository, channel, folder, or your own notes |
+| The delivery | what it produces and where that goes |
+| The cadence | on demand, on a schedule, or when something happens |
+| Done looks like | what makes the output right rather than merely produced |
+
+That checklist is `builder.WORKFLOW_SPEC`, and it is handed to the model as part
+of the prompt — so the questions you get are the fields the plan actually needs,
+not whatever the model finds interesting. The same list drives the clarifying
+questions asked when you *do* type a description, so there is one definition of
+"what is still missing".
+
+```
+› new workflow
+  answer in your own words; press Enter on a blank line to stop
+› What do you want px0 to do for you?
+  digest our merged PRs each week
+› Which repository, and whose PRs — yours or the whole team's?
+  razorpay/api, the whole team's
+› Where should the digest land: a Slack channel, a file, or just printed?
+  #eng on slack
+
+› the request
+Every Friday afternoon, collect the pull requests merged in razorpay/api that
+week and post a short digest to the #eng Slack channel.
+
+› Build this? [Y/edit/n]
+```
+
+One question per turn, and the model sees every answer before writing the next
+one — so answering "razorpay/api, every Friday" in one breath skips the two
+questions that would have asked for those separately. Enter on a blank line ends
+the interview early and the request is written from what you did say. The
+interview stops after eight questions regardless.
+
+The request it writes is what every later pass reads, so it is shown before the
+build spends a planning call: `edit` rewrites it, `n` cancels, anything else
+builds. Because the interview has already settled these questions, the clarifying
+round is skipped — you are not asked twice.
+
+Not available with `--yes`, or when stdin is not a terminal: there is nobody to
+interview, so px0 says so and exits rather than building from nothing.
 
 ### `--id ID`
 
@@ -87,6 +142,37 @@ Read the description from a file instead of the command line.
 ```shell
 px0 workflows new "" --from-file ./friday-digest.txt
 ```
+
+### Guidelines the build writes
+
+Near the end of a build, px0 asks itself whether this workflow leans on a
+durable convention — a review rubric, a commit format, a writing voice — that no
+file in `guidelines/` covers. When it does, px0 drafts that guideline from the
+workflow itself, prints it with the path it would take, and asks:
+
+```
+› guideline: Review rubric
+  the workflow comments on PRs and has no rubric to comment against
+[..] would be saved as  guidelines/review-rubric.md
+
+## Flag only real breakage
+...
+
+› Keep it? [Y/again/n]
+```
+
+`again` redraws it, `n` skips it, anything else saves it. Saved guidelines are
+listed in the new workflow's `guidelines:`, so every run inlines them verbatim.
+The path is printed when it is written, and `px0 guidelines edit <name>` is how
+you make a draft yours.
+
+This is the only way a guideline gets created — there is no
+`px0 guidelines new`. Asking someone to compose a convention from a blank page
+is the step that stopped guidelines from being written at all, so the build
+drafts a defensible version and leaves editing to you.
+
+Skipped entirely under `--yes`: there is nobody to show a draft to, and a
+convention nobody saw should not land in the store.
 
 ---
 
@@ -194,7 +280,7 @@ note saying when it was due against when it actually ran.
 
 Revise a workflow's instructions and rebuild it. Same build pipeline as `new`,
 starting from what the workflow already says. The previous version stays in the
-store's history, so `px0 versions` can show or revert it.
+store's history, so `px0 changes revert` can undo the rebuild.
 
 ### `workflow`
 
@@ -385,9 +471,6 @@ Frontmatter fields, beyond what the build writes for you.
 | `trigger.schedule` | A cron expression. A scheduled workflow's `output.target` must be `file` |
 | `trigger.watch` | `{tool: <read-only tool>, args: {...}, key: <field>, every: 15m}`. Polls the tool and runs when an item it has not seen before appears |
 | `timeout` | A duration. Overridden for one run by `--timeout` |
-
-Anywhere a value is templated — an input's `args`, the body — `{{secrets.NAME}}`
-resolves to a stored secret. See [`px0 secrets`](secrets.md).
 
 ### Watching instead of scheduling
 

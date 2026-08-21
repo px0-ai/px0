@@ -33,8 +33,25 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)  # greedy match spans newline
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 MAX_CLARIFY_ROUNDS = 3      # questions get diminishing; stop asking eventually
+MAX_INTAKE_ROUNDS = 8       # an interview, not an interrogation
 MAX_QUERIES = 4             # catalogue searches per build
 MAX_CANDIDATES = 40         # tools shown to the selection pass
+
+# What a workflow file has to pin down before it can be built, in the order the
+# interview should reach for it. Both the intake interview and the clarify pass
+# are handed this, so the questions a user answers are the fields the plan
+# actually needs rather than whatever the model finds interesting -- and so
+# "what is still missing" has one definition instead of two.
+WORKFLOW_SPEC = """\
+1. THE JOB -- what should happen, in a sentence or two.
+2. THE SOURCES -- what it reads: which service, account, repository, channel,
+   folder, or the user's own notes. The specific one, not the category.
+3. THE DELIVERY -- what it produces and where that goes: a message to a named
+   channel, a file, a ticket, or output printed for the user to read.
+4. THE CADENCE -- when it runs: on demand, on a schedule (say when), or when
+   something happens (say what).
+5. DONE LOOKS LIKE -- what makes the output right rather than merely produced:
+   length, tone, what to lead with, what to leave out."""
 
 
 class BuilderError(Exception):
@@ -92,11 +109,12 @@ def clarify(config: dict, description: str, qa: list[tuple[str, str]]) -> list[s
     prompt = (
         "You are about to turn a request into an automated workflow. Before "
         "planning it, decide whether anything is genuinely ambiguous.\n\n"
-        "Ask ONLY about things that would change the workflow: which account or "
-        "channel or repository, how often it runs, where the output goes, what "
-        "counts as done. Do NOT ask about anything you can pick a reasonable "
-        "default for, and do NOT ask for confirmation of what the request "
-        "already says.\n\n"
+        "A workflow has to pin these down:\n\n"
+        f"{WORKFLOW_SPEC}\n\n"
+        "Ask ONLY where one of those is missing AND the answer would change the "
+        "workflow. Do NOT ask about anything you can pick a reasonable default "
+        "for, and do NOT ask for confirmation of what the request already "
+        "says.\n\n"
         "Respond with ONLY a JSON array of question strings, at most 3. "
         "Return [] if the request is clear enough to build.\n\n"
         f"Request: {description}{_qa_block(qa)}"
@@ -106,6 +124,69 @@ def clarify(config: dict, description: str, qa: list[tuple[str, str]]) -> list[s
     if not isinstance(questions, list):
         raise BuilderError("the harness returned a non-list of questions")
     return [str(q).strip() for q in questions[:3] if str(q).strip()]
+
+
+def _transcript_block(transcript: list[tuple[str, str]]) -> str:
+    """Renders the intake interview so far for inclusion in a prompt."""
+    return "\n".join(f"Q: {q}\nA: {a}" for q, a in transcript)
+
+
+def intake(config: dict, transcript: list[tuple[str, str]],
+           wrap_up: bool = False) -> dict:
+    """One turn of the intake interview: the next question, or the request.
+
+    Returns `{"question": str}` while a field of `WORKFLOW_SPEC` is still both
+    unknown and load-bearing, and `{"description": str}` once the transcript
+    settles enough to build from. `wrap_up` forces the second: the user has
+    stopped answering, so the request is written from what they did say rather
+    than the interview running on without them.
+
+    One question per turn on purpose. Asking a batch means the third question is
+    written before the first is answered, which is how an interview turns into a
+    form -- and the answer to "which repository" is usually what determines
+    whether the next question is worth asking at all.
+    """
+    closing = (
+        "The user has stopped answering. Write the request from what they did "
+        "say and fill the rest with the obvious default; do NOT ask anything "
+        "else.\n\n"
+        if wrap_up else
+        "If a field above is still genuinely unknown AND knowing it would "
+        "change the workflow, ask the single most valuable next question. One "
+        "thing, one sentence, plain words -- name the likely options where "
+        "there are few ('every morning, every Friday, or only when you ask?'). "
+        "Never restate what they already told you, never ask for a field you "
+        "can default sensibly, and skip field 5 unless this is the kind of "
+        "output where taste shows.\n\n"
+        "Otherwise stop asking and write the request.\n\n"
+    )
+    prompt = (
+        "You are interviewing someone who wants to automate a job, to gather "
+        "exactly what a workflow file needs and nothing more:\n\n"
+        f"{WORKFLOW_SPEC}\n\n"
+        f"{closing}"
+        "The request you write becomes the workflow's own description and the "
+        "input to every later pass. Write it as one paragraph in the "
+        "imperative, in their words, naming the specific services, accounts, "
+        "cadence, and destination they gave. Invent no detail they did not "
+        "supply.\n\n"
+        'Respond with ONLY one JSON object: {"question": "<the next question>"} '
+        'or {"description": "<the finished request>"}.\n\n'
+        f"Interview so far:\n{_transcript_block(transcript)}"
+    )
+    raw = harness.invoke(config, prompt, timeout=60)
+    answer = _extract_json(raw)
+    if not isinstance(answer, dict):
+        raise BuilderError("the harness returned no intake object")
+
+    description = str(answer.get("description") or "").strip()
+    if description:
+        return {"description": description}
+    question = str(answer.get("question") or "").strip()
+    if question and not wrap_up:
+        return {"question": question}
+    raise BuilderError(
+        "the harness returned neither a question nor a request during intake")
 
 
 def propose_queries(config: dict, description: str,
@@ -449,15 +530,14 @@ def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]
 class GuidelineProposal:
     """A durable standard this workflow leans on that the store has no file for.
 
-    `path` is relative to `guidelines/`, `why` says what in the workflow depends
-    on it, and `ask` is the question to put to the user -- their answer is the
-    content, because the whole point is that px0 cannot infer a convention the
-    user holds.
+    `path` is relative to `guidelines/`, `title` names the standard, and `why`
+    says what in the workflow depends on it. There is no question to ask: this
+    is the only path by which a guideline gets written, so the draft is produced
+    from the workflow itself and shown to the user to keep, redo, or skip.
     """
     path: str
     title: str
     why: str
-    ask: str
 
 
 def propose_guidelines(config: dict, description: str, plan: Plan,
@@ -467,27 +547,26 @@ def propose_guidelines(config: dict, description: str, plan: Plan,
     Deliberately conservative. A guideline is a *durable, reusable* convention
     that outlives one workflow -- a review rubric, a commit message format, a
     writing voice. Anything the plan's own body already pins down is not one, and
-    neither is generic advice the model could have written without the user, since
-    inlining that into every run costs tokens and teaches px0 nothing.
+    neither is generic advice with no choices in it, since inlining that into
+    every run costs tokens and teaches px0 nothing.
     """
     existing_block = "\n".join(f"- {e}" for e in existing) or "- (none)"
     prompt = (
         "A workflow has just been planned. Decide whether it depends on any "
-        "durable standard held by the USER that no existing guideline file covers.\n\n"
-        "A guideline is a reusable convention that outlives this one workflow: a "
+        "durable convention that no existing guideline file covers.\n\n"
+        "A guideline is a reusable standard that outlives this one workflow: a "
         "code review rubric, a commit message format, a writing voice, a "
         "summarization style, a definition of done. It is worth proposing ONLY if "
-        "(a) the workflow's output quality depends on it, (b) it is the user's "
-        "preference rather than something you could write correctly yourself, and "
-        "(c) no file listed below already covers it.\n\n"
+        "(a) the workflow's output quality depends on it, (b) it would apply "
+        "again to the next workflow of this kind, and (c) no file listed below "
+        "already covers it.\n\n"
         "Do NOT propose: anything the instruction body already specifies in full; "
-        "generic best practice; a restatement of what the workflow does; or a "
-        "second file on a topic already listed.\n\n"
+        "generic best practice with no real choices in it; a restatement of what "
+        "the workflow does; or a second file on a topic already listed.\n\n"
         "Respond with ONLY a JSON array, at most 2 entries, each:\n"
         '{"path": "<kebab-case>.md or <folder>/<kebab-case>.md", '
         '"title": "<short label>", "why": "<what in this workflow needs it, one '
-        'sentence>", "ask": "<the question to ask the user, phrased so a two-line '
-        'answer is enough>"}\n\n'
+        'sentence>"}\n\n'
         "Return [] if the workflow needs no new guideline -- that is the common case.\n\n"
         f"Existing guideline files:\n{existing_block}\n\n"
         f"Workflow description: {plan.description or description}\n\n"
@@ -515,7 +594,6 @@ def propose_guidelines(config: dict, description: str, plan: Plan,
             path=path,
             title=title,
             why=str(entry.get("why") or "").strip(),
-            ask=str(entry.get("ask") or f"What is your {title.lower()} standard?").strip(),
         ))
     return out
 
@@ -537,26 +615,35 @@ def _guideline_path(raw: str) -> str:
     return "/".join(parts)
 
 
-def draft_guideline(config: dict, proposal: GuidelineProposal, answer: str) -> str:
-    """Turns what the user said into a guideline file in px0's own shape.
+def draft_guideline(config: dict, proposal: GuidelineProposal, description: str,
+                   plan: Plan) -> str:
+    """Drafts the guideline the workflow needs, in px0's own shape.
 
-    The user's answer is the authority here: this pass structures it into `## `
-    claim sections -- which is what makes each rule addressable by
-    `px0 guidelines log` and revertable on its own -- and must not add rules the
-    user did not state.
+    Written from the workflow rather than from an interview: the build already
+    knows what the workflow does and what standard it leans on, and asking the
+    user to type a convention from scratch was the step that stopped guidelines
+    from ever getting written. The result is shown before it is saved, and it is
+    an ordinary Markdown file afterwards, so a draft the user disagrees with is
+    a redo or an edit rather than a dead end.
+
+    Sections are `## ` headings because that is what makes each rule addressable
+    as a claim by `px0 guidelines log`.
     """
     prompt = (
-        "Turn the user's stated standard into a guideline file.\n\n"
+        "Write the guideline file for one durable convention a workflow leans on.\n\n"
         "Format: two to five `## ` sections. Each heading is a short "
         "prescriptive instruction (\"Lead with the takeaway\", not \"Takeaways\"). "
         "Under each, two or three lines of plain prose saying what to do and why. "
         "No preamble, no top-level title, no bullet lists, no closing summary.\n\n"
-        "Use ONLY what the user said. Make their wording concrete and specific, "
-        "but do NOT invent additional rules, and do not pad to reach a section "
-        "count -- if they stated one rule, write one section.\n\n"
-        f"Topic: {proposal.title}\n"
-        f"They were asked: {proposal.ask}\n"
-        f"They answered:\n{answer}"
+        "Write the version a careful practitioner would recognize as the "
+        "conventional one, and make every rule concrete enough to follow. This "
+        "file is inlined verbatim into every run of the workflow, so say nothing "
+        "you cannot justify, do not restate what the workflow does, and do not "
+        "pad to reach a section count.\n\n"
+        f"Guideline: {proposal.title}\n"
+        f"What in the workflow needs it: {proposal.why or '(unstated)'}\n"
+        f"Workflow: {plan.description or description}\n\n"
+        f"Instruction body:\n{plan.body[:2000]}"
     )
     text = harness.invoke(config, prompt, timeout=90).strip()
     # A harness that narrates around the answer leaves prose above the first
@@ -572,7 +659,7 @@ def save_guideline(home: Path, rel_path: str, content: str, actor: str = "builde
 
     Goes through `claims.capture_guideline_change` rather than writing the file
     directly, so the new claims get history from their first version and
-    `px0 guidelines log` / `why` / `revert` work on them immediately.
+    `px0 guidelines log` works on them immediately.
     """
     from px0 import claims, versioning  # deferred: both import builder-adjacent modules
 
@@ -582,7 +669,7 @@ def save_guideline(home: Path, rel_path: str, content: str, actor: str = "builde
     claims.capture_guideline_change(
         home, actor,
         [versioning.FileChange(f"guidelines/{rel_path}", content.encode(),
-                               "authored by the user during `px0 workflows new`")],
+                               "drafted during `px0 workflows new`")],
     )
     return dest
 

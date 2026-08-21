@@ -152,16 +152,6 @@ def add_alias(home: Path, old_claim: str, new_claim: str) -> None:
         conn.close()
 
 
-def remove_alias(home: Path, old_claim: str) -> None:
-    """Deletes an alias mapping; no-op if it doesn't exist."""
-    conn = versioning.connect(home)
-    try:
-        conn.execute("DELETE FROM aliases WHERE old_claim = ?", (old_claim,))
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def list_aliases(home: Path) -> list[dict]:
     """Returns every alias mapping, sorted by old_claim."""
     conn = versioning.connect(home)
@@ -171,24 +161,6 @@ def list_aliases(home: Path) -> list[dict]:
         ).fetchall()]
     finally:
         conn.close()
-
-
-def resolve_claim(home: Path, claim_id: str, _seen: set | None = None) -> str:
-    """Follow the alias chain forward to the current claim id."""
-    _seen = _seen or set()
-    if claim_id in _seen:
-        return claim_id
-    conn = versioning.connect(home)
-    try:
-        row = conn.execute(
-            "SELECT new_claim FROM aliases WHERE old_claim = ?", (claim_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        return claim_id
-    _seen.add(claim_id)
-    return resolve_claim(home, row["new_claim"], _seen)
 
 
 def lineage_slugs(home: Path, path: str, claim_id: str) -> set[str]:
@@ -292,42 +264,3 @@ def guidelines_log(home: Path, claim_id: str) -> list[dict]:
             "evidence": v["evidence"],
         })
     return entries
-
-
-def guidelines_revert(home: Path, claim_id: str, to_version: int, actor: str) -> str | None:
-    """Restores one claim's section text from an earlier file version, splicing it
-    back into the current file content (replacing the section if it's still present
-    under any alias, appending it otherwise) and recording the result as a new change.
-    Raises ValueError if the target version has no content or lacks this claim,
-    or ClaimIdError if claim_id is malformed."""
-    path, _ = parse_claim_id(claim_id)
-    slugs = lineage_slugs(home, path, claim_id)
-
-    old_content = versioning.show_version(home, path, to_version)
-    if old_content is None:
-        raise ValueError(f"{path}@v{to_version} has no content to restore")
-    old_sections = {s.slug: s for s in extract_sections(old_content.decode("utf-8"))}
-    old_slug = next((s for s in slugs if s in old_sections), None)
-    if old_slug is None:
-        raise ValueError(f"claim not present in {path}@v{to_version}")
-    restored_text = old_sections[old_slug].text
-
-    current_path = Path(home) / path
-    current_content = current_path.read_text() if current_path.exists() else ""
-    current_sections = extract_sections(current_content)
-    current_slug = next((s.slug for s in current_sections if s.slug in slugs), None)
-
-    if current_slug is not None:
-        parts = []
-        for s in current_sections:
-            parts.append(restored_text if s.slug == current_slug else s.text)
-        new_content = "".join(parts)
-    else:
-        sep = "\n" if current_content and not current_content.endswith("\n") else ""
-        new_content = current_content + sep + ("\n" if current_content else "") + restored_text
-
-    current_path.parent.mkdir(parents=True, exist_ok=True)
-    current_path.write_text(new_content)
-    return capture_guideline_change(
-        home, actor, [versioning.FileChange(path, new_content.encode())]
-    )

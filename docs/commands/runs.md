@@ -134,10 +134,6 @@ inlined, the passages it retrieved, and the tool calls it made.
 
 - **Input:** a run id.
 
-`px0 guidelines why <claim_id>` is the same verb for claims. One implementation
-serves both — it branches on the id's shape — but each is listed under the group
-whose ids it takes.
-
 ## `px0 runs list --running`
 
 Only the runs in flight right now, with the workflow each one is running and its

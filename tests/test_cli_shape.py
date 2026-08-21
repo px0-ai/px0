@@ -24,18 +24,15 @@ GROUPS = {
                    "copy", "disable", "enable"},
     "brain":      {"add", "refresh", "list", "search", "ask", "reindex", "show", "rm",
                    "export"},
-    "guidelines": {"list", "review", "log", "revert", "why", "consolidate", "alias",
-                   "new", "edit", "show", "rm"},
+    "guidelines": {"list", "log", "edit", "show", "rm"},
     "runs":       {"list", "show", "output", "rerun", "logs", "why", "cancel", "prune",
                    "open"},
-    "versions":   {"list", "show", "diff", "revert", "prune"},
     "changes":    {"list", "show", "revert"},
     "store":      {"export", "list", "import", "path", "verify"},
     "config":     {"list", "get", "set", "unset", "edit", "path", "model", "composio"},
     "tools":      {"list", "search", "call", "connect", "disconnect", "refresh"},
     "daemon":     {"install", "uninstall", "status", "start", "stop", "restart",
                    "logs", "serve"},
-    "secrets":    {"set", "list", "unset"},
     "mcp":        {"serve"},
 }
 
@@ -63,7 +60,7 @@ def test_only_the_four_install_commands_are_flat():
     """Everything else must name its entity first."""
     top = set(_top_level())
     leaves = {name for name in top if not _verbs(name)}
-    assert leaves == FLAT | {"skills"}, leaves
+    assert leaves == FLAT, leaves
 
 
 @pytest.mark.parametrize("entity, verbs", sorted(GROUPS.items()))
@@ -89,9 +86,8 @@ def test_the_old_flat_verbs_are_gone(gone):
     (["brain", "ask", "q"], "cmd_ask"),
     (["brain", "reindex"], "cmd_reindex"),
     (["guidelines", "list"], "cmd_guidelines_list"),
-    (["guidelines", "review"], "cmd_guidelines"),
-    (["guidelines", "consolidate"], "cmd_consolidate"),
-    (["guidelines", "why", "f.md#c1"], "cmd_why"),
+    (["guidelines", "log", "f.md#c1"], "cmd_guidelines"),
+    (["guidelines", "edit", "style"], "cmd_guidelines_file"),
     (["runs", "why", "r_1"], "cmd_why"),
     (["runs", "list"], "cmd_runs"),
     (["store", "list"], "cmd_store_list"),
@@ -102,11 +98,41 @@ def test_every_leaf_dispatches_to_its_own_handler(argv, handler):
     assert cli.build_parser().parse_args(argv).func.__name__ == handler
 
 
-def test_why_takes_a_claim_id_under_guidelines_and_a_run_id_under_runs():
-    """One handler, two id shapes -- provenance.why branches on the id itself."""
+def test_why_is_a_runs_verb_only():
+    """Claim provenance went with `guidelines why`; a run's is what is left."""
     p = cli.build_parser()
-    assert p.parse_args(["guidelines", "why", "go.md#c1"]).target_id == "go.md#c1"
     assert p.parse_args(["runs", "why", "r_20260820"]).target_id == "r_20260820"
+    with pytest.raises(SystemExit):
+        p.parse_args(["guidelines", "why", "go.md#c1"])
+
+
+@pytest.mark.parametrize("gone", [
+    ["secrets", "list"],
+    ["secrets", "set", "GITHUB_TOKEN", "x"],
+])
+def test_secrets_are_gone_now_that_every_credential_lives_at_composio(gone):
+    """The only credential px0 holds is the Composio API key, in config.toml."""
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(gone)
+
+
+@pytest.mark.parametrize("gone", [
+    ["versions", "list", "workflows/x.md"],
+    ["versions", "show", "workflows/x.md@v1"],
+    ["versions", "diff", "workflows/x.md", "1", "2"],
+    ["versions", "revert", "workflows/x.md", "--to", "v1"],
+    ["versions", "prune"],
+])
+def test_per_file_version_verbs_are_gone(gone):
+    """`changes` is the unit of undo now; the store still keeps its history."""
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(gone)
+
+
+def test_a_guideline_cannot_be_created_by_hand():
+    """`px0 workflows new` writes guidelines; there is no other way in."""
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["guidelines", "new", "style"])
 
 
 def test_a_group_with_no_verb_is_an_error_not_a_no_op():

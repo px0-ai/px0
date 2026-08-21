@@ -16,7 +16,7 @@ from pathlib import Path
 from px0 import __version__, SCHEMA_VERSION
 from px0 import connect as connect_mod
 from px0 import config as config_mod
-from px0 import daemon, harness, paths, proposals, retrieval, versioning
+from px0 import daemon, harness, paths, retrieval, versioning
 
 
 def _check_credentials(home: Path) -> dict:
@@ -249,18 +249,24 @@ def _check_connections(home: Path) -> dict:
 
 
 def _check_unreferenced_guidelines(home: Path) -> dict:
-    """Counts guideline files that no workflow lists.
+    """Counts guideline files that no workflow lists under its `guidelines:`.
 
-    Informational, never a failure: spec.md:792 puts unreferenced files in the
-    consolidation report ("to surface staleness"), which `px0 guidelines consolidate`
-    already does. Failing here would also mean every freshly initialized store
-    is unhealthy -- `px0 init` scaffolds guidelines but no workflows, so all of
-    them start out unreferenced.
+    Informational, never a failure. An unreferenced guideline is not broken --
+    it is a convention nothing currently calls for, which is what a guideline
+    written for a workflow that was since deleted looks like. Failing here would
+    also mean a store is unhealthy for keeping a file it does not use.
     """
-    files = proposals.unreferenced_guideline_files(home)
+    from px0 import workflow as workflow_mod
+
+    base = paths.guidelines_dir(home)
+    all_files = {str(p.relative_to(base)) for p in base.rglob("*.md")}
+    referenced: set[str] = set()
+    for wf in workflow_mod.load_all(home).values():
+        referenced.update(wf.guidelines)
+    files = sorted(all_files - referenced)
     detail = f"{len(files)} unreferenced file(s)"
     if files:
-        detail += " -- see `px0 guidelines consolidate`"
+        detail += " -- nothing inlines them; remove or link them from a workflow"
     return {"ok": True, "detail": detail, "files": files}
 
 
