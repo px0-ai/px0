@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from px0 import config as config_mod
+from px0 import paths
 
 
 _SINCE_RE = re.compile(r"-?(\d+)([dwh])")
@@ -60,11 +61,26 @@ def new_run_id(prefix: str = "run") -> str:
     return f"{prefix}_{ts}-{secrets.token_hex(2)}"
 
 
+class RunIdError(ValueError):
+    """A run id is not of the form `<prefix>_YYYYMMDD-HHMMSS-xxxx`."""
+    pass
+
+
 def _date_of(run_id: str) -> str:
     """Extracts the run's date (YYYY-MM-DD) from its run id, used to
-    partition records and logs into per-day directories."""
+    partition records and logs into per-day directories.
+
+    Raises RunIdError on anything that isn't a run id, so a mistyped argument
+    reports itself instead of surfacing an IndexError from the split.
+    """
     # run_YYYYMMDD-HHMMSS-xxxx -> YYYY-MM-DD
-    ts = run_id.split("_", 1)[1].split("-")[0]
+    _, _, rest = run_id.partition("_")
+    ts = rest.split("-")[0]
+    if not ts.isdigit() or len(ts) != 8:
+        raise RunIdError(
+            f"{run_id!r} is not a run id -- expected something like "
+            "run_20260817-093000-ab12 (see `px0 runs list`)"
+        )
     return f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
 
 
@@ -82,7 +98,14 @@ def log_path(config: dict, run_id: str) -> Path:
 
 def write_record(config: dict, record: dict) -> None:
     """Writes a run record as JSON to disk, creating parent directories as
-    needed. Overwrites any existing record for the same run id."""
+    needed. Overwrites any existing record for the same run id.
+
+    Stamps the owning store, because `logs.path` defaults to one directory
+    shared by every store on the machine: without this, a second store's
+    `px0 runs list` showed the first store's runs, and offered to rerun
+    workflows it does not have.
+    """
+    record.setdefault("store", str(paths.store_home()))
     path = record_path(config, record["id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, indent=2, default=str))
@@ -127,10 +150,16 @@ def list_records(
     """Lists run records matching the given filters (workflow id,
     failed-only, since a given time), newest first. Returns an empty list
     if the records directory doesn't exist. Record files that fail to
-    parse as JSON are silently skipped."""
+    parse as JSON are silently skipped.
+
+    Only the current store's runs are listed. Records written before runs
+    carried a store stamp have no owner recorded, so they are included rather
+    than hidden -- on the single-store setup that is every one of them.
+    """
     base = resolve_logs_path(config) / "records"
     if not base.exists():
         return []
+    this_store = str(paths.store_home())
     records: list[dict] = []
     for date_dir in sorted(base.iterdir(), reverse=True):
         if not date_dir.is_dir():
@@ -139,6 +168,9 @@ def list_records(
             try:
                 rec = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
+                continue
+            owner = rec.get("store")
+            if owner is not None and owner != this_store:
                 continue
             if workflow and rec.get("workflow_id") != workflow:
                 continue

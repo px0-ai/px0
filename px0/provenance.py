@@ -27,4 +27,11 @@ def why(home: Path, config: dict, target_id: str) -> dict:
         record = runs_mod.read_record(config, target_id)
     except FileNotFoundError as e:
         raise WhyError(str(e))
+    except runs_mod.RunIdError as e:
+        # Neither a claim id (no '#') nor a run id: say what both look like
+        # rather than letting the run-id parse error stand as the whole answer.
+        raise WhyError(
+            f"{e} If you meant a guideline claim, ids look like "
+            "<file>.md#<section-slug>."
+        )
     return {"kind": "run", "record": record}

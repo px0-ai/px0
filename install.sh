@@ -13,6 +13,26 @@ if [ "$1" = "--uninstall" ]; then
     else
         python3 -m pipx uninstall px0 >/dev/null 2>&1 || true
     fi
+    # Remove the scheduler unit before the binary goes: a launchd job with
+    # KeepAlive, or a systemd service, otherwise keeps trying to run a px0 that
+    # is no longer installed.
+    PLIST="$HOME/Library/LaunchAgents/sh.px0.daemon.plist"
+    if [ -f "$PLIST" ]; then
+        launchctl unload "$PLIST" >/dev/null 2>&1 || true
+        rm -f "$PLIST"
+        echo "Removed the launchd scheduler unit."
+    fi
+    UNIT="$HOME/.config/systemd/user/px0d.service"
+    if [ -f "$UNIT" ]; then
+        systemctl --user disable --now px0d.service >/dev/null 2>&1 || true
+        rm -f "$UNIT"
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        echo "Removed the systemd scheduler unit."
+    fi
+    if crontab -l 2>/dev/null | grep -q "px0 workflows run"; then
+        echo "Note: px0 cron entries remain in your crontab; remove them with \`crontab -e\`."
+    fi
+
     echo "To remove all local configurations and history, run:"
     echo "  rm -rf ~/.px0"
     exit 0

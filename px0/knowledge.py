@@ -59,10 +59,36 @@ def write_file(dest: Path, header: dict, body: str) -> None:
 
 
 def _slug_from_source(source: str) -> str:
-    """Turns a URL or file path into a filesystem-safe filename stem, capped at 80 chars."""
+    """Turns a URL or file path into a filesystem-safe filename stem, capped at 80 chars.
+
+    A local file slugs from its own name, not its absolute path: slugging the
+    full path and truncating to 80 chars made every file under a long directory
+    collide on the same stem, so ingesting a second one silently overwrote the
+    first.
+    """
+    if not urlparse(source).scheme in ("http", "https"):
+        candidate = Path(source).name or source
+        # A dotted filename keeps its stem; the suffix is noise in a slug.
+        stem = Path(candidate).stem or candidate
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", stem).strip("-").lower()
+        if slug:
+            return slug[:80]
     slug = re.sub(r"^https?://", "", source)
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", slug).strip("-").lower()
     return slug[:80] or "untitled"
+
+
+def _title_from_text(body: str, path: Path) -> str:
+    """Uses the first markdown heading as the title, falling back to the stem."""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            if heading:
+                return heading
+        if stripped:
+            break
+    return path.stem
 
 
 def _detect_kind(source: str) -> tuple[str, str]:
@@ -80,14 +106,53 @@ def _detect_kind(source: str) -> tuple[str, str]:
         return "pdf", "papers"
     if suffix in (".docx", ".doc", ".odt"):
         return "document", "docs"
-    raise IngestError(f"unrecognized source: {source}")
+    # Markdown and plain text need no extraction step, and a notes vault is a
+    # documented use for `knowledge.path` -- rejecting the obvious local file
+    # made the library URL-only in practice.
+    if suffix in (".md", ".markdown", ".txt", ".text", ".rst", ".org"):
+        return "text", "docs"
+    if not urlparse(source).scheme and not suffix:
+        raise IngestError(
+            f"unrecognized source: {source} -- give a URL, or a file ending in "
+            ".md, .txt, .pdf, .docx, or .odt"
+        )
+    raise IngestError(
+        f"unrecognized source: {source} -- supported: URLs, YouTube links, and "
+        ".md/.txt/.rst/.pdf/.docx/.odt files"
+    )
+
+
+def _fetch(url: str, timeout: int = 20, **kwargs) -> "requests.Response":
+    """GETs a URL, turning every network fault into IngestError.
+
+    Without this, an expired cert, a 404, or a dropped connection escaped as a
+    raw traceback. TLS verification honours REQUESTS_CA_BUNDLE, which the CLI
+    exports from `connectors.ca_bundle` so intercepting proxies work here the
+    same way they already do for Composio.
+    """
+    headers = {"User-Agent": "px0/0.1", **kwargs.pop("headers", {})}
+    try:
+        resp = requests.get(url, timeout=timeout, headers=headers, **kwargs)
+        resp.raise_for_status()
+    except requests.exceptions.SSLError as e:
+        raise IngestError(
+            f"TLS verification failed for {url}. If your network intercepts TLS, set the "
+            f"CA bundle with `px0 config set connectors.ca_bundle /path/to/ca-bundle.pem`. ({e})"
+        ) from e
+    except requests.exceptions.HTTPError as e:
+        code = e.response.status_code if e.response is not None else "?"
+        raise IngestError(f"{url} returned HTTP {code}") from e
+    except requests.exceptions.Timeout as e:
+        raise IngestError(f"{url} timed out after {timeout}s") from e
+    except requests.exceptions.RequestException as e:
+        raise IngestError(f"could not fetch {url}: {e}") from e
+    return resp
 
 
 def _extract_web(url: str) -> tuple[str, str]:
     """Fetches a web page and extracts its readable text: strips script/style/nav/
     footer/header/aside, prefers <article> or <main> if present. Returns (title, text)."""
-    resp = requests.get(url, timeout=20, headers={"User-Agent": "px0/0.1"})
-    resp.raise_for_status()
+    resp = _fetch(url)
     soup = BeautifulSoup(resp.text, "html.parser")
     title = soup.title.string.strip() if soup.title and soup.title.string else url
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -138,13 +203,13 @@ def _youtube_oembed(url: str) -> dict:
     """Fetches YouTube's public oEmbed metadata (title, author) for a video URL,
     no API key required. Returns {} on any failure."""
     try:
-        resp = requests.get(
-            "https://www.youtube.com/oembed", params={"url": url, "format": "json"}, timeout=10
+        resp = _fetch(
+            "https://www.youtube.com/oembed", timeout=10, params={"url": url, "format": "json"}
         )
         if resp.status_code == 200:
             return resp.json()
-    except requests.RequestException:
-        pass
+    except (IngestError, ValueError):
+        pass  # title metadata is a nicety; a video with no oembed still ingests
     return {}
 
 
@@ -166,8 +231,7 @@ def _extract_youtube(url: str) -> tuple[str, str | None, dict]:
 def enumerate_playlist(url: str) -> list[str]:
     """Scrapes a YouTube playlist page's HTML for video ids and returns their
     watch URLs in playlist order, deduplicated."""
-    resp = requests.get(url, timeout=20, headers={"User-Agent": "px0/0.1"})
-    resp.raise_for_status()
+    resp = _fetch(url)
     ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
     seen, ordered = set(), []
     for vid in ids:
@@ -218,6 +282,19 @@ def add(
         dest = _dest_path(home, config, folder, source)
         write_file(dest, header, body)
         is_stub = False
+    elif kind == "text":
+        src_path = Path(source).expanduser()
+        if not src_path.exists():
+            raise IngestError(f"no such file: {src_path}")
+        try:
+            body = src_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise IngestError(f"could not read {src_path}: {e}") from e
+        header = {"source": str(src_path), "retrieved": today,
+                  "kind": "doc", "title": _title_from_text(body, src_path)}
+        dest = _dest_path(home, config, folder, source)
+        write_file(dest, header, body)
+        is_stub = False
     elif kind == "document":
         body = _extract_document(Path(source).expanduser())
         header = {"source": str(Path(source).expanduser()), "retrieved": today,
@@ -253,20 +330,89 @@ def add(
     return IngestResult(dest, folder, is_stub)
 
 
+def resolve_knowledge_path(home: Path, config: dict, path: str | Path) -> Path:
+    """Resolves a user-supplied knowledge path to a real file.
+
+    Accepts what the user is likely to have in hand: an absolute path, a
+    store-relative one (`knowledge/blogs/x.md`, the form the docs use), a
+    library-relative one (`blogs/x.md`, the form `px0 knowledge list` prints),
+    or a bare filename. Previously only a path relative to the current working
+    directory worked, so neither the listed nor the documented form did.
+    """
+    raw = Path(path).expanduser()
+    base = knowledge_path(home, config)
+    candidates = [raw] if raw.is_absolute() else [
+        Path.cwd() / raw,
+        base / raw,
+        home / raw,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # Last resort: a bare name, matched anywhere in the library.
+    matches = sorted(base.rglob(raw.name)) if raw.name else []
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        rels = ", ".join(str(m.relative_to(base)) for m in matches[:5])
+        raise IngestError(f"{raw.name} is ambiguous -- matches {rels}")
+    raise IngestError(f"no knowledge file at {path} (see `px0 knowledge list`)")
+
+
 def refresh(home: Path, config: dict, path: Path) -> IngestResult:
-    """Retries transcript extraction for a YouTube stub file; rewrites it in place
-    once a transcript is available. Raises IngestError if path isn't a stub or the
-    transcript still isn't published."""
+    """Re-fetches an already-ingested source and rewrites the file in place.
+
+    Handles each kind the library holds: a YouTube stub retries transcript
+    extraction, a web page is fetched again, and a local file is re-read. Only
+    stubs used to be supported, which made the command reject every other file
+    with "is not a stub" despite advertising a re-fetch.
+    """
+    path = resolve_knowledge_path(home, config, path)
     header, body = read_header(path)
-    if header.get("kind") != "stub":
-        raise IngestError(f"{path} is not a stub")
-    source = header["source"]
-    title, transcript, meta = _extract_youtube(source)
-    if not transcript:
-        raise IngestError(f"still no transcript for {source}")
-    new_header = {"source": source, "retrieved": date.today().isoformat(),
-                  "kind": "video", "title": title}
-    write_file(path, new_header, transcript)
+    source = header.get("source")
+    if not source:
+        raise IngestError(f"{path} records no source to re-fetch")
+    today = date.today().isoformat()
+
+    if header.get("kind") == "stub":
+        title, transcript, meta = _extract_youtube(source)
+        if not transcript:
+            raise IngestError(f"still no transcript for {source}")
+        new_header = {"source": source, "retrieved": today,
+                      "kind": "video", "title": title}
+        write_file(path, new_header, transcript)
+    else:
+        kind, _ = _detect_kind(source)
+        if kind == "web":
+            title, new_body = _extract_web(source)
+            new_header = {"source": source, "retrieved": today,
+                          "kind": header.get("kind", "blog"), "title": title}
+        elif kind == "youtube":
+            title, transcript, meta = _extract_youtube(source)
+            if not transcript:
+                raise IngestError(f"no transcript published for {source}")
+            new_header = {"source": source, "retrieved": today,
+                          "kind": "video", "title": title}
+            new_body = transcript
+        elif kind == "text":
+            src_path = Path(source).expanduser()
+            if not src_path.is_file():
+                raise IngestError(f"original file is gone: {src_path}")
+            new_body = src_path.read_text(encoding="utf-8")
+            new_header = {"source": source, "retrieved": today,
+                          "kind": header.get("kind", "doc"),
+                          "title": _title_from_text(new_body, src_path)}
+        elif kind == "pdf":
+            new_body = _extract_pdf(Path(source).expanduser())
+            new_header = {"source": source, "retrieved": today,
+                          "kind": "paper", "title": header.get("title", Path(source).stem)}
+        elif kind == "document":
+            new_body = _extract_document(Path(source).expanduser())
+            new_header = {"source": source, "retrieved": today,
+                          "kind": "doc", "title": header.get("title", Path(source).stem)}
+        else:
+            raise IngestError(f"cannot re-fetch a {kind} source")
+        write_file(path, new_header, new_body)
     try:
         from px0 import proposals as proposals_mod
         proposals_mod.propose_from_knowledge(home, config, path)

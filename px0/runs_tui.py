@@ -40,6 +40,9 @@ def format_row(r: dict, widths: dict[str, int] | None = None) -> str:
     widths = widths or {}
     wrote = any(c.get("is_write") for c in r.get("tool_calls", []))
     marker = "  [write]" if wrote else ""
+    if r.get("dry_run"):
+        # A rehearsal looked identical to a real run in the listing.
+        marker += "  [dry-run]"
     fields = [
         r.get("id", "").ljust(widths.get("id", 0)),
         str(r.get("workflow_id") or "").ljust(widths.get("workflow_id", 0)),
@@ -83,8 +86,20 @@ def apply_filters(records: list[dict], workflow: str | None, outcome: str | None
     return filtered
 
 
+class NoTerminalError(RuntimeError):
+    """Raised when the TUI is asked to start without a terminal to draw on."""
+    pass
+
+
 def run(home: Path, config: dict) -> None:
-    """Entry point for the px0 runs curses TUI."""
+    """Entry point for the px0 runs curses TUI.
+
+    Raises NoTerminalError when stdin or stdout is not a terminal -- curses
+    otherwise emits escape sequences and dies inside `cbreak()`, which made
+    `px0 runs | head` unusable. The caller falls back to the plain listing.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise NoTerminalError("no terminal available for the interactive browser")
     try:
         curses.wrapper(_main, home, config)
     except KeyboardInterrupt:

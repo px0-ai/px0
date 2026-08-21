@@ -169,7 +169,7 @@ SCHEMA: dict[str, dict[str, Any]] = {
     },
     "connectors.ca_bundle": {
         "type": str, "choices": None,
-        "help": "CA bundle used to verify TLS to connector APIs; set automatically when a "
+        "help": "CA bundle used to verify TLS for every outbound request; set automatically when an "
                 "intercepting proxy (e.g. Zscaler) makes certifi's bundle insufficient",
     },
     "proposals.max_per_consolidation": {

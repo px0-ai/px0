@@ -48,11 +48,18 @@ EXIT_MODEL_ERROR = 3
 EXIT_INTEGRITY_ERROR = 4
 
 
-def _ctx(require_init: bool = True) -> tuple[Path, dict]:
+def _ctx(require_init: bool = True, scan: bool = True) -> tuple[Path, dict]:
     """Resolves the store home and loads its config for a subcommand.
 
     Exits the process with EXIT_USER_ERROR if the store hasn't been
     initialized and require_init is True.
+
+    Also captures hand edits as versions before the command reads anything
+    (spec.md: "before any command that reads store content"). It used to run
+    only inside a workflow run and the daemon's nightly pass, so editing a file
+    and then asking `px0 versions list` about it showed history without the
+    edit. The scan compares size and mtime over the few dozen versioned files
+    and hashes only what differs, so it is cheap enough to run unconditionally.
     """
     home = paths.store_home()
     if require_init and not store_mod.is_initialized(home):
@@ -66,6 +73,19 @@ def _ctx(require_init: bool = True) -> tuple[Path, dict]:
     composio_api_key = config.get("connectors", {}).get("composio_api_key")
     if composio_api_key:
         os.environ["COMPOSIO_API_KEY"] = composio_api_key
+
+    # Every outbound HTTPS call gets the stored bundle, not just the Composio
+    # ones: on a TLS-intercepting network `knowledge add <url>` failed while
+    # Composio worked, because only the Composio paths applied it.
+    connect_mod.apply_ca_bundle(home)
+
+    if scan and store_mod.is_initialized(home):
+        try:
+            claims.scan_and_process(home)
+        except Exception:
+            # Never let bookkeeping block the command the user actually ran;
+            # `px0 doctor` reports a wedged version store.
+            pass
 
     return home, config
 
@@ -712,7 +732,13 @@ def _print_workflows(home: Path, heading: bool) -> None:
     width = max((len(w) for w, _ in workflows), default=0)
     for wid, wf in workflows:
         print(f"  {wid.ljust(width)}  {ui.dim(wf.description)}")
-    if not workflows:
+    # Broken files are skipped by load_all, so they have to be reported here or
+    # they vanish silently -- the whole point of skipping was to keep the rest
+    # usable, not to hide the breakage.
+    errors = workflow_mod.load_errors(home)
+    for e in errors:
+        ui.warn("unreadable workflow", e, stream=sys.stdout)
+    if not workflows and not errors:
         ui.hint('none yet -- describe one with `px0 workflows new "..."`')
 
 
@@ -723,6 +749,9 @@ def _print_guidelines(home: Path, heading: bool) -> None:
         ui.heading(f"guidelines {ui.dim(f'({len(files)})')}")
     for p in files:
         print(f"  {p.relative_to(base)}")
+    if not files:
+        ui.hint("none yet -- write one in guidelines/, or let "
+                "`px0 workflows new` propose one")
 
 
 def _print_knowledge(home: Path, config: dict, heading: bool) -> None:
@@ -732,6 +761,8 @@ def _print_knowledge(home: Path, config: dict, heading: bool) -> None:
         ui.heading(f"knowledge {ui.dim(f'({len(files)})')}")
     for p in files:
         print(f"  {p.relative_to(base)}")
+    if not files:
+        ui.hint("none yet -- add something with `px0 knowledge add <url-or-file>`")
 
 
 def cmd_workflows_list(args: argparse.Namespace) -> None:
@@ -797,6 +828,17 @@ def cmd_tools(args: argparse.Namespace) -> None:
                       "description": t.description, "params": t.params,
                       **({"status": statuses[t.provider]} if statuses else {})}
                      for t in listed])
+        return
+
+    if not listed:
+        if args.service:
+            ui.info(f"no tools for {args.service!r}")
+            known = sorted({t.provider for t in tools.list_tools(
+                None, home=home if store_mod.is_initialized(home) else None)})
+            if known:
+                ui.hint(f"available: {', '.join(known)}")
+        else:
+            ui.info("no tools available")
         return
 
     width = max((len(t.id) for t in listed), default=0)
@@ -935,6 +977,20 @@ def cmd_daemon(args: argparse.Namespace) -> None:
 
 # --- runs --------------------------------------------------------------
 
+def _print_runs(config: dict, records: list, as_json: bool) -> None:
+    """Prints run records as the aligned plain listing, or as JSON."""
+    if as_json:
+        print(json.dumps(records, indent=2, default=str), flush=True)
+        return
+    from px0 import runs_tui
+    if not records:
+        ui.info("no runs recorded yet")
+        return
+    widths = runs_tui.column_widths(records)
+    for r in records:
+        print(runs_tui.format_row(r, widths))
+
+
 def cmd_runs(args: argparse.Namespace) -> None:
     """Handles `px0 runs` subcommands: list, show, output, rerun, logs -- inspecting
     and replaying past workflow run records."""
@@ -942,22 +998,18 @@ def cmd_runs(args: argparse.Namespace) -> None:
 
     if args.runs_cmd is None:
         from px0 import runs_tui
-        runs_tui.run(home, config)
+        try:
+            runs_tui.run(home, config)
+        except runs_tui.NoTerminalError:
+            # Piped or scripted: print the listing instead of failing, so
+            # `px0 runs | head` behaves like `px0 runs list`.
+            _print_runs(config, runs_mod.list_records(config), as_json=args.json)
         return
 
     if args.runs_cmd == "list":
         since = _parse_since(args.since) if args.since else None
         records = runs_mod.list_records(config, workflow=args.workflow, failed=args.failed, since=since)
-        if args.json:
-            _dump(args, records)
-            return
-        from px0 import runs_tui
-        if not records:
-            ui.info("no runs recorded yet")
-            return
-        widths = runs_tui.column_widths(records)
-        for r in records:
-            print(runs_tui.format_row(r, widths))
+        _print_runs(config, records, as_json=args.json)
         return
 
     if args.runs_cmd == "show":
@@ -976,8 +1028,14 @@ def cmd_runs(args: argparse.Namespace) -> None:
         if not wf_id:
             ui.err("nothing to rerun", "this run was an ask, not a workflow")
             sys.exit(EXIT_USER_ERROR)
+        # A rehearsal reruns as a rehearsal: replaying a --dry-run record as a
+        # live run would fire the write tools the original deliberately stubbed.
+        was_dry = bool(record.get("dry_run"))
+        if was_dry:
+            ui.info("original was a dry run", "rerunning with --dry-run; "
+                    "run it directly to execute for real")
         with ui.spinner(f"Rerunning {wf_id}"):
-            new_record = runner.run(home, config, wf_id, trigger="manual")
+            new_record = runner.run(home, config, wf_id, trigger="manual", dry_run=was_dry)
         role = ui.ok if new_record["outcome"] == "success" else ui.err
         role(f"reran as {new_record['id']}", new_record["outcome"], stream=sys.stderr)
         if new_record.get("output", {}).get("target") == "stdout":

@@ -102,10 +102,44 @@ def detect_renames(old_content: str, new_content: str) -> list[tuple[str, str]]:
     return renames
 
 
+# --- claim ids ---------------------------------------------------------
+
+class ClaimIdError(ValueError):
+    """A claim id is not of the form `<file>.md#<slug>`."""
+    pass
+
+
+def parse_claim_id(claim_id: str) -> tuple[str, str]:
+    """Splits a claim id into (file path, slug), validating its shape.
+
+    Every consumer used to do `claim_id.split("#", 1)` bare, which turned a
+    typo'd id into `not enough values to unpack` -- and let a malformed alias
+    into the table, where it broke lineage lookups for unrelated claims.
+    """
+    if not isinstance(claim_id, str) or "#" not in claim_id:
+        raise ClaimIdError(
+            f"{claim_id!r} is not a claim id -- expected <file>.md#<section-slug>, "
+            "e.g. commit-messages.md#summary-line"
+        )
+    path, slug = claim_id.split("#", 1)
+    if not path or not slug:
+        raise ClaimIdError(
+            f"{claim_id!r} is not a claim id -- both the file and the section slug "
+            "are required, e.g. commit-messages.md#summary-line"
+        )
+    return path, slug
+
+
 # --- alias storage -----------------------------------------------------
 
 def add_alias(home: Path, old_claim: str, new_claim: str) -> None:
-    """Records (or updates) that old_claim now resolves to new_claim."""
+    """Records (or updates) that old_claim now resolves to new_claim.
+
+    Both ids are validated first: an unparseable alias is written once and then
+    breaks every later lineage walk, including for well-formed claims.
+    """
+    parse_claim_id(old_claim)
+    parse_claim_id(new_claim)
     conn = versioning.connect(home)
     try:
         conn.execute(
@@ -160,15 +194,20 @@ def resolve_claim(home: Path, claim_id: str, _seen: set | None = None) -> str:
 def lineage_slugs(home: Path, path: str, claim_id: str) -> set[str]:
     """All slugs (past and present) belonging to this claim's identity,
     by walking the alias graph in both directions."""
-    target_slug = claim_id.split("#", 1)[1]
+    _, target_slug = parse_claim_id(claim_id)
     aliases = list_aliases(home)
     slugs = {target_slug}
     changed = True
     while changed:
         changed = False
         for a in aliases:
-            o_path, o_slug = a["old_claim"].split("#", 1)
-            n_path, n_slug = a["new_claim"].split("#", 1)
+            # Rows written before add_alias validated are skipped, not fatal:
+            # one bad row must not break lineage for every other claim.
+            try:
+                o_path, o_slug = parse_claim_id(a["old_claim"])
+                n_path, n_slug = parse_claim_id(a["new_claim"])
+            except ClaimIdError:
+                continue
             if o_path != path or n_path != path:
                 continue
             if o_slug in slugs and n_slug not in slugs:
@@ -228,8 +267,10 @@ def capture_guideline_change(
 
 def guidelines_log(home: Path, claim_id: str) -> list[dict]:
     """Returns the version history of one claim, following its alias lineage so
-    a section that was renamed still shows its full history under either name."""
-    path, _ = claim_id.split("#", 1)
+    a section that was renamed still shows its full history under either name.
+
+    Raises ClaimIdError if claim_id is not `<file>.md#<slug>`."""
+    path, _ = parse_claim_id(claim_id)
     slugs = lineage_slugs(home, path, claim_id)
     entries = []
     for v in versioning.list_versions(home, path):
@@ -257,8 +298,9 @@ def guidelines_revert(home: Path, claim_id: str, to_version: int, actor: str) ->
     """Restores one claim's section text from an earlier file version, splicing it
     back into the current file content (replacing the section if it's still present
     under any alias, appending it otherwise) and recording the result as a new change.
-    Raises ValueError if the target version has no content or lacks this claim."""
-    path, _ = claim_id.split("#", 1)
+    Raises ValueError if the target version has no content or lacks this claim,
+    or ClaimIdError if claim_id is malformed."""
+    path, _ = parse_claim_id(claim_id)
     slugs = lineage_slugs(home, path, claim_id)
 
     old_content = versioning.show_version(home, path, to_version)

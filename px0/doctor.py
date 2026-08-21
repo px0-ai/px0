@@ -224,6 +224,27 @@ def _check_unreferenced_guidelines(home: Path) -> dict:
     return {"ok": True, "detail": detail, "files": files}
 
 
+def _check_workflows(home: Path) -> dict:
+    """Reports workflow files that fail to parse.
+
+    A real failure, unlike unreferenced guidelines: an unparseable file is a
+    workflow that will never run, and it used to take every other workflow
+    command down with it. Naming the file here is the whole point -- yaml's own
+    error reports the position as "<unicode string>".
+    """
+    from px0 import workflow as workflow_mod
+
+    errors = workflow_mod.load_errors(home)
+    if not errors:
+        return {"ok": True, "detail": "all workflow files parse"}
+    return {
+        "ok": False,
+        "detail": f"{len(errors)} unreadable workflow file(s)",
+        "errors": errors,
+        "fix": "fix the frontmatter in the file(s) listed, or move them out of workflows/",
+    }
+
+
 def _check_update(home: Path) -> dict:
     """Reports the newer version the daemon's weekly check found, if any.
 
@@ -260,6 +281,7 @@ def run(home: Path, config: dict, quick: bool = False) -> dict:
         "locks": _check_locks(home),
         "schema": _check_schema(home),
         "connections": _check_connections(home),
+        "workflows": _check_workflows(home),
         "unreferenced_guidelines": _check_unreferenced_guidelines(home),
         "update": _check_update(home),
     }

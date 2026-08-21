@@ -234,6 +234,57 @@ def _tool_call_loop(
     return output, tool_calls
 
 
+# Recognized placeholders in an `output.path`. Both brace styles are accepted:
+# the prompt body references inputs as {{input_id}}, and a plan that carried
+# that habit into the path produced a file literally named
+# `report-{2026-08-17}.md` -- the inner {date} substituted, the outer braces
+# left behind.
+_OUTPUT_PLACEHOLDERS = ("date", "datetime", "time")
+
+
+def _render_output_path(template: str) -> str:
+    """Substitutes the supported placeholders in an output path template.
+
+    Raises RunError on an unknown placeholder rather than writing a filename
+    with braces in it.
+    """
+    now = _now()
+    values = {
+        "date": date.today().isoformat(),
+        "datetime": now.strftime("%Y-%m-%dT%H-%M-%S"),
+        "time": now.strftime("%H-%M-%S"),
+    }
+    rendered = template
+    for name in _OUTPUT_PLACEHOLDERS:
+        rendered = rendered.replace("{{" + name + "}}", values[name])
+        rendered = rendered.replace("{" + name + "}", values[name])
+    leftover = re.findall(r"\{+([^{}]*)\}+", rendered)
+    if leftover:
+        supported = ", ".join("{" + n + "}" for n in _OUTPUT_PLACEHOLDERS)
+        raise RunError(
+            f"output.path has unknown placeholder(s): {', '.join(sorted(set(leftover)))} "
+            f"-- supported: {supported}"
+        )
+    return rendered
+
+
+def _resolve_output_dest(home: Path, rendered: str) -> Path:
+    """Resolves a rendered output path inside the store's output directory.
+
+    An absolute path or a `..` segment used to escape the store entirely -- a
+    run could write anywhere the user could, from a path a model wrote into the
+    plan. Everything is now confined under the output directory.
+    """
+    dest = (home / rendered).resolve()
+    root = paths.output_dir(home).resolve()
+    if root not in dest.parents:
+        raise RunError(
+            f"output.path escapes the store's output directory: {rendered!r} "
+            f"resolves outside {root}"
+        )
+    return dest
+
+
 def route_output(
     home: Path, output_spec: dict, text: str, note: str | None = None
 ) -> dict:
@@ -252,12 +303,12 @@ def route_output(
         return {"target": "stdout", "text": text}
     if target == "file":
         path_template = output_spec.get("path", "output/output-{date}.md")
-        rendered = path_template.replace("{date}", date.today().isoformat())
+        rendered = _render_output_path(path_template)
         if rendered.startswith("outputs/"):
             rendered = "output/" + rendered.removeprefix("outputs/")
-        elif not rendered.startswith("output/") and not Path(rendered).is_absolute():
+        elif not rendered.startswith("output/"):
             rendered = f"output/{rendered}"
-        dest = home / rendered if not Path(rendered).is_absolute() else Path(rendered)
+        dest = _resolve_output_dest(home, rendered)
         lock = paths.lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         with open(lock, "w") as lf:
@@ -294,6 +345,10 @@ def run(
     record: dict = {
         "id": run_id, "workflow_id": workflow_id, "trigger": trigger,
         "start_time": start.isoformat(), "late": trigger == "late",
+        # Marked on the record so a rehearsal is never mistaken for the real
+        # thing: `runs list` labels it, and `runs rerun` refuses to replay it as
+        # a live run without being told to.
+        "dry_run": bool(dry_run),
     }
 
     def fail(message: str, **extra) -> "RunError":

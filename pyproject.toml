@@ -3,6 +3,8 @@ name = "px0"
 dynamic = ["version"]
 description = "A local-first CLI where everything is a workflow"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
@@ -32,7 +34,7 @@ docs = [
 px0 = "px0.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
