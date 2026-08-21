@@ -43,7 +43,7 @@ You will need:
 Then run:
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/px0-ai/px0/master/install.sh | sh
+curl -fsSL https://px0.ai/install.sh | sh
 ```
 
 Confirm it landed:

@@ -3,6 +3,10 @@ set -e
 
 # px0 installer / uninstaller script
 
+# Must match px0/retrieval.py's QMD_PINNED_VERSION -- px0 doctor hard-fails if
+# the installed qmd version does not match what px0 itself is pinned to.
+QMD_PINNED_VERSION="2.8.3"
+
 # Detect uninstall
 if [ "$1" = "--uninstall" ]; then
     echo "Uninstalling px0..."
@@ -41,7 +45,18 @@ fi
 # Bootstrap pipx if missing
 if ! command -v pipx >/dev/null 2>&1; then
     echo "pipx not found. Bootstrapping pipx..."
-    python3 -m pip install --user pipx
+    if ! pip_out=$(python3 -m pip install --user pipx 2>&1); then
+        if echo "$pip_out" | grep -q "externally-managed-environment"; then
+            # Debian/Ubuntu (PEP 668) refuses any --user install into the
+            # system Python. pipx immediately isolates itself into its own
+            # venv, which is exactly the case PEP 668 means --break-system-packages
+            # for, so this override is safe even though px0 itself never uses it.
+            python3 -m pip install --user --break-system-packages pipx
+        else
+            echo "$pip_out" >&2
+            exit 1
+        fi
+    fi
     python3 -m pipx ensurepath
     export PATH="$PATH:$HOME/.local/bin"
 fi
@@ -66,6 +81,24 @@ fi
 
 echo "Running install: $INSTALL_CMD"
 eval "$INSTALL_CMD"
+
+# Bootstrap qmd, px0's retrieval backend, if it is not already on PATH. Never
+# touches an existing qmd -- version drift is px0 doctor's job to report, not
+# this script's to silently "fix" by reinstalling over what's there.
+if ! command -v qmd >/dev/null 2>&1; then
+    if ! command -v bun >/dev/null 2>&1; then
+        echo "bun not found. Installing bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$PATH:$HOME/.bun/bin"
+    fi
+    if command -v bun >/dev/null 2>&1; then
+        echo "Installing qmd $QMD_PINNED_VERSION via bun..."
+        bun install -g "@tobilu/qmd@$QMD_PINNED_VERSION"
+    else
+        echo "bun install did not complete; skipping qmd for now." >&2
+        echo "Install it yourself once bun is on PATH: bun install -g @tobilu/qmd@$QMD_PINNED_VERSION" >&2
+    fi
+fi
 
 # Initialize store
 echo "Initializing px0 store..."

@@ -123,8 +123,14 @@ def test_the_migration_records_the_config_change_for_version_history(v1_store):
     assert b"[brain]" in changes[0].content
 
 
-def test_the_migrated_store_is_searchable(v1_store):
+def test_the_migrated_store_is_searchable(v1_store, monkeypatch):
     update._migrate_v1_to_v2(v1_store)
+
+    canned = '[{"file": "qmd://px0-brain/blogs/a-post.md", "score": 0.9, "snippet": "A saved post."}]'
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
+    monkeypatch.setattr(retrieval, "_qmd_ensure_collection", lambda h, c: None)
+    monkeypatch.setattr(retrieval, "_qmd_run",
+                        lambda config, *a, **k: "1 passage indexed" if a and a[0] == "update" else canned)
 
     config = config_mod.load(paths.config_path(v1_store))
     assert retrieval.reindex(v1_store, config) > 0
@@ -150,10 +156,6 @@ def test_the_stale_qmd_collection_is_dropped(v1_store, monkeypatch):
     Left behind, `px0-knowledge` points at a `knowledge/` folder that no longer
     exists, and qmd keeps it alongside the new `px0-brain` one.
     """
-    config = config_mod.load(paths.config_path(v1_store))
-    config_mod.set_key(config, "retrieval.backend", "qmd")
-    config_mod.save(paths.config_path(v1_store), config)
-
     calls = []
 
     def _fake_qmd(cfg, *args, **kw):
@@ -167,25 +169,9 @@ def test_the_stale_qmd_collection_is_dropped(v1_store, monkeypatch):
     assert ("collection", "remove", "px0-knowledge") in calls
 
 
-def test_a_local_backend_store_does_not_call_qmd_at_all(v1_store, monkeypatch):
-    """qmd is optional; a store that never used it has nothing to clean up."""
-    def _boom(*a, **k):
-        raise AssertionError("qmd must not be invoked for a local-backend store")
-
-    monkeypatch.setattr(retrieval, "_qmd_run", _boom)
-
-    update._migrate_v1_to_v2(v1_store)  # must not raise
-
-    assert (v1_store / "brain").is_dir()
-
-
 def test_a_broken_qmd_does_not_fail_the_store_migration(v1_store, monkeypatch):
     """Losing the folder move because an optional tool is unhappy would be far
     worse than leaving one stale collection behind."""
-    config = config_mod.load(paths.config_path(v1_store))
-    config_mod.set_key(config, "retrieval.backend", "qmd")
-    config_mod.save(paths.config_path(v1_store), config)
-
     monkeypatch.setattr(
         retrieval, "_qmd_run",
         lambda *a, **k: (_ for _ in ()).throw(retrieval.RetrievalBackendError("qmd is gone")),

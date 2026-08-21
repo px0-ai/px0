@@ -17,13 +17,8 @@ def ask(home: Path, config: dict, question: str, k: int = 5,
     """Retrieves the top-k passages from brain/, asks the harness to
     answer using only those passages, and records the exchange as a run.
 
-    Raises AskError if the index is empty/missing or nothing matches.
+    Raises AskError if nothing matches.
     Returns {"answer", "passages", "run_id"}."""
-    if retrieval.index_count(home) == 0:
-        raise AskError(
-            "the brain index is empty or missing; run `px0 brain reindex` first"
-        )
-
     passages = retrieval.retrieve(home, config, question, k, kind=kind)
     if not passages:
         of_kind = f" of kind {kind!r}" if kind else ""

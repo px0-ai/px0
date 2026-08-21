@@ -51,7 +51,6 @@ DEFAULTS: dict[str, Any] = {
         "retry_backoff_seconds": 30,
     },
     "retrieval": {
-        "backend": "local",
         "qmd_cmd": "qmd",
         "k_default": 5,
         "rerank": True,
@@ -271,10 +270,6 @@ SCHEMA: dict[str, dict[str, Any]] = {
     "runs.retry_backoff_seconds": {
         "type": int, "choices": None,
         "help": "seconds to wait before the second attempt, doubling for each attempt after",
-    },
-    "retrieval.backend": {
-        "type": str, "choices": ["local", "qmd"],
-        "help": "retrieval backend; either 'local' (SQLite FTS5/BM25) or 'qmd'",
     },
     "retrieval.qmd_cmd": {
         "type": str, "choices": None,

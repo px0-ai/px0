@@ -13,6 +13,18 @@ from px0 import brain, paths, retrieval
 from tests.conftest import build_docx, build_minimal_pdf, build_odt
 
 
+@pytest.fixture(autouse=True)
+def _no_real_reindex(monkeypatch):
+    """`add`/`refresh` reindex by default, which now shells out to qmd.
+
+    This file is about ingestion mechanics -- routing, encoding, format
+    conversion -- not retrieval, so a real qmd install must not be a
+    precondition for it. See test_retrieval_qmd.py for reindex/retrieve
+    coverage itself.
+    """
+    monkeypatch.setattr(retrieval, "reindex", lambda *a, **k: 0)
+
+
 def _add(tmp_home, brain_config, source, **kw):
     return brain.add(tmp_home, brain_config, str(source), **kw)
 

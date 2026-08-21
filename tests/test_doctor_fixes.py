@@ -37,25 +37,16 @@ def test_tight_credentials_carry_no_fix(tmp_home):
     assert res["ok"] is True and "fix" not in res
 
 
-def test_empty_index_over_existing_brain_points_at_reindex(tmp_home):
-    """The reported case: files on disk, nothing indexed, no hint what to run."""
-    (tmp_home / "brain").mkdir(exist_ok=True)
-    (tmp_home / "brain" / "note.md").write_text("# note\n\nbody\n")
-
-    res = doctor._check_index(tmp_home, {})
-
-    assert res["ok"] is False
-    assert "px0 brain reindex" in res["fix"]
-
-
-def test_a_populated_index_passes_with_no_fix(tmp_home):
-    (tmp_home / "brain").mkdir(exist_ok=True)
-    (tmp_home / "brain" / "note.md").write_text("# note\n\nbody\n")
-    retrieval.reindex(tmp_home, {})
+def test_index_check_reports_qmd_version_and_consent(tmp_home, monkeypatch):
+    monkeypatch.setattr(
+        retrieval, "_qmd_run",
+        lambda config, *a, **kw: f"qmd {retrieval.QMD_PINNED_VERSION} (facd35e)\n",
+    )
 
     res = doctor._check_index(tmp_home, {})
 
     assert res["ok"] is True and "fix" not in res
+    assert retrieval.QMD_PINNED_VERSION in res["detail"]
 
 
 def test_an_uninitialized_store_is_told_to_init(tmp_home):
@@ -110,12 +101,10 @@ def test_a_stale_connection_is_told_which_service_to_reauthorize(tmp_home):
     assert res["ok"] is False and "gmail" in res["fix"]
 
 
-def test_a_qmd_problem_offers_the_pin_and_the_way_out():
-    """Both halves matter: the local backend needs no install at all."""
+def test_a_qmd_problem_offers_the_pinned_build():
     fix = doctor._qmd_install_fix()
 
     assert retrieval.QMD_PINNED_VERSION in fix
-    assert "retrieval.backend local" in fix
 
 
 @pytest.mark.parametrize("error, expected", [

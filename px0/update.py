@@ -33,20 +33,17 @@ class UpdateError(Exception):
 def _drop_stale_qmd_collection(home: Path) -> None:
     """Removes the `px0-knowledge` collection left behind by the rename.
 
-    Only relevant to stores on the qmd backend. The collection points at the
-    `knowledge/` path that no longer exists, and qmd would keep serving results
-    from it alongside the new `px0-brain` one. Best-effort: qmd is optional, and
-    a store that never used it has nothing to clean up.
+    The collection points at the `knowledge/` path that no longer exists, and
+    qmd would keep serving results from it alongside the new `px0-brain` one.
+    Best-effort: a store whose qmd is absent or unhappy has nothing to clean
+    up, and that must not fail the migration.
     """
     try:
         config = config_mod.load(paths.config_path(home))
-        if config_mod.get(config, "retrieval.backend", "local") != "qmd":
-            return
         from px0 import retrieval
         if "px0-knowledge" in retrieval._qmd_run(config, "collection", "list"):
             retrieval._qmd_run(config, "collection", "remove", "px0-knowledge")
     except Exception:
-        # A missing or unhappy qmd must not fail the store migration.
         pass
 
 

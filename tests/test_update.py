@@ -165,11 +165,13 @@ def test_cmd_update_rollback_error_exit(tmp_home, monkeypatch, capsys):
 
 
 def _install_sh_env(tmp_path, pipx_body):
-    """PATH with a stub `pipx` in front, so install.sh never touches the real one.
+    """PATH with stub `pipx` and `qmd` in front, so install.sh never touches
+    the real ones.
 
     The previous version of this test ran the real `pipx uninstall px0`, which
     both mutated the developer's machine and failed wherever pipx is absent or
-    shimmed.
+    shimmed. `qmd` is stubbed too so the bun/qmd bootstrap step -- which only
+    runs when `qmd` is missing -- never fires a real network install here.
     """
     import os
     bin_dir = tmp_path / "bin"
@@ -177,6 +179,9 @@ def _install_sh_env(tmp_path, pipx_body):
     pipx = bin_dir / "pipx"
     pipx.write_text(pipx_body)
     pipx.chmod(0o755)
+    qmd = bin_dir / "qmd"
+    qmd.write_text("#!/bin/sh\necho \"qmd $*\"\n")
+    qmd.chmod(0o755)
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
     return env
 

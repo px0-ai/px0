@@ -393,7 +393,7 @@ the count.
 | `brain.path` | Which directory the brain is |
 | `brain.private_folder` | Which subfolder is withheld from retrieval |
 | `brain.ignore` | Glob patterns never indexed |
-| `retrieval.backend` | `local` (SQLite FTS5/BM25) or `qmd` (hybrid + rerank) |
+| `retrieval.qmd_cmd` | Command prefix used to run the qmd CLI |
 | `retrieval.k_default` | Default passage count per query |
 
 See [Configuration keys](../reference/configuration.md).

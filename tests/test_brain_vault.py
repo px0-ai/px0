@@ -1,10 +1,11 @@
 """Pointing `brain.path` at an existing notes vault.
 
 An Obsidian vault and a px0 brain are the same shape -- a folder of Markdown --
-so `brain.path` should be able to point straight at one. What makes that work is
-not the reading, which was always fine, but everything a real vault carries
-beside the notes: the app's own config, its local trash, drawings stored as
-Markdown, and a top-level folder called `work` that means something else here.
+so `brain.path` should be able to point straight at one. What still lives in
+px0 itself (as opposed to inside the external qmd index, which is opaque from
+here) is the private-folder guarantee -- a top-level folder called `work`
+means something else to px0 than to a notes app, and `retrieve()` withholds it
+by path prefix regardless of what qmd indexed.
 """
 
 import pytest
@@ -79,44 +80,6 @@ def test_ordinary_notes_are_not_ignored(rel):
     assert retrieval.is_ignored(rel, retrieval.DEFAULT_IGNORE_GLOBS) is False
 
 
-def test_a_deleted_note_does_not_stay_searchable(tmp_home, vault_config):
-    """Obsidian deletes into `.trash/`. A note the user deleted showing up in
-    search results is the worst of these, not merely noise."""
-    retrieval.reindex(tmp_home, vault_config)
-
-    assert retrieval.retrieve(tmp_home, vault_config, "salary forty percent", k=5) == []
-
-
-def test_the_notes_apps_own_docs_do_not_pollute_results(tmp_home, vault_config):
-    retrieval.reindex(tmp_home, vault_config)
-
-    assert retrieval.retrieve(tmp_home, vault_config, "dataview TABLE FROM", k=5) == []
-
-
-def test_a_drawing_does_not_pollute_results(tmp_home, vault_config):
-    """An .excalidraw.md is a JSON blob in Markdown clothing."""
-    retrieval.reindex(tmp_home, vault_config)
-
-    assert retrieval.retrieve(tmp_home, vault_config, "elements seed 123456789", k=5) == []
-
-
-def test_the_real_notes_are_searchable(tmp_home, vault_config):
-    retrieval.reindex(tmp_home, vault_config)
-
-    hits = retrieval.retrieve(tmp_home, vault_config, "consistent hashing", k=5)
-
-    assert [h.path for h in hits][:1] == ["Personal/Reading/consistent-hashing.md"]
-
-
-def test_a_folder_with_a_space_in_its_name_works(tmp_home, vault_config):
-    """`Daily Notes/` is Obsidian's default, and spaces in paths are everywhere."""
-    retrieval.reindex(tmp_home, vault_config)
-
-    hits = retrieval.retrieve(tmp_home, vault_config, "platform team backpressure", k=5)
-
-    assert [h.path for h in hits] == ["Daily Notes/2026-08-21.md"]
-
-
 def test_obsidian_frontmatter_does_not_confuse_the_header_parser(tmp_home, vault_config):
     """Vault frontmatter holds tags and aliases, not px0's own keys."""
     header, body = brain.read_header(
@@ -128,17 +91,10 @@ def test_obsidian_frontmatter_does_not_confuse_the_header_parser(tmp_home, vault
     assert "Consistent Hashing" in body
 
 
-def test_wikilinks_and_tags_survive_into_the_index(tmp_home, vault_config):
-    """px0 does not rewrite the vault, so its syntax comes along as text."""
-    retrieval.reindex(tmp_home, vault_config)
-
-    hit = retrieval.retrieve(tmp_home, vault_config, "consistent hashing", k=1)[0]
-
-    assert "[[Sharding]]" in hit.text
-
-
-def test_reading_a_vault_writes_nothing_into_it(tmp_home, vault_config, vault):
+def test_reading_a_vault_writes_nothing_into_it(tmp_home, vault_config, vault, monkeypatch):
     """The whole proposition is that px0 reads a vault in place."""
+    monkeypatch.setattr(retrieval, "_qmd_run", lambda config, *a, **k: "[]")
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
     before = {p: p.stat().st_mtime_ns for p in sorted(vault.rglob("*")) if p.is_file()}
 
     retrieval.reindex(tmp_home, vault_config)
@@ -149,16 +105,6 @@ def test_reading_a_vault_writes_nothing_into_it(tmp_home, vault_config, vault):
 
 
 # --- brain.ignore is configurable -------------------------------------------
-
-def test_ignore_patterns_can_be_extended(tmp_home, vault_config):
-    """A vault owner may not want their templates searched."""
-    _write(retrieval.brain_path(tmp_home, vault_config), "Templates/meeting.md",
-           "# {{title}}\n\nAttendees:\n")
-    config_mod.set_key(vault_config, "brain.ignore", "*.excalidraw.md,Templates/*")
-    retrieval.reindex(tmp_home, vault_config)
-
-    assert retrieval.retrieve(tmp_home, vault_config, "attendees", k=5) == []
-
 
 def test_a_comma_separated_string_is_read_as_a_list():
     """`px0 config set` takes one string; a hand-edited config.toml may too."""
@@ -176,46 +122,34 @@ def test_config_set_coerces_a_list_key(tmp_home):
     assert value == ["*.x.md", "*.y.md"]
 
 
-def test_an_empty_ignore_list_indexes_everything_but_dot_folders(tmp_home, vault_config):
-    """Dot-folders are structural, not a pattern the user can switch off: they
-    hold the notes app's state and its trash."""
-    config_mod.set_key(vault_config, "brain.ignore", "")
-    retrieval.reindex(tmp_home, vault_config)
-
-    paths_found = {p.path for p in retrieval.retrieve(tmp_home, vault_config, "seed elements", k=10)}
-    assert any("excalidraw" in p for p in paths_found)   # now indexed
-    assert retrieval.retrieve(tmp_home, vault_config, "salary forty percent", k=5) == []
-
-
 # --- the private-folder collision -------------------------------------------
 
-def test_the_private_folder_holds_vault_work_notes_back_by_default(tmp_home, vault_config):
+def test_the_private_folder_holds_vault_work_notes_back_by_default(tmp_home, monkeypatch):
     """Documenting the trap, not endorsing it: `work/` is px0's private folder,
     and a vault that happens to have one loses it from every search."""
-    retrieval.reindex(tmp_home, vault_config)
+    canned = ('[{"file": "qmd://px0-brain/work/quarterly-planning.md", "score": 0.9,'
+              ' "snippet": "gateway"},'
+              ' {"file": "qmd://px0-brain/Personal/Reading/consistent-hashing.md",'
+              ' "score": 0.5, "snippet": "hashing"}]')
+    monkeypatch.setattr(retrieval, "_qmd_ensure_collection", lambda h, c: None)
+    monkeypatch.setattr(retrieval, "_qmd_run", lambda config, *a, **k: canned)
 
-    assert retrieval.retrieve(tmp_home, vault_config, "quarterly planning gateway", k=5) == []
+    got = retrieval.retrieve(tmp_home, {}, "quarterly planning gateway", k=5)
 
-
-def test_the_private_folder_can_be_disabled(tmp_home, vault_config):
-    config_mod.set_key(vault_config, "brain.private_folder", "")
-    retrieval.reindex(tmp_home, vault_config)
-
-    hits = retrieval.retrieve(tmp_home, vault_config, "quarterly planning gateway", k=5)
-
-    assert [h.path for h in hits] == ["work/quarterly-planning.md"]
+    assert [p.path for p in got] == ["Personal/Reading/consistent-hashing.md"]
 
 
-def test_the_private_folder_can_be_renamed(tmp_home, vault_config):
-    config_mod.set_key(vault_config, "brain.private_folder", "px0-private")
-    _write(retrieval.brain_path(tmp_home, vault_config), "px0-private/secret.md",
-           "---\nsource: x\n---\n\nThe internal margin is forty percent.\n")
-    retrieval.reindex(tmp_home, vault_config)
+def test_the_private_folder_can_be_disabled(tmp_home, monkeypatch):
+    canned = ('[{"file": "qmd://px0-brain/work/quarterly-planning.md", "score": 0.9,'
+              ' "snippet": "gateway"}]')
+    monkeypatch.setattr(retrieval, "_qmd_ensure_collection", lambda h, c: None)
+    monkeypatch.setattr(retrieval, "_qmd_run", lambda config, *a, **k: canned)
 
-    # the vault's own work/ is now searchable...
-    assert retrieval.retrieve(tmp_home, vault_config, "quarterly planning", k=5)
-    # ...and the renamed folder is what gets held back
-    assert retrieval.retrieve(tmp_home, vault_config, "internal margin", k=5) == []
+    got = retrieval.retrieve(
+        tmp_home, {"brain": {"private_folder": ""}}, "quarterly planning gateway", k=5
+    )
+
+    assert [p.path for p in got] == ["work/quarterly-planning.md"]
 
 
 @pytest.mark.parametrize("rel,folder,expected", [
@@ -233,8 +167,7 @@ def test_is_private_matches_a_path_component_not_a_prefix(rel, folder, expected)
     assert retrieval.is_private(rel, folder) is expected
 
 
-def test_a_renamed_private_folder_is_withheld_on_the_qmd_backend_too(tmp_home, monkeypatch):
-    """Both backends read the rule from the same place."""
+def test_a_renamed_private_folder_is_withheld(tmp_home, monkeypatch):
     canned = ('[{"file": "qmd://px0-brain/vault-private/s.md", "score": 0.9,'
               ' "snippet": "secret"},'
               ' {"file": "qmd://px0-brain/docs/p.md", "score": 0.5, "snippet": "public"}]')
@@ -243,25 +176,11 @@ def test_a_renamed_private_folder_is_withheld_on_the_qmd_backend_too(tmp_home, m
 
     got = retrieval.retrieve(
         tmp_home,
-        {"retrieval": {"backend": "qmd"}, "brain": {"private_folder": "vault-private"}},
+        {"brain": {"private_folder": "vault-private"}},
         "anything", k=5, local_only=True,
     )
 
     assert [p.path for p in got] == ["docs/p.md"]
-
-
-# --- anchors ---------------------------------------------------------------
-
-def test_a_heading_with_no_blank_line_after_it_does_not_produce_a_giant_anchor(
-    tmp_home, vault_config
-):
-    """An Excalidraw file is a heading followed by one enormous line, so the
-    whole blob was treated as the heading and slugified into the anchor."""
-    config_mod.set_key(vault_config, "brain.ignore", "")
-    retrieval.reindex(tmp_home, vault_config)
-
-    for hit in retrieval.retrieve(tmp_home, vault_config, "seed elements", k=10):
-        assert len(hit.anchor) <= retrieval.ANCHOR_MAX_LEN
 
 
 # --- what the user is told --------------------------------------------------
@@ -325,18 +244,6 @@ def test_brain_list_does_not_list_tool_state(tmp_home, vault_config, monkeypatch
 
 
 # --- doctor ---------------------------------------------------------------
-
-def test_doctor_counts_only_what_would_be_indexed(tmp_home, vault_config):
-    """The raw .md count includes the app's state and its trash, so a vault of
-    nothing but ignored files demanded a reindex that could not help."""
-    retrieval.reindex(tmp_home, vault_config)
-
-    res = doctor._check_index(tmp_home, vault_config)
-
-    assert res["ok"] is True
-    # 3 real notes: the reading note, the daily note, and the work note.
-    assert res["detail"].startswith("3 brain files")
-
 
 def test_doctor_reports_what_the_private_folder_holds_back(tmp_home, vault_config):
     res = doctor._check_private_folder(tmp_home, vault_config)

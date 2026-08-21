@@ -91,55 +91,27 @@ def _check_qmd_version(home: Path, config: dict) -> dict:
 
 
 def _qmd_install_fix() -> str:
-    """The fix for any qmd problem: pin the version, or stop using the backend.
-
-    Both halves matter -- the local backend is a real answer here, not a
-    consolation prize, since it needs no install and no model download.
-    """
-    return (f"install the pinned build: npm install -g @tobilu/qmd@{retrieval.QMD_PINNED_VERSION} "
-            f"-- or drop back to the built-in backend: px0 config set retrieval.backend local")
+    """The fix for any qmd problem: install (or reinstall) the pinned build."""
+    return f"install the pinned build: npm install -g @tobilu/qmd@{retrieval.QMD_PINNED_VERSION}"
 
 
 def _check_index(home: Path, config: dict) -> dict:
-    """Flags a stale retrieval index: brain files exist but nothing is indexed."""
-    backend = config_mod.get(config, "retrieval.backend", "local")
-    if backend == "qmd":
-        v_check = _check_qmd_version(home, config)
-        if not v_check["ok"]:
-            return v_check
-        # Also check model download consent status
-        consent_path = paths.retrieval_consent_path(home)
-        import json
-        consented = False
-        if consent_path.exists():
-            try:
-                data = json.loads(consent_path.read_text())
-                consented = bool(data.get("qmd_embed_consented"))
-            except Exception:
-                pass
-        consent_str = "semantic search consented" if consented else "semantic search not consented"
-        return {"ok": True, "detail": f"qmd backend configured (version: {retrieval.QMD_PINNED_VERSION}, {consent_str})"}
-
-    base = retrieval.brain_path(home, config)
-    # Count what retrieval would actually index, not every .md on disk. Pointed
-    # at a notes vault, the raw count includes the app's own state and deleted
-    # notes -- which inflates the number and, for a vault holding nothing but
-    # ignored files, demanded a reindex that could never fix it.
-    globs = retrieval.ignore_globs(config)
-    file_count = 0
-    if base.exists():
-        file_count = sum(
-            1 for p in base.rglob("*.md")
-            if not retrieval.is_ignored(str(p.relative_to(base)), globs)
-        )
-    indexed = retrieval.index_count(home)
-    detail = f"{file_count} brain files, {indexed} indexed passages"
-    if indexed > 0 or file_count == 0:
-        return {"ok": True, "detail": detail}
-    return {"ok": False, "detail": detail,
-            "fix": "build the index: px0 brain reindex -- until then "
-                   "`px0 brain ask` and `px0 brain search` have nothing "
-                   "to retrieve from"}
+    """Flags a stale or misconfigured qmd retrieval index."""
+    v_check = _check_qmd_version(home, config)
+    if not v_check["ok"]:
+        return v_check
+    # Also check model download consent status
+    consent_path = paths.retrieval_consent_path(home)
+    import json
+    consented = False
+    if consent_path.exists():
+        try:
+            data = json.loads(consent_path.read_text())
+            consented = bool(data.get("qmd_embed_consented"))
+        except Exception:
+            pass
+    consent_str = "semantic search consented" if consented else "semantic search not consented"
+    return {"ok": True, "detail": f"qmd backend configured (version: {retrieval.QMD_PINNED_VERSION}, {consent_str})"}
 
 
 def _check_private_folder(home: Path, config: dict) -> dict:

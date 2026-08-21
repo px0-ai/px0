@@ -2051,8 +2051,7 @@ def cmd_changes(args: argparse.Namespace) -> None:
 def cmd_reindex(args: argparse.Namespace) -> None:
     """Handles `px0 brain reindex`: rebuilds the retrieval index from disk."""
     home, config = _ctx()
-    backend = config_mod.get(config, "retrieval.backend", "local")
-    with ui.spinner(f"Reindexing brain ({backend})"):
+    with ui.spinner("Reindexing brain"):
         count = retrieval.reindex(home, config)
     ui.ok("reindexed", f"{count} passages")
 

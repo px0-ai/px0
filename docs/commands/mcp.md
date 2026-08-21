@@ -74,7 +74,7 @@ that is what selects the store.
 
 | Key | Effect |
 | --- | ------ |
-| `retrieval.backend` | Which retrieval backend `brain_ask` and `brain_search` use |
+| `retrieval.qmd_cmd` | Command prefix used to run the qmd CLI |
 | `retrieval.k_default` | Passages retrieved when a call names no `k` |
 | `model.harness_cmd` | The backend `brain_ask` asks to write the answer |
 

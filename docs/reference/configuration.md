@@ -117,7 +117,6 @@ How the brain is searched. See [`px0 brain search`](../commands/brain.md#px0-bra
 
 | Key | Type | Default | What it does |
 | --- | ---- | ------- | ------------ |
-| `retrieval.backend` | str | `local` | retrieval backend; either 'local' (SQLite FTS5/BM25) or 'qmd' |
 | `retrieval.qmd_cmd` | str | `qmd` | command prefix used to run the qmd CLI |
 | `retrieval.k_default` | int | `5` | default number of passages retrieved per query |
 | `retrieval.rerank` | bool | `true` | rescore retrieved passages by how much of the query each one covers, before trimming to k; local arithmetic, no model call |

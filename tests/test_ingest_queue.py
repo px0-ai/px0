@@ -1,5 +1,16 @@
 import json
-from px0 import brain, paths, config as config_mod
+
+import pytest
+
+from px0 import brain, paths, config as config_mod, retrieval
+
+
+@pytest.fixture(autouse=True)
+def _no_real_reindex(monkeypatch):
+    """The queue reindexes once at the end, which now shells out to qmd; this
+    file is about queue mechanics, not retrieval, so stub it out."""
+    monkeypatch.setattr(retrieval, "reindex", lambda *a, **k: 0)
+
 
 def test_process_ingest_queue_happy_path(tmp_home, monkeypatch):
     config = config_mod.load(paths.config_path(tmp_home))

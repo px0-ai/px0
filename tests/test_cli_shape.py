@@ -167,15 +167,15 @@ def test_config_get_and_set_help_list_every_settable_key():
 
 def test_set_shows_allowed_values_and_get_does_not():
     """Choices constrain what you can write; they say nothing about reading."""
-    assert "local|qmd" in _leaf("config", "set").epilog
-    assert "local|qmd" not in _leaf("config", "get").epilog
+    assert "stable|beta" in _leaf("config", "set").epilog
+    assert "stable|beta" not in _leaf("config", "get").epilog
 
 
 def test_the_key_list_is_grouped_and_typed():
     from px0 import config as config_mod
 
     text = config_mod.key_help()
-    assert "  retrieval.backend" in text and "bool" in text and "int" in text
+    assert "  retrieval.qmd_cmd" in text and "bool" in text and "int" in text
     # a blank line separates each TOML table from the next
     assert "\n\n  logs.path" in text
     assert "px0 config list" in text, "should point at the fuller listing"

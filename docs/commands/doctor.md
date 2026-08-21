@@ -51,16 +51,13 @@ px0 doctor --json | jq -r '.checks | to_entries[] | select(.value.ok == false) |
 | `update` | Whether a newer px0 is available |
 | `daemon` | Whether the daemon is running |
 | `harness` | The configured coding agent is on `PATH` and responds |
-| `index` | Brain files exist and are indexed — counts only what retrieval would index, not every `.md` on disk |
+| `index` | qmd's version against the pinned one, and whether its local models have been consented to |
 | `private_folder` | How much the private folder is holding back from retrieval |
 
 `private_folder` is reported even when healthy, because the exclusion is
 invisible in normal use: a brain pointed at a vault with its own `work/` folder
 can have all of it quietly missing from every search. See
 [`px0 brain`](brain.md#private-material).
-
-When the backend is `qmd`, the `index` check instead reports qmd's version
-against the pinned one and whether the local models have been consented to.
 
 ## Output
 

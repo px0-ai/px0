@@ -2,21 +2,16 @@
 ranked passages with file path and anchor out. Guidelines are never
 retrieved by similarity -- only the brain.
 
-Two backends sit behind `retrieve()`, selected by `retrieval.backend`:
+`retrieve()` shells out to the qmd CLI (`retrieval.qmd_cmd`) for hybrid
+keyword + vector search with reranking. Needs qmd installed separately
+and gates its ~2GB of GGUF models behind explicit, printed-size consent
+on the first reindex.
 
-- "local" (default): SQLite FTS5 with BM25 ranking, embedded, no server.
-  Keyword matching only -- no vectors, no rerank, nothing to download.
-- "qmd": shells out to the qmd CLI (`retrieval.qmd_cmd`) for hybrid
-  keyword + vector search with reranking. Needs qmd installed separately
-  and gates its ~2GB of GGUF models behind explicit, printed-size
-  consent on the first reindex.
-
-Either way `local_only=True` (the default at every call site) excludes
+`local_only=True` (the default at every call site) excludes
 `brain/work/`, which never leaves the machine.
 """
 
 import re
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -134,115 +129,9 @@ def brain_path(home: Path, config: dict) -> Path:
     return Path(configured).expanduser()
 
 
-def index_db_path(home: Path) -> Path:
-    """Path to the SQLite FTS5 index file backing retrieval."""
-    return paths.index_dir(home) / "index.sqlite"
-
-
-# FTS5's default unicode61 tokenizer drops Unicode marks (categories Mn/Mc),
-# which for an abugida is not punctuation but part of the word: "शार्दिंग" was
-# indexed as the bare consonants श/र/द/ग, so it collided with any other word
-# built from the same skeleton and could not be searched for as itself. Adding
-# Mn/Mc keeps such words whole. Latin diacritic folding is unaffected -- café
-# still indexes as "cafe" and matches either spelling.
-_FTS_TOKENIZE = "unicode61 categories 'L* N* Co Mn Mc'"
-
-_PASSAGES_DDL = (
-    "CREATE VIRTUAL TABLE passages USING fts5("
-    "text, path UNINDEXED, anchor UNINDEXED, ingested_at UNINDEXED, "
-    "is_stub UNINDEXED, is_work UNINDEXED, kind UNINDEXED, "
-    f"tokenize=\"{_FTS_TOKENIZE}\")"
-)
-
 # Frontmatter `kind` values px0 writes, and so the ones `--kind` can filter on.
 # A file px0 did not write has no kind and is excluded by any --kind filter.
 KINDS = ("blog", "paper", "doc", "video", "stub")
-
-
-def _normalise_ddl(sql: str) -> str:
-    """Whitespace-insensitive form of a CREATE statement, for drift comparison."""
-    return " ".join(sql.split())
-
-
-def _connect(home: Path) -> sqlite3.Connection:
-    """Opens the index DB, creating the index directory and the FTS5 virtual table if needed.
-
-    An index built by an older px0 with a different tokenizer is dropped and
-    recreated rather than reused: the table's tokenizer is fixed at creation, so
-    a stale one would keep answering queries with the old, worse segmentation.
-    The index is derived data, so rebuilding costs nothing but a `reindex` --
-    which `px0 doctor` already prompts for whenever the index is empty.
-    """
-    paths.index_dir(home).mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(index_db_path(home))
-    existing = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'passages'"
-    ).fetchone()
-    # Compared against the whole DDL, not just the tokenizer: the column list
-    # changes too, and an index missing a column would fail every query that
-    # names it rather than simply answering worse.
-    if existing and _normalise_ddl(existing[0] or "") != _normalise_ddl(_PASSAGES_DDL):
-        conn.execute("DROP TABLE passages")
-        existing = None
-    if not existing:
-        conn.execute(_PASSAGES_DDL)
-    return conn
-
-
-# Anchors are a locator shown next to a result, not a summary.
-ANCHOR_MAX_LEN = 80
-
-
-def _chunk_by_paragraph(text: str) -> list[tuple[str, str]]:
-    """Chunks text by splitting on two or more newlines, grouping paragraphs
-    until the chunk is at least 150 words (or we hit a heading/EOF), and
-    finding the nearest preceding markdown heading (e.g. `## Section`) to
-    use as the anchor."""
-    paragraphs = re.split(r"\n{2,}", text)
-    chunks = []
-    current_chunk = []
-    current_words = 0
-    current_anchor = ""
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        # If it's a heading, it starts a new chunk immediately and updates the anchor
-        if para.startswith("#"):
-            if current_chunk:
-                chunks.append((current_anchor, "\n\n".join(current_chunk)))
-                current_chunk = []
-                current_words = 0
-            # Only the heading's own line, capped. A file with no blank lines --
-            # an Excalidraw drawing is one long line of JSON behind a heading --
-            # made the whole paragraph the "heading", producing an anchor
-            # thousands of characters long.
-            h_text = para.lstrip("#").strip().splitlines()[0] if para.strip("#").strip() else ""
-            current_anchor = re.sub(r"[^a-z0-9-]+", "-", h_text.lower()).strip("-")[:ANCHOR_MAX_LEN].strip("-")
-            # Also keep the heading in the text
-            current_chunk.append(para)
-            current_words += len(para.split())
-            continue
-
-        current_chunk.append(para)
-        current_words += len(para.split())
-
-        if current_words >= 150:
-            chunks.append((current_anchor, "\n\n".join(current_chunk)))
-            current_chunk = []
-            current_words = 0
-
-    if current_chunk:
-        chunks.append((current_anchor, "\n\n".join(current_chunk)))
-
-    return chunks
-
-
-def _chunk_file(text: str) -> list[tuple[str, str]]:
-    """Standard file-chunking entry point. Returns a list of (anchor, text) tuples."""
-    return _chunk_by_paragraph(text)
 
 
 def _qmd_run(config: dict, *args, timeout: float = 60) -> str:
@@ -258,8 +147,7 @@ def _qmd_run(config: dict, *args, timeout: float = 60) -> str:
     except FileNotFoundError as e:
         raise RetrievalBackendError(
             "qmd not found on PATH; install with `npm install -g @tobilu/qmd` "
-            "(requires Node.js) or `bun install -g @tobilu/qmd` (requires Bun), "
-            "or set `retrieval.backend` back to `local`."
+            "(requires Node.js) or `bun install -g @tobilu/qmd` (requires Bun)."
         ) from e
     except subprocess.TimeoutExpired as e:
         raise RetrievalBackendError(f"qmd timed out after {timeout}s") from e
@@ -329,10 +217,7 @@ def _as_text(value) -> str | None:
 
     YAML parses an unquoted `retrieved: 2026-08-21` as a `datetime.date`, so a
     hand-written note yields a date where `Passage.ingested_at` promises a
-    string. The qmd path handed that object straight through, and the local path
-    only survived it because sqlite3's implicit date adapter stringified it --
-    an adapter deprecated in 3.12 and slated for removal, while this package
-    supports 3.11 and up. Normalising here settles both.
+    string, and qmd's parsing handed that object straight through.
     """
     if value is None:
         return None
@@ -457,94 +342,19 @@ def _qmd_retrieve(
 
 
 def reindex(home: Path, config: dict) -> int:
-    """Rebuilds the passage index from scratch: wipes the table, walks every brain/*.md
-    file, chunks it, and inserts each chunk as a row. Returns the number of passages indexed."""
-    backend = config_mod.get(config, "retrieval.backend", "local")
-    if backend == "qmd":
-        _qmd_ensure_collection(home, config)
-        consented = _qmd_ensure_embed_consent(home, config)
-        
-        # Run update
-        update_out = _qmd_run(config, "update", "-c", QMD_COLLECTION, timeout=60)
-        
-        if consented:
-            _qmd_run(config, "embed", "-c", QMD_COLLECTION, timeout=1800)
-            
-        digits = re.findall(r"\d+", update_out)
-        return int(digits[0]) if digits else 0
+    """Rebuilds the qmd index: ensures the collection exists, asks for model-download
+    consent if not already given, then runs `qmd update` (and `qmd embed` if consented).
+    Returns the number of passages indexed."""
+    _qmd_ensure_collection(home, config)
+    consented = _qmd_ensure_embed_consent(home, config)
 
-    from px0 import brain as brain_mod  # avoid import cycle
+    update_out = _qmd_run(config, "update", "-c", QMD_COLLECTION, timeout=60)
 
-    base = brain_path(home, config)
-    globs = ignore_globs(config)
-    private = private_folder(config)
-    conn = _connect(home)
-    try:
-        conn.execute("DELETE FROM passages")
-        count = 0
-        if base.exists():
-            for path in sorted(base.rglob("*.md")):
-                # One unreadable file must not cost the whole index. A broken
-                # symlink or an unreadable-permissions file used to abort the
-                # walk partway through, leaving the brain silently half-indexed.
-                try:
-                    rel = str(path.relative_to(base))
-                except ValueError:
-                    continue
-                if is_ignored(rel, globs):
-                    continue
-                try:
-                    header, body = brain_mod.read_header(path)
-                except OSError:
-                    continue
-                is_work = is_private(rel, private)
-                for anchor, chunk_text in _chunk_file(body):
-                    conn.execute(
-                        "INSERT INTO passages (text, path, anchor, ingested_at, "
-                        "is_stub, is_work, kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (chunk_text, rel, anchor, _as_text(header.get("retrieved")),
-                         int(header.get("kind") == "stub"), int(is_work),
-                         _as_text(header.get("kind"))),
-                    )
-                    count += 1
-        conn.commit()
-        return count
-    finally:
-        conn.close()
+    if consented:
+        _qmd_run(config, "embed", "-c", QMD_COLLECTION, timeout=1800)
 
-
-def index_count(home: Path) -> int:
-    """Number of indexed passages, or 0 if the index doesn't exist yet."""
-    if not index_db_path(home).exists():
-        return 0
-    conn = _connect(home)
-    try:
-        return conn.execute("SELECT COUNT(*) FROM passages").fetchone()[0]
-    finally:
-        conn.close()
-
-
-def _fts_query(query: str) -> str:
-    """Builds an FTS5 MATCH expression that OR-matches each whitespace-separated
-    word of the query, as an FTS5 string so punctuation in the input can never
-    be parsed as query syntax.
-
-    Splitting on whitespace and letting FTS5 tokenize inside each quoted string
-    is what keeps the query side and the index side in agreement. Extracting
-    tokens here with a regex could not: `[A-Za-z0-9_]+` discarded every
-    non-ASCII word outright -- a Devanagari or CJK query reached the index as an
-    empty expression and matched nothing -- and even a Unicode-aware `\\w+`
-    silently drops the combining marks that such words are partly made of.
-    """
-    terms = []
-    for piece in query.split():
-        # FTS5 escapes a double quote inside a string by doubling it. A piece
-        # made only of punctuation stays in: it tokenizes to nothing and simply
-        # matches nothing, which is the right answer for it.
-        terms.append('"' + piece.replace('"', '""') + '"')
-    if not terms:
-        return '""'
-    return " OR ".join(terms)
+    digits = re.findall(r"\d+", update_out)
+    return int(digits[0]) if digits else 0
 
 
 # How many candidates the rerank stage looks at before trimming back to k.
@@ -618,52 +428,16 @@ def retrieve(
     not write carry no kind, so they are excluded by any such filter -- there is
     nothing to match them on.
     """
-    backend = config_mod.get(config, "retrieval.backend", "local")
     reranking = bool(config_mod.get(config, "retrieval.rerank", True))
     # Reranking can only reorder what it is given, so ask for more than k when
     # it is on. With rerank off, k rows in means k rows out, as before.
     fetch_k = min(max(k * RERANK_FACTOR, k), RERANK_MAX_CANDIDATES) if reranking else k
-    if backend == "qmd":
-        results = _qmd_retrieve(home, config, query, fetch_k, kind=kind)
-    else:
-        if not index_db_path(home).exists():
-            return []
-        conn = _connect(home)
-        try:
-            sql = (
-                "SELECT path, anchor, text, ingested_at, is_stub, "
-                "bm25(passages) AS score, kind FROM passages "
-                "WHERE passages MATCH ?"
-            )
-            args: list = [_fts_query(query)]
-            if local_only:
-                # Exclude work/ inside the query, not after it: filtering post-LIMIT
-                # would silently return fewer than k passages whenever work/ rows
-                # rank highest.
-                sql += " AND is_work = 0"
-            if kind:
-                # Same reasoning as the work/ exclusion: filter before LIMIT, or a
-                # query whose top hits are all the wrong kind returns short.
-                sql += " AND kind = ?"
-                args.append(kind)
-            sql += " ORDER BY score LIMIT ?"
-            args.append(fetch_k)
-            rows = conn.execute(sql, args).fetchall()
-        finally:
-            conn.close()
-        results = [
-            # sqlite's bm25() returns lower-is-better; negate so higher score means better match
-            Passage(path=r[0], anchor=r[1], text=r[2], score=-r[5],
-                    ingested_at=r[3], is_stub=bool(r[4]), kind=r[6])
-            for r in rows
-        ]
+    results = _qmd_retrieve(home, config, query, fetch_k, kind=kind)
 
     if local_only:
-        # Belt and braces: the local backend already excluded the private folder
-        # in SQL, and qmd has no is_work column to filter on, so this is the qmd
-        # path's only guard. Both sides go through `is_private` so the rule lives
-        # in one place -- a guarantee that depends on matching a string prefix in
-        # two files is one refactor away from silently lapsing.
+        # qmd has no is_work column to filter on, so this is the only guard
+        # against a private passage leaking out -- it goes through `is_private`
+        # so the rule lives in one place.
         private = private_folder(config)
         results = [p for p in results if not is_private(p.path, private)]
 
