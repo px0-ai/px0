@@ -1,5 +1,7 @@
 # px0
 
+Build custom agents and workflows using natural language, then run them on a schedule.
+
 Describe a recurring job in plain English and px0 writes it as a workflow you can run, schedule, and edit.
 
 Everything happens on your machine. Your workflows, your notes, and your conventions are plain Markdown files in one directory you own. There is no server, no account, and no hosted state to sign up for.
@@ -39,7 +41,7 @@ You will need:
 Then run:
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/px0/px0/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/px0-ai/px0/master/install.sh | sh
 ```
 
 Confirm it landed:
@@ -109,16 +111,17 @@ px0 runs                # browse past runs
 px0 runs why <run-id>   # how a run reached its result
 ```
 
-## Try it without setting up any app
+## Build your knowledge base
 
-The knowledge library needs nothing beyond `px0 init`:
+px0 includes a private, local knowledge base that indexes the articles, docs, papers, and transcripts you care about so you and your workflows can query them anytime.
 
 ```shell
-px0 knowledge add https://example.com/some-post
-px0 knowledge ask "what did that post say about caching?"
+px0 knowledge add https://example.com/some-post   # ingest web page, doc, PDF, or YouTube video
+px0 knowledge ask "what did that post say about caching?"  # Q&A across your knowledge
 ```
 
-Add posts, papers, and internal docs as you read them, then ask across all of them.
+- **Local extraction**: Ingests text from web pages, local documents, PDFs, and YouTube transcripts directly on your machine.
+- **Workflow-ready**: Workflows can query your knowledge base to summarize recent reads, look up reference material, or draft content backed by your own sources.
 
 ## Teach it how you work
 

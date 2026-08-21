@@ -69,11 +69,8 @@ some new features to the codebase
 
 ## Documentation Updates
 
-- Documentation is powered by [MkDocs](https://www.mkdocs.org/) with the [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) theme.
 - All documentation files are located in the `docs/` directory.
-- `mkdocs.yml` at the project root defines the documentation structure.
 - **Always keep the documentation updated.** If you add a new feature, change an API, or update core logic, you MUST update the corresponding markdown files in `docs/` to reflect these changes.
-- Ensure that the navigation in `mkdocs.yml` accurately represents the files in the `docs/` folder.
 
 ## Implementation Guidelines
 
