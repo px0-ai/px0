@@ -4,8 +4,10 @@ store, so raw prompts and connector responses stay out of any folder the
 user might copy or sync."""
 
 import json
+import os
 import re
 import secrets
+import signal
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -180,6 +182,86 @@ def list_records(
                 continue
             records.append(rec)
     return records
+
+
+def running_dir(home: Path) -> Path:
+    """Where a run in flight records its pid, so another process can cancel it."""
+    return paths.state_dir(home) / "running"
+
+
+def mark_running(home: Path, run_id: str, workflow_id: str, pid: int | None = None) -> None:
+    """Records that a run is in flight. Best-effort: a store that cannot write
+    this still runs the workflow, it only loses the ability to cancel it."""
+    path = running_dir(home) / f"{run_id}.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "id": run_id, "workflow_id": workflow_id,
+            "pid": pid if pid is not None else os.getpid(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }))
+    except OSError:
+        pass
+
+
+def clear_running(home: Path, run_id: str) -> None:
+    """Removes a run's in-flight marker. Safe to call when there is none."""
+    try:
+        (running_dir(home) / f"{run_id}.json").unlink()
+    except OSError:
+        pass
+
+
+def list_running(home: Path) -> list[dict]:
+    """Every run currently in flight, newest first, with dead markers dropped.
+
+    A crashed run leaves its marker behind, so each one is checked against the
+    process table before being reported: a stale entry would otherwise look
+    like a run that has been going for days.
+    """
+    base = running_dir(home)
+    if not base.exists():
+        return []
+    out = []
+    for path in sorted(base.glob("*.json")):
+        try:
+            rec = json.loads(path.read_text())
+        except (OSError, ValueError):
+            path.unlink(missing_ok=True)
+            continue
+        pid = rec.get("pid")
+        alive = False
+        if isinstance(pid, int):
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except (ProcessLookupError, PermissionError):
+                alive = False
+            except OSError:
+                alive = False
+        if not alive:
+            path.unlink(missing_ok=True)
+            continue
+        out.append(rec)
+    return sorted(out, key=lambda r: r.get("started_at", ""), reverse=True)
+
+
+def cancel(home: Path, run_id: str, force: bool = False) -> dict:
+    """Signals a run in flight to stop. Returns what happened.
+
+    SIGTERM by default so the run's own handlers can finalize the record;
+    `force` sends SIGKILL, which leaves the record as it was last written.
+    """
+    for rec in list_running(home):
+        if rec.get("id") == run_id:
+            pid = rec.get("pid")
+            try:
+                os.kill(int(pid), signal.SIGKILL if force else signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, TypeError, ValueError) as e:
+                clear_running(home, run_id)
+                return {"cancelled": False, "detail": str(e)}
+            return {"cancelled": True, "pid": pid, "signal": "SIGKILL" if force else "SIGTERM"}
+    return {"cancelled": False, "detail": "not running"}
 
 
 def apply_retention(config: dict) -> dict:

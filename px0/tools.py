@@ -252,15 +252,21 @@ def _composio_credentials(home):
 def _composio_execute(ctx: Context, app: str, tool_slug: str, arguments: dict) -> Any:
     """Executes a Composio tool, authorizing the app on demand if it isn't yet."""
     composio = _composio_credentials(ctx.home)
+    from px0 import connect as connect_mod
 
     connected_accounts = composio.get("connected_accounts", {})
-    if app not in connected_accounts:
-        raise _needs_connection(ctx.home, app, "is not connected yet")
+    # Accounts are keyed by Composio's toolkit slug. A curated tool passes px0's
+    # own name ("calendar"), a discovered tool passes the slug itself
+    # ("googlecalendar"); both have to find the same account.
+    key = connect_mod.account_key(app)
+    if key not in connected_accounts:
+        if app in connected_accounts:
+            key = app  # store written before slug-keying
+        else:
+            raise _needs_connection(ctx.home, app, "is not connected yet")
 
-    connected_account_id = connected_accounts[app]
+    connected_account_id = connected_accounts[key]
     api_key = composio["api_key"]
-    
-    from px0 import connect as connect_mod
     client = connect_mod.composio_client(ctx.home, api_key)
 
     try:
@@ -420,32 +426,86 @@ def _discovered_spec(tool) -> ToolSpec:
     )
 
 
-def resolve(tool_id: str, home=None) -> ToolSpec | None:
-    """The ToolSpec for a tool id, curated or discovered, or None if unknown.
+def _local_spec(tool_id: str) -> ToolSpec:
+    """Wraps one built-in local tool as a ToolSpec."""
+    from px0 import localtools
 
-    `home` is needed to see discovered tools -- their metadata lives in the
-    store's catalogue cache, not in this module.
+    provider, description, params, is_write, handler = localtools.BUILTINS[tool_id]
+
+    def wrapped(args: dict, ctx: Context, _h=handler) -> Any:
+        try:
+            return _h(args, ctx)
+        except localtools.LocalToolError as e:
+            raise ConnectorError(str(e)) from e
+
+    return ToolSpec(id=tool_id, provider=provider, description=description,
+                    params=params, is_write=is_write, handler=wrapped)
+
+
+def _user_spec(tool) -> ToolSpec:
+    """Wraps one user-declared tool as a ToolSpec."""
+    from px0 import localtools
+
+    def handler(args: dict, ctx: Context, _t=tool) -> Any:
+        try:
+            return localtools.run_user_tool(_t, args, ctx)
+        except localtools.LocalToolError as e:
+            raise ConnectorError(str(e)) from e
+
+    return ToolSpec(id=tool.id, provider=tool.id.split(".", 1)[0], description=tool.description,
+                    params=tool.params, is_write=tool.is_write, handler=handler)
+
+
+def local_specs() -> dict[str, ToolSpec]:
+    """Every built-in local tool, keyed by id."""
+    from px0 import localtools
+
+    return {tid: _local_spec(tid) for tid in localtools.BUILTINS}
+
+
+def user_specs(home) -> dict[str, ToolSpec]:
+    """Every user-declared tool in the store, keyed by id. Malformed files are skipped."""
+    if home is None:
+        return {}
+    from px0 import localtools
+
+    found, _errors = localtools.load_user_tools(home)
+    return {tid: _user_spec(t) for tid, t in found.items()}
+
+
+def resolve(tool_id: str, home=None) -> ToolSpec | None:
+    """The ToolSpec for a tool id -- curated, local, user-declared, or discovered --
+    or None if unknown.
+
+    `home` is needed to see the last two: their definitions live in the store,
+    not in this module.
     """
     if tool_id in REGISTRY:
         return REGISTRY[tool_id]
+    from px0 import localtools
+
+    if tool_id in localtools.BUILTINS:
+        return _local_spec(tool_id)
     if home is None:
         return None
     from px0 import catalogue
 
-    if not catalogue.is_catalogue_id(tool_id):
-        return None
-    tool = catalogue.load_cached(home).get(tool_id)
-    return _discovered_spec(tool) if tool else None
+    if catalogue.is_catalogue_id(tool_id):
+        tool = catalogue.load_cached(home).get(tool_id)
+        return _discovered_spec(tool) if tool else None
+    return user_specs(home).get(tool_id)
 
 
 def list_tools(service: str | None = None, home=None) -> list[ToolSpec]:
-    """Every usable tool -- curated, plus any discovered by `px0 workflows new` when `home`
-    is given -- optionally narrowed to one provider, sorted by id."""
-    specs = list(REGISTRY.values())
+    """Every usable tool -- curated and local, plus the user-declared and
+    discovered ones when `home` is given -- optionally narrowed to one provider,
+    sorted by id."""
+    specs = list(REGISTRY.values()) + list(local_specs().values())
     if home is not None:
         from px0 import catalogue
 
         specs += [_discovered_spec(t) for t in catalogue.load_cached(home).values()]
+        specs += list(user_specs(home).values())
     if service:
         specs = [t for t in specs if t.provider == service]
     return sorted(specs, key=lambda t: t.id)

@@ -11,6 +11,10 @@ Implemented by `px0/proposals.py` (proposing and applying) and `px0/claims.py`
 (claim identity, history, aliases).
 
 ```
+px0 guidelines new <name> [--from-file PATH] [--no-edit]
+px0 guidelines edit <name>
+px0 guidelines show <name>
+px0 guidelines rm <name> [--yes]
 px0 guidelines list
 px0 guidelines review [--list-only]
 px0 guidelines consolidate [--list-only]
@@ -30,6 +34,95 @@ Every guideline file, relative to `guidelines/`.
 
 - **Arguments:** none.
 - Also printed as one section of `px0 store list`.
+
+---
+
+## `px0 guidelines new`
+
+Create a guideline file. Guidelines are the one thing px0 asks you to write
+yourself, so this writes a template and opens it.
+
+### `name` (required)
+
+What to call it.
+
+- **Input:** a short slug; a trailing `.md` is accepted and stripped. Becomes
+  `guidelines/<name>.md`, which is how a workflow refers to it.
+
+### `--from-file PATH`
+
+Use this file's contents as the body instead of the template.
+
+- **Input:** a path to a text file.
+- **Default:** the template, opened in your editor.
+
+### `--no-edit`
+
+Write the template and stop, without opening an editor.
+
+- **Input:** flag, no value. Default off.
+- For scripted use, and for a terminal with no editor to open.
+
+```shell
+px0 guidelines new commit-messages
+px0 guidelines new go-review --from-file ~/notes/go-review.md
+```
+
+---
+
+## `px0 guidelines edit`
+
+Open a guideline in `$VISUAL`, `$EDITOR`, or the first of `nano`, `vim`, `vi`
+that exists. What you save is captured as a new version, so `px0 versions` can
+diff and revert it.
+
+### `name` (required)
+
+- **Input:** the guideline name, with or without `.md`.
+
+```shell
+px0 guidelines edit commit-messages
+```
+
+An unchanged file records nothing.
+
+---
+
+## `px0 guidelines show`
+
+Print one guideline verbatim — the same text a workflow inlines.
+
+### `name` (required)
+
+- **Input:** the guideline name.
+
+```shell
+px0 guidelines show commit-messages
+```
+
+---
+
+## `px0 guidelines rm`
+
+Remove a guideline, keeping its history.
+
+### `name` (required)
+
+- **Input:** the guideline name.
+
+### `--yes`
+
+Skip the confirmation.
+
+- **Input:** flag, no value. Default off.
+- Workflows that name the guideline are listed first: they will fail validation
+  until they stop naming it.
+
+```shell
+px0 guidelines rm outdated-voice
+```
+
+The content stays in the object store, so `px0 changes revert` puts it back.
 
 ---
 

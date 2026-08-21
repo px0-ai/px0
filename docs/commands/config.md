@@ -11,6 +11,9 @@ Implemented by `px0/config.py`. The full key list is in
 px0 config list [--json]
 px0 config get <KEY> [--json]
 px0 config set <KEY> <VALUE>
+px0 config unset <key>
+px0 config edit
+px0 config path
 px0 config model
 px0 config composio [key]
 ```
@@ -86,6 +89,59 @@ Setting `brain.path` also reports what px0 found there — how many Markdown fil
 how many were skipped as tool state, whether it looks like an Obsidian vault, and
 whether anything will be held back by the private folder. See
 [pointing the brain at a vault](brain.md#pointing-the-brain-at-an-existing-vault).
+
+---
+
+## `px0 config unset`
+
+Drop a key's stored override so it falls back to its default.
+
+### `key` (required)
+
+Which key to clear.
+
+- **Input:** a dotted key, as listed by `px0 config list`. `--help` lists them
+  all.
+- Unsetting a key that was never set is not an error: the result is the same
+  either way. px0 prints the default the key now resolves to.
+- The parent table is removed when it empties, so `config.toml` does not
+  accumulate empty sections.
+
+```shell
+px0 config unset tools.allow_shell
+px0 config unset brain.private_folder
+```
+
+---
+
+## `px0 config edit`
+
+Open `config.toml` in `$VISUAL`, `$EDITOR`, or the first of `nano`, `vim`, `vi`
+that exists.
+
+- **Arguments:** none.
+- What you save is checked for parseability before px0 reports success. If it no
+  longer parses, px0 says so and prints the `px0 versions revert` command that
+  restores the last good version — `config.toml` is versioned like everything
+  else.
+
+```shell
+px0 config edit
+```
+
+---
+
+## `px0 config path`
+
+Print where `config.toml` is.
+
+- **Arguments:** none.
+- `--json` prints it as an object.
+
+```shell
+px0 config path
+$EDITOR "$(px0 config path)"
+```
 
 ---
 

@@ -547,6 +547,65 @@ def _fts_query(query: str) -> str:
     return " OR ".join(terms)
 
 
+# How many candidates the rerank stage looks at before trimming back to k.
+# Wide enough that a passage BM25 ranked eighth can win on term coverage,
+# narrow enough to stay a local, instant pass.
+RERANK_FACTOR = 4
+RERANK_MAX_CANDIDATES = 60
+
+_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _terms(query: str) -> list[str]:
+    """The distinct lowercase words in a query, longest first."""
+    seen, out = set(), []
+    for word in _WORD_RE.findall(query.lower()):
+        if len(word) > 1 and word not in seen:
+            seen.add(word)
+            out.append(word)
+    return sorted(out, key=len, reverse=True)
+
+
+def rerank(query: str, passages: list[Passage], k: int) -> list[Passage]:
+    """Reorders candidates by how well each one actually covers the query.
+
+    BM25 rewards a passage that says one query term many times. A question with
+    three terms in it usually wants the passage that mentions all three, even
+    if each only once -- so coverage leads, then how close the terms sit to
+    each other, then the original score as the tie-break. Pure local
+    arithmetic: no model call, no network, and stable for the same input.
+    """
+    terms = _terms(query)
+    if not terms or not passages:
+        return passages[:k]
+
+    scored = []
+    for rank, passage in enumerate(passages):
+        text = (passage.text or "").lower()
+        positions = []
+        hits = 0
+        for term in terms:
+            index = text.find(term)
+            if index >= 0:
+                hits += 1
+                positions.append(index)
+        coverage = hits / len(terms)
+        if len(positions) > 1:
+            spread = max(positions) - min(positions)
+            # Terms within a paragraph of each other are usually one thought.
+            proximity = 1.0 / (1.0 + spread / 400.0)
+        else:
+            proximity = 0.5 if positions else 0.0
+        # Long passages match more terms by accident; a mild length penalty
+        # keeps a whole chapter from outranking the paragraph that answers.
+        length_penalty = min(1.0, 1200.0 / max(len(text), 1)) ** 0.15
+        combined = (coverage * 3.0) + proximity + (length_penalty * 0.25)
+        scored.append((combined, -rank, passage))
+
+    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [p for _score, _rank, p in scored[:k]]
+
+
 def retrieve(
     home: Path, config: dict, query: str, k: int = 5, local_only: bool = True,
     kind: str | None = None,
@@ -560,8 +619,12 @@ def retrieve(
     nothing to match them on.
     """
     backend = config_mod.get(config, "retrieval.backend", "local")
+    reranking = bool(config_mod.get(config, "retrieval.rerank", True))
+    # Reranking can only reorder what it is given, so ask for more than k when
+    # it is on. With rerank off, k rows in means k rows out, as before.
+    fetch_k = min(max(k * RERANK_FACTOR, k), RERANK_MAX_CANDIDATES) if reranking else k
     if backend == "qmd":
-        results = _qmd_retrieve(home, config, query, k, kind=kind)
+        results = _qmd_retrieve(home, config, query, fetch_k, kind=kind)
     else:
         if not index_db_path(home).exists():
             return []
@@ -584,7 +647,7 @@ def retrieve(
                 sql += " AND kind = ?"
                 args.append(kind)
             sql += " ORDER BY score LIMIT ?"
-            args.append(k)
+            args.append(fetch_k)
             rows = conn.execute(sql, args).fetchall()
         finally:
             conn.close()
@@ -603,4 +666,7 @@ def retrieve(
         # two files is one refactor away from silently lapsing.
         private = private_folder(config)
         results = [p for p in results if not is_private(p.path, private)]
-    return results
+
+    if reranking:
+        return rerank(query, results, k)
+    return results[:k]

@@ -28,6 +28,10 @@ from px0 import runs as runs_mod
 from px0 import workflow as workflow_mod
 
 POLL_INTERVAL_SECONDS = 30
+
+# How many item identities a watch remembers. Enough to span several polls of a
+# busy source without letting the schedule state grow without bound.
+WATCH_SEEN_LIMIT = 500
 LATE_THRESHOLD_SECONDS = 90
 
 
@@ -83,9 +87,12 @@ def _due_fires(schedule: str, last_fire: datetime | None, now: datetime) -> list
 
 def tick(home: Path, config: dict, state: dict) -> dict:
     """Check every scheduled workflow once; spawn `px0 workflows run` for anything
-    due. Returns the updated schedule state."""
+    due. Also polls every watched workflow, which fires on a new item rather
+    than on the clock. Returns the updated schedule state."""
     now = datetime.now()
     for wf in workflow_mod.load_all(home).values():
+        if not wf.enabled:
+            continue  # parked by `px0 workflows disable`; keeps its file and history
         schedule = wf.trigger.get("schedule")
         if not schedule or wf.pipeline:
             continue
@@ -97,8 +104,99 @@ def tick(home: Path, config: dict, state: dict) -> dict:
             spawn_run(home, wf.id, late, fire_time)
             _log_event(config, f"tick: spawned {wf.id} ({'late' if late else 'on-time'})")
             state[wf.id] = fire_time.isoformat()
+
+    _tick_watches(home, config, state, now)
     save_schedule_state(home, state)
     return state
+
+
+def _watch_state(state: dict, wf_id: str) -> dict:
+    """The bookkeeping a watch keeps between polls: when it last looked, and what
+    it had already seen."""
+    watches = state.setdefault("_watches", {})
+    return watches.setdefault(wf_id, {"last_poll": None, "seen": []})
+
+
+def _watch_keys(items, key: str | None) -> list[str]:
+    """The identity of each item a watch returned.
+
+    A watch has to know what it has already acted on, and the tool's own id
+    field is the only honest answer -- position changes, and the whole payload
+    changes when an unrelated field does. Falls back to a hash of the item when
+    no key is named, which still detects a genuinely new item.
+    """
+    import hashlib
+
+    if isinstance(items, dict):
+        for field in ("items", "data", "results", "messages", "events"):
+            if isinstance(items.get(field), list):
+                items = items[field]
+                break
+        else:
+            items = [items]
+    if not isinstance(items, list):
+        items = [items]
+    keys = []
+    for item in items:
+        value = None
+        if isinstance(item, dict):
+            if key:
+                value = item.get(key)
+            else:
+                for field in ("id", "url", "html_url", "number", "message_id", "key"):
+                    if item.get(field) is not None:
+                        value = item[field]
+                        break
+        if value is None:
+            value = hashlib.sha256(
+                json.dumps(item, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        keys.append(str(value))
+    return keys
+
+
+def _tick_watches(home: Path, config: dict, state: dict, now: datetime) -> None:
+    """Polls each watched workflow's read tool and fires on anything new.
+
+    This is what a local-first tool can offer instead of a webhook: Composio's
+    own triggers need a public endpoint to deliver to, and there isn't one on a
+    laptop. The poll interval is the workflow's, floored at a minute.
+    """
+    from px0 import tools as tools_mod
+
+    for wf in workflow_mod.load_all(home).values():
+        if not wf.enabled or wf.pipeline:
+            continue
+        spec = workflow_mod.watch_spec(wf)
+        if not spec:
+            continue
+        ws = _watch_state(state, wf.id)
+        last = ws.get("last_poll")
+        if last:
+            try:
+                if (now - datetime.fromisoformat(last)).total_seconds() < spec["every_seconds"]:
+                    continue
+            except ValueError:
+                pass
+        ws["last_poll"] = now.isoformat()
+        try:
+            result = tools_mod.call(home, config, spec["tool"], spec["args"])
+        except Exception as e:
+            _log_event(config, f"watch: {wf.id} poll failed: {e}")
+            continue
+        keys = _watch_keys(result, spec.get("key"))
+        seen = set(ws.get("seen") or [])
+        fresh = [k for k in keys if k not in seen]
+        # First poll only learns the baseline. Otherwise adding a watch to an
+        # inbox with 2,000 messages fires immediately on all of it.
+        if ws.get("primed"):
+            if fresh:
+                spawn_run(home, wf.id, late=False, fire_time=now)
+                _log_event(config, f"watch: spawned {wf.id} ({len(fresh)} new)")
+        else:
+            ws["primed"] = True
+            _log_event(config, f"watch: primed {wf.id} with {len(keys)} existing items")
+        # Cap what is remembered: a busy watch would grow the state file forever.
+        ws["seen"] = (keys + [k for k in seen if k not in set(keys)])[:WATCH_SEEN_LIMIT]
 
 
 def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime) -> None:
@@ -304,7 +402,7 @@ def crontab_block(home: Path, px0_bin: str) -> str:
     lines = ["# BEGIN px0-managed"]
     for wf in workflow_mod.load_all(home).values():
         schedule = wf.trigger.get("schedule")
-        if schedule and not wf.pipeline:
+        if schedule and not wf.pipeline and wf.enabled:
             lines.append(
                 f"{schedule} PX0_HOME={home} {px0_bin} workflows run {wf.id} --quiet")
     lines.append("# END px0-managed")
@@ -342,6 +440,63 @@ def install(home: Path, fallback_cron: bool = False) -> dict:
             "start_hint": "add the printed block with `crontab -e`",
             "reduced_semantics": "no missed-fire recovery, no log rotation, "
                                   "no background ingest queue"}
+
+
+def uninstall(home: Path) -> dict:
+    """Removes whatever `install` put in place, and stops the daemon if it is running.
+
+    `install` had no inverse: the only way to remove the scheduler unit was
+    `install.sh --uninstall`, which also removes px0 itself. This leaves px0 and
+    the store exactly as they are, and only stops work from firing on its own.
+
+    Reports the crontab case rather than editing the user's crontab, which is
+    theirs to own.
+    """
+    removed = []
+    stopped = False
+
+    pidfile = pidfile_path(home)
+    if pidfile.exists():
+        try:
+            pid = int(pidfile.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            stopped = True
+            for _ in range(20):
+                time.sleep(0.1)
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, PermissionError):
+                    break
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass
+        pidfile.unlink(missing_ok=True)
+
+    plist_path = Path("~/Library/LaunchAgents/sh.px0.daemon.plist").expanduser()
+    if plist_path.exists():
+        subprocess.run(["launchctl", "unload", str(plist_path)],
+                       capture_output=True, check=False)
+        plist_path.unlink()
+        removed.append(str(plist_path))
+
+    unit_path = Path("~/.config/systemd/user/px0d.service").expanduser()
+    if unit_path.exists():
+        subprocess.run(["systemctl", "--user", "disable", "--now", "px0d.service"],
+                       capture_output=True, check=False)
+        unit_path.unlink()
+        subprocess.run(["systemctl", "--user", "daemon-reload"],
+                       capture_output=True, check=False)
+        removed.append(str(unit_path))
+
+    cron_note = None
+    try:
+        listing = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        if "px0-managed" in (listing.stdout or "") or "px0 workflows run" in (listing.stdout or ""):
+            cron_note = ("px0 entries are still in your crontab; remove the "
+                         "px0-managed block with `crontab -e`")
+    except (OSError, FileNotFoundError):
+        pass
+
+    return {"removed": removed, "stopped": stopped, "cron_note": cron_note}
 
 
 def restart_if_running(home: Path, config: dict) -> None:

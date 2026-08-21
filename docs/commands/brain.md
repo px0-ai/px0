@@ -8,9 +8,12 @@ Implemented by `px0/brain.py` (ingestion), `px0/retrieval.py` (indexing and
 search), and `px0/ask.py` (retrieval plus generation).
 
 ```
-px0 brain add <source> [--to FOLDER] [--no-propose]
-px0 brain refresh <path> [--no-propose]
+px0 brain add <source> [--to FOLDER] [--from-file PATH] [--no-propose]
+px0 brain refresh [path] [--all] [--stale] [--days N] [--no-propose]
 px0 brain list
+px0 brain show <path> [--json]
+px0 brain rm <path> [--yes]
+px0 brain export <dir> [--include-private]
 px0 brain search <query> [--k N] [--kind KIND] [--json]
 px0 brain ask <question> [--k N] [--kind KIND] [--sources]
 px0 brain reindex
@@ -127,6 +130,126 @@ local file is gone, or when a stub still has no transcript.
 ### `--no-propose`
 
 As for `add`: skip the guideline-proposal pass. Default off.
+
+---
+
+### `--from-file PATH` (on `add`)
+
+Ingest every source listed in a file, one per line.
+
+- **Input:** a path to a text file. Blank lines and lines starting with `#` are
+  ignored.
+- **Default:** the single `source` argument is used.
+- The index is rebuilt once at the end rather than per file, which is what keeps
+  a long list from being quadratic in the size of the library.
+
+```shell
+px0 brain add "" --from-file ~/reading-backlog.txt
+```
+
+### `--all` (on `refresh`)
+
+Re-fetch every file that records a source.
+
+- **Input:** flag, no value. Default off.
+- `path` becomes optional when this is given.
+
+```shell
+px0 brain refresh --all
+```
+
+### `--stale` (on `refresh`)
+
+Re-fetch what has gone stale: anything retrieved longer ago than `--days`, plus
+every stub, whose transcript may have been published since.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 brain refresh --stale
+```
+
+### `--days N` (on `refresh`)
+
+What counts as stale.
+
+- **Input:** a whole number of days.
+- **Default:** 30. A file with no `retrieved` date is always treated as stale.
+
+```shell
+px0 brain refresh --stale --days 90
+```
+
+---
+
+## `px0 brain show`
+
+One file: where it came from, what kind it is, and its text.
+
+### `path` (required)
+
+- **Input:** the same forms `refresh` accepts — a library-relative path
+  (`blogs/x.md`), a store-relative one (`brain/blogs/x.md`), an absolute path, or
+  a bare filename matched anywhere in the library.
+
+### `--json`
+
+Frontmatter, body, size, and whether the file is private, as one object.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 brain show blogs/caching.md
+px0 brain show caching.md --json | jq .header
+```
+
+A file in the private folder is marked as such.
+
+---
+
+## `px0 brain rm`
+
+Remove a file and drop its passages from the index.
+
+### `path` (required)
+
+- **Input:** as for `show`.
+
+### `--yes`
+
+Skip the confirmation.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 brain rm blogs/mistaken-ingest.md
+```
+
+Deleting the file by hand works right up until you search: the passages stay in
+the index until something rebuilds it. This does both.
+
+---
+
+## `px0 brain export`
+
+Copy the library elsewhere, keeping its folder structure.
+
+### `dir` (required)
+
+- **Input:** a directory path. Created if it does not exist.
+
+### `--include-private`
+
+Include the private folder, which is held back by default.
+
+- **Input:** flag, no value. Default off.
+- The private folder's whole promise is that it does not leave the machine by
+  accident, so including it has to be asked for.
+
+```shell
+px0 brain export ~/Documents/brain-backup
+px0 brain export ~/Documents/everything --include-private
+```
 
 ---
 

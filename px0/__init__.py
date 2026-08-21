@@ -16,4 +16,4 @@ else:
     except Exception as _err:
         raise RuntimeError("px0 version could not be determined. VERSION file missing and package not installed.") from _err
 
-SCHEMA_VERSION = 2  # on-disk store schema version; bumped when the store layout changes in a way old stores can't read
+SCHEMA_VERSION = 3  # on-disk store schema version; bumped when the store layout changes in a way old stores can't read

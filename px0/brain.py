@@ -906,3 +906,184 @@ def process_ingest_queue(home: Path, config: dict) -> dict:
         "jobs_given_up": jobs_given_up,
         "playlists_truncated": playlists_truncated,
     }
+
+
+def list_files(home: Path, config: dict) -> list[Path]:
+    """Every brain file retrieval would consider, ignore patterns applied.
+
+    Listing raw `rglob` output misreports a brain pointed at a vault: most of
+    what it finds is the notes app's own state.
+    """
+    base = brain_path(home, config)
+    if not base.exists():
+        return []
+    globs = retrieval.ignore_globs(config)
+    return [p for p in sorted(base.rglob("*.md"))
+            if p.is_file() and not retrieval.is_ignored(str(p.relative_to(base)), globs)]
+
+
+def private_folder(config: dict) -> str:
+    """The brain subfolder held back from retrieval, per config."""
+    return retrieval.private_folder(config)
+
+
+def remove(home: Path, config: dict, path: str | Path, reindex: bool = True) -> dict:
+    """Deletes one brain file and drops its passages from the index.
+
+    Deleting the file by hand works too, right up until you search: the
+    passages stay in the index until something rebuilds it. This does both, and
+    reports what it removed so the caller can say so.
+    """
+    target = resolve_brain_path(home, config, path)
+    base = brain_path(home, config)
+    header, _body = ({}, "")
+    try:
+        header, _body = read_header(target)
+    except Exception:
+        pass  # a file px0 did not write has no frontmatter; it can still be removed
+    rel = str(target.relative_to(base)) if target.is_relative_to(base) else str(target)
+    target.unlink()
+    passages = None
+    if reindex:
+        from px0 import retrieval
+
+        try:
+            passages = retrieval.reindex(home, config)
+        except Exception:
+            passages = None
+    return {"path": rel, "kind": header.get("kind"), "source": header.get("source"),
+            "reindexed": passages}
+
+
+def show(home: Path, config: dict, path: str | Path) -> dict:
+    """One brain file: its frontmatter, its body, and where it came from."""
+    target = resolve_brain_path(home, config, path)
+    base = brain_path(home, config)
+    try:
+        header, body = read_header(target)
+    except Exception:
+        header, body = {}, read_text_lossy(target)
+    rel = str(target.relative_to(base)) if target.is_relative_to(base) else str(target)
+    private = private_folder(config)
+    return {
+        "path": rel,
+        "absolute": str(target),
+        "header": header,
+        "body": body,
+        "private": bool(private) and rel.split("/", 1)[0] == private,
+        "bytes": target.stat().st_size,
+    }
+
+
+def stale(home: Path, config: dict, days: int = 30) -> list[Path]:
+    """Brain files whose `retrieved` date is older than `days`, plus every stub.
+
+    A stub is a YouTube video whose transcript was not published yet, so it is
+    always worth another try regardless of age.
+    """
+    from datetime import timedelta
+
+    cutoff = date.today() - timedelta(days=max(0, days))
+    out = []
+    for path in list_files(home, config):
+        try:
+            header, _ = read_header(path)
+        except Exception:
+            continue
+        if not header.get("source"):
+            continue  # nothing to re-fetch
+        if header.get("kind") == "stub":
+            out.append(path)
+            continue
+        retrieved = header.get("retrieved")
+        try:
+            when = date.fromisoformat(str(retrieved))
+        except (TypeError, ValueError):
+            out.append(path)  # undated: treat as stale rather than never refreshing it
+            continue
+        if when < cutoff:
+            out.append(path)
+    return out
+
+
+def refresh_many(home: Path, config: dict, targets: list[Path], no_propose: bool = True) -> dict:
+    """Re-fetches several files, reindexing once at the end.
+
+    Reindexing rewrites the whole table, so doing it per file makes a batch
+    quadratic in the size of the library -- the same reason `add` takes a
+    reindex flag.
+    """
+    done, failed = [], []
+    for path in targets:
+        try:
+            refresh(home, config, path, no_propose=no_propose, reindex=False)
+            done.append(str(path))
+        except Exception as e:
+            failed.append({"path": str(path), "error": str(e)})
+    passages = None
+    if done:
+        from px0 import retrieval
+
+        try:
+            passages = retrieval.reindex(home, config)
+        except Exception:
+            passages = None
+    return {"refreshed": done, "failed": failed, "reindexed": passages}
+
+
+def add_many(home: Path, config: dict, sources: list[str], to: str | None = None,
+             no_propose: bool = True) -> dict:
+    """Ingests several sources, reindexing once at the end.
+
+    A reading backlog is a list, not one URL at a time.
+    """
+    added, failed = [], []
+    for source in sources:
+        try:
+            result = add(home, config, source, to=to, no_propose=no_propose, reindex=False)
+            added.append(result)
+        except Exception as e:
+            failed.append({"source": source, "error": str(e)})
+    passages = None
+    if added:
+        from px0 import retrieval
+
+        try:
+            passages = retrieval.reindex(home, config)
+        except Exception:
+            passages = None
+    return {"added": added, "failed": failed, "reindexed": passages}
+
+
+def read_sources(path: Path) -> list[str]:
+    """Reads a list of sources from a text file: one per line, # comments ignored."""
+    lines = []
+    for raw in Path(path).expanduser().read_text().splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            lines.append(line)
+    return lines
+
+
+def export_library(home: Path, config: dict, dest: Path, include_private: bool = False) -> dict:
+    """Copies the brain to `dest`, keeping its folder structure.
+
+    The private folder is held back unless asked for, because that folder's
+    whole promise is that it does not leave the machine by accident.
+    """
+    import shutil
+
+    base = brain_path(home, config)
+    dest = Path(dest).expanduser()
+    private = private_folder(config)
+    copied, held = 0, 0
+    for path in list_files(home, config):
+        rel = path.relative_to(base)
+        if private and rel.parts and rel.parts[0] == private and not include_private:
+            held += 1
+            continue
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied += 1
+    return {"dest": str(dest), "copied": copied, "held_back": held}

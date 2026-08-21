@@ -84,13 +84,15 @@ def test_tool_call_loop_elapsed_seconds(tmp_home, monkeypatch):
     monkeypatch.setattr(harness, "invoke", lambda *a, **kw: turns.pop(0) if turns else "Final Answer")
 
     # Run tool call loop
-    output, tool_calls = runner._tool_call_loop(
+    output, tool_calls, usage = runner._tool_call_loop(
         tmp_home, {}, "Initial prompt", ["slack.post_message"], False, 60.0, "run_123"
     )
 
     assert len(tool_calls) == 1
     assert "elapsed_seconds" in tool_calls[0]
     assert tool_calls[0]["elapsed_seconds"] >= 0.0
+    assert usage["model_calls"] == 2
+    assert usage["estimated"] is True
 
 
 def test_cmd_runs_bare_opens_tui(tmp_home, monkeypatch):

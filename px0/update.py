@@ -100,11 +100,35 @@ def _migrate_v1_to_v2(home: Path) -> list[Any]:
     return changes
 
 
+def _migrate_v2_to_v3(home: Path) -> list[Any]:
+    """Keys connected accounts by Composio's toolkit slug, and scaffolds `tools/`.
+
+    Accounts used to be stored under px0's own name for an app, so a curated
+    tool asking for "calendar" and a discovered one asking for "googlecalendar"
+    looked at different keys and the discovered one reported the app as not
+    connected. Slug-keying makes both find the same account.
+
+    Nothing here is versioned content, so the change list is empty: credentials
+    are deliberately outside the version chain.
+    """
+    from px0 import connect as connect_mod, localtools
+
+    connect_mod.migrate_account_keys(home)
+
+    tools_dir = paths.tools_dir(home)
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    sample = tools_dir / "example.toml.sample"
+    if not sample.exists():
+        sample.write_text(localtools.EXAMPLE_TOOL)
+    return []
+
+
 # Registry for forward-only migrations, keyed by the schema version each one
 # produces -- the runner applies every key greater than the store's current
 # version, so a v1 -> v2 migration is keyed 2, not 1.
 MIGRATIONS: dict[int, Callable[[Path], list[Any]]] = {
     2: _migrate_v1_to_v2,
+    3: _migrate_v2_to_v3,
 }
 
 

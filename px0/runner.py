@@ -18,6 +18,7 @@ from typing import Any
 
 from px0 import claims, config as config_mod, harness, paths, retrieval
 from px0 import runs as runs_mod
+from px0 import secrets as secrets_mod
 from px0 import tools, versioning
 from px0 import workflow as workflow_mod
 
@@ -108,7 +109,10 @@ def resolve_inputs(
     outcomes for the run record. An optional input that fails resolves to None
     and is marked degraded rather than aborting the run; a required input that
     fails raises RunError."""
-    context: dict = {"config": config, "input": cli_inputs}
+    context: dict = {"config": config, "input": cli_inputs,
+                     # Reachable as {{secrets.NAME}} in any args value or in the
+                     # body; never written to a record or a log.
+                     "secrets": secrets_mod.all_secrets(home)}
     meta: list[dict] = []
 
     for inp in wf.inputs:
@@ -128,7 +132,8 @@ def resolve_inputs(
             elif inp.kind == "workflow":
                 sub_cli = {"_stdin": cli_inputs.get("_stdin", "")}
                 sub_record = run(home, config, inp.workflow, trigger="workflow",
-                                  cli_inputs=sub_cli, output_override={"target": "memory"})
+                                  cli_inputs=sub_cli, output_override={"target": "memory"},
+                                  retry=False)
                 value = sub_record["output"].get("text", "")
             else:
                 raise workflow_mod.WorkflowError(f"input {inp.id!r} has no resolvable kind")
@@ -165,15 +170,21 @@ def render_prompt(wf: workflow_mod.Workflow, guideline_texts: dict[str, str], co
 
 def _tool_call_loop(
     home: Path, config: dict, prompt: str, allowed_tools: list[str],
-    dry_run: bool, timeout: float, run_id: str
-) -> tuple[str, list[dict]]:
+    dry_run: bool, timeout: float, run_id: str, redact=None
+) -> tuple[str, list[dict], dict]:
     """Drives the model through up to MAX_TOOL_TURNS turns, feeding it a
     `TOOL_CALL: {...}` protocol line-by-line since the harness backend is a
     plain non-interactive subprocess rather than a real MCP transport. Each
     call is checked against the workflow's tool allowlist; write tools are
     stubbed out (never executed) when dry_run is set. Returns the model's
     final text output and the list of tool calls actually made, each recorded
-    for the run's audit trail."""
+    for the run's audit trail. Also returns a usage estimate: the harness is a
+    plain subprocess that reports no token counts, so what a run cost is
+    approximated from the characters sent and received, and labelled as an
+    estimate rather than passed off as a measurement."""
+    redact = redact or (lambda x: x)
+    usage = {"model_calls": 0, "prompt_chars": 0, "output_chars": 0,
+             "estimated_tokens": 0, "estimated": True}
     tool_calls: list[dict] = []
     conversation = prompt
     if allowed_tools:
@@ -192,18 +203,27 @@ def _tool_call_loop(
 
     output = ""
     for turn in range(MAX_TOOL_TURNS):
-        runs_mod.append_raw_log(config, run_id, f"--- turn {turn + 1} PROMPT ---\n{conversation}")
+        runs_mod.append_raw_log(config, run_id,
+                                 f"--- turn {turn + 1} PROMPT ---\n{redact(conversation)}")
         output = harness.invoke(config, conversation, timeout=timeout)
-        runs_mod.append_raw_log(config, run_id, f"--- turn {turn + 1} OUTPUT ---\n{output}")
+        runs_mod.append_raw_log(config, run_id,
+                                 f"--- turn {turn + 1} OUTPUT ---\n{redact(output)}")
+        usage["model_calls"] += 1
+        usage["prompt_chars"] += len(conversation)
+        usage["output_chars"] += len(output or "")
+        # ~4 characters per token is the rule of thumb across these tokenizers:
+        # close enough to compare one nightly against another, not a bill.
+        usage["estimated_tokens"] = (usage["prompt_chars"] + usage["output_chars"]) // 4
 
         match = _TOOL_CALL_RE.search(output)
         if not match or not allowed_tools:
-            return output, tool_calls  # model gave a final answer, not a tool request
+            return output, tool_calls, usage  # model gave a final answer, not a tool request
         try:
             call = json.loads(match.group(1))
             tool_id, args = call["tool"], call.get("args", {})
         except (json.JSONDecodeError, KeyError):
-            return output, tool_calls  # malformed tool call: treat the raw output as the final answer
+            # malformed tool call: treat the raw output as the final answer
+            return output, tool_calls, usage
 
         is_write = tools.exists(tool_id, home) and tools.is_write(tool_id, home)
         if tool_id not in allowed_tools:
@@ -221,9 +241,9 @@ def _tool_call_loop(
             elapsed = time_mod.monotonic() - t0
 
         tool_calls.append({
-            "tool": tool_id, "args": args, "is_write": is_write,
+            "tool": tool_id, "args": redact(args), "is_write": is_write,
             "stubbed": bool(dry_run and is_write),
-            "timestamp": _now().isoformat(), "result_summary": str(result)[:500],
+            "timestamp": _now().isoformat(), "result_summary": redact(str(result))[:500],
             "elapsed_seconds": round(elapsed, 3),
         })
         conversation += (
@@ -231,7 +251,7 @@ def _tool_call_loop(
             f'TOOL_RESULT: {json.dumps(result, default=str)[:2000]}\n\nContinue.'
         )
 
-    return output, tool_calls
+    return output, tool_calls, usage
 
 
 # Recognized placeholders in an `output.path`. Both brace styles are accepted:
@@ -332,6 +352,78 @@ def run(
     dry_run: bool = False,
     output_override: dict | None = None,
     late_scheduled_at: str | None = None,
+    timeout_override: str | None = None,
+    retry: bool = True,
+) -> dict:
+    """Runs a workflow, retrying per its policy, and notifies if it ends failed.
+
+    Each attempt writes its own run record, so `px0 runs list` shows the
+    failures that led to a success instead of hiding them. The last attempt's
+    record is returned, or its RunError raised.
+
+    `retry=False` is for nested runs -- a pipeline stage or a sub-workflow
+    input -- where the parent owns the retry decision. Without it, a three-stage
+    pipeline with three attempts each could run nine times.
+    """
+    try:
+        wf = workflow_mod.load(home, workflow_id)
+    except workflow_mod.WorkflowError:
+        wf = None  # let _run_once produce the real error and its record
+
+    attempts, backoff = (1, 0.0)
+    if retry and wf is not None:
+        attempts, backoff = workflow_mod.retry_policy(wf, config)
+
+    last_error: RunError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            record = _run_once(
+                home, config, workflow_id, trigger=trigger, cli_inputs=cli_inputs,
+                dry_run=dry_run, output_override=output_override,
+                late_scheduled_at=late_scheduled_at, timeout_override=timeout_override,
+                attempt=attempt, attempts=attempts,
+            )
+        except RunError as e:
+            last_error = e
+            if attempt < attempts:
+                time.sleep(backoff * (2 ** (attempt - 1)))
+                continue
+            _notify_failure(home, config, wf, e.record)
+            raise
+        return record
+
+    if last_error is not None:  # unreachable in practice; keeps the contract explicit
+        raise last_error
+    raise RunError(f"{workflow_id} produced no run")
+
+
+def _notify_failure(home: Path, config: dict, wf, record: dict | None) -> None:
+    """Sends the failure notification and records what came of it. Never raises."""
+    if not isinstance(record, dict):
+        return
+    try:
+        from px0 import notify as notify_mod
+
+        result = notify_mod.on_failure(home, config, record,
+                                       wf.on_failure if wf is not None else None)
+        record["notified"] = result
+        runs_mod.write_record(config, record)
+    except Exception:
+        pass
+
+
+def _run_once(
+    home: Path,
+    config: dict,
+    workflow_id: str,
+    trigger: str = "manual",
+    cli_inputs: dict | None = None,
+    dry_run: bool = False,
+    output_override: dict | None = None,
+    late_scheduled_at: str | None = None,
+    timeout_override: str | None = None,
+    attempt: int = 1,
+    attempts: int = 1,
 ) -> dict:
     """Runs one workflow end to end through its eight stages: load/validate,
     checkpoint hand edits under lock, resolve inputs, render the prompt,
@@ -349,11 +441,15 @@ def run(
         # thing: `runs list` labels it, and `runs rerun` refuses to replay it as
         # a live run without being told to.
         "dry_run": bool(dry_run),
+        "attempt": attempt,
+        "attempts": attempts,
     }
+    runs_mod.mark_running(home, run_id, workflow_id)
 
     def fail(message: str, **extra) -> "RunError":
         # finalizes and persists the run record as a failure, then hands back
         # a RunError carrying that record for the caller to raise
+        runs_mod.clear_running(home, run_id)
         end = _now()
         record.update(outcome="failed", error=message, end_time=end.isoformat(),
                        duration_seconds=(end - start).total_seconds(), **extra)
@@ -383,10 +479,11 @@ def run(
             fcntl.flock(lf, fcntl.LOCK_UN)
 
     # Stage 3: resolve inputs
+    redact = secrets_mod.redactor(home)
     try:
         context, inputs_meta = resolve_inputs(home, config, wf, cli_inputs)
     except RunError as e:
-        raise fail(str(e), inputs_resolved=e.record.get("inputs_resolved", []))
+        raise fail(redact(str(e)), inputs_resolved=redact(e.record.get("inputs_resolved", [])))
 
     # Stage 4: render prompt
     guideline_texts, guidelines_inlined = {}, []
@@ -399,13 +496,17 @@ def run(
     prompt = render_prompt(wf, guideline_texts, context)
 
     # Stage 5 + 6: per-run tool loop, invoke model backend
-    timeout = harness.parse_duration(wf.timeout)
     try:
-        output_text, tool_calls = _tool_call_loop(
-            home, config, prompt, wf.tools, dry_run, timeout, run_id
+        timeout = harness.parse_duration(timeout_override or wf.timeout)
+    except ValueError:
+        raise fail(f"invalid timeout: {timeout_override or wf.timeout!r}")
+    try:
+        output_text, tool_calls, usage = _tool_call_loop(
+            home, config, prompt, wf.tools, dry_run, timeout, run_id, redact
         )
     except harness.HarnessError as e:
-        raise fail(str(e), inputs_resolved=inputs_meta, guidelines_inlined=guidelines_inlined)
+        raise fail(redact(str(e)), inputs_resolved=inputs_meta,
+                   guidelines_inlined=guidelines_inlined)
 
     # Stage 7: route output
     effective_output = output_override or wf.output or {"target": "stdout"}
@@ -421,11 +522,13 @@ def run(
         guidelines_inlined=guidelines_inlined,
         tool_calls=tool_calls,
         model=config_mod.get(config, "model.harness_cmd"),
+        usage=usage,
         outcome="success",
         output=output_info,
         end_time=end.isoformat(),
         duration_seconds=(end - start).total_seconds(),
     )
+    runs_mod.clear_running(home, run_id)
     runs_mod.write_record(config, record)
     return record
 
@@ -449,7 +552,7 @@ def _run_pipeline(
             stage_record = run(
                 home, config, stage_id, trigger="pipeline",
                 cli_inputs={"_stdin": stdin_text}, dry_run=dry_run,
-                output_override=stage_override,
+                output_override=stage_override, retry=False,
             )
         except RunError as e:
             end = _now()

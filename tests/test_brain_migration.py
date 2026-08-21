@@ -213,8 +213,9 @@ def test_the_migration_runs_through_the_update_runner(v1_store, monkeypatch):
     update.run_update(v1_store, config)
 
     history = json.loads(paths.update_history_path(v1_store).read_text())
-    assert history[-1]["migrations_applied"] == [2]
-    assert paths.schema_path(v1_store).read_text().strip() == "2"
+    # Every migration newer than the store's version runs, in order.
+    assert history[-1]["migrations_applied"] == [2, 3]
+    assert paths.schema_path(v1_store).read_text().strip() == "3"
     assert (v1_store / "brain").is_dir() and not (v1_store / "knowledge").exists()
 
 

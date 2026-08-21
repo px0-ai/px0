@@ -215,3 +215,89 @@ def remember(home: Path, discovered: list[CatalogueTool]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"tools": [asdict(t) for t in sorted(merged.values(), key=lambda t: t.slug)]}
     path.write_text(json.dumps(payload, indent=2))
+
+
+def toolkits(home: Path, search: str | None = None, limit: int = 100) -> list[dict]:
+    """Lists Composio's toolkits, optionally filtered by a search term.
+
+    This is the "what could px0 even reach?" question, which used to be
+    answerable only from inside `px0 workflows new`.
+    """
+    params: dict = {"limit": max(1, min(int(limit), 500))}
+    if search:
+        params["search"] = search
+    try:
+        data = _get(home, "/api/v3/toolkits", params)
+    except Exception as e:
+        raise CatalogueError(f"could not list Composio's toolkits: {e}") from e
+    out = []
+    for item in data.get("items") or []:
+        meta = item.get("meta") or {}
+        out.append({
+            "slug": item.get("slug", ""),
+            "name": item.get("name", ""),
+            "tools": meta.get("tools_count") or 0,
+            "triggers": meta.get("triggers_count") or 0,
+            "categories": [c.get("name", "") for c in (meta.get("categories") or [])],
+            "description": (meta.get("description") or "").strip(),
+            "no_auth": bool(item.get("no_auth")),
+        })
+    return sorted(out, key=lambda t: (-t["tools"], t["slug"]))
+
+
+def forget(home: Path, slugs: list[str] | None = None) -> int:
+    """Drops cached tool metadata: the named slugs, or everything.
+
+    The cache only ever grew: `remember` merges and nothing evicts, so a tool
+    Composio has since renamed or reshaped kept its stale schema for as long as
+    the store existed. Returns how many entries went.
+    """
+    cached = load_cached(home)
+    if not cached:
+        return 0
+    if slugs:
+        wanted = {s.removeprefix(ID_PREFIX) for s in slugs}
+        keep = {tid: t for tid, t in cached.items() if t.slug not in wanted}
+    else:
+        keep = {}
+    removed = len(cached) - len(keep)
+    path = cache_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"tools": [asdict(t) for t in sorted(keep.values(), key=lambda t: t.slug)]}
+    path.write_text(json.dumps(payload, indent=2))
+    return removed
+
+
+def refresh(home: Path, slugs: list[str] | None = None) -> dict:
+    """Re-reads cached tools from Composio, so a changed schema is picked up.
+
+    A tool that has since been deprecated or deleted is dropped rather than
+    kept with a schema that no longer describes anything.
+    """
+    cached = load_cached(home)
+    targets = [t for t in cached.values()
+               if not slugs or t.slug in {s.removeprefix(ID_PREFIX) for s in slugs}]
+    if not targets:
+        return {"refreshed": 0, "dropped": [], "unchanged": 0, "failed": []}
+
+    refreshed, dropped, unchanged, failed = [], [], 0, []
+    for tool in targets:
+        try:
+            fresh = fetch(home, tool.slug)
+        except CatalogueError as e:
+            if "404" in str(e) or "no Composio tool" in str(e):
+                dropped.append(tool.slug)
+            else:
+                failed.append({"slug": tool.slug, "error": str(e)})
+            continue
+        if asdict(fresh) == asdict(tool):
+            unchanged += 1
+        else:
+            refreshed.append(fresh)
+
+    if dropped:
+        forget(home, dropped)
+    if refreshed:
+        remember(home, refreshed)
+    return {"refreshed": len(refreshed), "dropped": dropped,
+            "unchanged": unchanged, "failed": failed}

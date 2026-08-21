@@ -21,6 +21,10 @@ def is_initialized(home: Path) -> bool:
 # blobs. Both have to be scrubbed or "credentials excluded" is a false promise.
 SECRET_CONFIG_KEYS = ("connectors.composio_api_key",)
 
+# What an export carries, and therefore what an import looks for.
+EXPORT_CONTENT = ("workflows", "guidelines", "brain", "output", "outputs", "skills", "tools")
+EXPORT_STATE = ("versions", "proposals", "schema", "schedule.json")
+
 
 def _redact_config(src: Path, target: Path) -> None:
     """Copies config.toml with every secret key blanked."""
@@ -76,7 +80,7 @@ def export(home: Path, dest: Path) -> None:
     export carries no API key in either the live file or the blobs.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("workflows", "guidelines", "brain", "output", "outputs", "skills"):
+    for name in EXPORT_CONTENT:
         src = home / name
         if not src.exists():
             continue
@@ -98,6 +102,159 @@ def export(home: Path, dest: Path) -> None:
             shutil.copy2(src, target)
 
     _purge_versioned_config(state_dest)
+
+
+class StoreError(Exception):
+    """An import or a check could not proceed."""
+
+
+def looks_like_export(src: Path) -> bool:
+    """Whether `src` looks like something `px0 store export` produced."""
+    if not src.is_dir():
+        return False
+    if (src / "config.toml").exists():
+        return True
+    return any((src / name).exists() for name in EXPORT_CONTENT)
+
+
+def import_store(home: Path, src: Path, force: bool = False, merge: bool = False) -> dict:
+    """Loads an exported store into `home`: the inverse of `export`.
+
+    Three rules keep this from being a footgun:
+
+    - An import into an existing store stops unless `merge` or `force` is
+      given, because the alternative is silently overwriting the workflows
+      someone is running.
+    - `merge` keeps whatever is already there and adds only files the store
+      does not have. `force` lets the import win on a collision.
+    - Credentials are never read from an export -- it does not contain them --
+      and the imported config.toml never overwrites a live one, so importing
+      does not blank the API key on the machine you are importing into.
+
+    Returns counts of what came in and what was skipped.
+    """
+    src = Path(src).expanduser()
+    if not looks_like_export(src):
+        raise StoreError(
+            f"{src} does not look like a px0 export; expected config.toml or a "
+            f"workflows/ directory (see `px0 store export`)")
+    if is_initialized(home) and not (force or merge):
+        raise StoreError(
+            f"a store already exists at {home}; pass --merge to add what is missing "
+            "or --force to let the import win on collisions")
+
+    report = {"imported": [], "skipped": [], "files": 0, "skipped_files": 0}
+
+    for name in EXPORT_CONTENT:
+        source = src / name
+        if not source.is_dir():
+            continue
+        for path in sorted(source.rglob("*")):
+            if not path.is_file():
+                continue
+            target = home / name / path.relative_to(source)
+            if target.exists() and not force:
+                report["skipped_files"] += 1
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+            report["files"] += 1
+        report["imported"].append(name)
+
+    cfg_src = src / "config.toml"
+    if cfg_src.exists():
+        if not paths.config_path(home).exists():
+            # A fresh store: take the exported config, but leave the redacted
+            # key blank rather than writing an empty string over a default.
+            shutil.copy2(cfg_src, paths.config_path(home))
+            report["imported"].append("config.toml")
+        else:
+            report["skipped"].append("config.toml (kept the one already here)")
+
+    state_src = src / ".state"
+    state_dest = paths.state_dir(home)
+    if state_src.is_dir():
+        state_dest.mkdir(parents=True, exist_ok=True)
+        for name in EXPORT_STATE:
+            source = state_src / name
+            if not source.exists():
+                continue
+            target = state_dest / name
+            if target.exists() and not force:
+                report["skipped"].append(f".state/{name}")
+                continue
+            if source.is_dir():
+                shutil.copytree(source, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(source, target)
+            report["imported"].append(f".state/{name}")
+
+    if not paths.config_path(home).exists():
+        init(home)
+        report["imported"].append("scaffolding")
+
+    return report
+
+
+def verify(home: Path) -> dict:
+    """Checks the store's own consistency, and says what to run for each problem found.
+
+    Cheap, read-only, and separate from `px0 doctor`: doctor asks whether the
+    install is wired up, this asks whether the store's contents still hang
+    together -- every version blob present, every workflow parsing, every
+    guideline a workflow references existing.
+    """
+    problems: list[dict] = []
+    checks = 0
+
+    checks += 1
+    for path in sorted(paths.workflows_dir(home).rglob("*.md")) if paths.workflows_dir(home).exists() else []:
+        try:
+            from px0 import workflow as workflow_mod
+
+            wf = workflow_mod.parse(path)
+        except Exception as e:
+            problems.append({"kind": "workflow", "detail": str(e),
+                             "fix": f"edit {path.relative_to(home)} or restore it with `px0 versions revert`"})
+            continue
+        for name in wf.guidelines:
+            if not (paths.guidelines_dir(home) / name).exists():
+                problems.append({
+                    "kind": "guideline", "detail": f"{wf.id} references missing guidelines/{name}",
+                    "fix": f"create it with `px0 guidelines new {name}` or remove the reference",
+                })
+
+    manifest = paths.versions_dir(home) / "manifest.sqlite"
+    if manifest.exists():
+        checks += 1
+        conn = sqlite3.connect(manifest)
+        try:
+            rows = conn.execute(
+                "SELECT path, version, hash FROM versions WHERE hash IS NOT NULL").fetchall()
+        finally:
+            conn.close()
+        objects = paths.versions_dir(home) / "objects"
+        missing = [(r[0], r[1]) for r in rows
+                   if not (objects / r[2][:2] / r[2]).exists()]
+        for path, version in missing[:20]:
+            problems.append({
+                "kind": "blob", "detail": f"{path}@v{version} has no stored content",
+                "fix": "the version cannot be shown or reverted to; `px0 versions prune` clears the record",
+            })
+        if len(missing) > 20:
+            problems.append({"kind": "blob",
+                             "detail": f"and {len(missing) - 20} more missing version blobs",
+                             "fix": "run `px0 versions prune`"})
+
+    from px0 import localtools
+
+    _tools, tool_errors = localtools.load_user_tools(home)
+    checks += 1
+    for err in tool_errors:
+        problems.append({"kind": "tool", "detail": err,
+                         "fix": f"fix or remove the file in {paths.tools_dir(home)}"})
+
+    return {"checks": checks, "problems": problems, "ok": not problems}
 
 
 def init(home: Path, harness_cmd: str | None = None) -> list[str]:
@@ -122,9 +279,20 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
         paths.proposals_dir(home),
         paths.index_dir(home),
         paths.ingest_dir(home),
+        paths.tools_dir(home),
     ):
         d.mkdir(parents=True, exist_ok=True)
     created.append(f"store at {home}")
+
+    # A worked example, with a suffix the loader ignores: copy it to
+    # <name>.toml to make it real. Scaffolding a live tool into every store
+    # would put a tool nobody asked for in `px0 tools list`.
+    sample = paths.tools_dir(home) / "example.toml.sample"
+    if not sample.exists():
+        from px0 import localtools
+
+        sample.write_text(localtools.EXAMPLE_TOOL)
+        created.append("tools/example.toml.sample")
 
     cfg_path = paths.config_path(home)
     if not cfg_path.exists():

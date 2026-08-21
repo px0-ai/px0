@@ -42,6 +42,21 @@ DEFAULTS: dict[str, Any] = {
         "check": True,
         "auto_install": False,
     },
+    "tools": {
+        "allow_shell": False,
+        "file_roots": [],
+        "http_timeout": 20,
+        "max_output_bytes": 20000,
+    },
+    "notify": {
+        "on_failure": "",
+        "channel": "",
+        "target": "",
+    },
+    "runs": {
+        "max_attempts": 1,
+        "retry_backoff_seconds": 30,
+    },
     "retrieval": {
         "backend": "local",
         "qmd_cmd": "qmd",
@@ -231,6 +246,51 @@ SCHEMA: dict[str, dict[str, Any]] = {
         "type": bool, "choices": None,
         "help": "install updates automatically instead of only surfacing them",
     },
+    "tools.allow_shell": {
+        "type": bool, "choices": None,
+        "help": "allow the shell.run tool, which executes an arbitrary command locally; "
+                "off by default because a workflow that can run a shell can do anything "
+                "you can",
+    },
+    "tools.file_roots": {
+        "type": list, "choices": None,
+        "help": "extra directories the file.read and file.write tools may touch, on top of "
+                "the store itself; a path outside every root is refused",
+    },
+    "tools.http_timeout": {
+        "type": int, "choices": None,
+        "help": "seconds before the http.get and http.post tools give up on a request",
+    },
+    "tools.max_output_bytes": {
+        "type": int, "choices": None,
+        "help": "cap on how much text a local tool returns to the model, so one large file "
+                "or chatty script cannot fill the prompt",
+    },
+    "notify.on_failure": {
+        "type": str, "choices": ["", "none", "desktop", "tool"],
+        "help": "what happens when a scheduled run fails: \"desktop\" raises a local "
+                "notification, \"tool\" sends through notify.channel, \"none\" (the "
+                "default) stays silent",
+    },
+    "notify.channel": {
+        "type": str, "choices": None,
+        "help": "tool id used for failure notifications when notify.on_failure is \"tool\", "
+                "e.g. slack.post_message or gmail.send_message",
+    },
+    "notify.target": {
+        "type": str, "choices": None,
+        "help": "where the failure notification goes: a Slack channel for "
+                "slack.post_message, an address for gmail.send_message",
+    },
+    "runs.max_attempts": {
+        "type": int, "choices": None,
+        "help": "how many times a run is attempted before it is recorded as failed; a "
+                "workflow's own retry.max_attempts overrides this",
+    },
+    "runs.retry_backoff_seconds": {
+        "type": int, "choices": None,
+        "help": "seconds to wait before the second attempt, doubling for each attempt after",
+    },
     "retrieval.backend": {
         "type": str, "choices": ["local", "qmd"],
         "help": "retrieval backend; either 'local' (SQLite FTS5/BM25) or 'qmd'",
@@ -245,7 +305,8 @@ SCHEMA: dict[str, dict[str, Any]] = {
     },
     "retrieval.rerank": {
         "type": bool, "choices": None,
-        "help": "reserved for a future rerank stage; not yet wired in this build",
+        "help": "rescore retrieved passages by how much of the query each one covers, "
+                "before trimming to k; local arithmetic, no model call",
     },
 }
 
@@ -298,6 +359,46 @@ def set_key(config: dict[str, Any], key: str, raw: str) -> Any:
         node = node.setdefault(part, {})
     node[parts[-1]] = value
     return value
+
+
+def default_for(key: str) -> Any:
+    """The built-in default for a SCHEMA key, as a Python value.
+
+    Raises ValueError for an unknown key, matching `get_key`.
+    """
+    if key not in SCHEMA:
+        raise ValueError(f"unknown config key: {key!r} (see `px0 config list`)")
+    node: Any = DEFAULTS
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def unset_key(config: dict[str, Any], key: str) -> Any:
+    """Removes a key's stored override so it falls back to its default.
+
+    Mutates `config` in place, drops the parent table when it empties, and
+    returns the default the key now resolves to. Unsetting a key that was
+    never set is not an error: the result is the same either way.
+    """
+    if key not in SCHEMA:
+        raise ValueError(f"unknown config key: {key!r} (see `px0 config list`)")
+    parts = key.split(".")
+    node = config
+    trail = []
+    for part in parts[:-1]:
+        if not isinstance(node, dict) or part not in node:
+            return default_for(key)
+        trail.append((node, part))
+        node = node[part]
+    if isinstance(node, dict):
+        node.pop(parts[-1], None)
+    for parent, part in reversed(trail):
+        if isinstance(parent.get(part), dict) and not parent[part]:
+            parent.pop(part)
+    return default_for(key)
 
 
 def key_help(include_choices: bool = True) -> str:

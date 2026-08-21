@@ -245,11 +245,38 @@ def diff_versions(home: Path, rel_path: str, v1: int, v2: int) -> str:
     return "".join(diff)
 
 
+def _write_to_disk(home: Path, rel_path: str, content: bytes | None) -> None:
+    """Puts a version's content back on disk, or removes the file for a tombstone.
+
+    `record_change` is the history writer and touches nothing in the working
+    tree, which is right for capturing an edit that has already happened and
+    wrong for a revert: reverting used to record the old content as a new
+    version and leave the file alone, so `px0 versions revert` and
+    `px0 changes revert` both reported success and changed nothing. The next
+    checkpoint scan then captured the untouched file again, quietly discarding
+    the revert.
+
+    Paths come out of the manifest, so they are confined to the store before
+    anything is written -- a manifest row is data, and data does not get to
+    name a path outside the store.
+    """
+    target = (home / rel_path).resolve()
+    root = home.resolve()
+    if root != target and root not in target.parents:
+        raise ValueError(f"refusing to write outside the store: {rel_path}")
+    if content is None:
+        target.unlink(missing_ok=True)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+
 def revert_file(home: Path, rel_path: str, to_version: int, actor: str) -> str | None:
-    """Reverts a file to a prior version by recording its old content as a new
-    version (history is never rewritten). Returns the new change id, or None
-    if the content is already identical to the current version."""
+    """Reverts a file to a prior version: writes that content back to disk and
+    records it as a new version, because history is never rewritten. Returns the
+    new change id, or None if the content is already what the file has."""
     content = show_version(home, rel_path, to_version)
+    _write_to_disk(home, rel_path, content)
     return record_change(home, actor, [FileChange(rel_path, content)])
 
 
@@ -336,6 +363,7 @@ def revert_change(home: Path, change_id: str, actor: str) -> str | None:
             if v["version"] < f["version"]:
                 prev_version = v["version"]
         content = show_version(home, f["path"], prev_version) if prev_version else None
+        _write_to_disk(home, f["path"], content)
         file_changes.append(FileChange(f["path"], content))
     return record_change(home, actor, file_changes)
 

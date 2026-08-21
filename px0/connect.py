@@ -8,17 +8,87 @@ only manual step left is the human consenting in a browser.
 """
 
 import os
+import re
 import ssl
 from pathlib import Path
 
 from px0 import credentials as creds_mod
 
-TOOLKIT_SLUGS = {
-    "gmail": "gmail",
-    "slack": "slack",
+# Aliases only. px0's curated tools call Google Calendar "calendar", while
+# Composio's toolkit slug is "googlecalendar"; anything not listed here is
+# already a slug and is used as-is. This was once a whitelist, which capped
+# authorization at four apps while `workflows new` happily discovered tools
+# from the other thousand-odd toolkits and then failed to authorize them.
+TOOLKIT_ALIASES = {
     "calendar": "googlecalendar",
-    "github": "github",
 }
+
+# Kept as a name so older callers and tests keep resolving; it is a view of the
+# alias map, never a permitted-apps list.
+TOOLKIT_SLUGS = dict(TOOLKIT_ALIASES)
+
+# A toolkit slug as Composio spells it: lowercase letters, digits, underscores.
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+
+
+def toolkit_slug(app: str) -> str:
+    """The Composio toolkit slug for an app name px0 uses internally.
+
+    Resolves px0's aliases first, then accepts any well-formed slug. Raises
+    ValueError for something that cannot be a toolkit slug at all, so a typo
+    fails here rather than as a confusing 404 from the API.
+    """
+    app = (app or "").strip().lower()
+    if not app:
+        raise ValueError("no app named")
+    slug = TOOLKIT_ALIASES.get(app, app)
+    if not _SLUG_RE.match(slug):
+        raise ValueError(
+            f"{app!r} is not a valid toolkit name; expected something like "
+            "'github', 'google_drive', or 'linear'"
+        )
+    return slug
+
+
+def account_key(app: str) -> str:
+    """The key a connected account is stored under in credentials.
+
+    Always the toolkit slug, so a curated tool asking for "calendar" and a
+    discovered tool asking for "googlecalendar" find the same account. Stores
+    written before this used the alias as the key; `migrate_account_keys`
+    rewrites those.
+    """
+    try:
+        return toolkit_slug(app)
+    except ValueError:
+        return (app or "").strip().lower()
+
+
+def migrate_account_keys(home: Path) -> dict[str, str]:
+    """Rewrites alias-keyed connected accounts to slug-keyed ones.
+
+    Returns {old: new} for whatever moved. Idempotent, and safe to call on a
+    store that has nothing to migrate.
+    """
+    creds = creds_mod.load(home)
+    composio = creds.get("composio")
+    if not composio:
+        return {}
+    accounts = composio.get("connected_accounts") or {}
+    moved = {}
+    for alias, slug in TOOLKIT_ALIASES.items():
+        if alias in accounts and slug not in accounts:
+            accounts[slug] = accounts.pop(alias)
+            moved[alias] = slug
+    for alias in list(TOOLKIT_ALIASES):
+        # both present: the slug entry wins, the stale alias goes
+        if alias in accounts and TOOLKIT_ALIASES[alias] in accounts:
+            accounts.pop(alias)
+            moved.setdefault(alias, TOOLKIT_ALIASES[alias])
+    if moved:
+        composio["connected_accounts"] = accounts
+        creds_mod.set_service(home, "composio", composio)
+    return moved
 
 COMPOSIO_HOST = "backend.composio.dev"
 
@@ -171,6 +241,11 @@ def short_api_error(exc: BaseException) -> str:
         return text[:300]
 
     err = data.get("error", data) if isinstance(data, dict) else {}
+    # Composio answers with `{"error": {...}}` most of the time and
+    # `{"error": "some text"}` occasionally; the second shape used to crash here
+    # while reporting the first failure, turning a bad request into a traceback.
+    if not isinstance(err, dict):
+        return f"{str(err).strip()[:300]}" or text[:300]
     message = str(err.get("message") or "").strip()
     if not message:
         return text[:300]
@@ -364,11 +439,8 @@ def _ensure_auth_config(home: Path, toolkit: str) -> str:
 def connect_composio_app(home: Path, app: str) -> dict:
     """Creates (or reuses) an auth config, creates an auth link session for the app,
     caches the connected_account_id, and returns the redirect_url."""
-    if app not in TOOLKIT_SLUGS:
-        raise ValueError(f"Unsupported app: {app}")
-
-    toolkit_slug = TOOLKIT_SLUGS[app]
-    auth_config_id = _ensure_auth_config(home, toolkit_slug)
+    slug = toolkit_slug(app)
+    auth_config_id = _ensure_auth_config(home, slug)
 
     client = _composio_client(home)
     try:
@@ -385,7 +457,7 @@ def connect_composio_app(home: Path, app: str) -> dict:
     creds = creds_mod.load(home)
     composio_creds = creds.get("composio", {})
     connected_accounts = composio_creds.setdefault("connected_accounts", {})
-    connected_accounts[app] = connected_account_id
+    connected_accounts[slug] = connected_account_id
     creds_mod.set_service(home, "composio", composio_creds)
 
     return {"redirect_url": redirect_url, "connected_account_id": connected_account_id}
@@ -396,10 +468,14 @@ def connected_account_status(home: Path, app: str) -> str:
     creds = creds_mod.load(home)
     composio = creds.get("composio", {})
     connected_accounts = composio.get("connected_accounts", {})
-    if app not in connected_accounts:
-        return "NOT_CONNECTED"
+    key = account_key(app)
+    if key not in connected_accounts:
+        if app in connected_accounts:  # store written before slug-keying
+            key = app
+        else:
+            return "NOT_CONNECTED"
 
-    connected_account_id = connected_accounts[app]
+    connected_account_id = connected_accounts[key]
     try:
         client = _composio_client(home)
         account = client.connected_accounts.get(connected_account_id)
@@ -435,3 +511,39 @@ def list_connections(home: Path) -> list[dict]:
             })
     return out
 
+
+def connected_accounts(home: Path) -> dict[str, str]:
+    """Every connected account in the store, keyed by toolkit slug."""
+    creds = creds_mod.load(home)
+    return dict((creds.get("composio") or {}).get("connected_accounts") or {})
+
+
+def disconnect_composio_app(home: Path, app: str) -> dict:
+    """Revokes an app's authorization: deletes the connected account at Composio
+    and drops it from the store's credentials.
+
+    The local record is removed even when the remote delete fails, because the
+    account it points at is already unusable in that case; the returned dict
+    says which half happened so the caller can report it honestly.
+    """
+    slug = account_key(app)
+    creds = creds_mod.load(home)
+    composio = creds.get("composio") or {}
+    accounts = composio.get("connected_accounts") or {}
+    key = slug if slug in accounts else (app if app in accounts else None)
+    if key is None:
+        return {"app": slug, "removed": False, "revoked": False,
+                "detail": "was not connected"}
+
+    account_id = accounts.pop(key)
+    revoked, detail = False, ""
+    try:
+        client = _composio_client(home)
+        with_cert_recovery(home, lambda: client.connected_accounts.delete(account_id))
+        revoked = True
+    except Exception as e:
+        detail = short_api_error(e)
+
+    composio["connected_accounts"] = accounts
+    creds_mod.set_service(home, "composio", composio)
+    return {"app": slug, "removed": True, "revoked": revoked, "detail": detail}

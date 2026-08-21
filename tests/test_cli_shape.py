@@ -12,21 +12,31 @@ import pytest
 from px0 import cli
 
 
-FLAT = {"init", "doctor", "version", "update"}
+# `status` and `completion` act on the whole install rather than on one entity:
+# status reports across every group, completion emits a shell script. Both read
+# wrong as `px0 <entity> status`, the way `git status` would.
+FLAT = {"init", "doctor", "version", "update", "status", "completion"}
 
 # The verbs each entity answers to. Anything added to a group should be added
 # here too, so the surface stays something you can read in one place.
 GROUPS = {
-    "workflows":  {"new", "run", "edit", "list"},
-    "brain":  {"add", "refresh", "list", "search", "ask", "reindex"},
-    "guidelines": {"list", "review", "log", "revert", "why", "consolidate", "alias"},
-    "runs":       {"list", "show", "output", "rerun", "logs", "why"},
+    "workflows":  {"new", "run", "edit", "list", "show", "validate", "rm", "rename",
+                   "copy", "disable", "enable"},
+    "brain":      {"add", "refresh", "list", "search", "ask", "reindex", "show", "rm",
+                   "export"},
+    "guidelines": {"list", "review", "log", "revert", "why", "consolidate", "alias",
+                   "new", "edit", "show", "rm"},
+    "runs":       {"list", "show", "output", "rerun", "logs", "why", "cancel", "prune",
+                   "open"},
     "versions":   {"list", "show", "diff", "revert", "prune"},
     "changes":    {"list", "show", "revert"},
-    "store":      {"export", "list"},
-    "config":     {"list", "get", "set", "model", "composio"},
-    "tools":      {"list"},
-    "daemon":     {"install", "status", "start", "stop", "restart", "logs", "serve"},
+    "store":      {"export", "list", "import", "path", "verify"},
+    "config":     {"list", "get", "set", "unset", "edit", "path", "model", "composio"},
+    "tools":      {"list", "search", "call", "connect", "disconnect", "refresh"},
+    "daemon":     {"install", "uninstall", "status", "start", "stop", "restart",
+                   "logs", "serve"},
+    "secrets":    {"set", "list", "unset"},
+    "mcp":        {"serve"},
 }
 
 

@@ -8,7 +8,9 @@ px0 <group> <verb> [arguments] [options]
 ```
 
 `px0 brain add`, `px0 workflows run`, `px0 guidelines review`. The only flat
-commands — no verb — are `init`, `skills`, `update`, `version`, and `doctor`.
+commands — no verb — are the ones that act on the install rather than on anything
+in the store: `init`, `skills`, `update`, `version`, `doctor`, `status`, and
+`completion`.
 
 ## Groups
 
@@ -24,9 +26,13 @@ commands — no verb — are `init`, `skills`, `update`, `version`, and `doctor`
 | [`versions`](versions.md) | Per-file history of the store | `px0/versioning.py` |
 | [`changes`](changes.md) | The store's change log, across files | `px0/versioning.py` |
 | [`store`](store.md) | The store as a whole | `px0/store.py` |
+| [`secrets`](secrets.md) | Values a workflow may use without storing them in its file | `px0/secrets.py` |
 | [`config`](config.md) | Reading and writing `config.toml` | `px0/config.py` |
 | [`skills`](skills.md) | Agent skill bundles | `px0/skills.py` |
 | [`update`](update.md) | Upgrading px0 and migrating the store | `px0/update.py` |
+| [`status`](status.md) | Whether anything needs attention | `px0/status.py` |
+| [`completion`](completion.md) | Shell completion scripts | `px0/completion.py` |
+| [`mcp`](mcp.md) | Serving the brain and workflows over MCP | `px0/mcp.py` |
 | [`doctor`](doctor.md) | Checking that everything is wired up | `px0/doctor.py` |
 
 ## Conventions
@@ -66,8 +72,11 @@ Where a command offers `--json`, it prints machine-readable output on stdout and
 nothing else, so it can be piped into `jq`. Progress spinners are written to
 stderr and never interleave with it.
 
-Available on: `runs list`, `runs show`, `brain search`, `versions list`,
-`changes list`, `config list`, `config get`, `doctor`, `workflows run`.
+Available on: `runs list`, `runs show`, `brain search`, `brain show`,
+`versions list`, `changes list`, `config list`, `config get`, `config path`,
+`doctor`, `status`, `store path`, `store verify`, `secrets list`, `tools list`,
+`tools search`, `tools call`, `workflows run`, `workflows show`,
+`workflows validate`.
 
 ### Exit codes
 
@@ -78,6 +87,13 @@ Available on: `runs list`, `runs show`, `brain search`, `versions list`,
 | `2` | Connector error: an external app call failed or is not authorized |
 | `3` | Model error: the coding-agent harness failed, timed out, or is missing |
 | `4` | Integrity error: the store's version history or index is inconsistent |
+
+### Confirmations
+
+Every command that removes or revokes something asks first, and every one of them
+takes `--yes` to skip the question. With stdin not a terminal and no `--yes`, the
+command stops rather than assuming: `px0 workflows rm`, `px0 brain rm`,
+`px0 guidelines rm`, `px0 tools disconnect`, and `px0 tools call` on a write tool.
 
 ### Environment
 

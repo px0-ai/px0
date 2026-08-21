@@ -14,6 +14,7 @@ px0 daemon stop
 px0 daemon restart
 px0 daemon logs [--follow|-f]
 px0 daemon serve
+px0 daemon uninstall
 ```
 
 ---
@@ -78,6 +79,42 @@ Run the scheduler in the foreground, logging to the terminal. No arguments.
 
 This is what the installed service invokes. Run it directly to watch the
 scheduler work or to debug a schedule without installing anything.
+
+## `px0 daemon uninstall`
+
+Remove whatever `install` put in place, and stop the daemon if it is running.
+
+- **Arguments:** none.
+- Removes the launchd plist or the systemd unit, unloading it first.
+- Leaves px0 and the store exactly as they are: workflows keep their schedules,
+  nothing fires on its own until `px0 daemon install` runs again.
+- On the cron fallback, says that px0 entries are still in your crontab rather
+  than editing it. That file is yours.
+
+```shell
+px0 daemon uninstall
+```
+
+`install.sh --uninstall` also removes the scheduler unit, but it removes px0
+along with it.
+
+---
+
+## What the daemon does on each tick
+
+Every 30 seconds, for each enabled workflow:
+
+- fires anything whose cron schedule is due, catching up a missed fire from
+  earlier the same day;
+- polls any `trigger.watch` whose interval has elapsed, and fires when an item
+  it has not seen before appears.
+
+A workflow with `enabled: false` is skipped by both, and by the cron fallback's
+generated crontab block. Once a day it also runs housekeeping: the hand-edit
+checkpoint scan, a brain reindex, the queued-ingest drain, run-log retention, and
+a weekly update check.
+
+---
 
 ## Related configuration
 

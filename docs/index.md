@@ -11,6 +11,7 @@ you can open in any editor.
 | Section | What is in it |
 | ------- | ------------- |
 | [Command reference](commands/index.md) | Every command group, verb, and option |
+| [Workflow use cases](workflow_usecases.md) | 116 jobs to build, and the apps each one touches |
 | [Configuration keys](reference/configuration.md) | Every `config.toml` key, its type and effect |
 | [Store layout](reference/store-layout.md) | What each folder and state file holds |
 
@@ -34,6 +35,7 @@ Your store is `~/.px0` unless `PX0_HOME` says otherwise.
 | `guidelines/` | How you work                                           |
 | `brain/`      | What you have read and kept                            |
 | `output/`     | What runs produced                                     |
+| `tools/`      | Tools you declared yourself, one TOML file each         |
 | `skills/`     | Guidelines compiled into agent skill bundles           |
 | `.state/`     | Runtime internals: version history, index, credentials |
 

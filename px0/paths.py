@@ -29,6 +29,11 @@ def outputs_dir(home: Path | None = None) -> Path:
     return output_dir(home)
 
 
+def tools_dir(home: Path | None = None) -> Path:
+    """Where user-declared tools live: one TOML file per tool."""
+    return (home or store_home()) / "tools"
+
+
 def skills_dir(home: Path | None = None) -> Path:
     """Path to the derived skills build output under `home` (or the default store)."""
     return (home or store_home()) / "skills"

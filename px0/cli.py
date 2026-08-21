@@ -7,6 +7,8 @@ import dataclasses
 import json
 import os
 import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +18,9 @@ from typing import NamedTuple
 
 from px0 import (
     ask as ask_mod,
+    authoring,
     catalogue as catalogue_mod,
+    completion as completion_mod,
     builder as builder_mod,
     claims,
     config as config_mod,
@@ -24,6 +28,11 @@ from px0 import (
     consolidate as consolidate_mod,
     credentials as creds_mod,
     daemon as daemon_mod,
+    localtools,
+    mcp as mcp_mod,
+    notify as notify_mod,
+    secrets as secrets_mod,
+    status as status_mod,
     doctor as doctor_mod,
     harness,
     brain as brain_mod,
@@ -103,6 +112,54 @@ def _dump(args: argparse.Namespace, data) -> None:
     let the two interleave out of order when piped.
     """
     print(json.dumps(data, indent=2, default=str), flush=True)
+
+
+def _confirm(question: str, assume_yes: bool = False) -> bool:
+    """Asks a yes/no question, defaulting to no.
+
+    Every destructive verb goes through here, so "are you sure" reads the same
+    everywhere and `--yes` means the same thing everywhere.
+    """
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        ui.err("this needs a confirmation and stdin is not a terminal")
+        ui.hint("pass --yes to proceed without being asked")
+        sys.exit(EXIT_USER_ERROR)
+    answer = ui.prompt(f"{question} [y/N] ").strip().lower()
+    return answer in ("y", "yes")
+
+
+def _open_in_editor(path: Path) -> bool:
+    """Opens a file in $VISUAL, $EDITOR, or a sensible fallback.
+
+    Returns False when there is no editor to open and no terminal to run one
+    in, so the caller can say where the file is instead of failing.
+    """
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        for candidate in ("nano", "vim", "vi"):
+            if shutil.which(candidate):
+                editor = candidate
+                break
+    if not editor or not sys.stdin.isatty():
+        return False
+    try:
+        subprocess.call(shlex.split(editor) + [str(path)])
+    except OSError as e:
+        ui.err(f"could not run {editor}", str(e))
+        return False
+    return True
+
+
+def _read_text_arg(path_value: str) -> str:
+    """Reads a file given on the command line, with a message that names it."""
+    path = Path(path_value).expanduser()
+    try:
+        return path.read_text()
+    except OSError as e:
+        ui.err(f"cannot read {path}", str(e))
+        sys.exit(EXIT_USER_ERROR)
 
 
 # --- init / new / run / ask ---------------------------------------------
@@ -471,10 +528,26 @@ def _write_one_guideline(home: Path, config: dict, proposal) -> str | None:
         return proposal.path
 
 
+def _description_arg(args: argparse.Namespace) -> str:
+    """The workflow description, from the argument or from --from-file.
+
+    A carefully written description is a paragraph, and a paragraph does not
+    want to survive shell quoting.
+    """
+    from_file = getattr(args, "from_file", None)
+    if from_file:
+        text = _read_text_arg(from_file).strip()
+        if not text:
+            ui.err(f"{from_file} is empty")
+            sys.exit(EXIT_USER_ERROR)
+        return text
+    return args.description
+
+
 def cmd_new(args: argparse.Namespace) -> None:
     """Handles `px0 workflows new`: builds a workflow from a sentence."""
     home, config = _ctx()
-    _build_workflow(home, config, args.description, args, existing_id=None)
+    _build_workflow(home, config, _description_arg(args), args, existing_id=None)
 
 
 def cmd_workflows_edit(args: argparse.Namespace) -> None:
@@ -688,6 +761,8 @@ def cmd_run(args: argparse.Namespace) -> None:
                 home, config, workflow_id, trigger=trigger, cli_inputs=cli_inputs,
                 dry_run=args.dry_run, output_override=output_override,
                 late_scheduled_at=args.late_scheduled_at,
+                timeout_override=getattr(args, "timeout", None),
+                retry=not getattr(args, "no_retry", False),
             )
     except runner.RunError as e:
         ui.err("run failed", str(e))
@@ -838,10 +913,215 @@ def cmd_workflows_list(args: argparse.Namespace) -> None:
     _print_workflows(home, heading=False)
 
 
+
+def cmd_workflows_show(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows show`: print one workflow, file and all."""
+    home, config = _ctx()
+    wf = workflow_mod.load(home, args.workflow)
+    if getattr(args, "json", False):
+        _dump(args, {
+            "id": wf.id, "path": str(wf.path.relative_to(home)), "version": wf.version,
+            "description": wf.description, "request": wf.request, "enabled": wf.enabled,
+            "trigger": wf.trigger, "guidelines": wf.guidelines, "tools": wf.tools,
+            "inputs": [dataclasses.asdict(i) for i in wf.inputs],
+            "output": wf.output, "timeout": wf.timeout, "pipeline": wf.pipeline,
+            "on_failure": wf.on_failure, "retry": wf.retry, "body": wf.body,
+        })
+        return
+    ui.kv("file", str(wf.path.relative_to(home)))
+    ui.kv("version", f"v{versioning.latest_version_number(home, str(wf.path.relative_to(home))) or 1}")
+    if not wf.enabled:
+        ui.warn("disabled", "it will not fire until `px0 workflows enable` runs")
+    print()
+    print(wf.path.read_text(), end="")
+
+
+def _validate_one(home: Path, wf) -> list[str]:
+    return workflow_mod.validate(wf, home)
+
+
+def cmd_workflows_validate(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows validate`: check workflows without running them.
+
+    Validation used to be reachable only by firing a workflow or running a full
+    `px0 doctor`, so a hand edit could not be checked before it mattered.
+    """
+    home, config = _ctx()
+    results = []
+    if getattr(args, "workflow", None):
+        targets = [workflow_mod.load(home, args.workflow)]
+    else:
+        targets = sorted(workflow_mod.load_all(home).values(), key=lambda w: w.id)
+        for message in workflow_mod.load_errors(home):
+            results.append({"workflow": None, "ok": False, "errors": [message]})
+    for wf in targets:
+        errors = _validate_one(home, wf)
+        results.append({"workflow": wf.id, "ok": not errors, "errors": errors})
+
+    if getattr(args, "json", False):
+        _dump(args, {"checked": len(results), "results": results,
+                     "ok": all(r["ok"] for r in results)})
+        return
+
+    bad = 0
+    for result in results:
+        name = result["workflow"] or "unparseable file"
+        if result["ok"]:
+            ui.ok(name, "valid")
+        else:
+            bad += 1
+            ui.err(name)
+            for message in result["errors"]:
+                ui.bullet(message)
+    if not results:
+        ui.info("no workflows to check", "write one with `px0 workflows new`")
+    if bad:
+        sys.exit(EXIT_USER_ERROR)
+
+
+def cmd_workflows_rm(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows rm`: remove a workflow, keeping its history."""
+    home, config = _ctx()
+    path = authoring.workflow_path(home, args.workflow)
+    if not path.exists():
+        ui.err(f"no such workflow: {args.workflow}")
+        ui.hint("see what there is with `px0 workflows list`")
+        sys.exit(EXIT_USER_ERROR)
+    rel = str(path.relative_to(home))
+    scheduled = ""
+    try:
+        wf = workflow_mod.parse(path)
+        if (wf.trigger or {}).get("schedule"):
+            scheduled = f" (scheduled {wf.trigger['schedule']})"
+    except workflow_mod.WorkflowError:
+        pass
+    if not _confirm(f"Remove {rel}{scheduled}?", getattr(args, "yes", False)):
+        ui.info("kept", rel)
+        return
+    result = authoring.remove_file(home, path, evidence=f"px0 workflows rm {args.workflow}")
+    ui.ok("removed", rel)
+    if result.get("change_id"):
+        ui.hint(f"undo with `px0 changes revert {result['change_id']}`")
+    daemon_mod.restart_if_running(home, config)
+
+
+def cmd_workflows_rename(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows rename`: new id, new filename, same history."""
+    home, config = _ctx()
+    src = authoring.workflow_path(home, args.workflow)
+    if not src.exists():
+        ui.err(f"no such workflow: {args.workflow}")
+        sys.exit(EXIT_USER_ERROR)
+    new_id = authoring.check_id(args.new_id, "workflow id")
+    if new_id in workflow_mod.load_all(home):
+        ui.err(f"{new_id} already exists")
+        sys.exit(EXIT_USER_ERROR)
+    dest = src.parent / f"{new_id}.md"
+    # The id lives in the frontmatter as well as the filename; a rename that
+    # only moved the file left the workflow running under its old id.
+    text = authoring.set_frontmatter_key(src.read_text(), "id", new_id)
+    src.write_text(text)
+    result = authoring.move_file(home, src, dest, evidence=f"renamed {args.workflow} to {new_id}")
+    ui.ok("renamed", f"{result['from']} -> {result['to']}")
+    daemon_mod.restart_if_running(home, config)
+
+
+def cmd_workflows_copy(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows copy`: fork a working workflow instead of rewriting it."""
+    home, config = _ctx()
+    src = authoring.workflow_path(home, args.workflow)
+    if not src.exists():
+        ui.err(f"no such workflow: {args.workflow}")
+        sys.exit(EXIT_USER_ERROR)
+    new_id = authoring.check_id(args.new_id, "workflow id")
+    if new_id in workflow_mod.load_all(home):
+        ui.err(f"{new_id} already exists")
+        sys.exit(EXIT_USER_ERROR)
+    dest = src.parent / f"{new_id}.md"
+    body = authoring.set_frontmatter_key(src.read_text(), "id", new_id)
+    authoring.write_file(home, dest, body, evidence=f"copied from {args.workflow}")
+    ui.ok("copied", f"{args.workflow} -> {new_id}")
+    ui.hint(f"edit it with `px0 workflows edit {new_id}`")
+
+
+def cmd_workflows_enable(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows disable` and `enable`: park a workflow, or unpark it.
+
+    Parking used to mean deleting `trigger.schedule` and remembering it later.
+    """
+    home, config = _ctx()
+    enable = args.workflows_cmd == "enable"
+    path = authoring.workflow_path(home, args.workflow)
+    if not path.exists():
+        ui.err(f"no such workflow: {args.workflow}")
+        sys.exit(EXIT_USER_ERROR)
+    wf = workflow_mod.parse(path)
+    if wf.enabled == enable:
+        ui.info(args.workflow, "already " + ("enabled" if enable else "disabled"))
+        return
+    text = authoring.set_frontmatter_key(path.read_text(), "enabled", enable)
+    authoring.write_file(home, path, text,
+                          evidence=("enabled" if enable else "disabled") + " via cli")
+    ui.ok("enabled" if enable else "disabled", args.workflow)
+    schedule = (wf.trigger or {}).get("schedule")
+    if schedule and not enable:
+        ui.hint(f"it will not fire on {schedule} until you run `px0 workflows enable {args.workflow}`")
+    daemon_mod.restart_if_running(home, config)
+
+
 def cmd_guidelines_list(args: argparse.Namespace) -> None:
     """Handles `px0 guidelines list`: every guideline file, store-relative."""
     home, _ = _ctx()
     _print_guidelines(home, heading=False)
+
+
+def cmd_brain_show(args: argparse.Namespace) -> None:
+    """Handles `px0 brain show`: one file, with what it came from."""
+    home, config = _ctx()
+    try:
+        info = brain_mod.show(home, config, args.path)
+    except brain_mod.IngestError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+    if getattr(args, "json", False):
+        _dump(args, info)
+        return
+    ui.kv("path", info["path"])
+    for key in ("source", "kind", "title", "retrieved"):
+        if info["header"].get(key):
+            ui.kv(key, str(info["header"][key]))
+    if info["private"]:
+        ui.warn("private", "held back from every search, and never sent anywhere")
+    print()
+    print(info["body"], end="" if info["body"].endswith("\n") else "\n")
+
+
+def cmd_brain_rm(args: argparse.Namespace) -> None:
+    """Handles `px0 brain rm`: remove a file and drop its passages."""
+    home, config = _ctx()
+    try:
+        info = brain_mod.show(home, config, args.path)
+    except brain_mod.IngestError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+    if not _confirm(f"Remove {info['path']} from the brain?", getattr(args, "yes", False)):
+        ui.info("kept", info["path"])
+        return
+    result = brain_mod.remove(home, config, args.path)
+    ui.ok("removed", result["path"])
+    if result.get("reindexed") is not None:
+        ui.hint(f"index rebuilt: {result['reindexed']} passages")
+
+
+def cmd_brain_export(args: argparse.Namespace) -> None:
+    """Handles `px0 brain export`: copy the library out, private folder held back."""
+    home, config = _ctx()
+    result = brain_mod.export_library(home, config, Path(args.dir),
+                                      include_private=args.include_private)
+    ui.ok("exported", f"{result['copied']} file(s) to {result['dest']}")
+    if result["held_back"]:
+        ui.hint(f"{result['held_back']} private file(s) held back; "
+                "pass --include-private to include them")
 
 
 def cmd_brain_list(args: argparse.Namespace) -> None:
@@ -870,6 +1150,22 @@ _AUTH_STATE = {
 
 
 def cmd_tools(args: argparse.Namespace) -> None:
+    """Handles the `px0 tools` group: list, search, call, connect, disconnect, refresh."""
+    verb = getattr(args, "tools_cmd", "list")
+    if verb == "search":
+        return _tools_search(args)
+    if verb == "call":
+        return _tools_call(args)
+    if verb == "connect":
+        return _tools_connect(args)
+    if verb == "disconnect":
+        return _tools_disconnect(args)
+    if verb == "refresh":
+        return _tools_refresh(args)
+    return _tools_list(args)
+
+
+def _tools_list(args: argparse.Namespace) -> None:
     """Handles `px0 tools list`: prints each available tool with a read/write marker,
     its id, provider, description, and parameters, optionally filtered by service."""
     # Include tools discovered by `px0 workflows new` when there is a store to read them
@@ -924,10 +1220,231 @@ def cmd_tools(args: argparse.Namespace) -> None:
     writes = sum(1 for t in listed if t.is_write)
     if writes:
         ui.hint(f"{writes} of {len(listed)} tools can change things outside px0")
+    if store_mod.is_initialized(home):
+        _user_tools, tool_errors = localtools.load_user_tools(home)
+        for message in tool_errors:
+            ui.warn("user tool skipped", message)
+    if not config_mod.get(config_mod.load(paths.config_path(home)), "tools.allow_shell", False):
+        if any(t.id == "shell.run" for t in listed):
+            ui.hint("shell.run is listed but disabled; enable it with "
+                    "`px0 config set tools.allow_shell true`")
     unready = sorted(p for p, st in statuses.items() if st != "ACTIVE")
     if unready:
         ui.hint(f"not authorized yet: {', '.join(unready)} -- a workflow that needs "
                 "one prints its authorization URL on the first run")
+
+
+def _catalogue_failed(error: Exception) -> None:
+    """Reports a catalogue failure in one line and says what fixes it."""
+    message = str(error)
+    ui.err("could not reach Composio's catalogue", message.split("\n")[0][:200])
+    if "401" in message or "Invalid API key" in message:
+        ui.remedy("px0 config composio <key>")
+    else:
+        ui.hint("check the network, then try again")
+    sys.exit(EXIT_CONNECTOR_ERROR)
+
+
+def _tools_search(args: argparse.Namespace) -> None:
+    """Handles `px0 tools search`: browse Composio's catalogue before writing a workflow.
+
+    The catalogue was searchable only from inside `px0 workflows new`, so the
+    first question anyone has -- what can this reach? -- had no command.
+    """
+    home, config = _ctx()
+    limit = args.limit or (40 if args.toolkits else catalogue_mod.SEARCH_LIMIT)
+
+    if args.toolkits:
+        try:
+            with ui.spinner("Searching Composio's toolkits"):
+                found = catalogue_mod.toolkits(home, args.query, limit=limit)
+        except catalogue_mod.CatalogueError as e:
+            _catalogue_failed(e)
+        if getattr(args, "json", False):
+            _dump(args, found)
+            return
+        if not found:
+            ui.info("no toolkit matches", args.query or "")
+            return
+        width = max(len(t["slug"]) for t in found)
+        for toolkit in found:
+            counts = ui.dim(f"{toolkit['tools']:>4} tools")
+            triggers = ui.dim(f"  {toolkit['triggers']} triggers") if toolkit["triggers"] else ""
+            print(f"  {toolkit['slug'].ljust(width)}  {counts}{triggers}  "
+                  f"{ui.dim(toolkit['description'][:70])}")
+        ui.hint(f"{len(found)} toolkit(s); authorize one with `px0 tools connect <slug>`")
+        return
+
+    if not args.query:
+        ui.err("nothing to search for")
+        ui.hint("name what the tool should do, or pass --toolkits to list toolkits")
+        sys.exit(EXIT_USER_ERROR)
+
+    try:
+        with ui.spinner("Searching Composio's catalogue"):
+            found = catalogue_mod.search(home, args.query, limit=limit, toolkit=args.toolkit)
+    except catalogue_mod.CatalogueError as e:
+        _catalogue_failed(e)
+    if getattr(args, "json", False):
+        _dump(args, [dataclasses.asdict(t) | {"id": t.id} for t in found])
+        return
+    if not found:
+        ui.info("no tool matches", args.query)
+        ui.hint("try fewer words, or `px0 tools search --toolkits <name>` first")
+        return
+    width = max(len(t.slug) for t in found)
+    for tool in found:
+        marker = ui.paint("write", "179") if tool.is_write else ui.dim("read ")
+        if tool.is_destructive:
+            marker = ui.paint("destroy", "203")
+        print(f"  {marker}  {tool.slug.ljust(width)}  {ui.dim(tool.description[:70])}")
+    ui.hint(f"{len(found)} tool(s). A workflow gets one by naming the job: "
+            "`px0 workflows new \"...\"`")
+
+
+def _parse_tool_args(pairs: list[str] | None) -> dict:
+    """Parses repeated --arg KEY=VALUE into a dict, JSON-decoding what parses as JSON."""
+    out: dict = {}
+    for raw in pairs or []:
+        if "=" not in raw:
+            ui.err(f"--arg needs KEY=VALUE, got {raw!r}")
+            sys.exit(EXIT_USER_ERROR)
+        key, value = raw.split("=", 1)
+        try:
+            out[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            out[key.strip()] = value
+    return out
+
+
+def _tools_call(args: argparse.Namespace) -> None:
+    """Handles `px0 tools call`: fire one tool and look at the result.
+
+    A dry run stubs every write, so before this the first real call a tool ever
+    made was inside a live workflow.
+    """
+    home, config = _ctx()
+    spec = tools.resolve(args.tool, home)
+    if spec is None:
+        ui.err(f"no such tool: {args.tool}")
+        ui.hint("see what there is with `px0 tools list`")
+        sys.exit(EXIT_USER_ERROR)
+    call_args = _parse_tool_args(getattr(args, "arg", None))
+
+    missing = [name for name, kind in spec.params.items()
+               if str(kind).endswith("*") and name not in call_args]
+    if missing:
+        ui.err(f"{spec.id} needs {', '.join(missing)}")
+        ui.hint("pass each one as --arg name=value")
+        sys.exit(EXIT_USER_ERROR)
+
+    if spec.is_write and not _confirm(
+            f"{spec.id} can change things outside px0. Call it for real?",
+            getattr(args, "yes", False)):
+        ui.info("not called", spec.id)
+        return
+
+    try:
+        with ui.spinner(f"Calling {spec.id}"):
+            result = tools.call(home, config, spec.id, call_args)
+    except tools.ConnectorNotConfigured as e:
+        ui.err(str(e))
+        sys.exit(EXIT_CONNECTOR_ERROR)
+    except tools.ConnectorError as e:
+        ui.err(f"{spec.id} failed", str(e))
+        sys.exit(EXIT_CONNECTOR_ERROR)
+
+    redact = secrets_mod.redactor(home)
+    if getattr(args, "json", False):
+        _dump(args, redact(result) if isinstance(result, (dict, list, str)) else result)
+        return
+    ui.ok("called", spec.id)
+    text = result if isinstance(result, str) else json.dumps(result, indent=2, default=str)
+    print(redact(text))
+
+
+def _tools_connect(args: argparse.Namespace) -> None:
+    """Handles `px0 tools connect`: authorize an app deliberately.
+
+    Authorization on demand covers the common case, but a token that expires or
+    is revoked left no way to repair it except running a workflow and watching
+    it fail.
+    """
+    home, config = _ctx()
+    try:
+        slug = connect_mod.toolkit_slug(args.app)
+    except ValueError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+    if getattr(args, "reconnect", False):
+        connect_mod.disconnect_composio_app(home, slug)
+
+    status = connect_mod.connected_account_status(home, slug)
+    if status == "ACTIVE":
+        ui.ok("already authorized", slug)
+        ui.hint(f"start again with `px0 tools connect {slug} --reconnect`")
+        return
+
+    try:
+        with ui.spinner(f"Preparing {slug} authorization"):
+            result = connect_mod.connect_composio_app(home, slug)
+    except (ValueError, connect_mod.ComposioUnreachable) as e:
+        ui.err(f"could not prepare {slug} authorization", str(e))
+        sys.exit(EXIT_CONNECTOR_ERROR)
+
+    ui.step(slug, "open this and complete the consent:", stream=sys.stdout)
+    ui.command(result["redirect_url"])
+    ui.hint(f"then confirm it with `px0 tools list --status`")
+
+
+def _tools_disconnect(args: argparse.Namespace) -> None:
+    """Handles `px0 tools disconnect`: revoke an app's authorization."""
+    home, config = _ctx()
+    slug = connect_mod.account_key(args.app)
+    if slug not in connect_mod.connected_accounts(home):
+        ui.info("not connected", slug)
+        return
+    users = sorted({wf.id for wf in workflow_mod.load_all(home).values()
+                    for t in list(wf.tools) + [i.tool for i in wf.inputs if i.tool]
+                    if (spec := tools.resolve(t, home)) and spec.provider in (slug, args.app)})
+    if users:
+        ui.warn("used by", ", ".join(users))
+    if not _confirm(f"Revoke {slug} authorization?", getattr(args, "yes", False)):
+        ui.info("kept", slug)
+        return
+    result = connect_mod.disconnect_composio_app(home, slug)
+    ui.ok("disconnected", slug)
+    if not result["revoked"]:
+        ui.warn("removed locally only", result.get("detail") or
+                "Composio still lists the account; revoke it there if it matters")
+
+
+def _tools_refresh(args: argparse.Namespace) -> None:
+    """Handles `px0 tools refresh`: re-read cached tool definitions, or drop them.
+
+    The cache only ever grew, so a tool Composio has since reshaped kept its
+    old schema for as long as the store existed.
+    """
+    home, config = _ctx()
+    targets = list(getattr(args, "tool", None) or [])
+    if getattr(args, "forget", False):
+        removed = catalogue_mod.forget(home, targets or None)
+        ui.ok("forgot", f"{removed} cached tool definition(s)")
+        ui.hint("a workflow naming a forgotten tool will not validate until "
+                "`px0 workflows edit` finds it again")
+        return
+    try:
+        with ui.spinner("Re-reading tool definitions"):
+            result = catalogue_mod.refresh(home, targets or None)
+    except catalogue_mod.CatalogueError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_CONNECTOR_ERROR)
+    ui.ok("refreshed", f"{result['refreshed']} changed, {result['unchanged']} unchanged")
+    for slug in result["dropped"]:
+        ui.warn("no longer in the catalogue", slug)
+    for failure in result["failed"]:
+        ui.err(failure["slug"], failure["error"])
 
 
 # --- daemon ----------------------------------------------------------------
@@ -1036,6 +1553,20 @@ def cmd_daemon(args: argparse.Namespace) -> None:
                 pass
         return
 
+    if args.daemon_cmd == "uninstall":
+        result = daemon_mod.uninstall(home)
+        if result["stopped"]:
+            ui.ok("stopped", "the running daemon")
+        for path in result["removed"]:
+            ui.ok("removed", path)
+        if not result["removed"] and not result["stopped"]:
+            ui.info("nothing to remove", "no scheduler unit is installed")
+        if result.get("cron_note"):
+            ui.hint(result["cron_note"])
+        ui.hint("workflows stay in the store; nothing fires until "
+                "`px0 daemon install` runs again")
+        return
+
     if args.daemon_cmd == "serve":
         ui.info("scheduler started", "polling every 30s; Ctrl-C to stop")
         daemon_mod.serve(home, config)
@@ -1074,9 +1605,66 @@ def cmd_runs(args: argparse.Namespace) -> None:
         return
 
     if args.runs_cmd == "list":
+        if getattr(args, "running", False):
+            running = runs_mod.list_running(home)
+            if args.json:
+                _dump(args, running)
+                return
+            if not running:
+                ui.info("nothing running")
+                return
+            for entry in running:
+                ui.kv(entry["id"], f"{entry['workflow_id']}  pid {entry['pid']}  "
+                                    f"since {entry['started_at']}")
+            ui.hint("stop one with `px0 runs cancel <run-id>`")
+            return
         since = _parse_since(args.since) if args.since else None
         records = runs_mod.list_records(config, workflow=args.workflow, failed=args.failed, since=since)
         _print_runs(config, records, as_json=args.json)
+        return
+
+    if args.runs_cmd == "cancel":
+        result = runs_mod.cancel(home, args.run_id, force=getattr(args, "force", False))
+        if result["cancelled"]:
+            ui.ok("signalled", f"{args.run_id} ({result['signal']} to pid {result['pid']})")
+            ui.hint("the run records itself as failed once it stops")
+            return
+        ui.err(f"not cancelled: {result.get('detail', 'unknown')}")
+        ui.hint("see what is in flight with `px0 runs list --running`")
+        sys.exit(EXIT_USER_ERROR)
+
+    if args.runs_cmd == "prune":
+        if args.dry_run:
+            records = runs_mod.list_records(config)
+            ui.info("retention applies to", f"{len(records)} record(s)")
+            ui.kv("logs kept for", f"{config_mod.get(config, 'logs.retention_days', 14)} days")
+            ui.kv("failed logs kept for",
+                  f"{config_mod.get(config, 'logs.retention_days_failed', 60)} days")
+            ui.kv("records kept for",
+                  f"{config_mod.get(config, 'logs.record_retention_days', 365)} days")
+            ui.hint("runs that called a write tool are never pruned")
+            return
+        removed = runs_mod.apply_retention(config)
+        ui.ok("pruned", f"{removed['logs']} log(s), {removed['records']} record(s)")
+        return
+
+    if args.runs_cmd == "open":
+        record = runs_mod.read_record(config, args.run_id)
+        output = record.get("output") or {}
+        if output.get("target") == "file" and output.get("path"):
+            path = home / output["path"]
+            if not path.exists():
+                ui.err(f"the file this run wrote is gone: {output['path']}")
+                sys.exit(EXIT_USER_ERROR)
+            ui.kv("file", output["path"])
+            print()
+            print(path.read_text(), end="")
+            return
+        text = output.get("text")
+        if text:
+            print(text, end="" if text.endswith("\n") else "\n")
+            return
+        ui.info("this run produced no output file", record.get("outcome", ""))
         return
 
     if args.runs_cmd == "show":
@@ -1146,10 +1734,60 @@ def cmd_runs(args: argparse.Namespace) -> None:
 
 # --- brain -----------------------------------------------------------
 
+def _records_source(path: Path) -> bool:
+    """Whether a brain file records where it came from, and so can be re-fetched."""
+    try:
+        header, _ = brain_mod.read_header(path)
+    except Exception:
+        return False
+    return bool(header.get("source"))
+
+
 def cmd_brain(args: argparse.Namespace) -> None:
     """Handles `px0 brain add` and `refresh`: ingests a source (URL, file, etc.)
     into the brain or re-fetches an already-ingested source."""
     home, config = _ctx()
+
+    if args.brain_cmd == "add" and getattr(args, "from_file", None):
+        sources = brain_mod.read_sources(Path(args.from_file))
+        if not sources:
+            ui.err(f"{args.from_file} lists no sources")
+            sys.exit(EXIT_USER_ERROR)
+        with ui.spinner(f"Ingesting {len(sources)} source(s)"):
+            result = brain_mod.add_many(home, config, sources, to=args.to,
+                                         no_propose=args.no_propose)
+        ui.ok("ingested", f"{len(result['added'])} of {len(sources)}")
+        for failure in result["failed"]:
+            ui.err(failure["source"], failure["error"])
+        if result.get("reindexed") is not None:
+            ui.hint(f"index rebuilt: {result['reindexed']} passages")
+        if result["failed"]:
+            sys.exit(EXIT_USER_ERROR)
+        return
+
+    if args.brain_cmd == "refresh" and (getattr(args, "all", False) or getattr(args, "stale", False)):
+        if args.all:
+            targets = [p for p in brain_mod.list_files(home, config)]
+            targets = [p for p in targets if _records_source(p)]
+        else:
+            targets = brain_mod.stale(home, config, days=args.days or 30)
+        if not targets:
+            ui.info("nothing to refresh", "no file records a source that has gone stale")
+            return
+        with ui.spinner(f"Re-fetching {len(targets)} file(s)"):
+            result = brain_mod.refresh_many(home, config, targets,
+                                            no_propose=args.no_propose)
+        ui.ok("refreshed", f"{len(result['refreshed'])} of {len(targets)}")
+        for failure in result["failed"]:
+            ui.err(Path(failure["path"]).name, failure["error"])
+        if result.get("reindexed") is not None:
+            ui.hint(f"index rebuilt: {result['reindexed']} passages")
+        return
+
+    if args.brain_cmd == "refresh" and not args.path:
+        ui.err("nothing named to refresh")
+        ui.hint("name a file, or pass --all or --stale")
+        sys.exit(EXIT_USER_ERROR)
 
     if args.brain_cmd == "add":
         try:
@@ -1223,6 +1861,81 @@ def _interactive_review(home: Path, proposal_list: list, non_interactive: bool) 
     elif not non_interactive:
         print()
         ui.info("nothing accepted")
+
+
+def cmd_guidelines_file(args: argparse.Namespace) -> None:
+    """Handles `px0 guidelines new`, `edit`, `show`, and `rm`.
+
+    Guidelines are the one thing px0 asks you to write by hand, and until now
+    the instruction was literally to open the store in an editor. These are the
+    same operations, with the store's history kept in step.
+    """
+    home, config = _ctx()
+    verb = args.guidelines_cmd
+    try:
+        path = authoring.guideline_path(home, args.name)
+    except authoring.AuthoringError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+    rel = str(path.relative_to(home))
+
+    if verb == "new":
+        if path.exists():
+            ui.err(f"{rel} already exists")
+            ui.hint(f"open it with `px0 guidelines edit {path.stem}`")
+            sys.exit(EXIT_USER_ERROR)
+        if getattr(args, "from_file", None):
+            body = _read_text_arg(args.from_file)
+        else:
+            title = path.stem.replace("-", " ").replace("_", " ").strip().capitalize()
+            body = authoring.GUIDELINE_TEMPLATE.format(title=title)
+        authoring.write_file(home, path, body, evidence="created via cli")
+        ui.ok("created", rel)
+        if not getattr(args, "from_file", None) and not getattr(args, "no_edit", False):
+            if _open_in_editor(path):
+                # The editor wrote the real content; capture it as a version.
+                authoring.write_file(home, path, path.read_text(), evidence="written in editor")
+            else:
+                ui.hint(f"write it: {path}")
+        ui.hint("a workflow that names it inlines the whole file verbatim")
+        return
+
+    if not path.exists():
+        ui.err(f"no guideline named {args.name}")
+        ui.hint("see what there is with `px0 guidelines list`")
+        sys.exit(EXIT_USER_ERROR)
+
+    if verb == "show":
+        print(path.read_text(), end="")
+        return
+
+    if verb == "edit":
+        before = path.read_text()
+        if not _open_in_editor(path):
+            ui.info("no editor", f"set $EDITOR, or edit {path} directly")
+            return
+        after = path.read_text()
+        if after == before:
+            ui.info("unchanged", rel)
+            return
+        authoring.write_file(home, path, after, evidence="edited via cli")
+        ui.ok("saved", rel)
+        return
+
+    if verb == "rm":
+        users = [wf.id for wf in workflow_mod.load_all(home).values()
+                 if path.name in wf.guidelines]
+        if users:
+            ui.warn("in use by", ", ".join(sorted(users)))
+            ui.hint("those workflows will fail validation until they stop naming it")
+        if not _confirm(f"Remove {rel}?", getattr(args, "yes", False)):
+            ui.info("kept", rel)
+            return
+        result = authoring.remove_file(home, path, evidence="removed via cli")
+        ui.ok("removed", rel)
+        if result.get("change_id"):
+            ui.hint(f"undo with `px0 changes revert {result['change_id']}`")
+        return
 
 
 def cmd_guidelines(args: argparse.Namespace) -> None:
@@ -1493,13 +2206,70 @@ def cmd_why(args: argparse.Namespace) -> None:
 
 
 def cmd_store(args: argparse.Namespace) -> None:
-    """Handles `px0 store export <dir>`: copies store content and version history to
-    another directory, excluding credentials."""
+    """Handles the `px0 store` group: export, import, path, and verify."""
+    if args.store_cmd == "import":
+        # An import can create the store, so it must not require one first.
+        home = paths.store_home()
+        try:
+            with ui.spinner(f"Importing {args.dir}"):
+                report = store_mod.import_store(home, Path(args.dir),
+                                                force=args.force, merge=args.merge)
+        except store_mod.StoreError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        ui.ok("imported", f"{report['files']} file(s) into {home}")
+        for name in report["imported"]:
+            ui.bullet(name)
+        if report["skipped_files"]:
+            ui.hint(f"{report['skipped_files']} file(s) already here were kept; "
+                    "pass --force to let the import win")
+        for skipped in report["skipped"]:
+            ui.hint(f"kept: {skipped}")
+        ui.hint("credentials are never in an export -- set the Composio key with "
+                "`px0 config composio <key>`")
+        return
+
     home, config = _ctx()
+
     if args.store_cmd == "export":
         with ui.spinner(f"Exporting store to {args.dir}"):
             store_mod.export(home, Path(args.dir))
         ui.ok("exported", f"{args.dir}  (credentials excluded)")
+        ui.hint(f"load it elsewhere with `px0 store import {args.dir}`")
+        return
+
+    if args.store_cmd == "path":
+        if getattr(args, "json", False):
+            _dump(args, {
+                "home": str(home),
+                "config": str(paths.config_path(home)),
+                "workflows": str(paths.workflows_dir(home)),
+                "guidelines": str(paths.guidelines_dir(home)),
+                "brain": str(retrieval.brain_path(home, config)),
+                "output": str(paths.output_dir(home)),
+                "tools": str(paths.tools_dir(home)),
+                "state": str(paths.state_dir(home)),
+                "logs": str(runs_mod.resolve_logs_path(config)),
+            })
+            return
+        print(home)
+        return
+
+    if args.store_cmd == "verify":
+        with ui.spinner("Checking the store"):
+            report = store_mod.verify(home)
+        if getattr(args, "json", False):
+            _dump(args, report)
+            if not report["ok"]:
+                sys.exit(EXIT_INTEGRITY_ERROR)
+            return
+        if report["ok"]:
+            ui.ok("store is consistent", f"{report['checks']} check(s), nothing to fix")
+            return
+        for problem in report["problems"]:
+            ui.err(problem["kind"], problem["detail"])
+            ui.remedy(problem["fix"])
+        sys.exit(EXIT_INTEGRITY_ERROR)
 
 
 def cmd_config(args: argparse.Namespace) -> None:
@@ -1546,6 +2316,43 @@ def cmd_config(args: argparse.Namespace) -> None:
         ui.ok(args.key, f"= {value!r}")
         if args.key == "brain.path":
             _report_brain_path(home, config)
+        return
+
+    if args.config_cmd == "unset":
+        try:
+            value = config_mod.unset_key(config, args.key)
+        except ValueError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        config_mod.save(paths.config_path(home), config)
+        ui.ok(args.key, f"back to its default: {value!r}")
+        return
+
+    if args.config_cmd == "edit":
+        path = paths.config_path(home)
+        before = path.read_text()
+        if not _open_in_editor(path):
+            ui.info("no editor", f"set $EDITOR, or edit {path} directly")
+            return
+        after = path.read_text()
+        if after == before:
+            ui.info("unchanged", str(path))
+            return
+        try:
+            config_mod.load(path)
+        except Exception as e:
+            ui.err("config.toml no longer parses", str(e))
+            ui.remedy(f"px0 versions revert config.toml --to "
+                      f"v{versioning.latest_version_number(home, 'config.toml') or 1}")
+            sys.exit(EXIT_USER_ERROR)
+        ui.ok("saved", str(path))
+        return
+
+    if args.config_cmd == "path":
+        if getattr(args, "json", False):
+            _dump(args, {"config": str(paths.config_path(home))})
+            return
+        print(paths.config_path(home))
         return
 
     if args.config_cmd == "model":
@@ -1750,6 +2557,152 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 # --- argument parser -----------------------------------------------------
 
+# --- secrets, status, completion, mcp -------------------------------------
+
+def cmd_secrets(args: argparse.Namespace) -> None:
+    """Handles `px0 secrets set|list|unset`.
+
+    A workflow file is versioned, diffed, and exported, so a token does not
+    belong in one. These live with the connector credentials and are reachable
+    from a workflow as {{secrets.NAME}}.
+    """
+    home, config = _ctx()
+
+    if args.secrets_cmd == "set":
+        value = args.value
+        if value is None:
+            import getpass
+
+            try:
+                value = getpass.getpass(f"Value for {args.name} (not echoed): ")
+            except (EOFError, KeyboardInterrupt):
+                print(file=sys.stderr)
+                ui.err("no value given")
+                sys.exit(EXIT_USER_ERROR)
+        try:
+            name = secrets_mod.set_secret(home, args.name, value)
+        except secrets_mod.SecretError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        ui.ok("stored", name)
+        ui.hint(f"use it in a workflow as {{{{secrets.{name}}}}}; it is redacted "
+                "out of every run record and log")
+        return
+
+    if args.secrets_cmd == "list":
+        names = secrets_mod.names(home)
+        if getattr(args, "json", False):
+            _dump(args, {"secrets": names})
+            return
+        if not names:
+            ui.info("no secrets stored", "add one with `px0 secrets set NAME`")
+            return
+        for name in names:
+            print(f"  {name}")
+        ui.hint("values are never printed; they live in .state/credentials.toml")
+        return
+
+    if args.secrets_cmd == "unset":
+        try:
+            removed = secrets_mod.unset_secret(home, args.name)
+        except secrets_mod.SecretError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        if not removed:
+            ui.info("nothing to remove", args.name)
+            return
+        ui.ok("removed", args.name)
+        users = [wf.id for wf in workflow_mod.load_all(home).values()
+                 if f"secrets.{args.name}" in wf.path.read_text()]
+        if users:
+            ui.warn("still referenced by", ", ".join(sorted(users)))
+        return
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    """Handles `px0 status`: is anything broken, in one screen.
+
+    Assembles what mattered from `daemon status`, `runs list --failed`, and
+    `doctor`, and stays cheap enough to run whenever you wonder.
+    """
+    home, config = _ctx()
+    report = status_mod.collect(home, config, hours=getattr(args, "hours", None) or
+                                status_mod.RECENT_HOURS)
+
+    if getattr(args, "json", False):
+        _dump(args, report)
+        if not report["ok"]:
+            sys.exit(EXIT_USER_ERROR)
+        return
+
+    daemon_state = "running" if report["daemon"]["alive"] else "not running"
+    role = ui.ok if report["daemon"]["alive"] or not report["workflows"]["scheduled"] else ui.warn
+    role("scheduler", f"{daemon_state} ({report['daemon']['platform']})")
+
+    wf = report["workflows"]
+    ui.kv("workflows", f"{wf['total']} total, {len(wf['scheduled'])} scheduled"
+                        + (f", {len(wf['watched'])} watched" if wf["watched"] else "")
+                        + (f", {len(wf['disabled'])} disabled" if wf["disabled"] else ""))
+
+    for wf_id, when in sorted((report["next_fires"] or {}).items())[:5]:
+        ui.kv(f"next  {wf_id}", str(when))
+
+    runs = report["runs"]
+    ui.kv(f"runs (last {report['hours']}h)",
+          f"{runs['recent']} run, {runs['failed']} failed"
+          + (f", {len(runs['running'])} in flight" if runs["running"] else ""))
+    for entry in runs["running"]:
+        ui.kv(f"running  {entry['id']}", entry["workflow_id"])
+    for failure in runs["failures"]:
+        ui.err(f"{failure['workflow']}  {failure['id']}", failure["error"][:120])
+
+    if report["problems"]:
+        print()
+        for problem in report["problems"]:
+            ui.warn(problem["detail"])
+            ui.remedy(problem["fix"])
+        sys.exit(EXIT_USER_ERROR)
+    ui.ok("nothing needs attention")
+
+
+def cmd_completion(args: argparse.Namespace) -> None:
+    """Handles `px0 completion <shell>`: print the completion script to install."""
+    try:
+        print(completion_mod.script(args.shell), end="")
+    except ValueError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+
+def cmd_mcp(args: argparse.Namespace) -> None:
+    """Handles `px0 mcp serve`: speak MCP over stdin and stdout.
+
+    Writes stay behind --allow-runs: an agent should not be able to fire a
+    workflow that posts to Slack because it was curious what px0 could do.
+    """
+    home, config = _ctx()
+    if args.mcp_cmd != "serve":
+        ui.err(f"unknown mcp command: {args.mcp_cmd}")
+        sys.exit(EXIT_USER_ERROR)
+    # Progress output would corrupt the protocol stream, which is stdout.
+    ui.set_color(False)
+    mcp_mod.serve(home, config, allow_runs=getattr(args, "allow_runs", False))
+
+
+def _run_completion(argv: list[str]) -> None:
+    """Answers the hidden `--complete` used by the generated shell scripts.
+
+    Silent by design: completion runs on every tab press, so a broken store
+    must produce no output rather than an error in the middle of a prompt.
+    """
+    try:
+        home = paths.store_home()
+        for candidate in completion_mod.complete(build_parser(), argv, home=home):
+            print(candidate)
+    except Exception:
+        pass
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The px0 argparse tree, built against this module's own `cmd_*` handlers.
 
@@ -1770,6 +2723,11 @@ def main(argv: list[str] | None = None) -> None:
     except (AttributeError, ValueError):
         pass  # not a real stream (captured in tests, or already closed)
 
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] == "--complete":
+        _run_completion(raw[1:])
+        return
+
     parser = build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "no_color", False):
@@ -1782,6 +2740,13 @@ def main(argv: list[str] | None = None) -> None:
     except tools.ConnectorError as e:
         ui.err(str(e))
         sys.exit(EXIT_CONNECTOR_ERROR)
+    except catalogue_mod.CatalogueError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_CONNECTOR_ERROR)
+    except (authoring.AuthoringError, secrets_mod.SecretError, store_mod.StoreError,
+            localtools.LocalToolError) as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
     except harness.HarnessError as e:
         ui.err(str(e))
         sys.exit(EXIT_MODEL_ERROR)

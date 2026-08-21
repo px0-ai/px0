@@ -8,10 +8,17 @@ Implemented by `px0/workflow.py` (the file format), `px0/builder.py` (building
 from a description), and `px0/runner.py` (execution).
 
 ```
-px0 workflows new <description> [--id ID] [--yes] [--no-clarify] [--no-discover]
-px0 workflows run [workflow] [--input K=V] [--output {stdout,file}] [--dry-run] [--stdin] [--quiet] [--json]
+px0 workflows new <description> [--id ID] [--from-file PATH] [--yes] [--no-clarify] [--no-discover]
+px0 workflows run [workflow] [--input K=V] [--output {stdout,file}] [--timeout DURATION] [--no-retry] [--dry-run] [--stdin] [--quiet] [--json]
 px0 workflows edit [workflow] [--yes] [--no-clarify] [--no-discover]
 px0 workflows list
+px0 workflows show <workflow> [--json]
+px0 workflows validate [workflow] [--json]
+px0 workflows rm <workflow> [--yes]
+px0 workflows rename <workflow> <new-id>
+px0 workflows copy <workflow> <new-id>
+px0 workflows disable <workflow>
+px0 workflows enable <workflow>
 ```
 
 ---
@@ -67,6 +74,19 @@ Use only px0's curated tools; skip the Composio catalogue search.
 - **Input:** flag, no value. Default off.
 - Faster, offline-friendly, and predictable. Use it when the job only needs tools
   px0 already knows about.
+
+### `--from-file PATH`
+
+Read the description from a file instead of the command line.
+
+- **Input:** a path to a text file. Its whole contents become the description.
+- **Default:** the `description` argument is used.
+- A description worth writing carefully is a paragraph, and a paragraph does not
+  survive shell quoting well.
+
+```shell
+px0 workflows new "" --from-file ./friday-digest.txt
+```
 
 ---
 
@@ -137,6 +157,31 @@ Print the full run record as JSON, and nothing else.
 px0 workflows run friday-pr-digest --json | jq -r '.outcome'
 ```
 
+### `--timeout DURATION`
+
+Override the workflow's own timeout for this run.
+
+- **Input:** a duration with an optional suffix: `90s`, `10m`, `1h`. No suffix
+  means seconds.
+- **Default:** the workflow's `timeout`, itself defaulting to `120s`.
+- For a one-off long report, instead of editing the file to run it once.
+
+```shell
+px0 workflows run monthly-review --timeout 15m
+```
+
+### `--no-retry`
+
+Attempt once, ignoring the workflow's retry policy.
+
+- **Input:** flag, no value. Default off.
+- Useful while debugging: a failing workflow with `retry.max_attempts: 3` would
+  otherwise fail three times before telling you.
+
+```shell
+px0 workflows run flaky-report --no-retry
+```
+
 ### `--late-scheduled-at` (internal)
 
 Hidden from `--help`, and not intended to be typed. The daemon passes it when
@@ -177,13 +222,200 @@ Every workflow id with its description.
 px0 workflows list
 ```
 
-Also printed as one section of `px0 store list`.
+Also printed as one section of `px0 store list`. A disabled workflow is marked.
+
+---
+
+## `px0 workflows show`
+
+Print one workflow: where its file is, what version it is on, and the file
+itself.
+
+### `workflow` (required)
+
+- **Input:** a workflow id.
+
+### `--json`
+
+Every frontmatter field plus the body, as one object.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 workflows show friday-pr-digest
+px0 workflows show friday-pr-digest --json | jq .tools
+```
+
+---
+
+## `px0 workflows validate`
+
+Check a workflow without running it: that its frontmatter parses, its tools and
+guidelines exist, its inputs are read-only, its cron expression is valid, and
+its output target is allowed.
+
+### `workflow`
+
+- **Input:** a workflow id.
+- **Default:** omit it to check every workflow in the store, including files
+  that fail to parse at all.
+
+### `--json`
+
+One object per workflow with its errors.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 workflows validate
+px0 workflows validate friday-pr-digest
+```
+
+Exits `1` if anything is invalid, so it works in a pre-commit hook or CI.
+
+---
+
+## `px0 workflows rm`
+
+Remove a workflow, keeping its history.
+
+### `workflow` (required)
+
+- **Input:** a workflow id.
+
+### `--yes`
+
+Skip the confirmation.
+
+- **Input:** flag, no value. Default off.
+- The confirmation names the schedule, if it has one, since a scheduled
+  workflow is the one you least want to remove by accident.
+
+```shell
+px0 workflows rm old-digest
+```
+
+Removing through px0 rather than with `rm` is what keeps the store honest: the
+content stays in the object store, the removal appears in `px0 changes list`,
+and `px0 changes revert` puts the file back. A hand deletion does none of that.
+
+---
+
+## `px0 workflows rename`
+
+Give a workflow a new id. Renames the file and rewrites the `id` in its
+frontmatter, which is what the daemon and every run record use.
+
+### `workflow` (required)
+
+- **Input:** the current id.
+
+### `new-id` (required)
+
+- **Input:** a short slug: letters, digits, dots, dashes, underscores. Refused
+  if a workflow already has it.
+
+```shell
+px0 workflows rename friday-digest weekly-digest
+```
+
+---
+
+## `px0 workflows copy`
+
+Copy a workflow to a new id — the way to fork one that works instead of
+describing it again.
+
+### `workflow` (required)
+
+- **Input:** the id to copy.
+
+### `new-id` (required)
+
+- **Input:** the new id. Refused if it is taken.
+
+```shell
+px0 workflows copy friday-pr-digest monday-pr-digest
+px0 workflows edit monday-pr-digest
+```
+
+---
+
+## `px0 workflows disable`
+
+Stop a workflow firing, without deleting it. Sets `enabled: false` in its
+frontmatter; the daemon and the cron fallback both skip it.
+
+### `workflow` (required)
+
+- **Input:** a workflow id.
+
+```shell
+px0 workflows disable noisy-hourly-report
+```
+
+The schedule stays in the file, so enabling it again needs no memory of what the
+cron expression was.
+
+---
+
+## `px0 workflows enable`
+
+Let a disabled workflow fire again.
+
+### `workflow` (required)
+
+- **Input:** a workflow id.
+
+```shell
+px0 workflows enable noisy-hourly-report
+```
+
+---
+
+## The workflow file
+
+Frontmatter fields, beyond what the build writes for you.
+
+| Field | What it does |
+| ----- | ------------ |
+| `enabled` | `false` parks the workflow: it keeps its file and history, and never fires. Set by `disable`/`enable` |
+| `retry` | `{max_attempts: N, backoff_seconds: S}`. Each attempt writes its own run record; the cap is 10 |
+| `on_failure` | `{notify: desktop\|tool\|none, channel: <tool id>, target: <where>}`. Overrides the `notify.*` config for this workflow |
+| `trigger.schedule` | A cron expression. A scheduled workflow's `output.target` must be `file` |
+| `trigger.watch` | `{tool: <read-only tool>, args: {...}, key: <field>, every: 15m}`. Polls the tool and runs when an item it has not seen before appears |
+| `timeout` | A duration. Overridden for one run by `--timeout` |
+
+Anywhere a value is templated — an input's `args`, the body — `{{secrets.NAME}}`
+resolves to a stored secret. See [`px0 secrets`](secrets.md).
+
+### Watching instead of scheduling
+
+A watch fires on something happening rather than on the clock. px0 polls the
+named read-only tool at `every` (at least 60s), identifies each item by `key`
+(or by its own `id`, `url`, or `number` if no key is named), and runs the
+workflow when something new turns up.
+
+```yaml
+trigger:
+  watch:
+    tool: github.list_my_prs
+    args:
+      since: "-1d"
+    key: url
+    every: 30m
+```
+
+The first poll only records a baseline, so adding a watch to a busy source does
+not immediately fire on everything already there. Composio's own event triggers
+need a public endpoint to deliver to, which a laptop does not have; this is what
+a local-first tool can do instead.
 
 ## Exit codes
 
 | Code | When |
 | ---- | ---- |
 | `0` | Success |
-| `1` | Unknown workflow id, malformed workflow file, bad `--input` |
+| `1` | Unknown workflow id, malformed workflow file, bad `--input`, failed validation, refused confirmation |
 | `2` | A tool call failed or its app is not authorized |
 | `3` | The coding-agent harness failed, timed out, or is missing |

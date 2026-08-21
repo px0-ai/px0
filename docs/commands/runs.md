@@ -9,12 +9,15 @@ interactive browser).
 
 ```
 px0 runs                                 # interactive browser
-px0 runs list [--workflow ID] [--failed] [--since WHEN] [--json]
+px0 runs list [--workflow ID] [--failed] [--since WHEN] [--running] [--json] [--workflow ID] [--failed] [--since WHEN] [--json]
 px0 runs show <run_id>
 px0 runs output <run_id>
 px0 runs logs <run_id> [--follow|-f]
 px0 runs rerun <run_id>
 px0 runs why <run_id>
+px0 runs cancel <run-id> [--force]
+px0 runs prune [--dry-run]
+px0 runs open <run-id>
 ```
 
 ---
@@ -134,6 +137,84 @@ inlined, the passages it retrieved, and the tool calls it made.
 `px0 guidelines why <claim_id>` is the same verb for claims. One implementation
 serves both — it branches on the id's shape — but each is listed under the group
 whose ids it takes.
+
+## `px0 runs list --running`
+
+Only the runs in flight right now, with the workflow each one is running and its
+pid.
+
+- **Input:** flag, no value. Default off.
+- A run that crashed leaves its marker behind, so each one is checked against the
+  process table first; a dead marker is dropped rather than reported as a run
+  that has been going for days.
+
+```shell
+px0 runs list --running
+```
+
+---
+
+## `px0 runs cancel`
+
+Stop a run in flight. Without this the only bound on a run is its own `timeout`.
+
+### `run-id` (required)
+
+- **Input:** a run id, as printed by `px0 runs list --running`.
+
+### `--force`
+
+Send `SIGKILL` instead of `SIGTERM`.
+
+- **Input:** flag, no value. Default off.
+- `SIGTERM` lets the run finalize its record as failed. `SIGKILL` leaves the
+  record as it was last written, so use it only when the run is not responding.
+
+```shell
+px0 runs cancel run_2026-08-21-091500-a1b2
+px0 runs cancel run_2026-08-21-091500-a1b2 --force
+```
+
+---
+
+## `px0 runs prune`
+
+Delete logs and records that are past retention.
+
+- The daemon's nightly pass does this too. This is how a store that never
+  installs the daemon applies its retention settings at all.
+- Runs that called a write tool are never pruned, regardless of age.
+
+### `--dry-run`
+
+Print the retention windows and how many records they apply to, and delete
+nothing.
+
+- **Input:** flag, no value. Default off.
+
+```shell
+px0 runs prune --dry-run
+px0 runs prune
+```
+
+---
+
+## `px0 runs open`
+
+Print what a run produced: the file it wrote, or its text if it wrote no file.
+
+### `run-id` (required)
+
+- **Input:** a run id.
+
+```shell
+px0 runs open run_2026-08-21-091500-a1b2
+```
+
+Differs from `px0 runs output`, which prints the text recorded on the run.
+`open` reads the file on disk, so it shows what is there now.
+
+---
 
 ## Related configuration
 

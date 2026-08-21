@@ -6,7 +6,7 @@ Describe a recurring job in plain English and px0 writes it as a workflow you ca
 
 Everything happens on your machine. Your workflows, your notes, and your conventions are plain Markdown files in one directory you own. There is no server, no account, and no hosted state to sign up for.
 
-Workflows do not stop at your laptop, though. Through [Composio](https://composio.dev), a workflow can reach hundreds of apps you already use: GitHub, Slack, Gmail, Google Calendar, Notion, Linear, Jira, Google Sheets, Salesforce, Stripe, Zendesk, Sentry, and over a thousand more.
+Workflows do not stop at your laptop, though. Through [Composio](https://composio.dev), a workflow can reach hundreds of apps you already use: GitHub, Slack, Gmail, Google Calendar, Notion, Linear, Jira, Google Sheets, Salesforce, Stripe, Zendesk, Sentry, and over a thousand more. It can also reach this machine — read a file, run the script that already does the job, fetch a URL, file something into your brain.
 
 ## What px0 is for
 
@@ -29,6 +29,8 @@ Each of these is one sentence you type into `px0 workflows new`, and each become
 | Log this week's revenue and refunds into the finance sheet                       | Stripe, Google Sheets  |
 | Group this week's support tickets by theme and open issues for the top three     | Zendesk, Linear        |
 | Save every newsletter I star to my reading library                               | Gmail, px0 brain       |
+| Watch for a new production error and open a ticket the moment one appears        | Sentry, Linear         |
+| Run our deploy script and post what it printed                                   | shell, Slack           |
 
 ## Install
 
@@ -94,7 +96,7 @@ px0 workflows run friday-pr-digest             # for real
 
 The first time a workflow needs Slack or Gmail, px0 hands you a URL to approve. You only authorize the apps you actually use.
 
-### 4. Put it on a schedule
+### 4. Put it on a schedule, or on a watch
 
 Your workflow already carries the schedule from the sentence you typed. Install the scheduler so it fires on its own:
 
@@ -103,15 +105,41 @@ px0 daemon install
 px0 daemon status
 ```
 
+A workflow can also wait for something to happen instead of watching the clock.
+Give it a read-only tool to poll and px0 runs it when something new turns up:
+
+```yaml
+trigger:
+  watch:
+    tool: github.list_my_prs
+    key: url
+    every: 30m
+```
+
 ### 5. See what happened
 
 ```shell
+px0 status              # is anything broken
 px0 workflows list      # what you can run
 px0 runs                # browse past runs
 px0 runs why <run-id>   # how a run reached its result
 ```
 
-## Build your knowledge base
+A scheduled workflow that fails is silent unless you ask it not to be. Pick how
+it tells you:
+
+```shell
+px0 config set notify.on_failure desktop     # a local notification
+px0 config set notify.on_failure tool        # or send it somewhere
+px0 config set notify.channel slack.post_message
+px0 config set notify.target "#ops"
+```
+
+Per workflow, an `on_failure` block in its frontmatter wins over both, so the
+noisy hourly job can stay quiet while the nightly report shouts. A `retry` block
+decides how many times a failed run is attempted first.
+
+## Try it without setting up any app
 
 The brain needs nothing beyond `px0 init`:
 
@@ -170,6 +198,47 @@ px0 config set brain.private_folder ""            # nothing is held back
 px0 config set brain.private_folder px0-private   # hold back this folder instead
 ```
 
+## Reaching this machine, and your own tools
+
+Beyond the apps Composio brokers, a workflow can use what is already on your
+laptop:
+
+| Tool | What it does |
+| ---- | ------------ |
+| `file.read`, `file.write`, `file.list` | Read and write files, inside the store and any directory you allow |
+| `http.get`, `http.post` | Fetch or post to a URL that is not an app px0 has a connector for |
+| `brain.add` | File something into your brain, so "save what I read" is a workflow |
+| `shell.run` | Run one local command. Off until you turn it on |
+
+```shell
+px0 config set tools.allow_shell true            # a workflow can then run anything you can
+px0 config set tools.file_roots ~/code/my-repo   # and read files there
+```
+
+Anything else you want a workflow to do, you can declare yourself. One TOML file
+per tool in `~/.px0/tools/`, read at run time:
+
+```toml
+id = "local.deploy_status"
+description = "Print the deploy status for an environment"
+command = ["./scripts/deploy-status.sh", "{env}"]
+params = { env = "str*" }
+is_write = false
+```
+
+It shows up in `px0 tools list` immediately, and `px0 workflows new` can use it.
+Arguments are substituted into argv, never into a shell, so a value with a
+semicolon in it stays a value.
+
+Values you would rather not write into a workflow file live outside it:
+
+```shell
+px0 secrets set GITHUB_TOKEN        # prompts, unechoed
+```
+
+A workflow reads it as `{{secrets.GITHUB_TOKEN}}`, and px0 redacts it out of
+every run record and log.
+
 ## Teach it how you work
 
 Guidelines are Markdown files describing your conventions: how you word a commit message, what your Go reviews check. Workflows that need a guideline inline it verbatim, so output comes back in your voice instead of the model's default.
@@ -195,6 +264,7 @@ Your store is `~/.px0`. Set `PX0_HOME` to move it.
 | `guidelines/` | How you work                                                          |
 | `brain/`      | What you have read and kept (or point `brain.path` at your own vault) |
 | `output/`     | What runs produced                                                    |
+| `tools/`      | Tools you wrote yourself, one small TOML file each                     |
 
 All of it is plain Markdown you can open in any editor. Edit a workflow by hand and the next run picks it up, with no compile step. px0 keeps its own history, so you can see what changed and undo it:
 
@@ -210,13 +280,20 @@ px0 changes list
 | `px0 workflows new`       | Turn a sentence into a workflow                |
 | `px0 workflows run`       | Run one now                                    |
 | `px0 workflows edit`      | Revise a workflow and rebuild it               |
+| `px0 workflows disable`   | Park one without deleting it                   |
+| `px0 status`              | Whether anything needs attention               |
 | `px0 brain add`           | Save a URL or file to your brain               |
 | `px0 brain ask`           | Ask a question across your brain               |
+| `px0 guidelines new`      | Write down a convention                        |
 | `px0 guidelines review`   | Accept or reject proposed conventions          |
 | `px0 runs`                | Browse past runs                               |
+| `px0 tools search`        | Find a tool in Composio's catalogue            |
+| `px0 tools connect`       | Authorize an app                               |
 | `px0 tools list --status` | What workflows can call, and what is connected |
+| `px0 secrets set`         | Store a value a workflow may use               |
 | `px0 daemon install`      | Run workflows on a schedule                    |
 | `px0 config list`         | Every setting, with its default                |
+| `px0 completion zsh`      | Shell completion                               |
 | `px0 doctor`              | Check that everything is wired up              |
 | `px0 update`              | Upgrade px0                                    |
 
