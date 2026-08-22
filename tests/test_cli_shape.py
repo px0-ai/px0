@@ -1,4 +1,4 @@
-"""The CLI is entity-first: `px0 <entity> <verb>`, with four flat exceptions.
+"""The CLI is entity-first: `px0 <entity> <verb>`, with five flat exceptions.
 
 These tests pin the *shape*, not every flag -- the point is that a new command
 can't quietly land as a flat verb again, and that the old flat names are gone
@@ -14,8 +14,10 @@ from px0 import cli
 
 # `status` and `completion` act on the whole install rather than on one entity:
 # status reports across every group, completion emits a shell script. Both read
-# wrong as `px0 <entity> status`, the way `git status` would.
-FLAT = {"init", "doctor", "version", "update", "status", "completion"}
+# wrong as `px0 <entity> status`, the way `git status` would. `uninstall` is the
+# same kind of exception -- it acts on the install itself, not on one entity's
+# content, so `px0 <entity> uninstall` would read wrong the same way.
+FLAT = {"init", "doctor", "version", "update", "status", "completion", "uninstall"}
 
 # The verbs each entity answers to. Anything added to a group should be added
 # here too, so the surface stays something you can read in one place.

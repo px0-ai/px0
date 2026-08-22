@@ -96,7 +96,8 @@ px0 daemon uninstall
 ```
 
 `install.sh --uninstall` also removes the scheduler unit, but it removes px0
-along with it.
+along with it. [`px0 uninstall`](uninstall.md) removes px0, the scheduler
+unit, and the store in one step.
 
 ---
 

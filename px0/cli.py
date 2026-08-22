@@ -298,7 +298,6 @@ def _intake_loop(config: dict) -> str:
     A blank answer ends it early and the request is written from what there is,
     because the way out of an interview should always be Enter.
     """
-    ui.heading("new workflow")
     ui.hint("answer in your own words; press Enter on a blank line to stop")
 
     transcript: list[tuple[str, str]] = []
@@ -806,14 +805,21 @@ def _build_workflow(home: Path, config: dict, description: str,
     dest = builder_mod.save_workflow(home, workflow_id, content)
 
     ui.heading(f"{'updated' if existing_id else 'created'} {workflow_id}")
-    ui.ok("workflow", str(dest))
-    if guidelines:
-        ui.ok("guidelines", ", ".join(f"guidelines/{g}" for g in guidelines))
-        ui.hint("each is inlined verbatim into every run of this workflow")
+    rows = [("workflow", str(dest))]
     if plan.trigger.get("schedule"):
-        ui.ok("schedule", plan.trigger["schedule"])
+        rows.append(("schedule", plan.trigger["schedule"]))
+    if guidelines:
+        rows.append(("guidelines", ", ".join(f"guidelines/{g}" for g in guidelines)))
+    if plan.output.get("target") == "file" and plan.output.get("path"):
+        rows.append(("output", plan.output["path"]))
     if selected:
-        ui.ok("tools", ", ".join(t.id for t in selected))
+        rows.append(("tools", ", ".join(t.id for t in selected)))
+    width = max(len(label) for label, _ in rows)
+    for label, detail in rows:
+        ui.ok(label, detail, width=width)
+
+    if guidelines:
+        ui.hint("each is inlined verbatim into every run of this workflow")
     if waiting:
         ui.warn("authorization pending", ", ".join(waiting),
                 stream=sys.stdout)
@@ -2443,6 +2449,62 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if failed:
         ui.hint(f"{len(failed)} check(s) failed: {', '.join(failed)}")
     sys.exit(0 if report["all_ok"] else EXIT_INTEGRITY_ERROR)
+
+
+def cmd_uninstall(args: argparse.Namespace) -> None:
+    """Handles `px0 uninstall`: stops the daemon, removes the scheduler unit,
+    deletes the entire store, and uninstalls the px0 package itself.
+
+    Irreversible: every workflow, guideline, brain file, credential, and run
+    record lives under the store home, so removing it removes px0's data in
+    full. `install.sh --uninstall` stops here at the package and scheduler
+    unit, deliberately leaving the store for the user to remove by hand; this
+    command is the other half, so it always asks first.
+    """
+    home = paths.store_home()
+    store_exists = home.exists()
+    mechanism = update_mod.detect_install_mechanism(home)
+
+    ui.heading("this will")
+    if store_exists:
+        ui.bullet("stop the daemon and remove its scheduler unit, if any")
+        ui.bullet(f"delete the entire store: {home}")
+    else:
+        ui.info("no store found", str(home))
+    ui.bullet(f"uninstall the px0 package (via {mechanism})")
+
+    if not _confirm("Uninstall px0 and delete all of its data? This cannot be undone.",
+                     getattr(args, "yes", False)):
+        ui.info("cancelled")
+        return
+
+    if store_exists:
+        result = daemon_mod.uninstall(home)
+        if result["stopped"]:
+            ui.ok("stopped", "the running daemon")
+        for path in result["removed"]:
+            ui.ok("removed", path)
+        if result.get("cron_note"):
+            ui.hint(result["cron_note"])
+        shutil.rmtree(home)
+        ui.ok("deleted", str(home))
+
+    if mechanism:
+        cmd = ["pipx", "uninstall", "px0"] if mechanism == "pipx" else \
+            [sys.executable, "-m", "pip", "uninstall", "-y", "px0"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except OSError as e:
+            ui.err("could not uninstall the px0 package", str(e))
+            ui.hint(f"remove it yourself: {' '.join(cmd)}")
+            sys.exit(EXIT_USER_ERROR)
+        if result.returncode != 0:
+            ui.err("could not uninstall the px0 package", result.stderr.strip()[:200])
+            ui.hint(f"remove it yourself: {' '.join(cmd)}")
+            sys.exit(EXIT_USER_ERROR)
+        ui.ok("uninstalled", "the px0 package")
+
+    ui.ok("px0 is uninstalled")
 
 
 # --- argument parser -----------------------------------------------------

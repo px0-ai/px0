@@ -188,7 +188,7 @@ def test_the_migration_runs_through_the_update_runner(v1_store, monkeypatch):
     monkeypatch.setattr(update, "check", lambda config: {
         "update_available": True, "available_version": "0.2.0", "channel": "stable",
     })
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pip")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pip")
     monkeypatch.setattr(update.subprocess, "run",
                         lambda *a, **k: type("_R", (), {"returncode": 0, "stderr": "", "stdout": ""})())
     monkeypatch.setattr(update.daemon_mod, "restart_if_running", lambda *a, **k: None)

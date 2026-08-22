@@ -9,8 +9,8 @@ px0 <group> <verb> [arguments] [options]
 
 `px0 brain add`, `px0 workflows run`, `px0 guidelines list`. The only flat
 commands — no verb — are the ones that act on the install rather than on anything
-in the store: `init`, `update`, `version`, `doctor`, `status`, and
-`completion`.
+in the store: `init`, `update`, `version`, `doctor`, `status`,
+`completion`, and `uninstall`.
 
 ## Groups
 
@@ -31,6 +31,7 @@ in the store: `init`, `update`, `version`, `doctor`, `status`, and
 | [`completion`](completion.md) | Shell completion scripts | `px0/completion.py` |
 | [`mcp`](mcp.md) | Serving the brain and workflows over MCP | `px0/mcp.py` |
 | [`doctor`](doctor.md) | Checking that everything is wired up | `px0/doctor.py` |
+| [`uninstall`](uninstall.md) | Removing px0 and its store entirely | `px0/cli.py` |
 
 ## Conventions
 

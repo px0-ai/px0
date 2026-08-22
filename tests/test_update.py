@@ -45,7 +45,7 @@ def test_version_comparison():
     assert version.parse("0.9.0") < version.parse("0.10.0")
 
 
-def test_detect_install_mechanism_pipx(tmp_home, monkeypatch):
+def testdetect_install_mechanism_pipx(tmp_home, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/pipx" if cmd == "pipx" else None)
 
     class MockRun:
@@ -55,12 +55,12 @@ def test_detect_install_mechanism_pipx(tmp_home, monkeypatch):
     
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: MockRun())
 
-    assert update._detect_install_mechanism(tmp_home) == "pipx"
+    assert update.detect_install_mechanism(tmp_home) == "pipx"
 
 
-def test_detect_install_mechanism_fallback_pip(tmp_home, monkeypatch):
+def testdetect_install_mechanism_fallback_pip(tmp_home, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda cmd: None)
-    assert update._detect_install_mechanism(tmp_home) == "pip"
+    assert update.detect_install_mechanism(tmp_home) == "pip"
 
 
 def test_migration_runner_advances_schema_on_success(tmp_home, monkeypatch):
@@ -90,7 +90,7 @@ def test_migration_runner_advances_schema_on_success(tmp_home, monkeypatch):
     # check() always reports update_available; run_update gates on it
     monkeypatch.setattr(update, "check", lambda *a: {
         "channel": "stable", "available_version": "0.2.0", "update_available": True})
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda *a: "pip")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda *a: "pip")
     
     # Mock subprocess run to simulate successful pip upgrade
     class MockSubprocess:
@@ -128,7 +128,7 @@ def test_migration_runner_halts_and_preserves_on_failure(tmp_home, monkeypatch):
     # check() always reports update_available; run_update gates on it
     monkeypatch.setattr(update, "check", lambda *a: {
         "channel": "stable", "available_version": "0.2.0", "update_available": True})
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda *a: "pip")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda *a: "pip")
     class MockSubprocess:
         def __init__(self):
             self.returncode = 0
@@ -187,13 +187,17 @@ def _install_sh_env(tmp_path, pipx_body):
 
 
 def test_install_script_uninstall(tmp_path):
-    env = _install_sh_env(tmp_path, "#!/bin/sh\necho \"pipx $*\"\n")
+    # The pipx call's own output is captured and only surfaced on failure (so
+    # a clean uninstall doesn't scroll pipx's own noise over the summary), so
+    # this checks the stub actually ran via a log file rather than stdout.
+    log = tmp_path / "pipx.log"
+    env = _install_sh_env(tmp_path, f'#!/bin/sh\necho "$@" >> "{log}"\n')
     res = subprocess.run(
         ["./install.sh", "--uninstall"], capture_output=True, text=True, timeout=10, env=env
     )
     assert res.returncode == 0, res.stderr
-    assert "Uninstalling px0..." in res.stdout
-    assert "pipx uninstall px0" in res.stdout
+    assert "Removing px0" in res.stdout
+    assert log.read_text().strip() == "uninstall px0"
     assert "rm -rf ~/.px0" in res.stdout
 
 
@@ -225,10 +229,10 @@ def test_install_script_runs_non_interactively(tmp_path):
     assert res.returncode == 0, res.stderr
     assert "pipx install px0" in res.stdout
     assert "px0 init" in res.stdout
-    assert "Not a terminal; skipping the daemon prompt" in res.stdout
+    assert "not a terminal; skipping the daemon prompt" in res.stdout
     # the px0 stub echoes its args, so a bare line proves it was never invoked
     assert "\npx0 daemon install\n" not in res.stdout
-    assert "installed successfully" in res.stdout
+    assert "px0 is installed" in res.stdout
 
 
 def test_install_script_honours_version_and_prefix(tmp_path):
@@ -294,7 +298,7 @@ def test_run_update_upgrades_records_history_restarts_daemon(tmp_home, monkeypat
         "available_version": "9.9.9", "channel": "stable",
         "current_version": update.__version__, "update_available": True,
     })
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pipx")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
     cmds = []
     _mock_installer(monkeypatch, cmds)
 
@@ -336,7 +340,7 @@ def test_run_update_raises_and_writes_no_history_when_install_fails(tmp_home, mo
     monkeypatch.setattr(update, "check", lambda config: {
         "available_version": "9.9.9", "channel": "stable", "update_available": True,
     })
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pipx")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
     _mock_installer(monkeypatch, [], returncode=1, stderr="boom")
 
     with pytest.raises(update.UpdateError) as exc:
@@ -355,7 +359,7 @@ def test_rollback_restores_prior_version_and_pops_history(tmp_home, monkeypatch,
     paths.update_history_path(tmp_home).write_text(json.dumps([
         {"from_version": "0.1.0", "to_version": "9.9.9", "at": "x", "migrations_applied": []},
     ]))
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pipx")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
     cmds = []
     _mock_installer(monkeypatch, cmds)
     monkeypatch.setattr(daemon_mod, "restart_if_running", lambda h, c: None)
@@ -376,7 +380,7 @@ def test_rollback_notes_schema_when_migrations_had_run(tmp_home, monkeypatch, ca
     paths.update_history_path(tmp_home).write_text(json.dumps([
         {"from_version": "0.1.0", "to_version": "9.9.9", "at": "x", "migrations_applied": [2]},
     ]))
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pipx")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
     _mock_installer(monkeypatch, [])
     monkeypatch.setattr(daemon_mod, "restart_if_running", lambda h, c: None)
 
@@ -465,7 +469,7 @@ def test_unreadable_schema_version_refuses_to_migrate(tmp_home, monkeypatch):
     monkeypatch.setattr(update, "check", lambda config: {
         "available_version": "9.9.9", "channel": "stable", "update_available": True,
     })
-    monkeypatch.setattr(update, "_detect_install_mechanism", lambda home: "pipx")
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
     _mock_installer(monkeypatch, [])
     paths.schema_path(tmp_home).write_text("not-a-number")
 

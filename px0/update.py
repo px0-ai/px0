@@ -237,7 +237,7 @@ def _load_history(path: Path) -> list:
     return loaded if isinstance(loaded, list) else []
 
 
-def _detect_install_mechanism(home: Path) -> str:
+def detect_install_mechanism(home: Path) -> str:
     """Detects whether px0 is installed via pipx or pip."""
     if shutil.which("pipx"):
         try:
@@ -261,7 +261,7 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
         return result  # nothing newer published; never "upgrade" to what's installed
     latest = result["available_version"]
 
-    mechanism = _detect_install_mechanism(home)
+    mechanism = detect_install_mechanism(home)
     channel = result["channel"]
 
     history_path = paths.update_history_path(home)
@@ -345,7 +345,7 @@ def rollback(home: Path, config: dict) -> None:
     last_entry = history[-1]
     target_version = last_entry["from_version"]
 
-    mechanism = _detect_install_mechanism(home)
+    mechanism = detect_install_mechanism(home)
     if mechanism == "pipx":
         cmd = ["pipx", "install", "--force", f"px0=={target_version}"]
     else:

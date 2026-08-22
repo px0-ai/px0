@@ -24,13 +24,41 @@ from px0 import harness
 from px0 import retrieval
 
 
+class _HelpFormatter(argparse.HelpFormatter):
+    """Widens the help column so a subcommand's name and its one-line help
+    stay on the same row instead of wrapping (stdlib's 24-column default
+    wraps anything past ~9 characters, which most of px0's own subcommand
+    names exceed)."""
+
+    def __init__(self, prog, **kwargs):
+        kwargs.setdefault("max_help_position", 32)
+        super().__init__(prog, **kwargs)
+        # `_action_max_length` only grows via `max()` as actions are added, so
+        # seeding it here raises the floor for the help column without
+        # affecting parsers whose longest name already exceeds it.
+        self._action_max_length = 24
+
+
+class _Parser(argparse.ArgumentParser):
+    """An ArgumentParser defaulting to `_HelpFormatter`.
+
+    `add_subparsers()` defaults its `parser_class` to `type(self)`, so every
+    subparser built off this one -- at every nesting level -- inherits the
+    same formatting without having to pass `formatter_class=` at each leaf.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", _HelpFormatter)
+        super().__init__(*args, **kwargs)
+
+
 def build(handlers) -> argparse.ArgumentParser:
     """Builds the full px0 argparse tree: one subparser per top-level command, each
     wiring its own flags and a `func` default that main() dispatches to.
 
     `handlers` is the module providing the `cmd_*` functions.
     """
-    p = argparse.ArgumentParser(prog="px0")
+    p = _Parser(prog="px0")
     # Declared on the root parser so `px0 --json <cmd>` works; every subcommand
     # that repeats it uses default=SUPPRESS so an omitted sub-level flag leaves
     # this value alone instead of resetting it to False.
@@ -40,9 +68,9 @@ def build(handlers) -> argparse.ArgumentParser:
     # Used by the generated completion scripts, not by people: everything after
     # it is a partly-typed command line to complete.
     p.add_argument("--complete", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    sp = sub.add_parser("init")
+    sp = sub.add_parser("init", help="scaffold a new store")
     sp.add_argument("dir", nargs="?")
     sp.add_argument(
         "--harness",
@@ -53,7 +81,7 @@ def build(handlers) -> argparse.ArgumentParser:
     sp.set_defaults(func=handlers.cmd_init)
 
     sp = sub.add_parser("workflows", help="build, run, and list workflows")
-    wf_sub = sp.add_subparsers(dest="workflows_cmd", required=True)
+    wf_sub = sp.add_subparsers(dest="workflows_cmd", required=True, metavar="<command>")
     wp = wf_sub.add_parser("new", help="describe a workflow and have px0 build it")
     # Optional: with no description, `cmd_new` interviews the user for one.
     wp.add_argument("description", nargs="?",
@@ -135,8 +163,8 @@ def build(handlers) -> argparse.ArgumentParser:
     wp.set_defaults(func=handlers.cmd_workflows_enable)
 
     sp = sub.add_parser("tools", help="what workflows can call, and what is connected")
-    tools_sub = sp.add_subparsers(dest="tools_cmd", required=True)
-    tp = tools_sub.add_parser("list")
+    tools_sub = sp.add_subparsers(dest="tools_cmd", required=True, metavar="<command>")
+    tp = tools_sub.add_parser("list", help="every tool available to workflows")
     tp.add_argument("service", nargs="?")
     tp.add_argument("--status", action="store_true",
                     help="also show whether each tool's app is authorized (one API call per app)")
@@ -172,29 +200,32 @@ def build(handlers) -> argparse.ArgumentParser:
                     help="drop the cached definitions instead of re-reading them")
     sp.set_defaults(func=handlers.cmd_tools)
 
-    sp = sub.add_parser("daemon")
-    daemon_sub = sp.add_subparsers(dest="daemon_cmd", required=True)
-    dp = daemon_sub.add_parser("install")
+    sp = sub.add_parser("daemon", help="run and manage the background scheduler")
+    daemon_sub = sp.add_subparsers(dest="daemon_cmd", required=True, metavar="<command>")
+    dp = daemon_sub.add_parser("install", help="write the platform scheduler unit")
     dp.add_argument("--fallback-cron", action="store_true")
-    daemon_sub.add_parser("status")
-    daemon_sub.add_parser("start")
-    daemon_sub.add_parser("stop")
-    daemon_sub.add_parser("restart")
-    daemon_logs_parser = daemon_sub.add_parser("logs")
+    daemon_sub.add_parser("status", help="whether the daemon is running, and what fires next")
+    daemon_sub.add_parser("start", help="start the daemon in the background")
+    daemon_sub.add_parser("stop", help="stop the running daemon")
+    daemon_sub.add_parser("restart", help="stop and start the daemon")
+    daemon_logs_parser = daemon_sub.add_parser("logs", help="print the daemon's log")
     daemon_logs_parser.add_argument("--follow", "-f", action="store_true", help="follow daemon log tail")
-    daemon_sub.add_parser("serve")
-    daemon_sub.add_parser("uninstall")
+    daemon_sub.add_parser("serve", help="run the scheduler loop in the foreground")
+    daemon_sub.add_parser("uninstall", help="remove the scheduler unit and stop the daemon")
     sp.set_defaults(func=handlers.cmd_daemon)
 
     sp = sub.add_parser("runs", help="inspect and re-run past executions")
-    runs_sub = sp.add_subparsers(dest="runs_cmd", required=False)
-    rp = runs_sub.add_parser("list")
+    runs_sub = sp.add_subparsers(dest="runs_cmd", required=False, metavar="<command>")
+    rp = runs_sub.add_parser("list", help="every recorded run")
     rp.add_argument("--workflow")
     rp.add_argument("--failed", action="store_true")
     rp.add_argument("--since")
     rp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    _run_id_help = {"show": "print one run's record as JSON",
+                    "output": "print one run's output text",
+                    "rerun": "run the same workflow again"}
     for name in ("show", "output", "rerun"):
-        rp2 = runs_sub.add_parser(name)
+        rp2 = runs_sub.add_parser(name, help=_run_id_help[name])
         rp2.add_argument("run_id")
     rp.add_argument("--running", action="store_true", help="only runs in flight right now")
 
@@ -208,7 +239,7 @@ def build(handlers) -> argparse.ArgumentParser:
     rp7 = runs_sub.add_parser("open", help="print the file a run produced")
     rp7.add_argument("run_id")
 
-    rp3 = runs_sub.add_parser("logs")
+    rp3 = runs_sub.add_parser("logs", help="print one run's log")
     rp3.add_argument("run_id")
     rp3.add_argument("--follow", "-f", action="store_true", help="follow run log tail")
     rp4 = runs_sub.add_parser("why", help="how a run reached its result")
@@ -217,7 +248,7 @@ def build(handlers) -> argparse.ArgumentParser:
     sp.set_defaults(func=handlers.cmd_runs)
 
     sp = sub.add_parser("brain", help="ingest, search, and ask over your brain")
-    brain_sub = sp.add_subparsers(dest="brain_cmd", required=True)
+    brain_sub = sp.add_subparsers(dest="brain_cmd", required=True, metavar="<command>")
     kp = brain_sub.add_parser("add", help="ingest a URL or file into your brain")
     kp.add_argument("source")
     # Any relative subfolder, not a fixed set: a brain pointed at an existing
@@ -289,7 +320,7 @@ def build(handlers) -> argparse.ArgumentParser:
     # what the workflow leans on and drafts it. What is left here are the
     # operations on a file that already exists.
     sp = sub.add_parser("guidelines", help="the conventions px0 follows when it works")
-    g_sub = sp.add_subparsers(dest="guidelines_cmd", required=True)
+    g_sub = sp.add_subparsers(dest="guidelines_cmd", required=True, metavar="<command>")
     gp = g_sub.add_parser("list", help="every guideline file in the store")
     gp.set_defaults(func=handlers.cmd_guidelines_list)
 
@@ -310,20 +341,20 @@ def build(handlers) -> argparse.ArgumentParser:
     gp.add_argument("claim_id")
     gp.set_defaults(func=handlers.cmd_guidelines)
 
-    sp = sub.add_parser("changes")
-    c_sub = sp.add_subparsers(dest="changes_cmd", required=True)
-    cp = c_sub.add_parser("list")
+    sp = sub.add_parser("changes", help="undo history: list, show, and revert store edits")
+    c_sub = sp.add_subparsers(dest="changes_cmd", required=True, metavar="<command>")
+    cp = c_sub.add_parser("list", help="every recorded change")
     cp.add_argument("--since")
     cp.add_argument("--actor")
     cp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    cp = c_sub.add_parser("show")
+    cp = c_sub.add_parser("show", help="a per-file diff for one change")
     cp.add_argument("change_id")
-    cp = c_sub.add_parser("revert")
+    cp = c_sub.add_parser("revert", help="undo one change")
     cp.add_argument("change_id")
     sp.set_defaults(func=handlers.cmd_changes)
 
     sp = sub.add_parser("store", help="the store as a whole")
-    store_sub = sp.add_subparsers(dest="store_cmd", required=True)
+    store_sub = sp.add_subparsers(dest="store_cmd", required=True, metavar="<command>")
     ep = store_sub.add_parser("export", help="copy content and history elsewhere")
     ep.add_argument("dir")
     ep.set_defaults(func=handlers.cmd_store)
@@ -349,7 +380,7 @@ def build(handlers) -> argparse.ArgumentParser:
     vp2.set_defaults(func=handlers.cmd_store)
 
     sp = sub.add_parser("config", help="read and write store configuration")
-    config_sub = sp.add_subparsers(dest="config_cmd", required=True)
+    config_sub = sp.add_subparsers(dest="config_cmd", required=True, metavar="<command>")
     lp = config_sub.add_parser("list", help="every key with its value, default, and help")
     lp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
@@ -384,8 +415,8 @@ def build(handlers) -> argparse.ArgumentParser:
     cpp = config_sub.add_parser("path", help="print config.toml's location")
     cpp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
-    config_sub.add_parser("model")
-    cop = config_sub.add_parser("composio")
+    config_sub.add_parser("model", help="pick a harness and model interactively")
+    cop = config_sub.add_parser("composio", help="set the Composio API key")
     cop.add_argument("key", nargs="?", help="Composio API key; prompted for if omitted")
     sp.set_defaults(func=handlers.cmd_config)
 
@@ -399,24 +430,28 @@ def build(handlers) -> argparse.ArgumentParser:
     sp.set_defaults(func=handlers.cmd_completion)
 
     sp = sub.add_parser("mcp", help="expose the brain and workflows over MCP")
-    mcp_sub = sp.add_subparsers(dest="mcp_cmd", required=True)
+    mcp_sub = sp.add_subparsers(dest="mcp_cmd", required=True, metavar="<command>")
     mp = mcp_sub.add_parser("serve", help="speak MCP on stdin and stdout")
     mp.add_argument("--allow-runs", action="store_true",
                     help="let a client run workflows, which can post and send")
     sp.set_defaults(func=handlers.cmd_mcp)
 
-    sp = sub.add_parser("update")
+    sp = sub.add_parser("update", help="check for and install px0 updates")
     sp.add_argument("--check", action="store_true")
     sp.add_argument("--channel")
     sp.add_argument("rollback", nargs="?", choices=["rollback"], default=None)
     sp.set_defaults(func=handlers.cmd_update)
 
-    sp = sub.add_parser("version")
+    sp = sub.add_parser("version", help="print version and build info")
     sp.set_defaults(func=handlers.cmd_version)
 
-    sp = sub.add_parser("doctor")
+    sp = sub.add_parser("doctor", help="run integrity and health checks")
     sp.add_argument("--quick", action="store_true")
     sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     sp.set_defaults(func=handlers.cmd_doctor)
+
+    sp = sub.add_parser("uninstall", help="uninstall px0 and delete all of its data")
+    sp.add_argument("--yes", action="store_true", help="skip the confirmation")
+    sp.set_defaults(func=handlers.cmd_uninstall)
 
     return p
