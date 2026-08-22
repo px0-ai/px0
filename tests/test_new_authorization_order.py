@@ -25,7 +25,6 @@ class _Tool:
 
 class _Args:
     def __init__(self, **kw):
-        self.description = "list my assigned PRs"
         self.yes = True          # skip clarify and every confirmation prompt
         self.id = "assigned-prs"
         self.no_clarify = True
@@ -77,22 +76,22 @@ _KEY_REFUSAL = (
 )
 
 
-def test_a_refused_authorization_stops_before_planning(new_flow, monkeypatch, capsys):
+def test_a_refused_authorization_stops_before_planning(new_flow, monkeypatch, tmp_home, capsys):
     _refuse(monkeypatch, _KEY_REFUSAL)
 
     with pytest.raises(SystemExit) as exc:
-        cli.cmd_new(_Args())
+        cli._build_workflow(tmp_home, {}, "list my assigned PRs", _Args(), existing_id=None)
 
     assert exc.value.code == cli.EXIT_CONNECTOR_ERROR
     assert new_flow == [], "nothing should have been planned or saved"
 
 
 def test_the_refusal_and_the_fact_nothing_was_written_are_both_reported(
-        new_flow, monkeypatch, capsys):
+        new_flow, monkeypatch, tmp_home, capsys):
     _refuse(monkeypatch, _KEY_REFUSAL)
 
     with pytest.raises(SystemExit):
-        cli.cmd_new(_Args())
+        cli._build_workflow(tmp_home, {}, "list my assigned PRs", _Args(), existing_id=None)
 
     out = capsys.readouterr().out
     assert "auth_configs" in out, "the user needs Composio's own reason"

@@ -1,12 +1,12 @@
 # Workflow use cases
 
-116 jobs px0 could run, each written as the sentence you would type into `px0 workflows new`. This page is a catalogue of ideas, not a set of shipped workflows: px0 ships none, and every row here is one command away from existing in your store.
+116 jobs px0 could run, each written as the sentence you would tell `px0 workflows new` during its interview. This page is a catalogue of ideas, not a set of shipped workflows: px0 ships none, and every row here is one command away from existing in your store.
 
 Toolkit names come from Composio's live catalogue, which held 1,364 toolkits when this page was written. Use `px0 tools list` to see what your store can already call.
 
 ## How to read a row
 
-- The first column is the sentence to type. Write it the way you would ask a colleague: what should happen, to what, and when.
+- The first column is the sentence to say when px0 asks. Write it the way you would ask a colleague: what should happen, to what, and when.
 - The second column reads left to right as `reads -> writes`. Everything left of the arrow is a read-only tool px0 resolves as an `inputs` entry. Everything right of it is a write tool declared under `tools`, which is the only place a workflow may post, send, or file anything.
 - `retrieve` on the left means brain retrieval rather than a connector. `file` on the right means the run's output goes to a file under `output/` and nothing is sent.
 - `+ guideline` marks a row whose output only lands if it sounds like you, so it should inline a file from `guidelines/`.

@@ -21,7 +21,7 @@ There is no server, no account, and no state stored in the cloud. But your workf
 
 ## Workflows you could build
 
-Each of these is one sentence you type into `px0 workflows new`, and each becomes a file you can edit and put on a schedule.
+Each of these is one sentence you tell `px0 workflows new` during its interview, and each becomes a file you can edit and put on a schedule.
 
 | What you want                                                                    | Apps it touches        |
 | -------------------------------------------------------------------------------- | ---------------------- |
@@ -83,13 +83,7 @@ px0 config model               # switch backend or pick a model, later
 
 ### 2. Build your first workflow
 
-px0 ships no workflows. You describe what you want:
-
-```shell
-px0 workflows new "every friday at 5pm, summarize the github pull requests I reviewed this week and post it to #eng-standup"
-```
-
-Or run it with nothing and be asked instead:
+px0 ships no workflows. Describe what you want:
 
 ```shell
 px0 workflows new
@@ -97,7 +91,7 @@ px0 workflows new
 
 That opens an interview - one question at a time, until px0 has the job, what it reads, where the result goes, when it runs, and what makes the output right. It writes the request back for you to approve or reword before anything is built. Enter on a blank line ends the questions early.
 
-Either way, px0 asks about anything still genuinely ambiguous, finds the tools the job needs, and shows you the list before authorizing anything. Tools that can post or send get called out, so you can drop the ones you did not ask for. Then it writes the workflow file and prints its id. Pass `--id <name>` to choose the id yourself.
+px0 then asks about anything still genuinely ambiguous, finds the tools the job needs, and shows you the list before authorizing anything. Tools that can post or send get called out, so you can drop the ones you did not ask for. Then it writes the workflow file and prints its id, which you can override when it asks.
 
 ### 3. Run it
 
@@ -110,7 +104,7 @@ The first time a workflow needs Slack or Gmail, px0 hands you a URL to approve. 
 
 ### 4. Put it on a schedule, or on a watch
 
-Your workflow already carries the schedule from the sentence you typed. Install the scheduler so it fires on its own:
+Your workflow already carries the schedule you described. Install the scheduler so it fires on its own:
 
 ```shell
 px0 daemon install
@@ -276,7 +270,7 @@ px0 changes show <change-id>
 
 | Command                   | What it does                                   |
 | ------------------------- | ---------------------------------------------- |
-| `px0 workflows new`       | Turn a sentence into a workflow, or be asked for one |
+| `px0 workflows new`       | Interview you, then turn what you say into a workflow |
 | `px0 workflows run`       | Run one now                                    |
 | `px0 workflows edit`      | Revise a workflow and rebuild it               |
 | `px0 workflows disable`   | Park one without deleting it                   |

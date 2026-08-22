@@ -148,16 +148,6 @@ def _open_in_editor(path: Path) -> bool:
     return True
 
 
-def _read_text_arg(path_value: str) -> str:
-    """Reads a file given on the command line, with a message that names it."""
-    path = Path(path_value).expanduser()
-    try:
-        return path.read_text()
-    except OSError as e:
-        ui.err(f"cannot read {path}", str(e))
-        sys.exit(EXIT_USER_ERROR)
-
-
 # --- init / new / run / ask ---------------------------------------------
 
 def _mask_key(key: str) -> str:
@@ -232,7 +222,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     ui.hint("try next:")
     ui.command("px0 doctor")
-    ui.command('px0 workflows new "describe what you want"')
+    ui.command('px0 workflows new')
 
     # Surfaced here because a fresh store is exactly when someone who already
     # keeps notes somewhere would want to know they need not move them.
@@ -285,9 +275,9 @@ _OPENING_QUESTION = "What do you want px0 to do for you?"
 
 
 def _intake_loop(config: dict) -> str:
-    """Interviews the user into a workflow request, when they named none.
+    """Interviews the user into a workflow request.
 
-    `px0 workflows new` with no description opens this. px0 asks for one thing
+    `px0 workflows new` always opens this. px0 asks for one thing
     at a time until every field a workflow file has to pin down is settled --
     the job, what it reads, where the result goes, when it runs, and what makes
     the output right -- then writes the request back for approval.
@@ -313,7 +303,7 @@ def _intake_loop(config: dict) -> str:
         if not answer:
             if not transcript:
                 ui.err("nothing to build")
-                ui.hint('describe it inline instead: px0 workflows new "..."')
+                ui.hint("run `px0 workflows new` again when you know what you want")
                 sys.exit(EXIT_USER_ERROR)
             wrap_up = True
         else:
@@ -323,10 +313,10 @@ def _intake_loop(config: dict) -> str:
             with ui.spinner("Working out what else it needs"):
                 step = builder_mod.intake(config, transcript, wrap_up=wrap_up)
         except (builder_mod.BuilderError, harness.HarnessError) as e:
-            # The interview is the only way in when no description was given,
-            # so a failed turn cannot fall through to a build with nothing.
+            # The interview is the only way in, so a failed turn cannot fall
+            # through to a build with nothing.
             ui.err("could not continue the interview", str(e).strip())
-            ui.hint('describe it inline instead: px0 workflows new "..."')
+            ui.hint("try `px0 workflows new` again")
             sys.exit(EXIT_MODEL_ERROR)
 
         if "description" in step:
@@ -604,49 +594,20 @@ def _write_one_guideline(home: Path, config: dict, proposal, description: str,
         return proposal.path
 
 
-def _description_arg(args: argparse.Namespace) -> str | None:
-    """The workflow description, from the argument or from --from-file.
-
-    None when neither was given, which `px0 workflows new` answers by asking.
-
-    A carefully written description is a paragraph, and a paragraph does not
-    want to survive shell quoting.
-    """
-    from_file = getattr(args, "from_file", None)
-    if from_file:
-        text = _read_text_arg(from_file).strip()
-        if not text:
-            ui.err(f"{from_file} is empty")
-            sys.exit(EXIT_USER_ERROR)
-        return text
-    return args.description
-
-
 def cmd_new(args: argparse.Namespace) -> None:
-    """Handles `px0 workflows new`: builds a workflow from a sentence, or from an
-    interview when no sentence was given.
+    """Handles `px0 workflows new`: interviews the user and builds a workflow
+    from what they say.
 
-    A description is the fast path for someone who already knows what to type.
-    Without one, px0 asks -- which is the honest default, because "what should
-    this read, and when does it run" are questions the user has to answer either
-    way and a blank prompt is a worse place to answer them than a question is.
+    px0 asks -- which is the honest default, because "what should this read,
+    and when does it run" are questions the user has to answer either way, and
+    a blank prompt is a worse place to answer them than a question is.
     """
     home, config = _ctx()
-    description = _description_arg(args)
-    if description is not None:
-        _build_workflow(home, config, description, args, existing_id=None)
-        return
-
-    if getattr(args, "yes", False) or not sys.stdin.isatty():
-        # Nobody to interview: --yes answers no questions, and a pipe has no
-        # keystrokes to read.
-        ui.err("no description given, and nothing to ask")
-        ui.hint("describe it inline, or from a file:")
-        ui.command('px0 workflows new "every Friday, post a PR digest to #eng"')
-        ui.command("px0 workflows new --from-file ./request.txt")
+    if not sys.stdin.isatty():
+        # No keystrokes to read on a pipe, and nobody to ask on the other end.
+        ui.err("workflows new needs a terminal to interview you")
         sys.exit(EXIT_USER_ERROR)
 
-    # The interview settles what `--no-clarify` would otherwise re-ask.
     _build_workflow(home, config, _intake_loop(config), args,
                     existing_id=None, already_clarified=True)
 
@@ -838,7 +799,7 @@ def _pick_workflow(home: Path, for_stdin: bool, verb: str = "run") -> str:
     workflows = sorted(workflow_mod.load_all(home).items())
     if not workflows:
         ui.err("no workflows yet")
-        ui.hint('describe one with `px0 workflows new "..."`')
+        ui.hint("describe one with `px0 workflows new`")
         sys.exit(EXIT_USER_ERROR)
     if for_stdin:
         ui.err("--stdin needs an explicit workflow id",
@@ -937,7 +898,7 @@ def _print_workflows(home: Path, heading: bool) -> None:
     for e in errors:
         ui.warn("unreadable workflow", e, stream=sys.stdout)
     if not workflows and not errors:
-        ui.hint('none yet -- describe one with `px0 workflows new "..."`')
+        ui.hint("none yet -- describe one with `px0 workflows new`")
 
 
 def _first_rule(path: Path) -> str:
@@ -1432,7 +1393,7 @@ def _tools_search(args: argparse.Namespace) -> None:
             marker = ui.paint("destroy", "203")
         print(f"  {marker}  {tool.slug.ljust(width)}  {ui.dim(tool.description[:70])}")
     ui.hint(f"{len(found)} tool(s). A workflow gets one by naming the job: "
-            "`px0 workflows new \"...\"`")
+            "`px0 workflows new`")
 
 
 def _parse_tool_args(pairs: list[str] | None) -> dict:

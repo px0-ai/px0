@@ -79,7 +79,7 @@ def test_the_old_flat_verbs_are_gone(gone):
 
 
 @pytest.mark.parametrize("argv, handler", [
-    (["workflows", "new", "a thing"], "cmd_new"),
+    (["workflows", "new"], "cmd_new"),
     (["workflows", "run", "wf"], "cmd_run"),
     (["workflows", "list"], "cmd_workflows_list"),
     (["brain", "add", "https://x"], "cmd_brain"),

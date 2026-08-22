@@ -571,13 +571,8 @@ def test_declining_the_request_builds_nothing(monkeypatch):
 
 
 class _NewArgs:
-    """`px0 workflows new` with nothing typed after it."""
-    description = None
-    from_file = None
-    yes = False
-    id = None
-    no_clarify = False
-    no_discover = False
+    """A stand-in for the argparse namespace `cmd_new` receives -- empty, since
+    `workflows new` takes no flags."""
 
     def __init__(self, **kw):
         self.__dict__.update(kw)
@@ -589,7 +584,7 @@ def _record_build(monkeypatch, seen):
                         seen.update(desc=desc, kw=kw))
 
 
-def test_new_with_no_description_interviews_and_does_not_ask_twice(monkeypatch, tmp_home):
+def test_new_always_interviews_and_does_not_ask_twice(monkeypatch, tmp_home):
     """The intake settles exactly what clarify asks, so clarify must be skipped."""
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
     monkeypatch.setattr(cli, "_intake_loop", lambda config: "the settled request")
@@ -603,34 +598,17 @@ def test_new_with_no_description_interviews_and_does_not_ask_twice(monkeypatch, 
     assert seen["kw"]["already_clarified"] is True
 
 
-def test_a_typed_description_goes_straight_to_the_build(monkeypatch, tmp_home):
+def test_no_terminal_to_interview_on_is_a_user_error(monkeypatch, tmp_home):
+    """A pipe has no keystrokes to read, and nobody to ask on the other end."""
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
-    monkeypatch.setattr(cli, "_intake_loop",
-                        lambda config: pytest.fail("must not interview"))
-    seen = {}
-    _record_build(monkeypatch, seen)
-
-    cli.cmd_new(_NewArgs(description="digest my PRs"))
-
-    assert seen["desc"] == "digest my PRs"
-    assert not seen["kw"].get("already_clarified")
-
-
-@pytest.mark.parametrize("args, isatty", [
-    (_NewArgs(yes=True), True),    # --yes answers no questions
-    (_NewArgs(), False),           # a pipe has no keystrokes to read
-])
-def test_no_description_and_nobody_to_ask_is_a_user_error(monkeypatch, tmp_home,
-                                                          args, isatty):
-    monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
-    monkeypatch.setattr("sys.stdin.isatty", lambda: isatty)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(cli, "_intake_loop",
                         lambda config: pytest.fail("nobody to interview"))
     monkeypatch.setattr(cli, "_build_workflow",
                         lambda *a, **k: pytest.fail("nothing to build from"))
 
     with pytest.raises(SystemExit) as exc:
-        cli.cmd_new(args)
+        cli.cmd_new(_NewArgs())
     assert exc.value.code == 1
 
 

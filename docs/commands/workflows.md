@@ -2,13 +2,13 @@
 
 A workflow is a Markdown file with YAML frontmatter describing a job px0 can run:
 its trigger, the tools it may call, the guidelines it inlines, and where its
-output goes. You describe one in a sentence and px0 builds it.
+output goes. px0 interviews you for one and builds it.
 
 Implemented by `px0/workflow.py` (the file format), `px0/builder.py` (building
 from a description), and `px0/runner.py` (execution).
 
 ```
-px0 workflows new [description] [--id ID] [--from-file PATH] [--yes] [--no-clarify] [--no-discover]
+px0 workflows new
 px0 workflows run [workflow] [--input K=V] [--output {stdout,file}] [--timeout DURATION] [--no-retry] [--dry-run] [--stdin] [--quiet] [--json]
 px0 workflows edit [workflow] [--yes] [--no-clarify] [--no-discover]
 px0 workflows list
@@ -25,30 +25,20 @@ px0 workflows enable <workflow>
 
 ## `px0 workflows new`
 
-Turn a description into a workflow file. px0 asks what is ambiguous, finds the
-tools the job needs, authorizes them, writes the workflow, and saves it under
-`workflows/`.
+Turn a description into a workflow file. px0 interviews you for it, asks what
+is ambiguous, finds the tools the job needs, authorizes them, writes the
+workflow, and saves it under `workflows/`.
 
-Run it with no description and px0 asks for one — see
-[Starting with no description](#starting-with-no-description).
-
-### `description` (optional)
-
-What you want the workflow to do.
-
-- **Input:** a sentence, quoted. Write it the way you would ask a colleague —
-  what should happen, to what, and when.
-- **Default:** omitted, px0 interviews you for it.
+- **Arguments:** none — `px0 workflows new` always opens the interview below.
 
 ```shell
-px0 workflows new "every Friday, summarize merged PRs and post to Slack"
 px0 workflows new
 ```
 
-### Starting with no description
+### The interview
 
-`px0 workflows new` on its own opens an interview. px0 asks for one thing at a
-time until it has what a workflow file must pin down:
+px0 asks for one thing at a time until it has what a workflow file must pin
+down:
 
 | | |
 | --- | --- |
@@ -60,9 +50,7 @@ time until it has what a workflow file must pin down:
 
 That checklist is `builder.WORKFLOW_SPEC`, and it is handed to the model as part
 of the prompt — so the questions you get are the fields the plan actually needs,
-not whatever the model finds interesting. The same list drives the clarifying
-questions asked when you *do* type a description, so there is one definition of
-"what is still missing".
+not whatever the model finds interesting.
 
 ```
 › new workflow
@@ -92,56 +80,11 @@ build spends a planning call: `edit` rewrites it, `n` cancels, anything else
 builds. Because the interview has already settled these questions, the clarifying
 round is skipped — you are not asked twice.
 
-Not available with `--yes`, or when stdin is not a terminal: there is nobody to
+The workflow's id, which is also its filename and how you run it, is derived
+from the request by default; px0 prompts you to override it before saving.
+
+Needs a terminal to answer on: with stdin not a tty, there is nobody to
 interview, so px0 says so and exits rather than building from nothing.
-
-### `--id ID`
-
-The workflow id, which is also its filename and how you run it.
-
-- **Input:** a short slug.
-- **Default:** derived from the description.
-
-```shell
-px0 workflows new "..." --id friday-pr-digest
-```
-
-### `--yes`
-
-Skip every prompt: no clarifying questions, no confirmations.
-
-- **Input:** flag, no value. Default off.
-- For scripted or unattended use. px0 builds from the description as written and
-  accepts its own choices.
-
-### `--no-clarify`
-
-Build from the description as written, without asking clarifying questions.
-
-- **Input:** flag, no value. Default off.
-- Narrower than `--yes`: confirmations still happen, only the interrogation is
-  skipped.
-
-### `--no-discover`
-
-Use only px0's curated tools; skip the Composio catalogue search.
-
-- **Input:** flag, no value. Default off.
-- Faster, offline-friendly, and predictable. Use it when the job only needs tools
-  px0 already knows about.
-
-### `--from-file PATH`
-
-Read the description from a file instead of the command line.
-
-- **Input:** a path to a text file. Its whole contents become the description.
-- **Default:** the `description` argument is used.
-- A description worth writing carefully is a paragraph, and a paragraph does not
-  survive shell quoting well.
-
-```shell
-px0 workflows new "" --from-file ./friday-digest.txt
-```
 
 ### Guidelines the build writes
 
@@ -171,7 +114,7 @@ This is the only way a guideline gets created — there is no
 is the step that stopped guidelines from being written at all, so the build
 drafts a defensible version and leaves editing to you.
 
-Skipped entirely under `--yes`: there is nobody to show a draft to, and a
+Skipped entirely under `edit --yes`: there is nobody to show a draft to, and a
 convention nobody saw should not land in the store.
 
 ---
@@ -286,9 +229,30 @@ store's history, so `px0 changes revert` can undo the rebuild.
 
 - **Input:** a workflow id. Omit to pick from a list.
 
-### `--yes`, `--no-clarify`, `--no-discover`
+### `--yes`
 
-As for `new`. `--no-clarify` rebuilds from the new instructions as written.
+Skip every prompt: no clarifying questions, no confirmations.
+
+- **Input:** flag, no value. Default off.
+- For scripted or unattended use. px0 rebuilds from the new instructions as
+  written and accepts its own choices.
+
+### `--no-clarify`
+
+Rebuild from the new instructions as written, without asking clarifying
+questions.
+
+- **Input:** flag, no value. Default off.
+- Narrower than `--yes`: confirmations still happen, only the interrogation is
+  skipped.
+
+### `--no-discover`
+
+Use only px0's curated tools; skip the Composio catalogue search.
+
+- **Input:** flag, no value. Default off.
+- Faster, offline-friendly, and predictable. Use it when the job only needs tools
+  px0 already knows about.
 
 ```shell
 px0 workflows edit friday-pr-digest

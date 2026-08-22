@@ -153,9 +153,8 @@ def test_missing_api_key_points_at_config_composio(tmp_home):
 
 
 def _new_args(**over):
-    """Namespace for `px0 workflows new`, defaulting to the non-interactive path."""
-    base = dict(description="test description", yes=True, id="test-id",
-                no_clarify=True, no_discover=True)
+    """Namespace for `cli._build_workflow`, defaulting to the non-interactive path."""
+    base = dict(yes=True, id="test-id", no_clarify=True, no_discover=True)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -178,7 +177,7 @@ def test_cmd_new_authorizes_what_the_plan_needs_and_still_writes_it(
     )
     monkeypatch.setattr(builder_mod, "generate_plan", lambda *a, **kw: fake_plan)
 
-    cli.cmd_new(_new_args())
+    cli._build_workflow(tmp_home, {}, "test description", _new_args(), existing_id=None)
 
     out = capsys.readouterr().out
     assert "authorization needed" in out
@@ -205,7 +204,7 @@ def test_cmd_new_skips_authorization_when_already_active(
     )
     monkeypatch.setattr(builder_mod, "generate_plan", lambda *a, **kw: fake_plan)
 
-    cli.cmd_new(_new_args())
+    cli._build_workflow(tmp_home, {}, "test description", _new_args(), existing_id=None)
 
     out = capsys.readouterr().out
     assert "already authorized" in out

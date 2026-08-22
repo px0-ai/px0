@@ -83,18 +83,6 @@ def build(handlers) -> argparse.ArgumentParser:
     sp = sub.add_parser("workflows", help="build, run, and list workflows")
     wf_sub = sp.add_subparsers(dest="workflows_cmd", required=True, metavar="<command>")
     wp = wf_sub.add_parser("new", help="describe a workflow and have px0 build it")
-    # Optional: with no description, `cmd_new` interviews the user for one.
-    wp.add_argument("description", nargs="?",
-                    help="what the workflow should do; omit to be asked")
-    wp.add_argument("--yes", action="store_true",
-                    help="skip every prompt: no clarifying questions, no confirmations")
-    wp.add_argument("--id", help="workflow id to save as")
-    wp.add_argument("--no-clarify", action="store_true",
-                    help="build from the description as written, without asking questions")
-    wp.add_argument("--no-discover", action="store_true",
-                    help="use only px0's curated tools; skip the Composio catalogue search")
-    wp.add_argument("--from-file", metavar="PATH",
-                    help="read the description from a file instead of the command line")
     wp.set_defaults(func=handlers.cmd_new)
 
     wp = wf_sub.add_parser("run", help="execute a workflow")
