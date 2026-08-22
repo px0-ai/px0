@@ -1,317 +1,627 @@
-#!/bin/bash
-set -e
+#!/bin/sh
 
-# px0 installer / uninstaller script
+# px0 installer / uninstaller
+#
+# Supported:
+#   sh install.sh
+#   ./install.sh
+#   curl -fsSL <URL> | sh
+#
+# Optional environment variables:
+#   PX0_VERSION       Install a specific px0 version
+#   PX0_CHANNEL       beta
+#   PX0_PREFIX        Directory for px0 binary
+#   PX0_NO_DAEMON     true
+#   NO_COLOR          Disable colour
+#   FORCE_COLOR       Force colour
 
-# Must match px0/retrieval.py's QMD_PINNED_VERSION -- px0 doctor hard-fails if
-# the installed qmd version does not match what px0 itself is pinned to.
+set -u
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
 QMD_PINNED_VERSION="2.8.3"
 
-# --- presentation --------------------------------------------------------
-#
-# Mirrors px0/ui.py's palette and glyphs (accent amber, ok green, err red,
-# warn yellow, dim grey) so the first thing anyone sees from px0 already
-# looks like every screen the CLI prints after it. Colour and animation are
-# both off the moment output is not a terminal, so `curl ... | sh` in a log
-# file stays plain and greppable.
+ACCENT=208
+OK=71
+ERR=167
+WARN=179
+DIM=245
+
+# ---------------------------------------------------------------------------
+# Presentation
+# ---------------------------------------------------------------------------
 
 _use_color=1
+
 if [ -n "${NO_COLOR:-}" ] || [ "${TERM:-}" = "dumb" ] || [ ! -t 1 ]; then
     _use_color=0
 fi
+
 if [ -n "${FORCE_COLOR:-}" ]; then
     _use_color=1
 fi
 
-ACCENT=208 OK=71 ERR=167 WARN=179 DIM=245
+_c() {
+    code="$1"
+    text="$2"
 
-_c() { # _c <256-colour-code> <text>
     if [ "$_use_color" = "1" ]; then
-        printf '\033[38;5;%sm%s\033[0m' "$1" "$2"
+        printf '\033[38;5;%sm%s\033[0m' "$code" "$text"
     else
-        printf '%s' "$2"
+        printf '%s' "$text"
     fi
 }
+
 _bold() {
+    text="$1"
+
     if [ "$_use_color" = "1" ]; then
-        printf '\033[1m%s\033[0m' "$1"
+        printf '\033[1m%s\033[0m' "$text"
     else
-        printf '%s' "$1"
+        printf '%s' "$text"
     fi
 }
+
 if [ -t 1 ]; then
-    G_OK="✓" G_ERR="✗" G_WARN="!" G_STEP="◇"
+    G_OK="✓"
+    G_ERR="✗"
+    G_WARN="!"
+    G_STEP="◇"
 else
-    G_OK="[OK]" G_ERR="[FAIL]" G_WARN="[WARN]" G_STEP="-"
+    G_OK="[OK]"
+    G_ERR="[FAIL]"
+    G_WARN="[WARN]"
+    G_STEP="-"
 fi
 
-ok_line()   { printf '%s %s' "$(_c "$OK" "$G_OK")" "$1"; [ -n "${2:-}" ] && printf '  %s' "$(_c "$DIM" "$2")"; printf '\n'; }
-err_line()  { printf '%s %s\n' "$(_c "$ERR" "$G_ERR")" "$1" >&2; }
-warn_line() { printf '%s %s\n' "$(_c "$WARN" "$G_WARN")" "$1"; }
-step_line() { printf '\n%s %s\n' "$(_c "$ACCENT" "$G_STEP")" "$(_bold "$1")"; }
-hint_line() { printf '\n%s\n' "$(_c "$DIM" "$1")"; }
-cmd_line()  { printf '  %s\n' "$(_c "$ACCENT" "$1")"; }
+ok_msg() {
+    message="$1"
+    detail="${2:-}"
+
+    printf '%s %s' "$(_c "$OK" "$G_OK")" "$message"
+
+    if [ -n "$detail" ]; then
+        printf '  %s' "$(_c "$DIM" "$detail")"
+    fi
+
+    printf '\n'
+}
+
+err_line() {
+    printf '%s %s\n' "$(_c "$ERR" "$G_ERR")" "$1" >&2
+}
+
+warn_line() {
+    printf '%s %s\n' "$(_c "$WARN" "$G_WARN")" "$1"
+}
+
+step_line() {
+    printf '\n%s %s\n' "$(_c "$ACCENT" "$G_STEP")" "$(_bold "$1")"
+}
+
+hint_line() {
+    printf '\n%s\n' "$(_c "$DIM" "$1")"
+}
+
+cmd_line() {
+    printf '  %s\n' "$(_c "$ACCENT" "$1")"
+}
 
 banner() {
     printf '\n'
+
     if [ "$_use_color" = "1" ]; then
         printf '\033[48;5;%sm\033[1;30m %s \033[0m' "$ACCENT" "px0"
     else
         printf 'px0'
     fi
+
     printf ' %s\n\n' "$(_c "$DIM" "- an agent that works the way you work.")"
 }
 
-# The Nth (0-8) braille spinner frame. A `case` over ten literal glyphs,
-# rather than an array, because this script has to run under whatever `sh`
-# resolves to when piped (`curl ... | sh`) -- often dash, which has no arrays.
-_frame_at() {
-    case $(($1 % 10)) in
-        0) printf '⠋' ;; 1) printf '⠙' ;; 2) printf '⠹' ;; 3) printf '⠸' ;;
-        4) printf '⠼' ;; 5) printf '⠴' ;; 6) printf '⠦' ;; 7) printf '⠧' ;;
-        8) printf '⠇' ;; *) printf '⠏' ;;
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+die() {
+    err_line "$1"
+    exit "${2:-1}"
+}
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+add_path_if_missing() {
+    directory="$1"
+
+    case ":${PATH:-}:" in
+        *":$directory:"*)
+            ;;
+        *)
+            PATH="${PATH:-}:$directory"
+            export PATH
+            ;;
     esac
 }
 
-# Runs "$@" with a braille spinner on a terminal, or a single "message..."
-# line otherwise. Output is captured and only shown if the command fails, so
-# a slow `pipx install` doesn't scroll its own progress bars over ours.
-spin() {
-    local msg="$1"; shift
-    local log status pid i
-    log=$(mktemp)
-    status=0
-    if [ "$_use_color" = "1" ] && [ -t 1 ]; then
-        ("$@") >"$log" 2>&1 &
-        pid=$!
-        i=0
-        while kill -0 "$pid" 2>/dev/null; do
-            printf '\r%s %s' "$(_c "$ACCENT" "$(_frame_at "$i")")" "$msg"
-            i=$((i + 1))
-            sleep 0.08
-        done
-        if wait "$pid"; then status=0; else status=$?; fi
-        printf '\r\033[K'
-    else
-        printf '%s...\n' "$msg"
-        if "$@" >"$log" 2>&1; then status=0; else status=$?; fi
+# ---------------------------------------------------------------------------
+# Python version helpers
+# ---------------------------------------------------------------------------
+
+python_version_ok() {
+    python_bin="$1"
+
+    version="$(
+        "$python_bin" -c '
+import sys
+print("%d.%d" % (sys.version_info[0], sys.version_info[1]))
+' 2>/dev/null
+    )" || return 1
+
+    major="${version%%.*}"
+    minor="${version#*.}"
+
+    if [ "$major" -gt 3 ]; then
+        return 0
     fi
-    if [ "$status" -eq 0 ]; then
-        ok_line "$msg"
-    else
-        err_line "$msg failed"
-        cat "$log" >&2
+
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ]; then
+        return 0
     fi
-    rm -f "$log"
-    return "$status"
+
+    return 1
 }
 
-# --- uninstall -------------------------------------------------------------
+find_supported_python() {
+    # Prefer newer versions when available.
+    for candidate in \
+        python3.13 \
+        python3.12 \
+        python3.11 \
+        python3
+    do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+           python_version_ok "$(command -v "$candidate")"; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
 
-if [ "$1" = "--uninstall" ]; then
-    banner
-    if command -v px0 >/dev/null 2>&1; then
-        hint_line "px0 uninstall removes px0 and your entire store (~/.px0) in one step."
-        hint_line "This script only removes the package and the scheduler unit."
-    fi
-
-    step_line "Removing px0"
-    # Either arm may fail (px0 not installed, pipx itself broken); uninstall is
-    # idempotent by intent, so report and carry on rather than aborting on set -e.
-    if command -v pipx >/dev/null 2>&1; then
-        pipx uninstall px0 >/dev/null 2>&1 && ok_line "uninstalled" "via pipx" \
-            || warn_line "pipx could not uninstall px0 (already gone?)"
-    else
-        python3 -m pipx uninstall px0 >/dev/null 2>&1 && ok_line "uninstalled" "via pipx" || true
-    fi
-
-    step_line "Removing the scheduler"
-    # Removed before the binary goes: a launchd job with KeepAlive, or a
-    # systemd service, otherwise keeps trying to run a px0 that is gone.
-    removed_any=0
-    PLIST="$HOME/Library/LaunchAgents/sh.px0.daemon.plist"
-    if [ -f "$PLIST" ]; then
-        launchctl unload "$PLIST" >/dev/null 2>&1 || true
-        rm -f "$PLIST"
-        ok_line "removed" "launchd unit"
-        removed_any=1
-    fi
-    UNIT="$HOME/.config/systemd/user/px0d.service"
-    if [ -f "$UNIT" ]; then
-        systemctl --user disable --now px0d.service >/dev/null 2>&1 || true
-        rm -f "$UNIT"
-        systemctl --user daemon-reload >/dev/null 2>&1 || true
-        ok_line "removed" "systemd unit"
-        removed_any=1
-    fi
-    if [ "$removed_any" = "0" ]; then
-        ok_line "nothing to remove" "no scheduler unit was installed"
-    fi
-    if crontab -l 2>/dev/null | grep -q "px0 workflows run"; then
-        warn_line "px0 cron entries remain in your crontab; remove them with \`crontab -e\`"
-    fi
-
-    hint_line "to remove all local configuration and history, run:"
-    cmd_line "rm -rf ~/.px0"
-    exit 0
-fi
-
-# --- install -----------------------------------------------------------
-
-banner
-
-# _pkg_install_other <dnf-pkg> <yum-pkg> <pacman-pkg> <apk-pkg> <brew-pkg>
-# Best-effort install via whichever non-apt package manager is present.
-# Returns 1 if none of them are, so the caller can fall back further.
-# (apt is handled by each call site directly -- its error handling differs.)
-_pkg_install_other() {
-    if command -v dnf >/dev/null 2>&1; then
-        $SUDO dnf install -y "$1" || true
-    elif command -v yum >/dev/null 2>&1; then
-        $SUDO yum install -y "$2" || true
-    elif command -v pacman >/dev/null 2>&1; then
-        $SUDO pacman -Sy --noconfirm "$3" || true
-    elif command -v apk >/dev/null 2>&1; then
-        $SUDO apk add "$4" || true
-    elif command -v brew >/dev/null 2>&1; then
-        brew install "$5" || true
-    else
-        return 1
-    fi
+    return 1
 }
 
-# Bootstrap pipx if missing
-if ! command -v pipx >/dev/null 2>&1; then
+# ---------------------------------------------------------------------------
+# Sudo helpers
+# ---------------------------------------------------------------------------
+
+# sudo reads its password prompt from /dev/tty, not from stdin, so a piped
+# install (`curl ... | sh`) -- where stdin is the script itself -- can still
+# prompt interactively as long as a real terminal is attached. Only fall
+# back to non-interactive sudo when there is truly no tty to prompt on,
+# otherwise a required password silently fails the whole install.
+resolve_sudo() {
     SUDO=""
-    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-        if [ -t 0 ]; then
-            # Real terminal on stdin: let sudo prompt for a password if needed.
-            SUDO="sudo"
-        else
-            # Piped install (curl ... | sh): no tty to prompt on, fail fast
-            # instead of hanging forever on a password prompt.
-            SUDO="sudo -n"
-        fi
+
+    if [ "$(id -u)" -eq 0 ] || ! command -v sudo >/dev/null 2>&1; then
+        return 0
     fi
 
-    # Prefer the OS package manager's own pipx package first -- it pulls in
-    # whatever Python it needs, sidestepping systems (e.g. Ubuntu 24.04) that
-    # ship python3 with no pip module at all.
-    if command -v apt-get >/dev/null 2>&1; then
-        if ! apt_out=$($SUDO apt-get update -qq 2>&1 && $SUDO apt-get install -y pipx 2>&1); then
-            if printf '%s' "$apt_out" | grep -q "Could not get lock\|dpkg frontend lock"; then
-                # A background apt-get (commonly unattended-upgrades) is holding
-                # the lock -- not something to force past; it clears on its own.
-                warn_line "apt is busy (another update is running in the background)"
-                hint_line "wait a minute for it to finish, then re-run this script"
-                exit 1
-            fi
-            printf '%s\n' "$apt_out" >&2
-        fi
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        SUDO="sudo"
     else
-        _pkg_install_other pipx pipx python-pipx pipx pipx
+        SUDO="sudo -n"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Package manager helpers
+# ---------------------------------------------------------------------------
+
+pkg_install_other() {
+    dnf_package="$1"
+    yum_package="$2"
+    pacman_package="$3"
+    apk_package="$4"
+    brew_package="$5"
+
+    if command -v dnf >/dev/null 2>&1; then
+        $SUDO dnf install -y "$dnf_package"
+        return $?
     fi
 
-    if ! command -v pipx >/dev/null 2>&1; then
-        # No OS package available (or it failed) -- fall back to bootstrapping
-        # pip first, then installing pipx through it.
-        if ! python3 -m pip --version >/dev/null 2>&1; then
-            if command -v apt-get >/dev/null 2>&1; then
-                $SUDO apt-get install -y python3-pip python3-venv || true
-            elif ! _pkg_install_other python3-pip python3-pip python-pip py3-pip python; then
-                python3 -m ensurepip --upgrade || true
-            fi
-        fi
-
-        if ! pip_out=$(python3 -m pip install --user pipx 2>&1); then
-            if echo "$pip_out" | grep -q "externally-managed-environment"; then
-                # Debian/Ubuntu (PEP 668) refuses any --user install into the
-                # system Python. pipx immediately isolates itself into its own
-                # venv, which is exactly the case PEP 668 means --break-system-packages
-                # for, so this override is safe even though px0 itself never uses it.
-                python3 -m pip install --user --break-system-packages pipx
-            else
-                err_line "could not install pipx"
-                printf '%s\n' "$pip_out" >&2
-                hint_line "install it yourself, then re-run this script:"
-                cmd_line "sudo apt-get install pipx"
-                exit 1
-            fi
-        fi
+    if command -v yum >/dev/null 2>&1; then
+        $SUDO yum install -y "$yum_package"
+        return $?
     fi
-    if command -v pipx >/dev/null 2>&1; then
-        pipx ensurepath >/dev/null 2>&1
-    else
-        python3 -m pipx ensurepath >/dev/null 2>&1
+
+    if command -v pacman >/dev/null 2>&1; then
+        $SUDO pacman -Sy --noconfirm "$pacman_package"
+        return $?
     fi
-    export PATH="$PATH:$HOME/.local/bin"
-    ok_line "pipx ready"
-fi
 
-# Determine pipx env from PX0_PREFIX
-if [ -n "$PX0_PREFIX" ]; then
-    export PIPX_BIN_DIR="$PX0_PREFIX"
-fi
+    if command -v apk >/dev/null 2>&1; then
+        $SUDO apk add "$apk_package"
+        return $?
+    fi
 
-# Build installation command
-INSTALL_CMD="pipx install"
-if [ "$PX0_CHANNEL" = "beta" ]; then
-    INSTALL_CMD="$INSTALL_CMD --pip-args=\"--pre\""
-fi
+    if command -v brew >/dev/null 2>&1; then
+        brew install "$brew_package"
+        return $?
+    fi
 
-# Append package name with optional version pinning
-if [ -n "$PX0_VERSION" ]; then
-    INSTALL_CMD="$INSTALL_CMD px0==$PX0_VERSION"
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Find / install Python 3.11+
+# ---------------------------------------------------------------------------
+
+PYTHON_BIN=""
+
+if PYTHON_FOUND="$(find_supported_python 2>/dev/null)"; then
+    PYTHON_BIN="$PYTHON_FOUND"
 else
-    INSTALL_CMD="$INSTALL_CMD px0"
+    resolve_sudo
+
+    step_line "Installing Python 3.11+"
+
+    # macOS / Homebrew
+    if command -v brew >/dev/null 2>&1; then
+        if brew install python@3.12 >/dev/null 2>&1; then
+            BREW_PYTHON="$(brew --prefix python@3.12 2>/dev/null)/bin/python3.12"
+
+            if [ -x "$BREW_PYTHON" ] &&
+               python_version_ok "$BREW_PYTHON"; then
+                PYTHON_BIN="$BREW_PYTHON"
+            fi
+        fi
+    fi
+
+    # Debian / Ubuntu
+    if [ -z "$PYTHON_BIN" ] &&
+       command -v apt-get >/dev/null 2>&1; then
+
+        if $SUDO apt-get update -qq >/dev/null 2>&1 &&
+           $SUDO apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1; then
+
+            if command -v python3.11 >/dev/null 2>&1 &&
+               python_version_ok "$(command -v python3.11)"; then
+                PYTHON_BIN="$(command -v python3.11)"
+            fi
+        fi
+    fi
+
+    # Fedora / RHEL
+    if [ -z "$PYTHON_BIN" ] &&
+       command -v dnf >/dev/null 2>&1; then
+
+        if $SUDO dnf install -y python3.11 >/dev/null 2>&1; then
+            if command -v python3.11 >/dev/null 2>&1 &&
+               python_version_ok "$(command -v python3.11)"; then
+                PYTHON_BIN="$(command -v python3.11)"
+            fi
+        fi
+    fi
+
+    # Arch / Alpine / other RHEL derivatives without their own python3.11
+    # package -- fall back to whatever "python3"-ish package each package
+    # manager ships (typically already 3.11+ on rolling-release distros).
+    if [ -z "$PYTHON_BIN" ] &&
+       pkg_install_other python3 python3 python python3 python@3.12 >/dev/null 2>&1; then
+
+        if command -v python3 >/dev/null 2>&1 &&
+           python_version_ok "$(command -v python3)"; then
+            PYTHON_BIN="$(command -v python3)"
+        fi
+    fi
+
+    if [ -z "$PYTHON_BIN" ]; then
+        err_line "px0 requires Python 3.11 or newer"
+
+        if command -v python3 >/dev/null 2>&1; then
+            printf 'Detected: %s\n' "$(python3 --version 2>&1)" >&2
+        fi
+
+        hint_line "Install Python 3.11+ and run this installer again."
+
+        if command -v brew >/dev/null 2>&1; then
+            cmd_line "brew install python@3.12"
+        elif command -v apt-get >/dev/null 2>&1; then
+            cmd_line "sudo apt-get install python3.11 python3.11-venv"
+        elif command -v dnf >/dev/null 2>&1; then
+            cmd_line "sudo dnf install python3.11"
+        elif command -v pacman >/dev/null 2>&1; then
+            cmd_line "sudo pacman -S python"
+        elif command -v apk >/dev/null 2>&1; then
+            cmd_line "sudo apk add python3"
+        fi
+
+        exit 1
+    fi
 fi
 
-_run_install() { eval "$INSTALL_CMD"; }
-spin "Installing px0${PX0_VERSION:+==$PX0_VERSION}" _run_install
+ok_msg "Python ready" "$("$PYTHON_BIN" --version 2>&1)"
 
-# Bootstrap qmd, px0's retrieval backend, if it is not already on PATH. Never
-# touches an existing qmd -- version drift is px0 doctor's job to report, not
-# this script's to silently "fix" by reinstalling over what's there.
-if ! command -v qmd >/dev/null 2>&1; then
-    if ! command -v bun >/dev/null 2>&1; then
-        _install_bun() { curl -fsSL https://bun.sh/install | bash; }
-        spin "Installing bun" _install_bun
-        export PATH="$PATH:$HOME/.bun/bin"
+# ---------------------------------------------------------------------------
+# Ensure pip exists
+# ---------------------------------------------------------------------------
+
+if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+    step_line "Bootstrapping pip"
+
+    if ! "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1; then
+        # Debian/Ubuntu disable ensurepip for the system Python and require
+        # installing pip via the OS package manager instead.
+        resolve_sudo
+
+        if command -v apt-get >/dev/null 2>&1; then
+            apt_out="$($SUDO apt-get install -y python3-pip python3-venv 2>&1)" || {
+                warn_line "could not install python3-pip via apt-get"
+                printf '%s\n' "$apt_out" >&2
+            }
+        else
+            pkg_install_other python3-pip python3-pip python-pip py3-pip python@3.12 \
+                >/dev/null 2>&1 || true
+        fi
     fi
-    if command -v bun >/dev/null 2>&1; then
-        _install_qmd() { bun install -g "@tobilu/qmd@$QMD_PINNED_VERSION"; }
-        spin "Installing qmd" _install_qmd
+fi
+
+if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+    err_line "pip is not available for $PYTHON_BIN"
+
+    hint_line "install it yourself, then re-run this script:"
+
+    if command -v apt-get >/dev/null 2>&1; then
+        cmd_line "sudo apt-get install python3-pip python3-venv"
+    elif command -v dnf >/dev/null 2>&1; then
+        cmd_line "sudo dnf install python3-pip"
+    elif command -v pacman >/dev/null 2>&1; then
+        cmd_line "sudo pacman -S python-pip"
+    elif command -v apk >/dev/null 2>&1; then
+        cmd_line "sudo apk add py3-pip"
+    elif command -v brew >/dev/null 2>&1; then
+        cmd_line "brew reinstall python@3.12"
+    fi
+
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Install / locate pipx
+# ---------------------------------------------------------------------------
+
+PIPX_BIN=""
+
+add_path_if_missing "$HOME/.local/bin"
+
+if [ -x "$HOME/.local/bin/pipx" ]; then
+    PIPX_BIN="$HOME/.local/bin/pipx"
+elif command -v pipx >/dev/null 2>&1; then
+    PIPX_BIN="$(command -v pipx)"
+fi
+
+# We deliberately use the selected Python to install pipx if we cannot find it.
+if [ -z "$PIPX_BIN" ]; then
+    step_line "Installing pipx"
+
+    pipx_installed=0
+
+    if "$PYTHON_BIN" -m pip install --user pipx >/dev/null 2>&1; then
+        pipx_installed=1
+    fi
+
+    # PEP 668 fallback.
+    if [ "$pipx_installed" -eq 0 ]; then
+        if "$PYTHON_BIN" -m pip install \
+            --user \
+            --break-system-packages \
+            pipx >/dev/null 2>&1; then
+            pipx_installed=1
+        fi
+    fi
+
+    add_path_if_missing "$HOME/.local/bin"
+
+    if [ -x "$HOME/.local/bin/pipx" ]; then
+        PIPX_BIN="$HOME/.local/bin/pipx"
+    elif command -v pipx >/dev/null 2>&1; then
+        PIPX_BIN="$(command -v pipx)"
+    elif "$PYTHON_BIN" -m pipx --version >/dev/null 2>&1; then
+        # Keep this as a fallback. Most installations expose a pipx binary.
+        PIPX_BIN="$PYTHON_BIN -m pipx"
+    fi
+
+    if [ -z "$PIPX_BIN" ]; then
+        die "pipx could not be installed"
+    fi
+
+    ok_msg "pipx ready"
+fi
+
+# ---------------------------------------------------------------------------
+# Configure pipx paths
+# ---------------------------------------------------------------------------
+
+if [ -n "${PX0_PREFIX:-}" ]; then
+    export PIPX_BIN_DIR="$PX0_PREFIX"
+else
+    export PIPX_BIN_DIR="$HOME/.local/bin"
+fi
+
+add_path_if_missing "$PIPX_BIN_DIR"
+
+# ---------------------------------------------------------------------------
+# Install px0
+# ---------------------------------------------------------------------------
+
+PX0_PACKAGE="px0"
+
+if [ -n "${PX0_VERSION:-}" ]; then
+    PX0_PACKAGE="px0==$PX0_VERSION"
+fi
+
+step_line "Installing px0"
+
+# Use the explicitly selected modern Python.
+#
+# This is the important fix:
+#   pipx install --python "$PYTHON_BIN" px0
+#
+# It prevents pipx from creating the px0 environment with an older system
+# Python such as 3.9 or 3.10.
+
+if [ "${PX0_CHANNEL:-}" = "beta" ]; then
+    if [ -x "$PIPX_BIN" ]; then
+        if ! "$PIPX_BIN" install \
+            --python "$PYTHON_BIN" \
+            --pip-args "--pre" \
+            "$PX0_PACKAGE"; then
+
+            if ! "$PIPX_BIN" upgrade \
+                --python "$PYTHON_BIN" \
+                --pip-args "--pre" \
+                px0 >/dev/null 2>&1; then
+                die "failed to install px0"
+            fi
+        fi
     else
-        warn_line "bun install did not complete; skipping qmd for now"
-        hint_line "install it yourself once bun is on PATH:"
+        if ! sh -c "$PIPX_BIN install --python \"\$1\" --pip-args \"--pre\" \"\$2\"" \
+            sh "$PYTHON_BIN" "$PX0_PACKAGE"; then
+
+            if ! sh -c "$PIPX_BIN upgrade --python \"\$1\" --pip-args \"--pre\" px0" \
+                sh "$PYTHON_BIN" >/dev/null 2>&1; then
+                die "failed to install px0"
+            fi
+        fi
+    fi
+else
+    if [ -x "$PIPX_BIN" ]; then
+        if ! "$PIPX_BIN" install \
+            --python "$PYTHON_BIN" \
+            "$PX0_PACKAGE"; then
+
+            if ! "$PIPX_BIN" upgrade \
+                --python "$PYTHON_BIN" \
+                px0 >/dev/null 2>&1; then
+                die "failed to install px0"
+            fi
+        fi
+    else
+        if ! sh -c "$PIPX_BIN install --python \"\$1\" \"\$2\"" \
+            sh "$PYTHON_BIN" "$PX0_PACKAGE"; then
+
+            if ! sh -c "$PIPX_BIN upgrade --python \"\$1\" px0" \
+                sh "$PYTHON_BIN" >/dev/null 2>&1; then
+                die "failed to install px0"
+            fi
+        fi
+    fi
+fi
+
+ok_msg "px0 package installed"
+
+# ---------------------------------------------------------------------------
+# Locate px0 binary
+# ---------------------------------------------------------------------------
+
+PX0_BIN="$PIPX_BIN_DIR/px0"
+
+if [ ! -x "$PX0_BIN" ]; then
+    if command -v px0 >/dev/null 2>&1; then
+        PX0_BIN="$(command -v px0)"
+    elif [ -x "$HOME/.local/bin/px0" ]; then
+        PX0_BIN="$HOME/.local/bin/px0"
+    else
+        die "px0 installed successfully but the executable could not be found"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Bootstrap qmd
+# ---------------------------------------------------------------------------
+
+if ! command -v qmd >/dev/null 2>&1; then
+
+    if ! command -v bun >/dev/null 2>&1; then
+        step_line "Installing bun"
+
+        if ! command -v curl >/dev/null 2>&1; then
+            warn_line "curl is not installed; cannot install bun"
+        elif ! command -v bash >/dev/null 2>&1; then
+            warn_line "bash is not installed; cannot install bun"
+        else
+            if curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1; then
+                ok_msg "bun installed"
+            else
+                warn_line "bun installation did not complete"
+            fi
+        fi
+
+        add_path_if_missing "$HOME/.bun/bin"
+    fi
+
+    if command -v bun >/dev/null 2>&1; then
+        step_line "Installing qmd"
+
+        if bun install -g "@tobilu/qmd@$QMD_PINNED_VERSION" >/dev/null 2>&1; then
+            ok_msg "qmd installed" "$QMD_PINNED_VERSION"
+        else
+            warn_line "qmd installation did not complete"
+            hint_line "install it manually with:"
+            cmd_line "bun install -g @tobilu/qmd@$QMD_PINNED_VERSION"
+        fi
+    else
+        warn_line "bun is unavailable; skipping qmd"
+        hint_line "install it manually with:"
         cmd_line "bun install -g @tobilu/qmd@$QMD_PINNED_VERSION"
     fi
 fi
 
-# Initialize store
-step_line "Setting up your store"
-PX0_BIN="${PIPX_BIN_DIR:-$HOME/.local/bin}/px0"
-"$PX0_BIN" init
+# ---------------------------------------------------------------------------
+# Scheduler
+# ---------------------------------------------------------------------------
 
-# Daemon offer
-# Only offer the daemon when there is a terminal to answer on. Under
-# `curl ... | sh` stdin is the script itself, so `read` hits EOF and would
-# abort the installer on set -e just before it prints success.
-if [ "$PX0_NO_DAEMON" != "true" ] && [ -t 0 ]; then
+if [ "${PX0_NO_DAEMON:-}" != "true" ] && [ -t 0 ]; then
     step_line "Scheduler"
-    printf 'Install the px0 scheduler daemon now? %s ' "$(_c "$DIM" "[y/N]:")"
-    if read -r ans && { [ "$ans" = "y" ] || [ "$ans" = "Y" ]; }; then
-        "$PX0_BIN" daemon install
+
+    printf 'Install the px0 scheduler daemon now? %s ' \
+        "$(_c "$DIM" "[y/N]:")"
+
+    ans=""
+
+    if read -r ans; then
+        case "$ans" in
+            y|Y)
+                if "$PX0_BIN" daemon install; then
+                    ok_msg "scheduler installed"
+                else
+                    warn_line "scheduler installation failed"
+                    hint_line "you can retry with:"
+                    cmd_line "px0 daemon install"
+                fi
+                ;;
+            *)
+                ;;
+        esac
     fi
-elif [ "$PX0_NO_DAEMON" != "true" ]; then
+
+elif [ "${PX0_NO_DAEMON:-}" != "true" ]; then
     warn_line "not a terminal; skipping the daemon prompt"
     hint_line "enable it any time with:"
     cmd_line "px0 daemon install"
 fi
 
-ok_line "$(_bold "px0 is installed")"
+# ---------------------------------------------------------------------------
+# Success
+# ---------------------------------------------------------------------------
+
+ok_msg "$(_bold "px0 is installed")"
+
 hint_line "try these next:"
-cmd_line "px0 doctor"
+cmd_line "px0 init"
 cmd_line "px0 workflows new"
-cmd_line "px0 workflows list"
+
 printf '\n'

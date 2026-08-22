@@ -251,6 +251,32 @@ def detect_install_mechanism(home: Path) -> str:
     return "pip"
 
 
+def _pipx_venv_python() -> str | None:
+    """The interpreter pipx built px0's venv with, or None if it can't be read.
+
+    `pipx install --force` (used for a beta reinstall and for every rollback)
+    rebuilds the venv from scratch, and without an explicit --python it falls
+    back to whatever python pipx itself runs on -- not necessarily the one
+    install.sh deliberately picked for px0. Passing this back in keeps a
+    forced reinstall pinned to the interpreter the venv already has.
+    """
+    try:
+        res = subprocess.run(["pipx", "list", "--json"], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return None
+        data = json.loads(res.stdout)
+        app_paths = (
+            data.get("venvs", {}).get("px0", {})
+            .get("metadata", {}).get("main_package", {}).get("app_paths", [])
+        )
+        if not app_paths:
+            return None
+        python_path = Path(app_paths[0]["__Path__"]).parent / "python"
+        return str(python_path) if python_path.exists() else None
+    except Exception:
+        return None
+
+
 def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
     """Entry point for `px0 update`. Performs PyPI check and upgrades using pipx/pip."""
     result = check(config)
@@ -271,6 +297,9 @@ def run_update(home: Path, config: dict, check_only: bool = False) -> dict:
     if mechanism == "pipx":
         if channel == "beta":
             cmd = ["pipx", "install", "--pip-args=--pre", "--force", "px0"]
+            venv_python = _pipx_venv_python()
+            if venv_python:
+                cmd += ["--python", venv_python]
         else:
             cmd = ["pipx", "upgrade", "px0"]
     else:
@@ -348,6 +377,9 @@ def rollback(home: Path, config: dict) -> None:
     mechanism = detect_install_mechanism(home)
     if mechanism == "pipx":
         cmd = ["pipx", "install", "--force", f"px0=={target_version}"]
+        venv_python = _pipx_venv_python()
+        if venv_python:
+            cmd += ["--python", venv_python]
     else:
         cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", f"px0=={target_version}"]
 

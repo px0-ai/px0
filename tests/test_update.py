@@ -321,6 +321,54 @@ def test_run_update_upgrades_records_history_restarts_daemon(tmp_home, monkeypat
     assert history[0]["at"]
 
 
+def _fake_pipx_list_run(bin_dir):
+    """A `pipx list --json` stub reporting px0's venv as living in `bin_dir`."""
+    list_json = json.dumps({"venvs": {"px0": {"metadata": {"main_package": {
+        "app_paths": [{"__Path__": str(bin_dir / "px0"), "__type__": "Path"}]
+    }}}}})
+
+    class R:
+        def __init__(self, rc, out, err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def fake_run(cmd, *a, **kw):
+        if cmd[:2] == ["pipx", "list"]:
+            return R(0, list_json)
+        return R(0, "", "")
+
+    return fake_run
+
+
+def test_run_update_beta_pins_the_venvs_own_python(tmp_home, monkeypatch):
+    """A --force beta reinstall must stay on the venv's existing interpreter,
+    not whatever python pipx itself happens to default to."""
+    bin_dir = tmp_home / "pipx-bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text("#!/bin/sh\n")
+
+    monkeypatch.setattr(update, "check", lambda config: {
+        "available_version": "9.9.9", "channel": "beta", "update_available": True,
+    })
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
+    fake_run = _fake_pipx_list_run(bin_dir)
+    cmds = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **kw: (cmds.append(cmd), fake_run(cmd, *a, **kw))[1])
+
+    update.run_update(tmp_home, {})
+
+    assert cmds[-1] == [
+        "pipx", "install", "--pip-args=--pre", "--force", "px0",
+        "--python", str(bin_dir / "python"),
+    ]
+
+
+def test_pipx_venv_python_returns_none_when_unreadable(monkeypatch):
+    """Degrades to no --python rather than raising when pipx list fails or the
+    venv's python has since vanished."""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError("no pipx")))
+    assert update._pipx_venv_python() is None
+
+
 def test_run_update_check_only_touches_nothing(tmp_home, monkeypatch):
     """Phase 5 AC2: --check reports the version and leaves disk alone."""
     monkeypatch.setattr(update, "check", lambda config: {
@@ -366,11 +414,37 @@ def test_rollback_restores_prior_version_and_pops_history(tmp_home, monkeypatch,
 
     update.rollback(tmp_home, {})
 
-    assert cmds == [["pipx", "install", "--force", "px0==0.1.0"]]
+    assert cmds == [["pipx", "list", "--json"], ["pipx", "install", "--force", "px0==0.1.0"]]
     assert json.loads(paths.update_history_path(tmp_home).read_text()) == []
     out = capsys.readouterr().out
     assert "rolled back to px0 version 0.1.0" in out
     assert "forward-only" not in out  # no migrations ran, so no schema note
+
+
+def test_rollback_pins_the_venvs_own_python(tmp_home, monkeypatch):
+    """A rollback always force-reinstalls; it must stay on the venv's existing
+    interpreter rather than pipx's own default."""
+    from px0 import daemon as daemon_mod
+
+    bin_dir = tmp_home / "pipx-bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text("#!/bin/sh\n")
+
+    paths.update_history_path(tmp_home).parent.mkdir(parents=True, exist_ok=True)
+    paths.update_history_path(tmp_home).write_text(json.dumps([
+        {"from_version": "0.1.0", "to_version": "9.9.9", "at": "x", "migrations_applied": []},
+    ]))
+    monkeypatch.setattr(update, "detect_install_mechanism", lambda home: "pipx")
+    fake_run = _fake_pipx_list_run(bin_dir)
+    cmds = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **kw: (cmds.append(cmd), fake_run(cmd, *a, **kw))[1])
+    monkeypatch.setattr(daemon_mod, "restart_if_running", lambda h, c: None)
+
+    update.rollback(tmp_home, {})
+
+    assert cmds[-1] == [
+        "pipx", "install", "--force", "px0==0.1.0", "--python", str(bin_dir / "python"),
+    ]
 
 
 def test_rollback_notes_schema_when_migrations_had_run(tmp_home, monkeypatch, capsys):
