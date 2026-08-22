@@ -39,12 +39,6 @@ _bold() {
         printf '%s' "$1"
     fi
 }
-_visible_len() { # strips escape sequences before counting, so padding stays correct
-    local stripped
-    stripped=$(printf '%s' "$1" | sed -E 's/\x1b\[[0-9;]*m//g')
-    printf '%s' "${#stripped}"
-}
-
 if [ -t 1 ]; then
     G_OK="✓" G_ERR="✗" G_WARN="!" G_STEP="◇"
 else
@@ -57,24 +51,6 @@ warn_line() { printf '%s %s\n' "$(_c "$WARN" "$G_WARN")" "$1"; }
 step_line() { printf '\n%s %s\n' "$(_c "$ACCENT" "$G_STEP")" "$(_bold "$1")"; }
 hint_line() { printf '\n%s\n' "$(_c "$DIM" "$1")"; }
 cmd_line()  { printf '  %s\n' "$(_c "$ACCENT" "$1")"; }
-
-box() { # box <colour> <line>...  -- bordered block; lines may carry colour of their own
-    local color="$1"; shift
-    local max=0 len
-    for l in "$@"; do
-        len=$(_visible_len "$l")
-        [ "$len" -gt "$max" ] && max=$len
-    done
-    local inner=$((max + 2))
-    local rule; rule=$(printf -- '─%.0s' $(seq 1 "$inner"))
-    printf '%s\n' "$(_c "$color" "╭${rule}╮")"
-    for l in "$@"; do
-        len=$(_visible_len "$l")
-        local pad=$((max - len))
-        printf '%s %s%*s %s\n' "$(_c "$color" "│")" "$l" "$pad" "" "$(_c "$color" "│")"
-    done
-    printf '%s\n' "$(_c "$color" "╰${rule}╯")"
-}
 
 banner() {
     printf '\n'
@@ -184,6 +160,26 @@ fi
 
 banner
 
+# _pkg_install_other <dnf-pkg> <yum-pkg> <pacman-pkg> <apk-pkg> <brew-pkg>
+# Best-effort install via whichever non-apt package manager is present.
+# Returns 1 if none of them are, so the caller can fall back further.
+# (apt is handled by each call site directly -- its error handling differs.)
+_pkg_install_other() {
+    if command -v dnf >/dev/null 2>&1; then
+        $SUDO dnf install -y "$1" || true
+    elif command -v yum >/dev/null 2>&1; then
+        $SUDO yum install -y "$2" || true
+    elif command -v pacman >/dev/null 2>&1; then
+        $SUDO pacman -Sy --noconfirm "$3" || true
+    elif command -v apk >/dev/null 2>&1; then
+        $SUDO apk add "$4" || true
+    elif command -v brew >/dev/null 2>&1; then
+        brew install "$5" || true
+    else
+        return 1
+    fi
+}
+
 # Bootstrap pipx if missing
 if ! command -v pipx >/dev/null 2>&1; then
     SUDO=""
@@ -212,16 +208,8 @@ if ! command -v pipx >/dev/null 2>&1; then
             fi
             printf '%s\n' "$apt_out" >&2
         fi
-    elif command -v dnf >/dev/null 2>&1; then
-        $SUDO dnf install -y pipx || true
-    elif command -v yum >/dev/null 2>&1; then
-        $SUDO yum install -y pipx || true
-    elif command -v pacman >/dev/null 2>&1; then
-        $SUDO pacman -Sy --noconfirm python-pipx || true
-    elif command -v apk >/dev/null 2>&1; then
-        $SUDO apk add pipx || true
-    elif command -v brew >/dev/null 2>&1; then
-        brew install pipx || true
+    else
+        _pkg_install_other pipx pipx python-pipx pipx pipx
     fi
 
     if ! command -v pipx >/dev/null 2>&1; then
@@ -230,17 +218,7 @@ if ! command -v pipx >/dev/null 2>&1; then
         if ! python3 -m pip --version >/dev/null 2>&1; then
             if command -v apt-get >/dev/null 2>&1; then
                 $SUDO apt-get install -y python3-pip python3-venv || true
-            elif command -v dnf >/dev/null 2>&1; then
-                $SUDO dnf install -y python3-pip || true
-            elif command -v yum >/dev/null 2>&1; then
-                $SUDO yum install -y python3-pip || true
-            elif command -v pacman >/dev/null 2>&1; then
-                $SUDO pacman -Sy --noconfirm python-pip || true
-            elif command -v apk >/dev/null 2>&1; then
-                $SUDO apk add py3-pip || true
-            elif command -v brew >/dev/null 2>&1; then
-                brew install python || true
-            else
+            elif ! _pkg_install_other python3-pip python3-pip python-pip py3-pip python; then
                 python3 -m ensurepip --upgrade || true
             fi
         fi
@@ -331,7 +309,9 @@ elif [ "$PX0_NO_DAEMON" != "true" ]; then
     cmd_line "px0 daemon install"
 fi
 
-box "$OK" "$(_bold "px0 is installed")" "$(_c "$DIM" "try these next:")" \
-    "$(_c "$ACCENT" "px0 doctor")" \
-    "$(_c "$ACCENT" "px0 workflows new")     $(_c "$DIM" "# describe a job, get a workflow")" \
-    "$(_c "$ACCENT" "px0 workflows list")"
+ok_line "$(_bold "px0 is installed")"
+hint_line "try these next:"
+cmd_line "px0 doctor"
+cmd_line "px0 workflows new"
+cmd_line "px0 workflows list"
+printf '\n'
