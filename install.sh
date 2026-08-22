@@ -77,7 +77,13 @@ box() { # box <colour> <line>...  -- bordered block; lines may carry colour of t
 }
 
 banner() {
-    box "$ACCENT" "$(_bold "px0")" "$(_c "$DIM" "Describe a job. px0 writes, runs, and schedules it.")"
+    printf '\n'
+    if [ "$_use_color" = "1" ]; then
+        printf '\033[48;5;%sm\033[1;30m %s \033[0m' "$ACCENT" "px0"
+    else
+        printf 'px0'
+    fi
+    printf ' %s\n\n' "$(_c "$DIM" "- an agent that works the way you work.")"
 }
 
 # The Nth (0-8) braille spinner frame. A `case` over ten literal glyphs,
@@ -180,21 +186,86 @@ banner
 
 # Bootstrap pipx if missing
 if ! command -v pipx >/dev/null 2>&1; then
-    step_line "Setting up pipx"
-    if ! pip_out=$(python3 -m pip install --user pipx 2>&1); then
-        if echo "$pip_out" | grep -q "externally-managed-environment"; then
-            # Debian/Ubuntu (PEP 668) refuses any --user install into the
-            # system Python. pipx immediately isolates itself into its own
-            # venv, which is exactly the case PEP 668 means --break-system-packages
-            # for, so this override is safe even though px0 itself never uses it.
-            python3 -m pip install --user --break-system-packages pipx
+    SUDO=""
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        if [ -t 0 ]; then
+            # Real terminal on stdin: let sudo prompt for a password if needed.
+            SUDO="sudo"
         else
-            err_line "could not install pipx"
-            printf '%s\n' "$pip_out" >&2
-            exit 1
+            # Piped install (curl ... | sh): no tty to prompt on, fail fast
+            # instead of hanging forever on a password prompt.
+            SUDO="sudo -n"
         fi
     fi
-    python3 -m pipx ensurepath
+
+    # Prefer the OS package manager's own pipx package first -- it pulls in
+    # whatever Python it needs, sidestepping systems (e.g. Ubuntu 24.04) that
+    # ship python3 with no pip module at all.
+    if command -v apt-get >/dev/null 2>&1; then
+        if ! apt_out=$($SUDO apt-get update -qq 2>&1 && $SUDO apt-get install -y pipx 2>&1); then
+            if printf '%s' "$apt_out" | grep -q "Could not get lock\|dpkg frontend lock"; then
+                # A background apt-get (commonly unattended-upgrades) is holding
+                # the lock -- not something to force past; it clears on its own.
+                warn_line "apt is busy (another update is running in the background)"
+                hint_line "wait a minute for it to finish, then re-run this script"
+                exit 1
+            fi
+            printf '%s\n' "$apt_out" >&2
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        $SUDO dnf install -y pipx || true
+    elif command -v yum >/dev/null 2>&1; then
+        $SUDO yum install -y pipx || true
+    elif command -v pacman >/dev/null 2>&1; then
+        $SUDO pacman -Sy --noconfirm python-pipx || true
+    elif command -v apk >/dev/null 2>&1; then
+        $SUDO apk add pipx || true
+    elif command -v brew >/dev/null 2>&1; then
+        brew install pipx || true
+    fi
+
+    if ! command -v pipx >/dev/null 2>&1; then
+        # No OS package available (or it failed) -- fall back to bootstrapping
+        # pip first, then installing pipx through it.
+        if ! python3 -m pip --version >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+                $SUDO apt-get install -y python3-pip python3-venv || true
+            elif command -v dnf >/dev/null 2>&1; then
+                $SUDO dnf install -y python3-pip || true
+            elif command -v yum >/dev/null 2>&1; then
+                $SUDO yum install -y python3-pip || true
+            elif command -v pacman >/dev/null 2>&1; then
+                $SUDO pacman -Sy --noconfirm python-pip || true
+            elif command -v apk >/dev/null 2>&1; then
+                $SUDO apk add py3-pip || true
+            elif command -v brew >/dev/null 2>&1; then
+                brew install python || true
+            else
+                python3 -m ensurepip --upgrade || true
+            fi
+        fi
+
+        if ! pip_out=$(python3 -m pip install --user pipx 2>&1); then
+            if echo "$pip_out" | grep -q "externally-managed-environment"; then
+                # Debian/Ubuntu (PEP 668) refuses any --user install into the
+                # system Python. pipx immediately isolates itself into its own
+                # venv, which is exactly the case PEP 668 means --break-system-packages
+                # for, so this override is safe even though px0 itself never uses it.
+                python3 -m pip install --user --break-system-packages pipx
+            else
+                err_line "could not install pipx"
+                printf '%s\n' "$pip_out" >&2
+                hint_line "install it yourself, then re-run this script:"
+                cmd_line "sudo apt-get install pipx"
+                exit 1
+            fi
+        fi
+    fi
+    if command -v pipx >/dev/null 2>&1; then
+        pipx ensurepath >/dev/null 2>&1
+    else
+        python3 -m pipx ensurepath >/dev/null 2>&1
+    fi
     export PATH="$PATH:$HOME/.local/bin"
     ok_line "pipx ready"
 fi
@@ -217,15 +288,13 @@ else
     INSTALL_CMD="$INSTALL_CMD px0"
 fi
 
-step_line "Installing px0"
 _run_install() { eval "$INSTALL_CMD"; }
-spin "pipx install px0${PX0_VERSION:+==$PX0_VERSION}" _run_install
+spin "Installing px0${PX0_VERSION:+==$PX0_VERSION}" _run_install
 
 # Bootstrap qmd, px0's retrieval backend, if it is not already on PATH. Never
 # touches an existing qmd -- version drift is px0 doctor's job to report, not
 # this script's to silently "fix" by reinstalling over what's there.
 if ! command -v qmd >/dev/null 2>&1; then
-    step_line "Installing qmd"
     if ! command -v bun >/dev/null 2>&1; then
         _install_bun() { curl -fsSL https://bun.sh/install | bash; }
         spin "Installing bun" _install_bun
@@ -233,7 +302,7 @@ if ! command -v qmd >/dev/null 2>&1; then
     fi
     if command -v bun >/dev/null 2>&1; then
         _install_qmd() { bun install -g "@tobilu/qmd@$QMD_PINNED_VERSION"; }
-        spin "bun install -g @tobilu/qmd@$QMD_PINNED_VERSION" _install_qmd
+        spin "Installing qmd" _install_qmd
     else
         warn_line "bun install did not complete; skipping qmd for now"
         hint_line "install it yourself once bun is on PATH:"
@@ -243,7 +312,8 @@ fi
 
 # Initialize store
 step_line "Setting up your store"
-px0 init
+PX0_BIN="${PIPX_BIN_DIR:-$HOME/.local/bin}/px0"
+"$PX0_BIN" init
 
 # Daemon offer
 # Only offer the daemon when there is a terminal to answer on. Under
@@ -253,7 +323,7 @@ if [ "$PX0_NO_DAEMON" != "true" ] && [ -t 0 ]; then
     step_line "Scheduler"
     printf 'Install the px0 scheduler daemon now? %s ' "$(_c "$DIM" "[y/N]:")"
     if read -r ans && { [ "$ans" = "y" ] || [ "$ans" = "Y" ]; }; then
-        px0 daemon install
+        "$PX0_BIN" daemon install
     fi
 elif [ "$PX0_NO_DAEMON" != "true" ]; then
     warn_line "not a terminal; skipping the daemon prompt"

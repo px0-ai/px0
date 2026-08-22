@@ -1,12 +1,16 @@
-# px0
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://px0.ai/logo/px0-logo-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://px0.ai/logo/px0-logo-light.png">
+  <img alt="Your descriptive image alt text" src="https://px0.ai" width="160">
+</picture>
 
-Build custom agents and workflows using natural language, then run them on a schedule.
+An agent that works the way you work.
 
-Describe a recurring job in plain English and px0 writes it as a workflow you can run, schedule, and edit.
+---
 
-Everything happens on your machine. Your workflows, your notes, and your conventions are plain Markdown files in one directory you own. There is no server, no account, and no hosted state to sign up for.
+You already have tools, habits, and conventions. px0 automates them. You describe a recurring chore in plain English, and px0 writes it as a workflow you can run, schedule, and edit directly from your terminal. Everything stays on your machine. Your workflows, your notes, and your conventions are plain Markdown files in a directory you own.
 
-Workflows do not stop at your laptop, though. Through [Composio](https://composio.dev), a workflow can reach hundreds of apps you already use: GitHub, Slack, Gmail, Google Calendar, Notion, Linear, Jira, Google Sheets, Salesforce, Stripe, Zendesk, Sentry, and over a thousand more. It can also reach this machine — read a file, run the script that already does the job, fetch a URL, file something into your brain.
+There is no server, no account, and no state stored in the cloud. But your workflows don't stop at your laptop. Through [Composio](https://composio.dev), px0 reaches the apps you already use: GitHub, Slack, Gmail, Notion, Linear, Jira, and over a thousand more.
 
 ## What px0 is for
 
@@ -91,7 +95,7 @@ Or run it with nothing and be asked instead:
 px0 workflows new
 ```
 
-That opens an interview — one question at a time, until px0 has the job, what it reads, where the result goes, when it runs, and what makes the output right. It writes the request back for you to approve or reword before anything is built. Enter on a blank line ends the questions early.
+That opens an interview - one question at a time, until px0 has the job, what it reads, where the result goes, when it runs, and what makes the output right. It writes the request back for you to approve or reword before anything is built. Enter on a blank line ends the questions early.
 
 Either way, px0 asks about anything still genuinely ambiguous, finds the tools the job needs, and shows you the list before authorizing anything. Tools that can post or send get called out, so you can drop the ones you did not ask for. Then it writes the workflow file and prints its id. Pass `--id <name>` to choose the id yourself.
 
@@ -159,9 +163,9 @@ px0 brain ask "what did that post say about caching?"
 - **Local extraction**: Ingests text from web pages, local documents, PDFs, and YouTube transcripts directly on your machine.
 - **Workflow-ready**: Workflows can query your knowledge base to summarize recent reads, look up reference material, or draft content backed by your own sources.
 
-`brain add` takes a URL, a YouTube link, or a local file — `.md`, `.txt`, `.rst`, `.org`, `.pdf`, `.docx`, `.odt`, or a saved `.html` page. Extraction runs on your machine and needs no API key. `pdftotext` and `pandoc` are used when installed, but nothing depends on them being there.
+`brain add` takes a URL, a YouTube link, or a local file - `.md`, `.txt`, `.rst`, `.org`, `.pdf`, `.docx`, `.odt`, or a saved `.html` page. Extraction runs on your machine and needs no API key. `pdftotext` and `pandoc` are used when installed, but nothing depends on them being there.
 
-Ingests are filed by what they are — `papers/` for PDFs, `blogs/` for web pages, `docs/` for everything else — and `--to` overrides that with any folder you like, including one your own vault already uses:
+Ingests are filed by what they are - `papers/` for PDFs, `blogs/` for web pages, `docs/` for everything else - and `--to` overrides that with any folder you like, including one your own vault already uses:
 
 ```shell
 px0 brain add ./paper.pdf --to "Personal/Reading"
@@ -184,14 +188,14 @@ px0 brain add ./internal-pricing.md --to work
 
 ### Already keep notes somewhere? Point px0 at them
 
-A px0 brain and an Obsidian vault are the same thing on disk — a folder of Markdown — so you can point one at the other and keep writing where you already write:
+A px0 brain and an Obsidian vault are the same thing on disk - a folder of Markdown - so you can point one at the other and keep writing where you already write:
 
 ```shell
 px0 config set brain.path ~/Documents/MyVault
 px0 brain reindex
 ```
 
-Any folder of Markdown works: an Obsidian vault, a Logseq graph, a `notes/` directory in a repo. px0 reads it in place — `reindex`, `search`, and `ask` never write to it.
+Any folder of Markdown works: an Obsidian vault, a Logseq graph, a `notes/` directory in a repo. px0 reads it in place - `reindex`, `search`, and `ask` never write to it.
 
 It skips what a real vault carries beside the notes: every dot-folder (`.obsidian/`, `.trash/`, `.git/`, `.stversions/`) and drawings stored as Markdown (`*.excalidraw.md`). Add your own patterns if you want:
 
