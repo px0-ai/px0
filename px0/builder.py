@@ -262,6 +262,10 @@ def search_candidates(home: Path, queries: list[dict]) -> list[catalogue.Catalog
     return list(seen.values())[:MAX_CANDIDATES]
 
 
+MAX_SELECT_ATTEMPTS = 3     # a real candidate list coming back empty is more
+                            # often sampling noise than a genuine "nothing fits"
+
+
 def select_tools(config: dict, description: str, qa: list[tuple[str, str]],
                  candidates: list[catalogue.CatalogueTool]) -> list[catalogue.CatalogueTool]:
     """Picks the minimal set of candidate tools the request actually needs.
@@ -269,6 +273,12 @@ def select_tools(config: dict, description: str, qa: list[tuple[str, str]],
     Relevance ranking alone is not trustworthy -- a search for "post a message"
     can rank a delete tool first -- so the model chooses with the task in hand,
     and is told to prefer fewer tools and to avoid writes it wasn't asked for.
+
+    Retries a few times on an empty pick before accepting it: the same prompt
+    against the same candidates can come back `[]` on one attempt and the
+    obviously-right selection on the next, so one empty response is treated as
+    noise rather than the model's final word -- otherwise the build falls
+    through to inventing tools that don't exist in the candidate list at all.
     """
     if not candidates:
         return []
@@ -279,26 +289,38 @@ def select_tools(config: dict, description: str, qa: list[tuple[str, str]],
         for t in candidates
     )
     prompt = (
-        "Choose the tools this request needs, from the candidate list only.\n\n"
-        "Rules: pick the FEWEST tools that accomplish the request. Prefer a read "
-        "tool over a write tool. Include a write tool ONLY if the request "
-        "explicitly asks to post, send, comment, or otherwise change something. "
-        "NEVER include a DESTRUCTIVE tool unless the request explicitly asks to "
-        "delete or overwrite. Omit anything merely adjacent to the task.\n\n"
-        "Respond with ONLY a JSON array of the chosen slugs, exactly as written "
-        "below. Return [] if none of them fit.\n\n"
+        "Choose every candidate tool below that this request needs -- it is "
+        "normal to need more than one.\n\n"
+        "Rules: pick the fewest tools that accomplish the request, but do NOT "
+        "omit a candidate that clearly satisfies part of the request just to "
+        "keep the list short. Prefer a read tool over a write tool. Include a "
+        "write tool ONLY if the request explicitly asks to post, send, "
+        "comment, or otherwise change something. A DESTRUCTIVE tool is fine "
+        "to include when the request calls for it, even without the words "
+        "\"delete\" or \"overwrite\" -- the user reviews and confirms every "
+        "tool before anything is built, so it is safe to propose one that fits. "
+        "Return [] ONLY if nothing in the list is relevant to any part of the "
+        "request -- if a candidate is a close match, include it rather than "
+        "second-guess it.\n\n"
+        "Respond with ONLY a JSON array of the chosen slugs, exactly as "
+        "written below.\n\n"
         f"Candidates:\n{listing}\n\n"
         f"Request: {description}{_qa_block(qa)}"
     )
-    raw = harness.invoke(config, prompt, timeout=90)
-    chosen = _extract_json(raw, want_array=True)
-    if not isinstance(chosen, list):
-        raise BuilderError("the harness returned a non-list of tool slugs")
-
     by_slug = {t.slug: t for t in candidates}
-    # Silently drop hallucinated slugs: the candidate list is the contract, and a
-    # slug that isn't in it would fail validation later anyway.
-    return [by_slug[str(s)] for s in chosen if str(s) in by_slug]
+
+    for attempt in range(MAX_SELECT_ATTEMPTS):
+        raw = harness.invoke(config, prompt, timeout=90)
+        chosen = _extract_json(raw, want_array=True)
+        if not isinstance(chosen, list):
+            raise BuilderError("the harness returned a non-list of tool slugs")
+
+        # Silently drop hallucinated slugs: the candidate list is the contract,
+        # and a slug that isn't in it would fail validation later anyway.
+        selected = [by_slug[str(s)] for s in chosen if str(s) in by_slug]
+        if selected or attempt == MAX_SELECT_ATTEMPTS - 1:
+            return selected
+    return []
 
 
 def generate_plan(config: dict, description: str,
@@ -330,7 +352,14 @@ def generate_plan(config: dict, description: str,
         "actions like posting -- include a write tool here, never in inputs), "
         '"output" ({"target": "stdout"|"file", "path": templated path if file}), '
         '"body" (the instruction text the model receives at run time; reference '
-        'each input by {{input_id}}), '
+        "each input by {{input_id}}. Write it as clean, scannable markdown, not "
+        "a single dense paragraph: a short lead-in sentence if needed, then "
+        "numbered steps for anything sequential -- fetch, filter, look up, "
+        "summarize, post -- and bullet points for enumerated items such as "
+        "report sections. Put each tool id and template variable in backticks. "
+        "Leave a blank line between steps and between sections. Both the human "
+        "reviewing this plan and the model executing it read a short list of "
+        "steps far more reliably than a run-on sentence), "
         '"description" (one line).\n\n'
         f"{tool_block}\n\n"
         f"Request: {description}{_qa_block(qa)}"

@@ -162,11 +162,17 @@ def step(message: str, detail: str = "", **kw) -> None:
 
 # --- structure -------------------------------------------------------------
 
-def heading(text: str, stream=None) -> None:
-    """A section title. One blank line above, never a box or a banner."""
+def heading(text: str, *, color: str | None = None, stream=None) -> None:
+    """A section title. One blank line above, never a box or a banner.
+
+    Plain bold by default; `color` paints it instead (still bold), for the
+    rare heading that should stand out as more than structure -- e.g. a
+    question back to the user rather than a status section.
+    """
     stream = stream or sys.stdout
     print(file=stream, flush=True)
-    print(strong(text, stream=stream), file=stream, flush=True)
+    styled = paint(text, color, bold=True, stream=stream) if color else strong(text, stream=stream)
+    print(styled, file=stream, flush=True)
 
 
 def rule(stream=None) -> None:
@@ -213,7 +219,8 @@ def command(text: str, stream=None) -> None:
 
 def prompt(text: str) -> str:
     """A styled input prompt. Returns what the user typed, stripped."""
-    return input(f"{accent('›')} {text}").strip()
+    print()
+    return input(accent(f"› {text}")).strip()
 
 
 def select(label: str, options: list[tuple[str, str]], stream=None) -> int | None:
@@ -237,6 +244,7 @@ def select(label: str, options: list[tuple[str, str]], stream=None) -> int | Non
     import termios
     import tty
 
+    print(file=stream)
     width = max(len(name) for name, _ in options)
     cursor = 0
 
@@ -254,7 +262,7 @@ def select(label: str, options: list[tuple[str, str]], stream=None) -> int | Non
             stream.write(f"\x1b[2K{row}\r\n")
         stream.flush()
 
-    print(f"{accent('›', stream=stream)} {label}", file=stream, flush=True)
+    print(accent(f"› {label}", stream=stream), file=stream, flush=True)
     print(dim("  ↑/↓ to move, enter to select, q to cancel", stream=stream),
           file=stream, flush=True)
 
@@ -383,7 +391,8 @@ def select_action(key: str, cursor: int, count: int) -> tuple[int, str]:
 
 def _select_numbered(label: str, options: list[tuple[str, str]], stream) -> int | None:
     """The no-terminal fallback: print the list, read a number."""
-    print(f"{accent('›', stream=stream)} {label}", file=stream, flush=True)
+    print(file=stream)
+    print(accent(f"› {label}", stream=stream), file=stream, flush=True)
     width = max(len(name) for name, _ in options)
     for i, (name, detail) in enumerate(options, 1):
         line = f"  {faint(f'{i:>2}.', stream=stream)} {name.ljust(width)}"
@@ -407,7 +416,8 @@ def paragraph(text: str, stream=None) -> str:
     explanation beyond the hint printed above it.
     """
     stream = stream or sys.stdout
-    print(f"{accent('›', stream=stream)} {text}", file=stream, flush=True)
+    print(file=stream)
+    print(accent(f"› {text}", stream=stream), file=stream, flush=True)
     print(dim("  (finish with an empty line)", stream=stream), file=stream, flush=True)
     lines = []
     while True:
@@ -419,6 +429,91 @@ def paragraph(text: str, stream=None) -> str:
             break
         lines.append(line)
     return "\n".join(lines).strip()
+
+
+# --- markdown / yaml preview -------------------------------------------------
+#
+# Handed off to rich rather than hand-rolled: a real markdown renderer and a
+# Pygments-backed YAML highlighter give proper multi-colour syntax highlighting
+# (keys, strings, punctuation each their own colour) instead of a single
+# accent colour standing in for every kind of token. Imported lazily -- this
+# is the only place in the CLI that needs it, and every other command should
+# not pay for the import.
+
+
+def _rich_console(stream, file):
+    from rich.console import Console
+    from rich.theme import Theme
+
+    enabled = color_enabled(stream)
+    return Console(
+        file=file,
+        no_color=not enabled,
+        force_terminal=enabled or None,
+        width=shutil.get_terminal_size((80, 24)).columns,
+        highlight=False,
+        # rich's own markdown styles put inline code on a background box,
+        # which reads as a broken black chip on a light terminal theme --
+        # override it to px0's own accent, foreground only, matching how
+        # `code` spans and numbered markers are coloured everywhere else.
+        theme=Theme({
+            "markdown.code": f"color({_ACCENT})",
+            "markdown.code_block": f"color({_ACCENT})",
+            "markdown.item.bullet": f"color({_FAINT})",
+            "markdown.item.number": f"color({_ACCENT})",
+        }),
+    )
+
+
+def _print_rich(renderables: list, stream=None) -> None:
+    """Prints rich renderables to `stream`, one line at a time, with trailing
+    padding stripped.
+
+    Rich pads list items and tables out to the full console width so a
+    background style stays consistent across the line -- with no background
+    set, that padding is just literal trailing spaces on every list line in a
+    workflow preview. Rendered into a buffer first so each line can be
+    trimmed before it reaches the real stream.
+    """
+    import io
+
+    stream = stream or sys.stdout
+    buf = io.StringIO()
+    console = _rich_console(stream, buf)
+    for renderable in renderables:
+        console.print(renderable)
+    for line in buf.getvalue().split("\n"):
+        print(line.rstrip(), file=stream)
+
+
+def render_markdown(text: str, stream=None) -> None:
+    """Prints markdown via rich: real headings, lists, bold, and code spans."""
+    from rich.markdown import Markdown
+
+    _print_rich([Markdown(text)], stream=stream)
+
+
+def render_workflow_markdown(content: str, stream=None) -> None:
+    """Renders a workflow file's `---\\nyaml\\n---\\nbody` text: the frontmatter
+    syntax-highlighted as YAML, the body rendered as markdown. Falls back to
+    plain markdown rendering if there is no frontmatter.
+    """
+    end = content.find("\n---\n", 4) if content.startswith("---\n") else -1
+    if end == -1:
+        render_markdown(content, stream=stream)
+        return
+
+    from rich.markdown import Markdown
+    from rich.syntax import Syntax
+    from rich.text import Text
+
+    _print_rich([
+        Text("---", style="dim"),
+        Syntax(content[4:end], "yaml", background_color="default", word_wrap=True),
+        Text("---", style="dim"),
+        Text(""),
+        Markdown(content[end + 5:]),
+    ], stream=stream)
 
 
 # --- spinner ---------------------------------------------------------------
@@ -454,7 +549,8 @@ class Spinner:
             # Hold the timer back for the first second: on a fast operation the
             # counter is noise, and "(0s)" reads as broken.
             timer = dim(f" ({elapsed:.0f}s)", stream=self.stream) if elapsed >= 1 else ""
-            self.stream.write(f"\r{accent(frame, stream=self.stream)} {self.message}{timer}")
+            self.stream.write(f"\r{accent(frame, stream=self.stream)} "
+                              f"{dim(self.message, stream=self.stream)}{timer}")
             self.stream.flush()
             self._stop.wait(_INTERVAL)
 
@@ -464,7 +560,7 @@ class Spinner:
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
         elif not self.quiet:
-            print(f"{self.message}...", file=self.stream, flush=True)
+            print(dim(f"{self.message}...", stream=self.stream), file=self.stream, flush=True)
         return self
 
     def _erase(self) -> None:

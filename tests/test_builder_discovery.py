@@ -621,8 +621,7 @@ def test_confirm_tools_accepts_all_on_empty_answer(tmp_home, monkeypatch, capsys
 
     assert kept == selected
     out = capsys.readouterr().out
-    assert "tools selected (2)" in out
-    assert "could change things outside px0" in out    # B_TWO is a write
+    assert "Tools selected (2)" in out
 
 
 def test_confirm_tools_drops_the_numbers_given(tmp_home, monkeypatch):
@@ -667,4 +666,4 @@ def test_confirm_tools_still_reports_when_assuming_yes(tmp_home, capsys):
     kept = cli._confirm_tools(tmp_home, selected, assume_yes=True)
 
     assert kept == selected
-    assert "tools selected (1)" in capsys.readouterr().out
+    assert "Tools selected (1)" in capsys.readouterr().out

@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import shutil
+import textwrap
 import signal
 import subprocess
 import sys
@@ -170,6 +171,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     cfg = config_mod.load(paths.config_path(home))
     existing_key = cfg.get("connectors", {}).get("composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
 
+    if composio_key is None:
+        ui.hint("needs \"read all\" and \"write all\" privileges on Composio -- workflows "
+                "authorize individual toolkits later, but the key itself must be able to grant them")
+
     while True:
         if composio_key is None:
             if existing_key:
@@ -303,8 +308,6 @@ def _intake_loop(config: dict) -> str:
     A blank answer ends it early and the request is written from what there is,
     because the way out of an interview should always be Enter.
     """
-    ui.hint("answer in your own words; press Enter on a blank line to stop")
-
     transcript: list[tuple[str, str]] = []
     question = _OPENING_QUESTION
     wrap_up = False
@@ -358,7 +361,9 @@ def _confirm_request(config: dict, description: str,
     better placed than the model to judge is whether it says what they meant.
     """
     while True:
-        ui.heading("the request")
+        ui.heading("Here's what I got from your request -- let me know if it looks right.",
+                  color="110")
+        print()
         print(description, flush=True)
         choice = ui.prompt("Build this? [Y/edit/n] ").lower()
         if choice in ("n", "no"):
@@ -371,17 +376,33 @@ def _confirm_request(config: dict, description: str,
             description = edited
 
 
-def _describe_tool(spec_or_tool, width: int) -> str:
-    """One aligned line for a tool being proposed: id, access, description."""
+def _print_tool(spec_or_tool, index: int) -> None:
+    """One tool being proposed: number, access, and id on their own line, with
+    the full description wrapped on an indented line below it.
+
+    Two lines rather than one truncated one -- the description is what tells
+    the user whether a tool actually does what its name implies, and cutting
+    it off mid-word defeats that.
+    """
     is_destructive = getattr(spec_or_tool, "is_destructive", False)
     if is_destructive:
-        access = ui.paint("destructive", "167")
+        access_plain = "destructive"
+        access = ui.paint(access_plain, "167")
     elif spec_or_tool.is_write:
-        access = ui.paint("write", "179")
+        access_plain = "write"
+        access = ui.paint(access_plain, "179")  # yellow -- can change things outside px0
     else:
-        access = ui.dim("read ")
+        access_plain = "read "
+        access = ui.paint(access_plain, "110")  # blue -- looks only
+    prefix_plain = f"  {index}. {access_plain}  "
+    print(f"  {ui.accent(f'{index}.')} {access}  {spec_or_tool.id}")
     desc = getattr(spec_or_tool, "description", "")
-    return f"  {access:<11}  {spec_or_tool.id.ljust(width)}  {ui.dim(desc[:70])}"
+    if desc:
+        cols = shutil.get_terminal_size((80, 24)).columns
+        indent = " " * len(prefix_plain)
+        wrapped = textwrap.fill(desc, width=max(cols - len(prefix_plain) - 1, 20),
+                                initial_indent=indent, subsequent_indent=indent)
+        print(ui.dim(wrapped))
 
 
 def _discover_tools(home: Path, config: dict, description: str,
@@ -427,26 +448,22 @@ def _confirm_tools(home: Path, selected: list, assume_yes: bool) -> list:
     these, and choosing a write tool the request didn't ask for is exactly the
     mistake a human should catch here.
     """
-    width = max(len(t.id) for t in selected)
-    ui.heading(f"tools selected ({len(selected)})")
+    ui.heading(f"Tools selected ({len(selected)}).", color="110")
+    print()
     for i, tool in enumerate(selected, 1):
         # numbered so the drop-list below can refer to them
-        print(f"  {ui.accent(str(i) + '.')}{_describe_tool(tool, width)}")
+        _print_tool(tool, i)
 
-    writes = [t for t in selected if t.is_write]
     destructive = [t for t in selected if t.is_destructive]
     if destructive:
         ui.warn("destructive tools proposed",
                 ", ".join(t.slug for t in destructive), stream=sys.stdout)
-    elif writes:
-        ui.warn("this workflow could change things outside px0",
-                ", ".join(t.slug for t in writes), stream=sys.stdout)
 
     if assume_yes:
         return selected
 
     ui.hint("Enter accepts all; list numbers to drop (e.g. 2,3); n aborts")
-    answer = ui.prompt("keep all? ").lower()
+    answer = ui.prompt("keep all? [Y/n/#,#,...] ").lower()
 
     if answer in ("n", "no"):
         ui.info("cancelled")
@@ -520,6 +537,22 @@ def _authorize_toolkits(home: Path, toolkits: set[str], assume_yes: bool) -> _Au
         ui.step(toolkit, "open this and complete the consent:", stream=sys.stdout)
         ui.command(res["redirect_url"])
         waiting.append(toolkit)
+
+    # All the links are up before asking -- rechecking after one confirmation
+    # is cheaper than interrupting the user once per toolkit, and it lets an
+    # app the user actually finished drop out of `waiting` instead of nagging
+    # about it again at the end.
+    if waiting and not assume_yes:
+        ui.prompt("Press Enter once you've connected all of the above: ")
+        with ui.spinner("Rechecking authorizations"):
+            still_pending = [t for t in waiting
+                             if connect_mod.connected_account_status(home, t) != "ACTIVE"]
+        if still_pending:
+            ui.warn("still not connected", ", ".join(still_pending), stream=sys.stdout)
+        else:
+            ui.ok("all connected", ", ".join(waiting))
+        waiting = still_pending
+
     return _AuthOutcome(waiting, blocked)
 
 
@@ -727,8 +760,20 @@ def _build_workflow(home: Path, config: dict, description: str,
         ui.err(str(e))
         sys.exit(EXIT_MODEL_ERROR)
 
-    ui.heading("plan")
-    print(json.dumps(plan.raw, indent=2), flush=True)
+    # slugify the description into a default workflow id, capped to 40 chars --
+    # computed now so the preview below can show it, and reused for the actual
+    # id prompt further down instead of recomputing it.
+    default_id = re.sub(r"[^a-z0-9-]+", "-",
+                        plan.description.lower()).strip("-")[:40] or "new-workflow"
+
+    ui.heading("Here's the plan -- let me know what you think.", color="110")
+    print()
+    # id and guidelines aren't picked yet, so this previews against a
+    # placeholder id -- everything the plan itself determined, in the same
+    # shape the saved file will take.
+    preview = builder_mod.render_workflow_file(
+        existing_id or default_id, plan, guidelines=[], request=description)
+    ui.render_workflow_markdown(preview)
 
     issues = builder_mod.check_feasibility(plan, home)
     if issues:
@@ -737,12 +782,6 @@ def _build_workflow(home: Path, config: dict, description: str,
             ui.err(i, stream=sys.stdout)
         ui.hint("cannot proceed until these are resolved")
         sys.exit(EXIT_USER_ERROR)
-
-    writes = builder_mod.write_tools_named(plan, home)
-    if writes:
-        ui.heading("write access")
-        ui.warn("this workflow would be granted write tools",
-                ", ".join(writes), stream=sys.stdout)
 
     # Whatever the plan needs that discovery didn't cover: px0's curated tools,
     # and everything under --no-discover, where there was nothing to pre-authorize.
@@ -755,16 +794,13 @@ def _build_workflow(home: Path, config: dict, description: str,
 
     verb = "Rebuild" if existing_id else "Generate"
     if not assume_yes:
-        if ui.prompt(f"{verb} this workflow? [y/N] ").lower() != "y":
+        if ui.prompt(f"{verb} this workflow? [Y/n] ").lower() in ("n", "no"):
             ui.info("cancelled")
             return
 
     if existing_id:
         workflow_id = existing_id
     else:
-        # slugify the description into a default workflow id, capped to 40 chars
-        default_id = re.sub(r"[^a-z0-9-]+", "-",
-                            plan.description.lower()).strip("-")[:40] or "new-workflow"
         if getattr(args, "id", None):
             workflow_id = args.id
         elif assume_yes:
@@ -780,7 +816,7 @@ def _build_workflow(home: Path, config: dict, description: str,
     content = builder_mod.render_workflow_file(workflow_id, plan, guidelines, description)
     dest = builder_mod.save_workflow(home, workflow_id, content)
 
-    ui.heading(f"{'updated' if existing_id else 'created'} {workflow_id}")
+    ui.heading(f"{'updated' if existing_id else 'created'} {ui.accent(workflow_id)}")
     rows = [("workflow", str(dest))]
     if plan.trigger.get("schedule"):
         rows.append(("schedule", plan.trigger["schedule"]))
@@ -1042,7 +1078,7 @@ def cmd_workflows_show(args: argparse.Namespace) -> None:
     if not wf.enabled:
         ui.warn("disabled", "it will not fire until `px0 workflows enable` runs")
     print()
-    print(wf.path.read_text(), end="")
+    ui.render_workflow_markdown(wf.path.read_text())
 
 
 def _validate_one(home: Path, wf) -> list[str]:

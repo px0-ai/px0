@@ -147,6 +147,28 @@ add_path_if_missing() {
     esac
 }
 
+# bun's own installer appends its BUN_INSTALL/PATH lines to shell rc files on
+# every run, with no check for an entry already being there -- rerunning this
+# script (or bun's installer directly) piles up duplicate exports over time.
+# We don't control that script, so clean up after it here: collapse repeated
+# BUN_INSTALL lines in each rc file down to the first occurrence.
+dedupe_bun_rc_entries() {
+    for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc_file" ] || continue
+
+        tmp_file="$(mktemp)" || continue
+
+        if awk '
+            /BUN_INSTALL/ || /^# bun$/ { if (seen[$0]++) next }
+            { print }
+        ' "$rc_file" > "$tmp_file" && ! cmp -s "$rc_file" "$tmp_file"; then
+            cp "$tmp_file" "$rc_file"
+        fi
+
+        rm -f "$tmp_file"
+    done
+}
+
 # ---------------------------------------------------------------------------
 # Python version helpers
 # ---------------------------------------------------------------------------
@@ -534,6 +556,7 @@ fi
 # also already present, below.
 if command -v bun >/dev/null 2>&1; then
     ok_msg "bun already installed" "$(bun --version 2>&1)"
+    dedupe_bun_rc_entries
 fi
 
 if command -v qmd >/dev/null 2>&1; then
@@ -550,6 +573,7 @@ else
         else
             if curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1; then
                 ok_msg "bun installed"
+                dedupe_bun_rc_entries
             else
                 warn_line "bun installation did not complete"
             fi

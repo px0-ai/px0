@@ -23,6 +23,7 @@ dependencies = [
     "youtube-transcript-api>=1.0",
     "composio>=0.1.0",
     "packaging>=23.0",
+    "rich>=13.0",
 ]
 
 [tool.setuptools.dynamic]
