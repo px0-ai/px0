@@ -220,8 +220,23 @@ def cmd_init(args: argparse.Namespace) -> None:
     for line in created:
         ui.ok(line)
 
+    # Most of these folders are empty right after init -- starter content only
+    # exists once you write a workflow or read something into the brain -- so
+    # this is the one place that tells you what each is for before you go
+    # looking. tools/ is deliberately left off: it is for a TOML file you
+    # write yourself, not somewhere to look right after init.
+    folders = [
+        ("workflows", "one Markdown file per workflow px0 runs"),
+        ("guidelines", "claims px0 follows, one file per topic"),
+        ("brain", "what you've read and kept"),
+        ("output", "what runs produce"),
+    ]
+    width = max(len(name) for name, _ in folders) + 1
+    ui.hint(f"inside {home}:")
+    for name, desc in folders:
+        ui.kv(name, desc, width=width)
+
     ui.hint("try next:")
-    ui.command("px0 doctor")
     ui.command('px0 workflows new')
 
     # Surfaced here because a fresh store is exactly when someone who already
@@ -2420,22 +2435,17 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
     record lives under the store home, so removing it removes px0's data in
     full. `install.sh --uninstall` stops here at the package and scheduler
     unit, deliberately leaving the store for the user to remove by hand; this
-    command is the other half. Each of the three things listed above is its
-    own irreversible action, so each is confirmed (and can be declined) on
-    its own instead of one blanket yes covering all of them.
+    command is the other half. Each of the three things below is its own
+    irreversible action, so each is confirmed (and can be declined) on its
+    own instead of one blanket yes covering all of them -- reported live as
+    it happens rather than previewed upfront, the way `install.sh` narrates
+    its steps: a tick the moment there's nothing to do, or the moment the
+    confirmed action is actually done.
     """
     home = paths.store_home()
     store_exists = home.exists()
     mechanism = update_mod.detect_install_mechanism(home)
     assume_yes = getattr(args, "yes", False)
-
-    ui.heading("this will")
-    if store_exists:
-        ui.bullet("stop the daemon and remove its scheduler unit, if any")
-        ui.bullet(f"delete the entire store: {home}")
-    else:
-        ui.info("no store found", str(home))
-    ui.bullet(f"uninstall the px0 package (via {mechanism})")
 
     kept = []
 
@@ -2456,6 +2466,8 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
             ui.ok("deleted", str(home))
         else:
             kept.append("the store")
+    else:
+        ui.ok("no store to remove", str(home))
 
     if mechanism:
         if _confirm(f"Uninstall the px0 package (via {mechanism})?", assume_yes):
