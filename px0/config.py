@@ -220,11 +220,13 @@ SCHEMA: dict[str, dict[str, Any]] = {
     },
     "update.check": {
         "type": bool, "choices": None,
-        "help": "whether the daemon checks weekly for an available update",
+        "help": "whether px0 checks for an available update -- once a day from the "
+                "CLI, and weekly from the daemon if installed",
     },
     "update.auto_install": {
         "type": bool, "choices": None,
-        "help": "install updates automatically instead of only surfacing them",
+        "help": "install updates automatically (including from the CLI's daily check) "
+                "instead of only surfacing them",
     },
     "tools.allow_shell": {
         "type": bool, "choices": None,

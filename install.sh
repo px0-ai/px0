@@ -457,6 +457,22 @@ add_path_if_missing "$PIPX_BIN_DIR"
 # Install px0
 # ---------------------------------------------------------------------------
 
+# Runs `pipx <verb> ...` through whichever form PIPX_BIN takes -- a bare
+# executable, or the "$PYTHON_BIN -m pipx" fallback string that needs a shell
+# to word-split it. Captures combined output into PX0_PIPX_OUTPUT instead of
+# letting pipx's own chatter (e.g. "already seems to be installed") print
+# straight to the terminal, so the caller can decide what -- if anything --
+# is worth showing.
+_pipx_run() {
+    verb="$1"
+    shift
+    if [ -x "$PIPX_BIN" ]; then
+        PX0_PIPX_OUTPUT="$("$PIPX_BIN" "$verb" "$@" 2>&1)"
+    else
+        PX0_PIPX_OUTPUT="$(sh -c "$PIPX_BIN \"\$@\"" sh "$verb" "$@" 2>&1)"
+    fi
+}
+
 PX0_PACKAGE="px0"
 
 if [ -n "${PX0_VERSION:-}" ]; then
@@ -465,63 +481,33 @@ fi
 
 step_line "Installing px0"
 
-# Use the explicitly selected modern Python.
-#
-# This is the important fix:
-#   pipx install --python "$PYTHON_BIN" px0
-#
-# It prevents pipx from creating the px0 environment with an older system
-# Python such as 3.9 or 3.10.
-
+# Use the explicitly selected modern Python, which prevents pipx from
+# creating the px0 environment with an older system Python such as 3.9/3.10.
 if [ "${PX0_CHANNEL:-}" = "beta" ]; then
-    if [ -x "$PIPX_BIN" ]; then
-        if ! "$PIPX_BIN" install \
-            --python "$PYTHON_BIN" \
-            --pip-args "--pre" \
-            "$PX0_PACKAGE"; then
-
-            if ! "$PIPX_BIN" upgrade \
-                --python "$PYTHON_BIN" \
-                --pip-args "--pre" \
-                px0 >/dev/null 2>&1; then
-                die "failed to install px0"
-            fi
-        fi
-    else
-        if ! sh -c "$PIPX_BIN install --python \"\$1\" --pip-args \"--pre\" \"\$2\"" \
-            sh "$PYTHON_BIN" "$PX0_PACKAGE"; then
-
-            if ! sh -c "$PIPX_BIN upgrade --python \"\$1\" --pip-args \"--pre\" px0" \
-                sh "$PYTHON_BIN" >/dev/null 2>&1; then
-                die "failed to install px0"
-            fi
-        fi
-    fi
+    _pipx_run install --python "$PYTHON_BIN" --pip-args "--pre" "$PX0_PACKAGE"
 else
-    if [ -x "$PIPX_BIN" ]; then
-        if ! "$PIPX_BIN" install \
-            --python "$PYTHON_BIN" \
-            "$PX0_PACKAGE"; then
-
-            if ! "$PIPX_BIN" upgrade \
-                --python "$PYTHON_BIN" \
-                px0 >/dev/null 2>&1; then
-                die "failed to install px0"
-            fi
-        fi
-    else
-        if ! sh -c "$PIPX_BIN install --python \"\$1\" \"\$2\"" \
-            sh "$PYTHON_BIN" "$PX0_PACKAGE"; then
-
-            if ! sh -c "$PIPX_BIN upgrade --python \"\$1\" px0" \
-                sh "$PYTHON_BIN" >/dev/null 2>&1; then
-                die "failed to install px0"
-            fi
-        fi
-    fi
+    _pipx_run install --python "$PYTHON_BIN" "$PX0_PACKAGE"
 fi
+install_rc=$?
+install_output="$PX0_PIPX_OUTPUT"
 
-ok_msg "px0 package installed"
+if [ "$install_rc" -ne 0 ]; then
+    if [ "${PX0_CHANNEL:-}" = "beta" ]; then
+        _pipx_run upgrade --python "$PYTHON_BIN" --pip-args "--pre" px0
+    else
+        _pipx_run upgrade --python "$PYTHON_BIN" px0
+    fi
+    if [ $? -ne 0 ]; then
+        [ -n "$install_output" ] && printf '%s\n' "$install_output" >&2
+        [ -n "$PX0_PIPX_OUTPUT" ] && printf '%s\n' "$PX0_PIPX_OUTPUT" >&2
+        die "failed to install px0"
+    fi
+    ok_msg "px0 upgraded"
+elif printf '%s' "$install_output" | grep -qi "already seems to be installed"; then
+    ok_msg "px0 already installed"
+else
+    ok_msg "px0 package installed"
+fi
 
 # ---------------------------------------------------------------------------
 # Locate px0 binary
@@ -543,7 +529,16 @@ fi
 # Bootstrap qmd
 # ---------------------------------------------------------------------------
 
-if ! command -v qmd >/dev/null 2>&1; then
+# Report bun's status up front, regardless of whether qmd still needs it --
+# otherwise an already-installed bun never gets mentioned once qmd itself is
+# also already present, below.
+if command -v bun >/dev/null 2>&1; then
+    ok_msg "bun already installed" "$(bun --version 2>&1)"
+fi
+
+if command -v qmd >/dev/null 2>&1; then
+    ok_msg "qmd already installed" "$(qmd --version 2>&1)"
+else
 
     if ! command -v bun >/dev/null 2>&1; then
         step_line "Installing bun"
@@ -607,21 +602,16 @@ if [ "${PX0_NO_DAEMON:-}" != "true" ] && [ -t 0 ]; then
                 ;;
         esac
     fi
-
-elif [ "${PX0_NO_DAEMON:-}" != "true" ]; then
-    warn_line "not a terminal; skipping the daemon prompt"
-    hint_line "enable it any time with:"
-    cmd_line "px0 daemon install"
 fi
 
 # ---------------------------------------------------------------------------
 # Success
 # ---------------------------------------------------------------------------
 
-ok_msg "$(_bold "px0 is installed")"
-
 hint_line "try these next:"
+
 cmd_line "px0 init"
+cmd_line "px0 daemon install"
 cmd_line "px0 workflows new"
 
 printf '\n'

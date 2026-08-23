@@ -2420,11 +2420,14 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
     record lives under the store home, so removing it removes px0's data in
     full. `install.sh --uninstall` stops here at the package and scheduler
     unit, deliberately leaving the store for the user to remove by hand; this
-    command is the other half, so it always asks first.
+    command is the other half. Each of the three things listed above is its
+    own irreversible action, so each is confirmed (and can be declined) on
+    its own instead of one blanket yes covering all of them.
     """
     home = paths.store_home()
     store_exists = home.exists()
     mechanism = update_mod.detect_install_mechanism(home)
+    assume_yes = getattr(args, "yes", False)
 
     ui.heading("this will")
     if store_exists:
@@ -2434,38 +2437,48 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
         ui.info("no store found", str(home))
     ui.bullet(f"uninstall the px0 package (via {mechanism})")
 
-    if not _confirm("Uninstall px0 and delete all of its data? This cannot be undone.",
-                     getattr(args, "yes", False)):
-        ui.info("cancelled")
-        return
+    kept = []
 
     if store_exists:
-        result = daemon_mod.uninstall(home)
-        if result["stopped"]:
-            ui.ok("stopped", "the running daemon")
-        for path in result["removed"]:
-            ui.ok("removed", path)
-        if result.get("cron_note"):
-            ui.hint(result["cron_note"])
-        shutil.rmtree(home)
-        ui.ok("deleted", str(home))
+        if _confirm("Stop the daemon and remove its scheduler unit?", assume_yes):
+            result = daemon_mod.uninstall(home)
+            if result["stopped"]:
+                ui.ok("stopped", "the running daemon")
+            for path in result["removed"]:
+                ui.ok("removed", path)
+            if result.get("cron_note"):
+                ui.hint(result["cron_note"])
+        else:
+            kept.append("daemon / scheduler unit")
+
+        if _confirm(f"Delete the entire store at {home}? This cannot be undone.", assume_yes):
+            shutil.rmtree(home)
+            ui.ok("deleted", str(home))
+        else:
+            kept.append("the store")
 
     if mechanism:
-        cmd = ["pipx", "uninstall", "px0"] if mechanism == "pipx" else \
-            [sys.executable, "-m", "pip", "uninstall", "-y", "px0"]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        except OSError as e:
-            ui.err("could not uninstall the px0 package", str(e))
-            ui.hint(f"remove it yourself: {' '.join(cmd)}")
-            sys.exit(EXIT_USER_ERROR)
-        if result.returncode != 0:
-            ui.err("could not uninstall the px0 package", result.stderr.strip()[:200])
-            ui.hint(f"remove it yourself: {' '.join(cmd)}")
-            sys.exit(EXIT_USER_ERROR)
-        ui.ok("uninstalled", "the px0 package")
+        if _confirm(f"Uninstall the px0 package (via {mechanism})?", assume_yes):
+            cmd = ["pipx", "uninstall", "px0"] if mechanism == "pipx" else \
+                [sys.executable, "-m", "pip", "uninstall", "-y", "px0"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            except OSError as e:
+                ui.err("could not uninstall the px0 package", str(e))
+                ui.hint(f"remove it yourself: {' '.join(cmd)}")
+                sys.exit(EXIT_USER_ERROR)
+            if result.returncode != 0:
+                ui.err("could not uninstall the px0 package", result.stderr.strip()[:200])
+                ui.hint(f"remove it yourself: {' '.join(cmd)}")
+                sys.exit(EXIT_USER_ERROR)
+            ui.ok("uninstalled", "the px0 package")
+        else:
+            kept.append("the px0 package")
 
-    ui.ok("px0 is uninstalled")
+    if kept:
+        ui.info("kept", ", ".join(kept))
+    else:
+        ui.ok("px0 is uninstalled")
 
 
 # --- argument parser -----------------------------------------------------
@@ -2565,6 +2578,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser_mod.build(sys.modules[__name__])
 
 
+def _notify_update() -> None:
+    """Runs the once-a-day cached update check and prints the result, if any.
+
+    Called after every successful command. Best-effort and silent on any
+    failure -- an update nudge is never worth breaking or delaying the
+    command that triggered it (`update_mod.maybe_check` itself never raises,
+    but this still guards against a bad store/config on the way in).
+    """
+    try:
+        home = paths.store_home()
+        if not store_mod.is_initialized(home):
+            return
+        config = config_mod.load(paths.config_path(home))
+        result = update_mod.maybe_check(home, config)
+    except Exception:
+        return
+
+    if not result:
+        return
+    if result["kind"] == "available":
+        ui.info(f"{result['available_version']} available",
+                f"on channel {result.get('channel', 'stable')}")
+        ui.hint("install it with:")
+        ui.command("px0 update")
+    elif result["kind"] == "installed":
+        ui.ok(result["result"].get("message", "auto-updated"))
+    elif result["kind"] == "install_failed":
+        ui.warn("auto-update failed", result.get("error", ""))
+        ui.hint("try it by hand with:")
+        ui.command("px0 update")
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: parses args, dispatches to the selected subcommand's handler,
     and translates known exception types into the appropriate exit code."""
@@ -2589,6 +2634,8 @@ def main(argv: list[str] | None = None) -> None:
         ui.set_color(False)  # --json output is data; never decorate it
     try:
         args.func(args)
+        if args.func is not cmd_update and not getattr(args, "json", False):
+            _notify_update()
     # each except maps a failure category to its own exit code so callers/scripts can branch on it
     except tools.ConnectorError as e:
         ui.err(str(e))

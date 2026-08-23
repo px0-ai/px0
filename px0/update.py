@@ -13,7 +13,7 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Any
 
 import requests
@@ -220,6 +220,76 @@ def check(config: dict) -> dict:
         "message": (f"Update available: {latest} on channel {channel}."
                     if update_available else "Already up to date."),
     }
+
+
+def maybe_check(home: Path, config: dict) -> dict | None:
+    """Best-effort update check, run once per calendar day from every CLI command.
+
+    Reads/writes `.state/update-check.json` so the PyPI round-trip only happens
+    on the first invocation of a new day; every later command that day reads
+    the cached result instead. Never raises -- a broken or slow check must
+    never break or noticeably delay the command that triggered it.
+
+    Returns None when there is nothing to report (checks disabled, up to date,
+    or the check itself failed). Otherwise returns one of:
+      {"kind": "available", "available_version": ...}          -- default
+      {"kind": "installed", "result": <run_update() result>}   -- update.auto_install=true
+      {"kind": "install_failed", "error": ...}
+    """
+    if not config_mod.get(config, "update.check", True):
+        return None
+
+    check_path = paths.update_check_path(home)
+    now = datetime.now(timezone.utc)
+
+    cached: dict = {}
+    if check_path.exists():
+        try:
+            cached = json.loads(check_path.read_text())
+        except (OSError, ValueError):
+            cached = {}
+
+    checked_at = None
+    if cached.get("checked_at"):
+        try:
+            checked_at = datetime.fromisoformat(cached["checked_at"])
+        except ValueError:
+            checked_at = None
+
+    available = cached.get("available_version")
+    if checked_at is None or (now - checked_at) >= timedelta(days=1):
+        try:
+            available = check(config).get("available_version")
+        except PyPIUnreachable:
+            pass  # keep whatever we last knew; try again on tomorrow's first command
+        try:
+            check_path.parent.mkdir(parents=True, exist_ok=True)
+            check_path.write_text(json.dumps(
+                {"checked_at": now.isoformat(), "available_version": available},
+                indent=2,
+            ))
+        except OSError:
+            pass
+
+    if not available:
+        return None
+    try:
+        if version.parse(available) <= version.parse(__version__):
+            return None
+    except version.InvalidVersion:
+        return None
+
+    if not config_mod.get(config, "update.auto_install", False):
+        return {
+            "kind": "available",
+            "available_version": available,
+            "channel": config_mod.get(config, "update.channel", "stable"),
+        }
+
+    try:
+        return {"kind": "installed", "result": run_update(home, config)}
+    except UpdateError as e:
+        return {"kind": "install_failed", "error": str(e)}
 
 
 def _load_history(path: Path) -> list:

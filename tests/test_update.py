@@ -625,3 +625,111 @@ def test_cmd_update_check_reports_an_available_version(tmp_home, monkeypatch, ca
     assert "9.9.9 available" in out
     assert "px0 update" in out
     assert "up to date" not in out
+
+
+def test_maybe_check_hits_pypi_once_and_then_caches_for_the_day(tmp_home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: (
+        calls.append(1), MockResponse({"info": {"version": "9.9.9"}}))[1])
+
+    first = update.maybe_check(tmp_home, {})
+    assert first == {"kind": "available", "available_version": "9.9.9", "channel": "stable"}
+    assert len(calls) == 1
+
+    # Same day: served from the cache file, PyPI not touched again.
+    second = update.maybe_check(tmp_home, {})
+    assert second == first
+    assert len(calls) == 1
+
+    check_path = paths.update_check_path(tmp_home)
+    data = json.loads(check_path.read_text())
+    assert data["available_version"] == "9.9.9"
+
+
+def test_maybe_check_rechecks_once_the_cached_entry_is_a_day_old(tmp_home, monkeypatch):
+    check_path = paths.update_check_path(tmp_home)
+    check_path.parent.mkdir(parents=True, exist_ok=True)
+    check_path.write_text(json.dumps({
+        "checked_at": "2020-01-01T00:00:00+00:00", "available_version": None,
+    }))
+
+    calls = []
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: (
+        calls.append(1), MockResponse({"info": {"version": "9.9.9"}}))[1])
+
+    result = update.maybe_check(tmp_home, {})
+    assert result["available_version"] == "9.9.9"
+    assert len(calls) == 1
+
+
+def test_maybe_check_respects_update_check_false(tmp_home, monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: pytest.fail("must not call PyPI"))
+    assert update.maybe_check(tmp_home, {"update": {"check": False}}) is None
+
+
+def test_maybe_check_returns_none_when_up_to_date(tmp_home, monkeypatch):
+    monkeypatch.setattr(requests, "get",
+                         lambda *a, **kw: MockResponse({"info": {"version": update.__version__}}))
+    assert update.maybe_check(tmp_home, {}) is None
+
+
+def test_maybe_check_survives_pypi_being_unreachable(tmp_home, monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: (_ for _ in ()).throw(
+        requests.ConnectionError("no route to host")))
+    assert update.maybe_check(tmp_home, {}) is None  # never raises
+
+    data = json.loads(paths.update_check_path(tmp_home).read_text())
+    assert data["available_version"] is None  # recorded so tomorrow retries, not every command
+
+
+def test_maybe_check_installs_automatically_when_configured(tmp_home, monkeypatch):
+    monkeypatch.setattr(requests, "get",
+                         lambda *a, **kw: MockResponse({"info": {"version": "9.9.9"}}))
+    monkeypatch.setattr(update, "run_update", lambda h, c: {"message": "Successfully updated to 9.9.9."})
+
+    result = update.maybe_check(tmp_home, {"update": {"auto_install": True}})
+    assert result == {"kind": "installed", "result": {"message": "Successfully updated to 9.9.9."}}
+
+
+def test_maybe_check_reports_auto_install_failure(tmp_home, monkeypatch):
+    monkeypatch.setattr(requests, "get",
+                         lambda *a, **kw: MockResponse({"info": {"version": "9.9.9"}}))
+
+    def boom(h, c):
+        raise update.UpdateError("pipx exploded")
+    monkeypatch.setattr(update, "run_update", boom)
+
+    result = update.maybe_check(tmp_home, {"update": {"auto_install": True}})
+    assert result == {"kind": "install_failed", "error": "pipx exploded"}
+
+
+def test_notify_update_prints_available_version(tmp_home, monkeypatch, capsys):
+    monkeypatch.setattr(paths, "store_home", lambda: tmp_home)
+    monkeypatch.setattr(update, "maybe_check", lambda h, c: {
+        "kind": "available", "available_version": "9.9.9", "channel": "stable",
+    })
+
+    cli._notify_update()
+
+    out = capsys.readouterr().out
+    assert "9.9.9 available" in out
+    assert "px0 update" in out
+
+
+def test_main_notifies_after_an_ordinary_command_but_not_after_update(tmp_home, monkeypatch, capsys):
+    """End-to-end through main(): the notify hook fires for a normal command
+    and is skipped for `px0 update` itself, so the two check paths never race."""
+    monkeypatch.setenv("PX0_HOME", str(tmp_home))
+    monkeypatch.setattr(update, "maybe_check", lambda h, c: {
+        "kind": "available", "available_version": "9.9.9", "channel": "stable",
+    })
+    monkeypatch.setattr(update, "run_update", lambda h, c, check_only=False: {
+        "channel": "stable", "available_version": None, "update_available": False,
+        "current_version": update.__version__, "message": "Already up to date.",
+    })
+
+    cli.main(["version"])
+    assert "9.9.9 available" in capsys.readouterr().out
+
+    cli.main(["update", "--check"])
+    assert "9.9.9 available" not in capsys.readouterr().out
