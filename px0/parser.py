@@ -127,10 +127,11 @@ def build(handlers) -> argparse.ArgumentParser:
     wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     wp.set_defaults(func=handlers.cmd_workflows_validate)
 
-    wp = wf_sub.add_parser("rm", help="remove a workflow, keeping its history")
-    wp.add_argument("workflow")
+    wp = wf_sub.add_parser("delete", help="remove a workflow, keeping its history")
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit to pick one from a list")
     wp.add_argument("--yes", action="store_true", help="skip the confirmation")
-    wp.set_defaults(func=handlers.cmd_workflows_rm)
+    wp.set_defaults(func=handlers.cmd_workflows_delete)
 
     wp = wf_sub.add_parser("rename", help="give a workflow a new id")
     wp.add_argument("workflow")

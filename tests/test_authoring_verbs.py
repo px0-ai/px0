@@ -86,7 +86,7 @@ def test_rm_refuses_without_a_confirmation_and_keeps_the_file(ctx, monkeypatch, 
     monkeypatch.setattr(cli.ui, "prompt", lambda *a, **k: "n")
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
 
-    cli.cmd_workflows_rm(argparse.Namespace(workflow="demo", yes=False))
+    cli.cmd_workflows_delete(argparse.Namespace(workflow="demo", yes=False))
 
     assert path.exists()
     assert "kept" in capsys.readouterr().out

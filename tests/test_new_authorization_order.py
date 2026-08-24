@@ -120,8 +120,8 @@ def test_declining_to_start_authorization_leaves_it_pending_not_blocked(
     monkeypatch.setattr(cli.ui, "spinner", _quiet_spinner)
     monkeypatch.setattr(cli.connect_mod, "connected_account_status",
                         lambda home, toolkit: "not authorized")
-    monkeypatch.setattr(ui, "prompt", lambda text: "n")
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "n")
+    monkeypatch.setattr(ui, "prompt", lambda text, **k: "n")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "n")
 
     outcome = cli._authorize_toolkits(tmp_home, {"github"}, False)
 

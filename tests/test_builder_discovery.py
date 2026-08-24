@@ -376,7 +376,7 @@ def test_clarify_loop_asks_records_and_stops(monkeypatch, capsys):
     rounds = [["Which channel?", "How often?"], []]
     monkeypatch.setattr(builder_mod, "clarify", lambda c, d, qa: rounds.pop(0))
     answers = iter(["#eng", ""])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
 
     qa = cli._clarify_loop({}, "post to slack", skip=False)
 
@@ -393,7 +393,7 @@ def test_clarify_loop_stops_when_nothing_is_answered(monkeypatch):
         return ["Q?"]
 
     monkeypatch.setattr(builder_mod, "clarify", clarify)
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")
 
     assert cli._clarify_loop({}, "x", skip=False) == []
     assert len(calls) == 1
@@ -401,7 +401,7 @@ def test_clarify_loop_stops_when_nothing_is_answered(monkeypatch):
 
 def test_clarify_loop_is_bounded(monkeypatch):
     monkeypatch.setattr(builder_mod, "clarify", lambda c, d, qa: ["Q?"])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "an answer")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "an answer")
 
     qa = cli._clarify_loop({}, "x", skip=False)
     assert len(qa) == builder_mod.MAX_CLARIFY_ROUNDS
@@ -493,7 +493,7 @@ def test_intake_loop_asks_until_the_request_is_written(monkeypatch, capsys):
 
     monkeypatch.setattr(builder_mod, "intake", fake_intake)
     answers = iter(["digest my PRs", "razorpay/api", "every Friday", ""])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
 
     description = cli._intake_loop({})
 
@@ -519,7 +519,7 @@ def test_a_blank_answer_wraps_the_interview_up_rather_than_asking_on(monkeypatch
     monkeypatch.setattr(builder_mod, "intake", fake_intake)
     # the job, then Enter on the follow-up, then Enter to accept the write-up
     answers = iter(["digest my PRs", "", ""])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
 
     assert cli._intake_loop({}) == "what there was"
     assert calls == [False, True], calls
@@ -528,7 +528,7 @@ def test_a_blank_answer_wraps_the_interview_up_rather_than_asking_on(monkeypatch
 def test_a_blank_first_answer_builds_nothing(monkeypatch):
     monkeypatch.setattr(builder_mod, "intake",
                         lambda *a, **k: pytest.fail("nothing to work from"))
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")
 
     with pytest.raises(SystemExit):
         cli._intake_loop({})
@@ -543,7 +543,7 @@ def test_the_interview_is_bounded(monkeypatch):
         return {"description": "settled"} if wrap_up else {"question": "another?"}
 
     monkeypatch.setattr(builder_mod, "intake", fake_intake)
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "an answer")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "an answer")
 
     assert cli._intake_loop({}) == "settled"
     assert rounds.count(False) == builder_mod.MAX_INTAKE_ROUNDS
@@ -553,17 +553,46 @@ def test_the_interview_is_bounded(monkeypatch):
 def test_the_request_can_be_rewritten_before_anything_is_built(monkeypatch):
     monkeypatch.setattr(builder_mod, "intake",
                         lambda *a, **k: {"description": "not quite right"})
-    answers = iter(["digest my PRs", "edit", ""])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
-    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "exactly right")
+    answers = iter(["digest my PRs", "edit", "only my own PRs", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
+    seen = {}
+    monkeypatch.setattr(builder_mod, "revise_request",
+                        lambda config, description, note, transcript=None: seen.update(
+                            description=description, note=note) or "exactly right")
 
     assert cli._intake_loop({}) == "exactly right"
+    assert seen == {"description": "not quite right", "note": "only my own PRs"}
+
+
+def test_a_blank_edit_note_keeps_the_request_and_asks_again(monkeypatch):
+    monkeypatch.setattr(builder_mod, "intake",
+                        lambda *a, **k: {"description": "not quite right"})
+    answers = iter(["digest my PRs", "edit", "", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
+    monkeypatch.setattr(builder_mod, "revise_request",
+                        lambda *a, **k: pytest.fail("must not revise on a blank note"))
+
+    assert cli._intake_loop({}) == "not quite right"
+
+
+def test_a_failed_revision_keeps_the_request_and_asks_again(monkeypatch, capsys):
+    monkeypatch.setattr(builder_mod, "intake",
+                        lambda *a, **k: {"description": "not quite right"})
+    answers = iter(["digest my PRs", "edit", "only my own PRs", ""])
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
+
+    def fail(*a, **k):
+        raise builder_mod.BuilderError("the harness is unreachable")
+    monkeypatch.setattr(builder_mod, "revise_request", fail)
+
+    assert cli._intake_loop({}) == "not quite right"
+    assert "could not revise" in capsys.readouterr().err
 
 
 def test_declining_the_request_builds_nothing(monkeypatch):
     monkeypatch.setattr(builder_mod, "intake", lambda *a, **k: {"description": "d"})
     answers = iter(["digest my PRs", "n"])
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: next(answers))
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: next(answers))
 
     with pytest.raises(SystemExit) as e:
         cli._intake_loop({})
@@ -615,7 +644,7 @@ def test_no_terminal_to_interview_on_is_a_user_error(monkeypatch, tmp_home):
 def test_confirm_tools_accepts_all_on_empty_answer(tmp_home, monkeypatch, capsys):
     selected = [catalogue._from_api(_api_item("A_ONE", ["readOnlyHint"])),
                 catalogue._from_api(_api_item("B_TWO", []))]
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")
 
     kept = cli._confirm_tools(tmp_home, selected, assume_yes=False)
 
@@ -627,7 +656,7 @@ def test_confirm_tools_accepts_all_on_empty_answer(tmp_home, monkeypatch, capsys
 def test_confirm_tools_drops_the_numbers_given(tmp_home, monkeypatch):
     selected = [catalogue._from_api(_api_item(s, ["readOnlyHint"]))
                 for s in ("A_ONE", "B_TWO", "C_THREE")]
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "2,3")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "2,3")
 
     kept = cli._confirm_tools(tmp_home, selected, assume_yes=False)
     assert [t.slug for t in kept] == ["A_ONE"]
@@ -635,7 +664,7 @@ def test_confirm_tools_drops_the_numbers_given(tmp_home, monkeypatch):
 
 def test_confirm_tools_aborts_on_n(tmp_home, monkeypatch):
     selected = [catalogue._from_api(_api_item("A_ONE", []))]
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "n")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "n")
 
     with pytest.raises(SystemExit) as exc:
         cli._confirm_tools(tmp_home, selected, assume_yes=False)
@@ -644,7 +673,7 @@ def test_confirm_tools_aborts_on_n(tmp_home, monkeypatch):
 
 def test_confirm_tools_refuses_to_continue_with_nothing_left(tmp_home, monkeypatch):
     selected = [catalogue._from_api(_api_item("A_ONE", []))]
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "1")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "1")
 
     with pytest.raises(SystemExit) as exc:
         cli._confirm_tools(tmp_home, selected, assume_yes=False)
@@ -653,7 +682,7 @@ def test_confirm_tools_refuses_to_continue_with_nothing_left(tmp_home, monkeypat
 
 def test_confirm_tools_warns_harder_about_destructive_tools(tmp_home, monkeypatch, capsys):
     selected = [catalogue._from_api(_api_item("A_DEL", ["destructiveHint"]))]
-    monkeypatch.setattr(cli.ui, "prompt", lambda text: "")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")
 
     cli._confirm_tools(tmp_home, selected, assume_yes=False)
     assert "destructive tools proposed" in capsys.readouterr().out

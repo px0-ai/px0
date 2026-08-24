@@ -275,7 +275,7 @@ def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str,
         answered = 0
         for question in questions:
             try:
-                answer = ui.prompt(f"{question}\n  ")
+                answer = ui.prompt(f"{question}\n  ", color=_FOLLOWUP)
             except EOFError:
                 return qa
             if answer:
@@ -292,6 +292,12 @@ def _clarify_loop(config: dict, description: str, skip: bool) -> list[tuple[str,
 # nothing for the model to reason about, so spending a call to have it ask
 # "what do you want?" only adds latency.
 _OPENING_QUESTION = "What do you want px0 to do for you?"
+
+# The opening question of an interview gets `ui.prompt`'s own accent -- it is
+# the one thing every build starts from. Every question after it, here and in
+# `_clarify_loop`, is a follow-up and gets this quieter blue instead, so an
+# eight-question interview doesn't read as eight equally loud demands.
+_FOLLOWUP = "110"
 
 
 def _intake_loop(config: dict) -> str:
@@ -313,8 +319,9 @@ def _intake_loop(config: dict) -> str:
     wrap_up = False
 
     for _ in range(builder_mod.MAX_INTAKE_ROUNDS):
+        color = None if question == _OPENING_QUESTION else _FOLLOWUP
         try:
-            answer = ui.prompt(f"{question}\n  ")
+            answer = ui.prompt(f"{question}\n  ", color=color)
         except EOFError:
             print(file=sys.stderr)
             answer = ""
@@ -361,8 +368,8 @@ def _confirm_request(config: dict, description: str,
     better placed than the model to judge is whether it says what they meant.
     """
     while True:
-        ui.heading("Here's what I got from your request -- let me know if it looks right.",
-                  color="110")
+        ui.remark("Here's what I got from your request -- let me know if it looks right.",
+                 color=_FOLLOWUP)
         print()
         print(description, flush=True)
         choice = ui.prompt("Build this? [Y/edit/n] ").lower()
@@ -371,9 +378,14 @@ def _confirm_request(config: dict, description: str,
             sys.exit(0)
         if choice not in ("e", "edit"):
             return description
-        edited = ui.paragraph("Rewrite it (blank keeps it as it is):")
-        if edited:
-            description = edited
+        note = ui.prompt("What should change (leave it blank to keep it as is):\n  ", color=_FOLLOWUP)
+        if not note:
+            continue
+        try:
+            with ui.spinner("Working that change in"):
+                description = builder_mod.revise_request(config, description, note, transcript)
+        except (builder_mod.BuilderError, harness.HarnessError) as e:
+            ui.err("could not revise the request", str(e).strip())
 
 
 def _print_tool(spec_or_tool, index: int) -> None:
@@ -448,7 +460,7 @@ def _confirm_tools(home: Path, selected: list, assume_yes: bool) -> list:
     these, and choosing a write tool the request didn't ask for is exactly the
     mistake a human should catch here.
     """
-    ui.heading(f"Tools selected ({len(selected)}).", color="110")
+    ui.say(f"Tools selected ({len(selected)}).")
     print()
     for i, tool in enumerate(selected, 1):
         # numbered so the drop-list below can refer to them
@@ -703,7 +715,7 @@ def cmd_workflows_edit(args: argparse.Namespace) -> None:
         ui.kv("guidelines", ", ".join(wf.guidelines))
 
     print(flush=True)
-    description = ui.paragraph("New instructions (blank to keep the current ones):").strip()
+    description = ui.prompt("New instructions (blank to keep the current ones):\n  ").strip()
     if not description:
         ui.info("unchanged")
         return
@@ -766,7 +778,7 @@ def _build_workflow(home: Path, config: dict, description: str,
     default_id = re.sub(r"[^a-z0-9-]+", "-",
                         plan.description.lower()).strip("-")[:40] or "new-workflow"
 
-    ui.heading("Here's the plan -- let me know what you think.", color="110")
+    ui.say("Here's the plan -- let me know what you think.")
     print()
     # id and guidelines aren't picked yet, so this previews against a
     # placeholder id -- everything the plan itself determined, in the same
@@ -1124,12 +1136,13 @@ def cmd_workflows_validate(args: argparse.Namespace) -> None:
         sys.exit(EXIT_USER_ERROR)
 
 
-def cmd_workflows_rm(args: argparse.Namespace) -> None:
-    """Handles `px0 workflows rm`: remove a workflow, keeping its history."""
+def cmd_workflows_delete(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows delete`: remove a workflow, keeping its history."""
     home, config = _ctx()
-    path = authoring.workflow_path(home, args.workflow)
+    workflow_id = args.workflow or _pick_workflow(home, for_stdin=False, verb="delete")
+    path = authoring.workflow_path(home, workflow_id)
     if not path.exists():
-        ui.err(f"no such workflow: {args.workflow}")
+        ui.err(f"no such workflow: {workflow_id}")
         ui.hint("see what there is with `px0 workflows list`")
         sys.exit(EXIT_USER_ERROR)
     rel = str(path.relative_to(home))
@@ -1143,7 +1156,7 @@ def cmd_workflows_rm(args: argparse.Namespace) -> None:
     if not _confirm(f"Remove {rel}{scheduled}?", getattr(args, "yes", False)):
         ui.info("kept", rel)
         return
-    result = authoring.remove_file(home, path, evidence=f"px0 workflows rm {args.workflow}")
+    result = authoring.remove_file(home, path, evidence=f"px0 workflows delete {workflow_id}")
     ui.ok("removed", rel)
     if result.get("change_id"):
         ui.hint(f"undo with `px0 changes revert {result['change_id']}`")

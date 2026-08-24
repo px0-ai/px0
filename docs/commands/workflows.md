@@ -14,7 +14,7 @@ px0 workflows edit [workflow] [--yes] [--no-clarify] [--no-discover]
 px0 workflows list
 px0 workflows show <workflow> [--json]
 px0 workflows validate [workflow] [--json]
-px0 workflows rm <workflow> [--yes]
+px0 workflows delete [workflow] [--yes]
 px0 workflows rename <workflow> <new-id>
 px0 workflows copy <workflow> <new-id>
 px0 workflows disable <workflow>
@@ -76,9 +76,11 @@ the interview early and the request is written from what you did say. The
 interview stops after eight questions regardless.
 
 The request it writes is what every later pass reads, so it is shown before the
-build spends a planning call: `edit` rewrites it, `n` cancels, anything else
-builds. Because the interview has already settled these questions, the clarifying
-round is skipped — you are not asked twice.
+build spends a planning call: `edit` asks what should change and folds that note
+into the request with one more harness call, rather than replacing it outright
+— so "and only my own PRs" changes just that, not the whole paragraph. `n`
+cancels, anything else builds. Because the interview has already settled these
+questions, the clarifying round is skipped — you are not asked twice.
 
 The workflow's id, which is also its filename and how you run it, is derived
 from the request by default; px0 prompts you to override it before saving.
@@ -325,13 +327,13 @@ Exits `1` if anything is invalid, so it works in a pre-commit hook or CI.
 
 ---
 
-## `px0 workflows rm`
+## `px0 workflows delete`
 
 Remove a workflow, keeping its history.
 
-### `workflow` (required)
+### `workflow`
 
-- **Input:** a workflow id.
+- **Input:** a workflow id. Omit to pick from a list.
 
 ### `--yes`
 
@@ -342,7 +344,8 @@ Skip the confirmation.
   workflow is the one you least want to remove by accident.
 
 ```shell
-px0 workflows rm old-digest
+px0 workflows delete old-digest
+px0 workflows delete
 ```
 
 Removing through px0 rather than with `rm` is what keeps the store honest: the

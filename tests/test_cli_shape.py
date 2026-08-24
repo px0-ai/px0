@@ -22,7 +22,7 @@ FLAT = {"init", "doctor", "version", "update", "status", "completion", "uninstal
 # The verbs each entity answers to. Anything added to a group should be added
 # here too, so the surface stays something you can read in one place.
 GROUPS = {
-    "workflows":  {"new", "run", "edit", "list", "show", "validate", "rm", "rename",
+    "workflows":  {"new", "run", "edit", "list", "show", "validate", "delete", "rename",
                    "copy", "disable", "enable"},
     "brain":      {"add", "refresh", "list", "search", "ask", "reindex", "show", "rm",
                    "export"},

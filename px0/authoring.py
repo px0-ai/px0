@@ -7,7 +7,7 @@ cannot be undone by the mechanism built for undoing things. Going through here
 means `px0 changes list` sees it and `px0 changes revert` can put it back.
 
 The functions are deliberately dumb about content -- they move bytes and record
-changes. Validation is the caller's job, so `px0 workflows rm` does not refuse
+changes. Validation is the caller's job, so `px0 workflows delete` does not refuse
 to remove a workflow that no longer parses.
 """
 

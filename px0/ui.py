@@ -175,6 +175,35 @@ def heading(text: str, *, color: str | None = None, stream=None) -> None:
     print(styled, file=stream, flush=True)
 
 
+def say(text: str, stream=None) -> None:
+    """Something px0 itself is telling the user -- a finding, a plan, a summary
+    handed back for review -- as opposed to `heading`'s plain section titles or
+    `prompt`'s request for an answer.
+
+    One blank line above, a glyph that marks it as px0's own voice, both in the
+    same muted blue everywhere so "here is what I found" always reads the same
+    regardless of which command said it.
+    """
+    stream = stream or sys.stdout
+    print(file=stream, flush=True)
+    mark = paint("◆", _INFO, stream=stream) if color_enabled(stream) else "*"
+    print(f"{mark} {paint(text, _INFO, bold=True, stream=stream)}", file=stream, flush=True)
+
+
+def remark(text: str, *, color: str | None = None, stream=None) -> None:
+    """A line in px0's own voice styled exactly like a follow-up question --
+    the same "› " marker, the same weight -- but with nothing to answer.
+
+    For the moment in an interview where what follows is the answer itself
+    (the request just written up) rather than another question: matching
+    `prompt`'s look keeps that moment reading as the same back-and-forth
+    instead of switching to a status voice mid-conversation.
+    """
+    stream = stream or sys.stdout
+    print(file=stream, flush=True)
+    print(paint(f"› {text}", color or _ACCENT, stream=stream), file=stream, flush=True)
+
+
 def rule(stream=None) -> None:
     """A full-width faint separator. Skipped entirely when not a terminal."""
     stream = stream or sys.stdout
@@ -217,10 +246,16 @@ def command(text: str, stream=None) -> None:
     print(f"  {accent(text, stream=stream)}", file=stream, flush=True)
 
 
-def prompt(text: str) -> str:
-    """A styled input prompt. Returns what the user typed, stripped."""
+def prompt(text: str, *, color: str | None = None) -> str:
+    """A styled input prompt. Returns what the user typed, stripped.
+
+    Accent (px0's own voice) by default -- the colour that marks the one
+    question opening an interview, or a plain yes/no confirmation. Pass
+    `color` for a question that is a follow-up to one already asked, so the
+    two read as different weight rather than an unbroken wall of accent.
+    """
     print()
-    return input(accent(f"› {text}")).strip()
+    return input(paint(f"› {text}", color or _ACCENT)).strip()
 
 
 def select(label: str, options: list[tuple[str, str]], stream=None) -> int | None:
@@ -408,29 +443,6 @@ def _select_numbered(label: str, options: list[tuple[str, str]], stream) -> int 
     return int(answer) - 1
 
 
-def paragraph(text: str, stream=None) -> str:
-    """Reads a multi-line answer, ending at the first blank line or EOF.
-
-    A single `input()` cannot take a convention worth writing down -- most are
-    two or three sentences. Blank-line-terminated is the idiom that needs no
-    explanation beyond the hint printed above it.
-    """
-    stream = stream or sys.stdout
-    print(file=stream)
-    print(accent(f"› {text}", stream=stream), file=stream, flush=True)
-    print(dim("  (finish with an empty line)", stream=stream), file=stream, flush=True)
-    lines = []
-    while True:
-        try:
-            line = input("  ")
-        except EOFError:
-            break
-        if not line.strip():
-            break
-        lines.append(line)
-    return "\n".join(lines).strip()
-
-
 # --- markdown / yaml preview -------------------------------------------------
 #
 # Handed off to rich rather than hand-rolled: a real markdown renderer and a
@@ -452,15 +464,25 @@ def _rich_console(stream, file):
         force_terminal=enabled or None,
         width=shutil.get_terminal_size((80, 24)).columns,
         highlight=False,
-        # rich's own markdown styles put inline code on a background box,
-        # which reads as a broken black chip on a light terminal theme --
-        # override it to px0's own accent, foreground only, matching how
-        # `code` spans and numbered markers are coloured everywhere else.
+        # rich's own markdown styles put inline code on a background box (a
+        # broken black chip on a light terminal theme) and lean on magenta/cyan
+        # for headings, numbered markers, and quotes -- colours from outside
+        # px0's own narrow palette. A workflow body is mostly numbered steps and
+        # tool ids in backticks (builder.py asks the model to write it that way),
+        # so painting those the same accent as every prompt and CTA read as the
+        # whole body being orange. Re-themed to px0's own palette instead: code
+        # gets the quiet info blue, list markers match the grey bullets already
+        # use, and headings/quotes drop their colour and lean on weight, so a
+        # plan reads as prose with a little emphasis, not a colour test page.
         theme=Theme({
-            "markdown.code": f"color({_ACCENT})",
-            "markdown.code_block": f"color({_ACCENT})",
+            "markdown.code": f"color({_INFO})",
+            "markdown.code_block": f"color({_INFO})",
             "markdown.item.bullet": f"color({_FAINT})",
-            "markdown.item.number": f"color({_ACCENT})",
+            "markdown.item.number": f"color({_FAINT})",
+            "markdown.h2": "bold underline",
+            "markdown.h3": "bold",
+            "markdown.h4": "italic",
+            "markdown.block_quote": f"italic color({_DIM})",
         }),
     )
 

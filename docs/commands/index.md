@@ -90,7 +90,7 @@ Available on: `runs list`, `runs show`, `brain search`, `brain show`,
 
 Every command that removes or revokes something asks first, and every one of them
 takes `--yes` to skip the question. With stdin not a terminal and no `--yes`, the
-command stops rather than assuming: `px0 workflows rm`, `px0 brain rm`,
+command stops rather than assuming: `px0 workflows delete`, `px0 brain rm`,
 `px0 guidelines rm`, `px0 tools disconnect`, and `px0 tools call` on a write tool.
 
 ### Environment

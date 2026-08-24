@@ -189,6 +189,40 @@ def intake(config: dict, transcript: list[tuple[str, str]],
         "the harness returned neither a question nor a request during intake")
 
 
+def revise_request(config: dict, description: str, note: str,
+                   transcript: list[tuple[str, str]] | None = None) -> str:
+    """Folds a follow-up note into an already-written request, one harness call.
+
+    Chosen over overwriting the paragraph outright: the "edit" step of
+    confirming a request used to replace the whole thing with whatever the user
+    typed next, so a two-word note like "and only my own PRs" silently dropped
+    everything else the interview had settled. Reading it as a continuation of
+    the same conversation instead means the note only has to say what changes.
+    """
+    transcript_block = (f"\n\nInterview it came from:\n{_transcript_block(transcript)}"
+                        if transcript else "")
+    prompt = (
+        "You wrote this request for an automated workflow, from an interview "
+        "with the user. They now want something changed -- fold their note "
+        "into the request rather than replacing it: keep whatever the note "
+        "does not touch, change what it does, and invent nothing it does not "
+        "say.\n\n"
+        "Write it as one paragraph in the imperative, the same shape as the "
+        "current request.\n\n"
+        f"Current request: {description}{transcript_block}\n\n"
+        f"Their note: {note}\n\n"
+        'Respond with ONLY one JSON object: {"description": "<the revised request>"}.'
+    )
+    raw = harness.invoke(config, prompt, timeout=60)
+    answer = _extract_json(raw)
+    if not isinstance(answer, dict):
+        raise BuilderError("the harness returned no revision object")
+    revised = str(answer.get("description") or "").strip()
+    if not revised:
+        raise BuilderError("the harness returned an empty revision")
+    return revised
+
+
 def propose_queries(config: dict, description: str,
                     qa: list[tuple[str, str]]) -> list[dict]:
     """Turns the settled request into Composio catalogue searches.

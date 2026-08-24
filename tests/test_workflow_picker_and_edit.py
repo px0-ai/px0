@@ -292,7 +292,7 @@ class _EditArgs:
 def test_edit_shows_the_original_request_back(monkeypatch, tmp_home, capsys):
     _add(tmp_home, "alpha", "Summarize things")
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
-    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "")   # keep it unchanged
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")   # keep it unchanged
 
     cli.cmd_workflows_edit(_EditArgs("alpha"))
 
@@ -305,7 +305,7 @@ def test_an_empty_answer_leaves_the_workflow_alone(monkeypatch, tmp_home):
     _add(tmp_home, "alpha")
     before = (tmp_home / "workflows" / "alpha.md").read_text()
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
-    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "  ")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "  ")
     monkeypatch.setattr(cli, "_build_workflow",
                         lambda *a, **k: pytest.fail("must not rebuild"))
 
@@ -318,7 +318,7 @@ def test_edit_rebuilds_under_the_same_id(monkeypatch, tmp_home):
     """An edit replaces the workflow; it must not fork a near-duplicate."""
     _add(tmp_home, "alpha")
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
-    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "do it differently")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "do it differently")
     seen = {}
     monkeypatch.setattr(cli, "_build_workflow",
                         lambda home, config, desc, args, existing_id: seen.update(
@@ -341,6 +341,6 @@ def test_edit_with_no_id_picks_one(monkeypatch, tmp_home):
     _add(tmp_home, "alpha")
     monkeypatch.setattr(cli, "_ctx", lambda: (tmp_home, {}))
     monkeypatch.setattr(cli.ui, "select", lambda label, options: 0)
-    monkeypatch.setattr(cli.ui, "paragraph", lambda text: "")
+    monkeypatch.setattr(cli.ui, "prompt", lambda text, **k: "")
 
     cli.cmd_workflows_edit(_EditArgs(None))   # must not raise
