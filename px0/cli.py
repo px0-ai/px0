@@ -768,15 +768,21 @@ def _build_workflow(home: Path, config: dict, description: str,
 
         with ui.spinner("Writing the workflow plan"):
             plan = builder_mod.generate_plan(config, description, qa, selected)
+
+        # Asked for now so the preview below can show it, and reused for the
+        # actual id prompt further down instead of recomputing it. Skipped
+        # whenever an id is already pinned -- a rebuild's existing_id, or an
+        # explicit --id -- since neither needs a name invented for it.
+        if existing_id:
+            default_id = existing_id
+        elif getattr(args, "id", None):
+            default_id = args.id
+        else:
+            with ui.spinner("Naming the workflow"):
+                default_id = builder_mod.generate_slug(config, plan.description)
     except (builder_mod.BuilderError, harness.HarnessError) as e:
         ui.err(str(e))
         sys.exit(EXIT_MODEL_ERROR)
-
-    # slugify the description into a default workflow id, capped to 40 chars --
-    # computed now so the preview below can show it, and reused for the actual
-    # id prompt further down instead of recomputing it.
-    default_id = re.sub(r"[^a-z0-9-]+", "-",
-                        plan.description.lower()).strip("-")[:40] or "new-workflow"
 
     ui.say("Here's the plan -- let me know what you think.")
     print()
@@ -819,6 +825,20 @@ def _build_workflow(home: Path, config: dict, description: str,
             workflow_id = default_id
         else:
             workflow_id = ui.prompt(f"workflow id {ui.dim(f'[{default_id}]')}: ") or default_id
+
+        # A hand-typed id or a harness slug can both collide with a workflow
+        # already on disk; `save_workflow` overwrites without asking, so this
+        # is the last chance to catch it before that file is gone.
+        while workflow_id in workflow_mod.load_all(home):
+            ui.warn(f"{workflow_id} already exists")
+            if assume_yes:
+                break
+            choice = ui.prompt("overwrite it, or generate a new id? [o/N] ").strip().lower()
+            if choice in ("o", "overwrite"):
+                break
+            with ui.spinner("Naming the workflow"):
+                workflow_id = builder_mod.generate_slug(config, plan.description)
+            ui.info("new id", workflow_id)
 
     guidelines = builder_mod.choose_guidelines(home, description)
     # After the commit to write, not before: nobody should be asked to author
@@ -2360,7 +2380,8 @@ def _select_model(home: Path, config: dict) -> None:
 
     if idx == len(names) + 1:
         base_cmd = ui.prompt("harness command "
-                             + ui.dim("(the prompt is appended as the final argument)") + ": ")
+                             + ui.dim("(the prompt is appended as the final argument, "
+                                     "or piped to stdin if that gets too long)") + ": ")
         if not base_cmd:
             ui.info("cancelled")
             return

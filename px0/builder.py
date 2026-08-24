@@ -384,7 +384,10 @@ def generate_plan(config: dict, description: str,
         "to gather context, so they must be READ tools only), "
         '"tools" (list of tool ids the model may call during the run, for '
         "actions like posting -- include a write tool here, never in inputs), "
-        '"output" ({"target": "stdout"|"file", "path": templated path if file}), '
+        '"output" ({"target": "stdout"|"file", "path": templated path if file}) -- '
+        'if trigger.schedule is set, target MUST be "file" with a path, since '
+        "nobody is watching stdout for a run that fires on a cron, even when "
+        "the body also posts somewhere via a tool call, "
         '"body" (the instruction text the model receives at run time; reference '
         "each input by {{input_id}}. Write it as clean, scannable markdown, not "
         "a single dense paragraph: a short lead-in sentence if needed, then "
@@ -412,10 +415,39 @@ def generate_plan(config: dict, description: str,
     )
 
 
+MAX_SLUG_LEN = 40  # kept short enough to type back at the id prompt without wrapping
+
+
+def generate_slug(config: dict, description: str) -> str:
+    """Asks the harness for a short id-shaped slug naming this workflow.
+
+    A slug names the job -- "github-pr-digest" -- rather than being the first
+    forty characters of the description sentence, which is what a mechanical
+    slugify produces and which reads as noise once there are a dozen workflows
+    to tell apart in `px0 workflows list`.
+    """
+    prompt = (
+        "Name this automated workflow with a short id for a filename.\n\n"
+        "Rules: lowercase letters, digits, and hyphens only, no spaces, at "
+        f"most {MAX_SLUG_LEN} characters. Capture the service and the action "
+        "in 2-5 words, not the whole sentence.\n\n"
+        'Respond with ONLY one JSON object: {"slug": "<the id>"}.\n\n'
+        f"Workflow: {description}"
+    )
+    raw = harness.invoke(config, prompt, timeout=30)
+    answer = _extract_json(raw)
+    if not isinstance(answer, dict):
+        raise BuilderError("the harness returned no slug object")
+    slug = re.sub(r"[^a-z0-9-]+", "-",
+                 str(answer.get("slug") or "").strip().lower()).strip("-")
+    return slug[:MAX_SLUG_LEN].strip("-") or "new-workflow"
+
+
 def check_feasibility(plan: Plan, home: Path) -> list[str]:
     """Validates a plan against reality: unknown tool ids, write tools used as inputs
-    (inputs must be read-only), and an invalid cron schedule. Returns a list of
-    human-readable issue strings; empty means the plan can proceed."""
+    (inputs must be read-only), an invalid cron schedule, and a scheduled plan
+    that would fail `workflow.validate` the moment the daemon fires it. Returns
+    a list of human-readable issue strings; empty means the plan can proceed."""
     issues = []
     known = [t.id for t in tools.list_tools(home=home)]
 
@@ -447,6 +479,13 @@ def check_feasibility(plan: Plan, home: Path) -> list[str]:
             croniter(schedule)
         except (ValueError, KeyError) as e:
             issues.append(f"trigger.schedule {schedule!r} invalid: {e}")
+        # Nobody is watching stdout for a run the cron fires unattended, and
+        # `workflow.validate` enforces that at run time regardless of what the
+        # body's tool calls post elsewhere -- catch it here instead of letting
+        # the build succeed and the first scheduled run fail.
+        if plan.output.get("target") not in (None, "file"):
+            issues.append("a scheduled workflow's output.target must be 'file' "
+                          "(add output.path -- posting via a tool call doesn't satisfy this)")
 
     return issues
 

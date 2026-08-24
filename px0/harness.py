@@ -2,6 +2,7 @@
 non-interactive mode (`harness_cmd` in config.toml, e.g. `claude -p`).
 Text and tool-calls in, text out -- there is no direct-API backend."""
 
+import errno
 import shlex
 import shutil
 import subprocess
@@ -11,6 +12,9 @@ from px0 import config as config_mod
 # Non-interactive invocation for each supported coding-agent CLI: a command
 # prefix that, with the prompt appended as the final argument, prints the
 # reply to stdout and exits. Verified against each CLI's own --help output.
+# `claude` and `pi` also accept the prompt piped to stdin in place of that
+# argument (confirmed by running each, not just reading its --help); `invoke`
+# falls back to that when the argument form is too big for the OS to exec.
 KNOWN_HARNESSES: dict[str, str] = {
     "claude": "claude -p",
     "gemini": "gemini -p",
@@ -75,22 +79,42 @@ def parse_duration(s: str) -> float:
     return float(s)
 
 
-def invoke(config: dict, prompt: str, timeout: float = 120) -> str:
-    """Shells out to the configured harness command (e.g. `claude -p`) with
-    the prompt as its final argument and returns stdout.
-
-    Raises HarnessError if the binary is missing, the call times out, or it
-    exits non-zero."""
-    harness_cmd = resolve_harness_cmd(config_mod.get(config, "model.harness_cmd", "claude -p"))
-    cmd = shlex.split(harness_cmd) + [prompt]
+def _run(cmd: list[str], input_text: str | None, timeout: float,
+         harness_cmd: str) -> subprocess.CompletedProcess:
+    """Runs one harness subprocess, translating its failure modes into HarnessError."""
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
+        return subprocess.run(
+            cmd, input=input_text, capture_output=True, text=True, timeout=timeout
         )
     except FileNotFoundError as e:
         raise HarnessError(f"harness command not found: {harness_cmd!r} ({e})") from e
     except subprocess.TimeoutExpired as e:
         raise HarnessError(f"harness timed out after {timeout}s") from e
+
+
+def invoke(config: dict, prompt: str, timeout: float = 120) -> str:
+    """Shells out to the configured harness command (e.g. `claude -p`) with
+    the prompt as its final argument and returns stdout.
+
+    A run's conversation grows with every tool result folded back in, and
+    once the prompt is long enough the OS refuses to exec the command at all
+    (`OSError: [Errno 7] Argument list too long`) well before any output
+    limit does. That case is retried once with the same prompt piped to
+    stdin and no positional argument instead, which is how `claude -p` and
+    `pi -p` are documented to accept a piped prompt -- if the configured
+    harness doesn't support that either, the retry fails too and surfaces as
+    an ordinary HarnessError instead of a second crash.
+
+    Raises HarnessError if the binary is missing, the call times out, or it
+    exits non-zero."""
+    harness_cmd = resolve_harness_cmd(config_mod.get(config, "model.harness_cmd", "claude -p"))
+    cmd = shlex.split(harness_cmd)
+    try:
+        result = _run(cmd + [prompt], None, timeout, harness_cmd)
+    except OSError as e:
+        if e.errno != errno.E2BIG:
+            raise HarnessError(f"failed to run harness {harness_cmd!r}: {e}") from e
+        result = _run(cmd, prompt, timeout, harness_cmd)
     if result.returncode != 0:
         raise HarnessError(
             f"harness exited {result.returncode}: {result.stderr.strip()[:500]}"
