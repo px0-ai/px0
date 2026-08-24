@@ -26,7 +26,7 @@ history like any other change.
 | Path | What it holds |
 | ---- | ------------- |
 | `workflows/` | One Markdown file per workflow: YAML frontmatter for trigger, tools, and output, prose for the instructions |
-| `guidelines/` | One Markdown file per topic; each `##` heading is a claim with its own id and history |
+| `guidelines/` | One Markdown file per topic: `name` and `description` frontmatter, then the rules. Each `##` heading is a claim with its own id and history |
 | `brain/` | What you have read and kept, as Markdown with frontmatter recording `source`, `retrieved`, `kind`, and `title` |
 | `tools/` | Tools you declared yourself: one TOML file each, read at run time. `example.toml.sample` ships as a worked example and is not loaded — the loader only reads `*.toml` |
 

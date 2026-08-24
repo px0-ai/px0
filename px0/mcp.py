@@ -68,7 +68,8 @@ def tool_definitions(allow_runs: bool) -> list[dict]:
         },
         {
             "name": "guidelines_list",
-            "description": "List the user's px0 guidelines: the conventions they want followed.",
+            "description": "List the user's px0 guidelines with what each one covers, "
+                           "so you can tell which conventions apply before reading one.",
             "inputSchema": {"type": "object", "properties": {}},
         },
         {
@@ -101,7 +102,7 @@ def tool_definitions(allow_runs: bool) -> list[dict]:
 
 def call_tool(home, config, name: str, args: dict, allow_runs: bool) -> dict:
     """Runs one exposed tool and returns an MCP tool result."""
-    from px0 import ask as ask_mod, retrieval, paths, workflow as workflow_mod
+    from px0 import ask as ask_mod, retrieval, workflow as workflow_mod
 
     args = args or {}
     try:
@@ -136,9 +137,14 @@ def call_tool(home, config, name: str, args: dict, allow_runs: bool) -> dict:
             return _text("\n".join(rows) or "no workflows in this store")
 
         if name == "guidelines_list":
-            base = paths.guidelines_dir(home)
-            names = sorted(p.name for p in base.glob("*.md")) if base.exists() else []
-            return _text("\n".join(f"- {n}" for n in names) or "no guidelines in this store")
+            # Path and description, the same pair a build chooses from: a caller
+            # deciding which convention applies needs the description, and a
+            # bare filename list also lost every guideline in a subfolder.
+            from px0 import guidelines as guidelines_mod
+
+            rows = [f"- {rel}: {g.summary or 'no description'}"
+                    for rel, g in guidelines_mod.load_all(home).items()]
+            return _text("\n".join(rows) or "no guidelines in this store")
 
         if name == "guideline_read":
             raw = str(args.get("name") or "").strip()

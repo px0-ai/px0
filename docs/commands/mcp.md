@@ -43,7 +43,7 @@ px0 mcp serve --allow-runs
 | `brain_ask` | Answer a question from the brain, citing the files used | no |
 | `brain_search` | Return matching passages, without a model call | no |
 | `workflows_list` | Every workflow, with its schedule and whether it is disabled | no |
-| `guidelines_list` | Every guideline file | no |
+| `guidelines_list` | Every guideline file, with what each one covers | no |
 | `guideline_read` | One guideline verbatim, to follow it | no |
 | `workflow_run` | Run a workflow, optionally as a dry run | yes |
 

@@ -329,45 +329,128 @@ def test_feasibility_flags_a_tool_that_was_never_discovered(tmp_home):
 
 
 # --- guideline relevance ---------------------------------------------------
+#
+# Selection reads frontmatter descriptions, so these fix what the model is shown
+# and what it is allowed to pick, not how a scorer weighs words.
 
-@pytest.mark.parametrize("description,expected", [
-    ("draft a commit message from my staged diff", {"commit-messages.md"}),
-    ("write a pull request description from the branch diff", {"pr-descriptions.md"}),
-    ("summarize every blog post I saved this week", {"summarization.md"}),
-    ("review my go code changes for style violations", {"code-review/go.md"}),
-    ("check my python code for review issues", {"code-review/python.md"}),
-])
-def test_guidelines_match_the_task(tmp_home, description, expected):
-    from px0 import paths
-    g_dir = paths.guidelines_dir(tmp_home)
-    (g_dir / "commit-messages.md").write_text("## Imperative mood summary line\n\nCommit messages body.\n")
-    (g_dir / "pr-descriptions.md").write_text("## Lead with the problem\n\nPR descriptions.\n")
-    (g_dir / "summarization.md").write_text("## Lead with the takeaway\n\nSummarization body.\n")
-    (g_dir / "code-review").mkdir(parents=True, exist_ok=True)
-    (g_dir / "code-review" / "go.md").write_text("## Wrap errors with %w\n\nGo code review.\n")
-    (g_dir / "code-review" / "python.md").write_text("## Type hints on public functions\n\nPython code review.\n")
-    assert set(builder_mod.choose_guidelines(tmp_home, description)) == expected
+def _store_with_guidelines(home):
+    from px0 import guidelines as guidelines_mod, paths
 
-
-@pytest.mark.parametrize("description", [
-    "post a daily haiku about the weather to slack",
-    "email me the weather forecast each morning",
-])
-def test_unrelated_tasks_get_no_guidelines(tmp_home, description):
-    """Every attached guideline is inlined verbatim into the prompt, so a wrong
-    one costs tokens and misleads the model. None is better."""
-    assert builder_mod.choose_guidelines(tmp_home, description) == []
+    files = {
+        "commit-messages.md": (
+            "How to word a commit message. Use when the workflow writes or "
+            "rewrites a commit message.",
+            "## Imperative mood summary line\n\nCommit messages body.\n"),
+        "summarization.md": (
+            "How to summarize something you have read. Use when the workflow "
+            "produces a summary or digest.",
+            "## Lead with the takeaway\n\nSummarization body.\n"),
+        "code-review/go.md": (
+            "What a Go review checks. Use when the workflow reviews Go code.",
+            "## Wrap errors with %w\n\nGo code review.\n"),
+    }
+    base = paths.guidelines_dir(home)
+    for rel, (description, body) in files.items():
+        dest = base / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(guidelines_mod.render(
+            guidelines_mod.name_for(rel), description, body))
 
 
-def test_work_folder_guidelines_are_never_auto_attached(tmp_home):
-    from px0 import paths
+def _plan(body="b", description="d"):
+    return builder_mod.Plan(trigger={}, inputs=[], tools=[], output={},
+                            body=body, description=description)
+
+
+def test_the_descriptions_are_what_the_model_chooses_from(tmp_home, monkeypatch):
+    """The frontmatter line, not the file's rules: that is the whole point of
+    putting a description on a guideline."""
+    _store_with_guidelines(tmp_home)
+    seen = {}
+    monkeypatch.setattr(harness, "invoke",
+                        lambda cfg, prompt, **k: seen.setdefault("p", prompt) or "[]")
+
+    builder_mod.select_guidelines(tmp_home, {}, "summarize my week", _plan())
+
+    assert "Use when the workflow produces a summary" in seen["p"]
+    assert "Wrap errors with %w" not in seen["p"], "bodies stay out of the prompt"
+    assert "summarize my week" in seen["p"]
+
+
+def test_only_guidelines_the_store_has_can_be_attached(tmp_home, monkeypatch):
+    """The model answers with paths; an invented one must not reach a workflow,
+    where it would fail validation on every run."""
+    _store_with_guidelines(tmp_home)
+    monkeypatch.setattr(harness, "invoke", lambda *a, **k:
+                        '["summarization.md", "invented.md", 7]')
+
+    assert builder_mod.select_guidelines(tmp_home, {}, "d", _plan()) == ["summarization.md"]
+
+
+def test_no_guideline_applies_is_a_normal_answer(tmp_home, monkeypatch):
+    """A standup that reads commits is not governed by the commit-message
+    convention -- the case that used to attach one anyway."""
+    _store_with_guidelines(tmp_home)
+    monkeypatch.setattr(harness, "invoke", lambda *a, **k: "[]")
+
+    assert builder_mod.select_guidelines(
+        tmp_home, {},
+        "summarize my last 24 hours of commits and post it to slack", _plan()) == []
+
+
+def test_at_most_three_guidelines_are_attached(tmp_home, monkeypatch):
+    """Every one is inlined into every run; past three the workflow's own
+    instructions stop being the loudest thing in the prompt."""
+    from px0 import guidelines as guidelines_mod, paths
+
+    _store_with_guidelines(tmp_home)
+    for i in range(4):
+        (paths.guidelines_dir(tmp_home) / f"extra-{i}.md").write_text(
+            guidelines_mod.render(f"extra-{i}", "d", "## H\n\nb\n"))
+    monkeypatch.setattr(harness, "invoke", lambda *a, **k: json.dumps(
+        [f"extra-{i}.md" for i in range(4)] + ["summarization.md"]))
+
+    assert len(builder_mod.select_guidelines(tmp_home, {}, "d", _plan())) == 3
+
+
+def test_an_empty_store_asks_the_model_nothing(tmp_home, monkeypatch):
+    monkeypatch.setattr(harness, "invoke",
+                        lambda *a, **k: pytest.fail("nothing to choose from"))
+    assert builder_mod.select_guidelines(tmp_home, {}, "d", _plan()) == []
+
+
+def test_a_harness_failure_attaches_nothing_rather_than_guessing(tmp_home, monkeypatch):
+    """A wrong guideline costs every run; the build is never failed over this."""
+    _store_with_guidelines(tmp_home)
+    monkeypatch.setattr(harness, "invoke", lambda *a, **k:
+                        (_ for _ in ()).throw(harness.HarnessError("down")))
+
+    assert builder_mod.select_guidelines(tmp_home, {}, "d", _plan()) == []
+
+
+def test_a_non_array_answer_attaches_nothing(tmp_home, monkeypatch):
+    _store_with_guidelines(tmp_home)
+    monkeypatch.setattr(harness, "invoke", lambda *a, **k: "no idea, sorry")
+
+    assert builder_mod.select_guidelines(tmp_home, {}, "d", _plan()) == []
+
+
+def test_work_folder_guidelines_are_never_offered(tmp_home, monkeypatch):
+    """`work/` means "mine": px0 does not hand one to a model on its own."""
+    from px0 import guidelines as guidelines_mod, paths
 
     work = paths.guidelines_dir(tmp_home) / "work"
     work.mkdir(parents=True, exist_ok=True)
-    (work / "commit-messages.md").write_text("## Commit messages\ncommit message rules\n")
+    (work / "commit-messages.md").write_text(
+        guidelines_mod.render("commit-messages", "how I word commits", "## H\n\nb\n"))
+    seen = {}
+    monkeypatch.setattr(harness, "invoke", lambda cfg, prompt, **k:
+                        seen.setdefault("p", prompt) or '["work/commit-messages.md"]')
 
-    chosen = builder_mod.choose_guidelines(tmp_home, "draft a commit message")
-    assert all(not c.startswith("work/") for c in chosen)
+    chosen = builder_mod.select_guidelines(tmp_home, {}, "draft a commit message", _plan())
+
+    assert chosen == []
+    assert "p" not in seen, "a work/ guideline is not even shown to the model"
 
 
 # --- the interactive flow --------------------------------------------------

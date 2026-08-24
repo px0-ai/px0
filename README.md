@@ -238,9 +238,22 @@ semicolon in it stays a value.
 
 ## Teach it how you work
 
-Guidelines are Markdown files describing your conventions: how you word a commit message, what your Go reviews check. Workflows that need a guideline inline it verbatim, so output comes back in your voice instead of the model's default.
+Guidelines are Markdown files describing your conventions: how you word a commit message, what your Go reviews check. Each one is `name` and `description` frontmatter over its rules, the same shape as a skill:
 
-You never write one from scratch. When `px0 workflows new` finds that a workflow leans on a convention you have no file for, it drafts that guideline from the workflow, shows it to you, and lists it on the workflow so every run inlines it. Editing the draft is how it becomes yours:
+```markdown
+---
+name: commit-messages
+description: How to word a commit message. Use when the workflow writes or rewrites one.
+---
+
+## Imperative mood summary line
+
+Write the summary line in the imperative mood: "Add retry logic", not "Added".
+```
+
+The description is what makes it findable. When you build a workflow, px0 reads the descriptions and attaches only the guidelines whose standard that workflow's output is judged against — a nightly standup that summarizes commits does not inherit your commit-message convention. What it attaches is inlined verbatim into every run, so output comes back in your voice instead of the model's default.
+
+You never write one from scratch. When `px0 workflows new` finds that a workflow leans on a convention you have no file for, it drafts that guideline from the workflow, shows it to you, and lists it on the workflow. Editing the draft is how it becomes yours:
 
 ```shell
 px0 guidelines list

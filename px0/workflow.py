@@ -1,6 +1,7 @@
 """Workflow file model: YAML frontmatter as the machine contract, the
 Markdown body as the prompt the model receives."""
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,74 @@ MAX_ATTEMPTS = 10
 # The floor on how often a watch may poll. Anything faster burns API quota and
 # model calls for a job that, by definition, is waiting for something.
 MIN_WATCH_SECONDS = 60
+
+# An argument the plan left for a human to fill in: `<OWNER>`, `<REPO>`,
+# `<YYYY-MM-01T00:00:00Z>`. Matched only when it is the entire value, so Slack's
+# own `<@U123>` and `<https://url|text>` syntax inside a longer string is left
+# alone -- angle brackets are only a placeholder when they are the whole answer.
+_PLACEHOLDER_ARG_RE = re.compile(r"^<[^<>]+>$")
+
+# A `{{name}}` reference inside an argument, matched the way the runner matches
+# it, so what validation accepts and what a run can resolve cannot drift.
+_ARG_TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
+
+# What an argument's template may reference: the store's config, the values
+# passed with `--input`, and any input resolved before this one. The runner
+# builds its context from exactly these, so anything else resolves to None and
+# is sent to the connector as a missing value.
+_ARG_TEMPLATE_ROOTS = frozenset({"config", "input"})
+
+# The clock placeholders a workflow may use, on top of the roots above. Every
+# "what happened since yesterday" workflow needs one, and a scheduled run cannot
+# be handed a literal timestamp -- so the grammar is fixed here, as part of what
+# a workflow file may say, and `runner` turns each name into a value.
+#
+#   {{now}}       this instant
+#   {{today}}     today's date, YYYY-MM-DD (also `{{date}}`)
+#   {{datetime}}  this instant, always filename-safe
+#   {{time}}      the time of day
+#   {{now-24h}}   24 hours ago -- units m, h, d, w
+#
+# One vocabulary for arguments and for `output.path` alike. They used to be two:
+# arguments took `now`/`today`, paths took only `date`/`datetime`/`time`, and a
+# plan that wrote `logs/daily-{{today}}.md` was accepted everywhere except the
+# one place it was used. Formatting still differs by context -- a path gets a
+# filename-safe form, an argument gets ISO 8601 -- but what you may *name* does
+# not.
+TIME_PLACEHOLDER_NAMES = ("now", "today", "date", "datetime", "time")
+TIME_PLACEHOLDER_RE = re.compile(
+    r"^(?:" + "|".join(TIME_PLACEHOLDER_NAMES) + r"|now-\d+[mhdw])$")
+
+# A `{{name}}` or `{name}` reference in an output path. Both styles, because a
+# plan that learned `{{input_id}}` from the body carries the habit into the path,
+# and a file literally named `report-{2026-08-17}.md` is nobody's intent.
+_OUTPUT_TEMPLATE_RE = re.compile(r"\{\{?\s*([^{}]*?)\s*\}?\}")
+
+
+def is_time_placeholder(name: str) -> bool:
+    """Whether `name` is one of the clock placeholders the runner resolves."""
+    return bool(TIME_PLACEHOLDER_RE.match(name))
+
+
+def supported_placeholders() -> str:
+    """The clock vocabulary, for an error message that says what *is* allowed."""
+    return ", ".join(["{" + n + "}" for n in TIME_PLACEHOLDER_NAMES] + ["{now-<N><m|h|d|w>}"])
+
+
+def output_path_errors(path: str) -> list[str]:
+    """Reports placeholders in an `output.path` that no run can resolve.
+
+    Checked here, at validation time, because the path is only rendered once the
+    run is routing its output -- after the model call. A typo in a filename used
+    to be discovered at the most expensive possible moment, and reported as a
+    failed run rather than as a workflow that could never have succeeded.
+    """
+    unknown = sorted({name for name in _OUTPUT_TEMPLATE_RE.findall(path)
+                      if not is_time_placeholder(name)})
+    if not unknown:
+        return []
+    return [f"output.path has unknown placeholder(s): {', '.join(unknown)} "
+            f"-- supported: {supported_placeholders()}"]
 
 
 class WorkflowError(Exception):
@@ -288,6 +357,80 @@ def _validate_watch(wf: "Workflow", home: Path) -> list[str]:
     return errors
 
 
+def _walk_strings(value, trail: str = ""):
+    """Yields every (dotted location, string) pair inside a nested args value, so
+    a placeholder buried in a list or a sub-object is found too."""
+    if isinstance(value, str):
+        yield trail, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield from _walk_strings(v, f"{trail}.{k}" if trail else str(k))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _walk_strings(v, f"{trail}[{i}]")
+
+
+def input_arg_errors(inputs: list[dict], fix: str) -> list[str]:
+    """Reports arguments a run cannot turn into a real value.
+
+    Two ways a plan leaves one behind, and both used to reach the connector as
+    written: a literal fill-me placeholder (`owner: <OWNER>`), and a template
+    referencing something nothing provides (`author: {{github_username}}`), which
+    the runner resolves to None. Both produced an error from the far end of the
+    API describing a request nobody meant to make -- a `<OWNER>/<REPO>` fetch
+    comes back as GitHub's 404 "Not Found", which reads as a missing repository
+    rather than as an unfinished workflow.
+
+    Takes plain dicts (`{"id", "args", "retrieve"}`) so the same rule can run
+    over a plan the build has not saved yet and over a workflow on disk; `fix`
+    is the caller's advice, since the build can regenerate and a run cannot.
+    """
+    errors: list[str] = []
+    resolved = set(_ARG_TEMPLATE_ROOTS)
+
+    for inp in inputs:
+        input_id = inp.get("id")
+        for field_name in ("args", "retrieve"):
+            value = inp.get(field_name)
+            if not value:
+                continue
+            for where, text in _walk_strings(value):
+                location = f"{field_name}.{where}" if where else field_name
+                if _PLACEHOLDER_ARG_RE.match(text.strip()):
+                    errors.append(
+                        f"input {input_id!r} {location} is still the placeholder "
+                        f"{text.strip()!r} -- {fix}"
+                    )
+                    continue
+                for name in _ARG_TEMPLATE_RE.findall(text):
+                    root = name.split(".")[0]
+                    if root in resolved or is_time_placeholder(name):
+                        continue
+                    errors.append(
+                        f"input {input_id!r} {location} references {{{{{name}}}}}, "
+                        f"which nothing provides -- write the value into the file, "
+                        f"or pass it at run time as `{{{{input.{root}}}}}` with "
+                        f"`--input {root}=<value>`"
+                    )
+        # Only inputs *above* this one are resolved when its args are rendered.
+        resolved.add(input_id)
+
+    return errors
+
+
+def _validate_input_args(wf: Workflow) -> list[str]:
+    """`input_arg_errors` over a parsed workflow.
+
+    Caught by `validate`, which runs before a run touches the network, so an
+    unfinished workflow is named as one instead of a connector being asked for a
+    repository called `<REPO>`.
+    """
+    return input_arg_errors(
+        [{"id": inp.id, "args": inp.args, "retrieve": inp.retrieve} for inp in wf.inputs],
+        fix=f"rebuild the workflow with `px0 workflows edit {wf.id}`, naming the real value",
+    )
+
+
 def validate(wf: Workflow, home: Path) -> list[str]:
     """Validates a parsed workflow's cross-references and structural
     constraints -- guideline files, tool references, pipeline stages, cron
@@ -325,6 +468,9 @@ def validate(wf: Workflow, home: Path) -> list[str]:
     if not isinstance(wf.enabled, bool):
         errors.append(f"enabled must be true or false, got {wf.enabled!r}")
 
+    errors.extend(_validate_input_args(wf))
+    if wf.output.get("path"):
+        errors.extend(output_path_errors(wf.output["path"]))
     errors.extend(_validate_on_failure(wf))
     errors.extend(_validate_retry(wf))
 

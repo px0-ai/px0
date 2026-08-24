@@ -15,6 +15,10 @@ model can do it well:
    first), so a model with the task in hand chooses, and a human confirms.
 4. `generate_plan` -- write the workflow against exactly those tools.
 
+Two more decide what conventions the workflow works under: `select_guidelines`
+picks the existing guidelines whose standard its output is judged against, and
+`propose_guidelines` names one worth writing down when no file covers it.
+
 Pure planning functions live here; every prompt, spinner, and confirmation
 lives in the CLI, which is where user interaction belongs.
 """
@@ -27,7 +31,8 @@ from pathlib import Path
 
 import yaml
 
-from px0 import catalogue, harness, paths, tools
+from px0 import catalogue, guidelines as guidelines_mod, harness, paths, tools
+from px0 import workflow as workflow_mod
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)  # greedy match spans newlines to grab the whole object out of prose
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
@@ -381,15 +386,29 @@ def generate_plan(config: dict, description: str,
         "tool. Respond with ONLY a JSON object with keys: "
         '"trigger" ({"manual": bool, "schedule": five-field cron or null}), '
         '"inputs" (list of {"id", "tool", "args"} -- these run before the prompt '
-        "to gather context, so they must be READ tools only), "
+        "to gather context, so they must be READ tools only. Every argument must "
+        "be a value the request actually settled: NEVER write a placeholder like "
+        "<OWNER>, <REPO>, YOUR_USERNAME or TODO, and never invent one -- if the "
+        "request does not name the repository, channel, or account an argument "
+        "needs, leave that input out entirely rather than stubbing it. For a time "
+        "window use the clock placeholders {{now}}, {{today}}, and {{now-<N><unit>}} "
+        "with unit m, h, d, or w -- {{now-24h}} is 24 hours ago, as an ISO 8601 "
+        "timestamp -- because a scheduled run cannot use a literal date), "
         '"tools" (list of tool ids the model may call during the run, for '
         "actions like posting -- include a write tool here, never in inputs), "
-        '"output" ({"target": "stdout"|"file", "path": templated path if file}) -- '
+        '"output" ({"target": "stdout"|"file", "path": templated path if file -- '
+        "its only placeholders are the clock ones: {{today}}, {{date}}, {{now}}, "
+        "{{datetime}}, {{time}}, {{now-<N><unit>}}; anything else in braces is an "
+        'error, so never put an input id in a path}) -- '
         'if trigger.schedule is set, target MUST be "file" with a path, since '
         "nobody is watching stdout for a run that fires on a cron, even when "
         "the body also posts somewhere via a tool call, "
         '"body" (the instruction text the model receives at run time; reference '
-        "each input by {{input_id}}. Write it as clean, scannable markdown, not "
+        "each input by {{input_id}}. A run has nobody to answer questions, so "
+        "NEVER write a step that asks the user for a value or stops until they "
+        "supply one -- if the request left something unsettled, leave it out of "
+        "the plan rather than deferring it to a run that cannot ask. "
+        "Write it as clean, scannable markdown, not "
         "a single dense paragraph: a short lead-in sentence if needed, then "
         "numbered steps for anything sequential -- fetch, filter, look up, "
         "summarize, post -- and bullet points for enumerated items such as "
@@ -445,10 +464,22 @@ def generate_slug(config: dict, description: str) -> str:
 
 def check_feasibility(plan: Plan, home: Path) -> list[str]:
     """Validates a plan against reality: unknown tool ids, write tools used as inputs
-    (inputs must be read-only), an invalid cron schedule, and a scheduled plan
-    that would fail `workflow.validate` the moment the daemon fires it. Returns
-    a list of human-readable issue strings; empty means the plan can proceed."""
+    (inputs must be read-only), arguments left as placeholders, an invalid cron
+    schedule, and a scheduled plan that would fail `workflow.validate` the moment
+    the daemon fires it. Returns a list of human-readable issue strings; empty
+    means the plan can proceed."""
     issues = []
+
+    # A plan that could not settle an argument writes `owner: <OWNER>` rather
+    # than saying so, and the workflow then fails on its first run with the
+    # connector's own error -- GitHub answers `<OWNER>/<REPO>` with a 404, which
+    # reads as a missing repository. Caught before the file is written, because
+    # the fix is a better request, not an edit to the file.
+    issues.extend(workflow_mod.input_arg_errors(
+        plan.inputs,
+        fix="the plan could not settle it: re-run and name the real value in the "
+            "request (which repository, which channel, which account)",
+    ))
     known = [t.id for t in tools.list_tools(home=home)]
 
     def check_tool(tool_id: str, context: str):
@@ -517,113 +548,68 @@ def write_tools_named(plan: Plan, home: Path | None = None) -> list[str]:
     return out
 
 
-# Words too common to signal a topic. Raw overlap without this attaches
-# `code-review/go.md` to a workflow about haikus, because both texts contain
-# "the", "a", "for", and "post".
-_STOPWORDS = frozenset("""
-a an and are as at be been but by can do does for from get given has have how i
-if in into is it its me my no not of on one or our out so than that the their
-them then there these they this to up use used using was what when which who
-will with you your it's don't
-also always any because before both each else every into just like make making
-more most much need needs new now only other over same should some such take
-then those through time under very via want way well were while would
-add added adds all its new run runs set sets
-me my we us if no it is to of on or so as at an be by do in up
-""".split())
-
-# Keeps only files close to the best match, so a strong hit doesn't drag in
-# every file that merely cleared the floor.
-_GUIDELINE_RELATIVE_BAND = 0.85
-
-# Below this, the overlap is coincidence rather than topicality. Calibrated
-# against the starter guidelines: a PR-description request clears it for
-# `pr-descriptions.md`, a haiku request clears it for nothing.
-_GUIDELINE_SCORE_FLOOR = 1.5
-
-_PREFIX_MATCH_LEN = 5  # "summariz(e)" vs "summariz(ation)", "description(s)"
+# How many existing guidelines one workflow may be handed. Every one is inlined
+# verbatim into every run, so this is a prompt-budget ceiling as much as a
+# relevance one: past three, the workflow's own instructions stop being the
+# loudest thing in the prompt.
+MAX_ATTACHED_GUIDELINES = 3
 
 
-def _terms(text: str) -> set[str]:
-    """Distinctive lowercase words in `text`: no stopwords, nothing tiny."""
-    return {w for w in re.findall(r"[a-z][a-z\-]+", text.lower())
-            if w not in _STOPWORDS}
+def select_guidelines(home: Path, config: dict, description: str,
+                      plan: Plan | None = None) -> list[str]:
+    """Picks the existing guidelines whose standard this workflow's output is
+    actually judged against.
 
+    Reads frontmatter descriptions, the way a skill is selected by its own
+    description rather than by its contents. The keyword scorer this replaced
+    matched on filename and body overlap, which cannot tell *writing* a commit
+    message from *reading* one: a nightly standup that summarizes commits scored
+    highest against `commit-messages.md` and inlined a commit-authoring rubric
+    into every run.
 
-def _topic_hits(wanted: set[str], topic: set[str]) -> int:
-    """Counts topic words the request refers to, matching on a shared prefix.
-
-    Prefix matching stands in for stemming, which the word forms here need:
-    "summarize" has to match `summarization.md` and "pull request description"
-    has to match `pr-descriptions.md`. Cheap, and wrong only for words that
-    share five letters and nothing else.
+    Returns [] freely, and on any harness failure. A wrong guideline is worse
+    than none -- it spends prompt and pulls the output toward a convention the
+    task never called for -- so nothing is attached on a guess, and the build
+    is never failed over this.
     """
-    hits = 0
-    for word in topic:
-        for candidate in wanted:
-            if word == candidate or _shared_prefix(word, candidate) >= _PREFIX_MATCH_LEN:
-                hits += 1
-                break
-    return hits
-
-
-def _shared_prefix(a: str, b: str) -> int:
-    """Length of the leading substring `a` and `b` have in common.
-
-    Compared on a shared prefix rather than "one is a prefix of the other":
-    "summarize" and "summarization" share eight characters but neither contains
-    the other.
-    """
-    n = 0
-    for x, y in zip(a, b):
-        if x != y:
-            break
-        n += 1
-    return n
-
-
-def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]:
-    """Picks the guideline files whose topic actually matches the task.
-
-    A file's headings name what it is about, so a heading match counts for much
-    more than a body match, and body matches are normalized by vocabulary size
-    so a long file doesn't win on sheer surface area. Files scoring below
-    `_GUIDELINE_SCORE_FLOOR` are left off entirely -- attaching an unrelated
-    guideline is worse than attaching none, since every one is inlined verbatim
-    into the run's prompt.
-    """
-    from px0 import claims  # deferred: claims imports paths-adjacent modules
-
-    wanted = _terms(description)
-    if not wanted:
+    available = guidelines_mod.attachable(home)
+    if not available:
         return []
 
-    scored = []
-    base = paths.guidelines_dir(home)
-    for path in sorted(base.rglob("*.md")):
-        rel = str(path.relative_to(base))
-        if rel.startswith("work/"):
-            continue  # work/ guidelines are never auto-attached
-        text = path.read_text()
-
-        # The starter guidelines' headings are prescriptive sentences ("Lead with
-        # the problem"), not topic labels -- so the path carries most of the
-        # signal, and headings only add to it.
-        topic_terms = _terms(rel.replace("/", " ").replace("-", " ").removesuffix(".md"))
-        heading_terms = _terms(" ".join(s.heading for s in claims.extract_sections(text)))
-        body_terms = _terms(text)
-
-        score = (_topic_hits(wanted, topic_terms) * 1.5
-                 + _topic_hits(wanted, heading_terms) * 0.5
-                 + (len(wanted & body_terms) / max(len(body_terms), 1) ** 0.5) * 3.0)
-        if score >= _GUIDELINE_SCORE_FLOOR:
-            scored.append((score, rel))
-
-    if not scored:
+    listing = "\n".join(f"- {g.rel}: {g.summary or '(no description)'}"
+                        for g in available)
+    prompt = (
+        "Choose which of these guidelines this workflow must follow.\n\n"
+        "Each is a durable convention the user has written down. Attaching one "
+        "inlines its full text into every run of the workflow, so choose a "
+        "guideline ONLY if the workflow's own output is judged against it -- "
+        "that is, following it changes what the workflow produces.\n\n"
+        "Do NOT choose a guideline merely because the workflow touches the same "
+        "subject. A workflow that reads, summarizes, or reports on something is "
+        "not governed by the convention for authoring that thing: a standup "
+        "that summarizes commits does not follow the commit-message convention, "
+        "and a workflow that lists open pull requests does not follow the "
+        "pull-request-description convention.\n\n"
+        f"Choose at most {MAX_ATTACHED_GUIDELINES}. Respond with ONLY a JSON "
+        "array of the chosen paths, exactly as written below. Return [] if none "
+        "of them governs this workflow's output -- that is the common answer.\n\n"
+        f"Guidelines:\n{listing}\n\n"
+        f"Workflow: {(plan.description if plan else '') or description}\n"
+        f"What the user asked for: {description}\n\n"
+        f"What it does:\n{(plan.body if plan else '')[:2000]}"
+    )
+    try:
+        chosen = _extract_json(harness.invoke(config, prompt, timeout=60), want_array=True)
+    except (BuilderError, harness.HarnessError):
         return []
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    cutoff = scored[0][0] * _GUIDELINE_RELATIVE_BAND
-    return [rel for score, rel in scored[:top_n] if score >= cutoff]
+    if not isinstance(chosen, list):
+        return []
+
+    # Only paths that exist, in store order rather than the order the model
+    # happened to list them, so the same picks render the same `guidelines:`.
+    by_rel = {g.rel: g for g in available}
+    picked = {c for c in chosen if isinstance(c, str) and c in by_rel}
+    return [g.rel for g in available if g.rel in picked][:MAX_ATTACHED_GUIDELINES]
 
 
 # --- proposing a guideline the store doesn't have yet ----------------------
@@ -632,14 +618,25 @@ def choose_guidelines(home: Path, description: str, top_n: int = 3) -> list[str]
 class GuidelineProposal:
     """A durable standard this workflow leans on that the store has no file for.
 
-    `path` is relative to `guidelines/`, `title` names the standard, and `why`
+    `path` is relative to `guidelines/`, `title` names the standard, `description`
+    is the frontmatter line every later workflow is matched against, and `why`
     says what in the workflow depends on it. There is no question to ask: this
     is the only path by which a guideline gets written, so the draft is produced
     from the workflow itself and shown to the user to keep, redo, or skip.
+
+    The description is settled here rather than after drafting, because it is the
+    file's contract -- what it covers and when it applies -- and a proposal that
+    cannot state that in one sentence is not a durable convention.
     """
     path: str
     title: str
-    why: str
+    why: str = ""
+    description: str = ""
+
+    @property
+    def name(self) -> str:
+        """The frontmatter name: the filename, as with a skill."""
+        return guidelines_mod.name_for(self.path)
 
 
 def propose_guidelines(config: dict, description: str, plan: Plan,
@@ -659,16 +656,20 @@ def propose_guidelines(config: dict, description: str, plan: Plan,
         "A guideline is a reusable standard that outlives this one workflow: a "
         "code review rubric, a commit message format, a writing voice, a "
         "summarization style, a definition of done. It is worth proposing ONLY if "
-        "(a) the workflow's output quality depends on it, (b) it would apply "
-        "again to the next workflow of this kind, and (c) no file listed below "
-        "already covers it.\n\n"
+        "(a) this workflow's own output is judged against it -- following it "
+        "changes what the workflow produces, (b) it would apply again to the next "
+        "workflow of this kind, and (c) no file listed below already covers it.\n\n"
         "Do NOT propose: anything the instruction body already specifies in full; "
         "generic best practice with no real choices in it; a restatement of what "
-        "the workflow does; or a second file on a topic already listed.\n\n"
+        "the workflow does; a convention for authoring something this workflow "
+        "only reads or reports on; or a second file on a topic already listed.\n\n"
         "Respond with ONLY a JSON array, at most 2 entries, each:\n"
         '{"path": "<kebab-case>.md or <folder>/<kebab-case>.md", '
-        '"title": "<short label>", "why": "<what in this workflow needs it, one '
-        'sentence>"}\n\n'
+        '"title": "<short label>", '
+        '"description": "<one sentence: what this convention covers and when a '
+        'workflow should follow it, phrased so a later workflow can be matched '
+        'against it>", '
+        '"why": "<what in this workflow needs it, one sentence>"}\n\n'
         "Return [] if the workflow needs no new guideline -- that is the common case.\n\n"
         f"Existing guideline files:\n{existing_block}\n\n"
         f"Workflow description: {plan.description or description}\n\n"
@@ -696,6 +697,10 @@ def propose_guidelines(config: dict, description: str, plan: Plan,
             path=path,
             title=title,
             why=str(entry.get("why") or "").strip(),
+            # Falls back to the title so the file is never written without a
+            # description: an undescribed guideline is invisible to every later
+            # `select_guidelines`, which is a worse outcome than a terse line.
+            description=str(entry.get("description") or "").strip() or title,
         ))
     return out
 
@@ -719,7 +724,7 @@ def _guideline_path(raw: str) -> str:
 
 def draft_guideline(config: dict, proposal: GuidelineProposal, description: str,
                    plan: Plan) -> str:
-    """Drafts the guideline the workflow needs, in px0's own shape.
+    """Drafts the body of the guideline the workflow needs, in px0's own shape.
 
     Written from the workflow rather than from an interview: the build already
     knows what the workflow does and what standard it leans on, and asking the
@@ -728,11 +733,15 @@ def draft_guideline(config: dict, proposal: GuidelineProposal, description: str,
     an ordinary Markdown file afterwards, so a draft the user disagrees with is
     a redo or an edit rather than a dead end.
 
+    Returns the rules only. `save_guideline` adds the `name`/`description`
+    frontmatter, so the model is never asked to write YAML it could break -- and
+    the description stays the one the proposal already committed to.
+
     Sections are `## ` headings because that is what makes each rule addressable
     as a claim by `px0 guidelines log`.
     """
     prompt = (
-        "Write the guideline file for one durable convention a workflow leans on.\n\n"
+        "Write the rules for one durable convention a workflow leans on.\n\n"
         "Format: two to five `## ` sections. Each heading is a short "
         "prescriptive instruction (\"Lead with the takeaway\", not \"Takeaways\"). "
         "Under each, two or three lines of plain prose saying what to do and why. "
@@ -743,6 +752,7 @@ def draft_guideline(config: dict, proposal: GuidelineProposal, description: str,
         "you cannot justify, do not restate what the workflow does, and do not "
         "pad to reach a section count.\n\n"
         f"Guideline: {proposal.title}\n"
+        f"What it covers: {proposal.description or proposal.title}\n"
         f"What in the workflow needs it: {proposal.why or '(unstated)'}\n"
         f"Workflow: {plan.description or description}\n\n"
         f"Instruction body:\n{plan.body[:2000]}"
@@ -756,14 +766,28 @@ def draft_guideline(config: dict, proposal: GuidelineProposal, description: str,
     return text[idx:].rstrip() + "\n"
 
 
-def save_guideline(home: Path, rel_path: str, content: str, actor: str = "builder") -> Path:
+def save_guideline(home: Path, rel_path: str, body: str, description: str = "",
+                   actor: str = "builder") -> Path:
     """Writes a new guideline file and records it as a versioned guideline change.
+
+    The file gets `name`/`description` frontmatter over the drafted rules, which
+    is what makes it findable later: `select_guidelines` reads descriptions and
+    nothing else, so a guideline saved without one can never be attached to the
+    next workflow that needs it. A body that already carries frontmatter (a
+    caller passing a whole file, or a re-save) keeps its own.
 
     Goes through `claims.capture_guideline_change` rather than writing the file
     directly, so the new claims get history from their first version and
     `px0 guidelines log` works on them immediately.
     """
     from px0 import claims, versioning  # deferred: both import builder-adjacent modules
+
+    front, rules = guidelines_mod.split_frontmatter(body)
+    if front is None:
+        content = guidelines_mod.render(guidelines_mod.name_for(rel_path),
+                                        description, rules)
+    else:
+        content = body if body.endswith("\n") else body + "\n"
 
     dest = paths.guidelines_dir(home) / rel_path
     dest.parent.mkdir(parents=True, exist_ok=True)

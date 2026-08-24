@@ -1,16 +1,17 @@
 """`px0 workflows new` is the only thing that writes a guideline.
 
 There is no `px0 guidelines new`, so the build has to notice that a workflow
-leans on a durable convention, draft it from the workflow itself, save it, list
-it on the workflow, and let the runner inline it into every run.
+leans on a durable convention, draft it from the workflow itself, save it with
+the `name`/`description` frontmatter that makes it findable again, list it on
+the workflow, and let the runner inline its body into every run.
 """
 
 import re
 
 import pytest
 
-from px0 import (builder as builder_mod, claims, cli, paths, runner, ui,
-                 versioning, workflow as wf_mod)
+from px0 import (builder as builder_mod, claims, cli, guidelines as guidelines_mod,
+                 paths, runner, ui, versioning, workflow as wf_mod)
 
 
 def _plan(body="Review each open PR and comment.", description="Review my PRs"):
@@ -92,6 +93,28 @@ def test_a_proposal_needs_only_a_path_and_a_title(monkeypatch):
     assert [(p.path, p.title, p.why) for p in out] == [("x.md", "Commit style", "")]
 
 
+def test_a_proposal_carries_the_description_later_builds_match_against(monkeypatch):
+    monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: """
+      [{"path": "review-rubric.md", "title": "Review rubric",
+        "description": "What a code review comments on. Use when the workflow reviews code.",
+        "why": "w"}]
+    """)
+
+    proposal = builder_mod.propose_guidelines({}, "d", _plan(), [])[0]
+
+    assert proposal.description.startswith("What a code review comments on")
+    assert proposal.name == "review-rubric", "the name is the filename, as with a skill"
+
+
+def test_a_proposal_without_a_description_falls_back_to_its_title(monkeypatch):
+    """An undescribed guideline is invisible to every later selection pass, which
+    is worse than a terse line."""
+    monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k:
+                        '[{"path": "x.md", "title": "Commit style"}]')
+
+    assert builder_mod.propose_guidelines({}, "d", _plan(), [])[0].description == "Commit style"
+
+
 def test_at_most_two_proposals_reach_the_user(monkeypatch):
     """Every draft costs a model call and a decision; a build is not an interview."""
     monkeypatch.setattr(builder_mod.harness, "invoke", lambda *a, **k: str(
@@ -146,11 +169,11 @@ def test_the_workflow_is_what_reaches_the_model(monkeypatch):
 def test_a_saved_guideline_gets_version_and_claim_history(tmp_home):
     """Written through the guideline change path, not as a bare file, so
     `px0 guidelines log` works on it from version 1."""
-    content = "## Flag only real breakage\n\nOnly production breakage.\n"
+    body = "## Flag only real breakage\n\nOnly production breakage.\n"
 
-    dest = builder_mod.save_guideline(tmp_home, "review-rubric.md", content)
+    dest = builder_mod.save_guideline(tmp_home, "review-rubric.md", body)
 
-    assert dest.read_text() == content
+    assert body in dest.read_text(), "the rules are kept verbatim"
     versions = versioning.list_versions(tmp_home, "guidelines/review-rubric.md")
     assert len(versions) == 1 and versions[0]["actor"] == "builder"
     claim = "guidelines/review-rubric.md#flag-only-real-breakage"
@@ -162,11 +185,45 @@ def test_a_nested_guideline_creates_its_folder(tmp_home):
     assert dest.exists() and dest.parent.name == "code-review"
 
 
+def test_a_saved_guideline_is_named_and_described_in_its_frontmatter(tmp_home):
+    """The frontmatter is what makes the file findable: `select_guidelines` reads
+    descriptions and nothing else."""
+    dest = builder_mod.save_guideline(
+        tmp_home, "code-review/go.md", "## Wrap errors with %w\n\nAlways.\n",
+        description="What a Go review checks. Use when the workflow reviews Go code.")
+
+    g = guidelines_mod.parse(dest, "code-review/go.md")
+    assert g.name == "go", "the folder groups the topic; the file names it"
+    assert g.description.startswith("What a Go review checks")
+    assert g.body.startswith("## Wrap errors with %w")
+    assert g.described
+
+
+def test_a_description_with_a_colon_still_parses(tmp_home):
+    """The frontmatter is dumped as YAML, not formatted by hand."""
+    dest = builder_mod.save_guideline(
+        tmp_home, "voice.md", "## H\n\nb\n",
+        description="Voice: plain, short sentences. Use when the workflow writes prose.")
+
+    assert guidelines_mod.parse(dest, "voice.md").description.startswith("Voice: plain")
+
+
+def test_a_body_that_already_carries_frontmatter_keeps_its_own(tmp_home):
+    """A re-save must not wrap one file's frontmatter in another."""
+    text = guidelines_mod.render("voice", "how I write", "## Say it plainly\n\nShort.\n")
+
+    dest = builder_mod.save_guideline(tmp_home, "voice.md", text, description="ignored")
+
+    assert dest.read_text().count("---") == 2
+    assert guidelines_mod.parse(dest, "voice.md").description == "how I write"
+
+
 # --- the whole loop: authored file -> workflow -> run prompt -----------------
 
 def test_an_authored_guideline_is_listed_and_then_inlined_at_run_time(tmp_home):
-    content = "## Leave formatting to the linter\n\nNever comment on spacing.\n"
-    builder_mod.save_guideline(tmp_home, "review-rubric.md", content)
+    body = "## Leave formatting to the linter\n\nNever comment on spacing.\n"
+    builder_mod.save_guideline(tmp_home, "review-rubric.md", body,
+                              description="What a review comments on.")
 
     file_text = builder_mod.render_workflow_file(
         "review", _plan(), ["review-rubric.md"], "review my PRs")
@@ -176,8 +233,11 @@ def test_an_authored_guideline_is_listed_and_then_inlined_at_run_time(tmp_home):
     assert wf.guidelines == ["review-rubric.md"]
     assert wf_mod.validate(wf, tmp_home) == [], "a listed guideline must resolve"
 
-    prompt = runner.render_prompt(wf, {"review-rubric.md": content}, {})
+    prompt = runner.render_prompt(
+        wf, {"review-rubric.md": guidelines_mod.body_of(tmp_home, "review-rubric.md")}, {})
     assert "Never comment on spacing." in prompt, "the content must reach the run"
+    assert "description:" not in prompt, "the frontmatter is px0's index, not the model's"
+    assert "# review-rubric\n" in prompt, "headed by its name"
 
 
 # --- the build's authoring pass: draft, show, keep / again / skip ------------
@@ -186,7 +246,9 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _proposal(path="review-rubric.md", title="Review rubric"):
-    return builder_mod.GuidelineProposal(path=path, title=title, why="no rubric yet")
+    return builder_mod.GuidelineProposal(
+        path=path, title=title, why="no rubric yet",
+        description="What a review comments on. Use when the workflow reviews code.")
 
 
 def test_the_build_drafts_a_needed_guideline_without_interviewing_anyone(
@@ -204,8 +266,12 @@ def test_the_build_drafts_a_needed_guideline_without_interviewing_anyone(
     assert created == ["review-rubric.md"]
     dest = paths.guidelines_dir(tmp_home) / "review-rubric.md"
     assert "Only that." in dest.read_text()
+    g = guidelines_mod.parse(dest, "review-rubric.md")
+    assert g.description.startswith("What a review comments on"), \
+        "the proposal's description is what the file is matched against later"
     out = capsys.readouterr().out
     assert "guidelines/review-rubric.md" in out, "the user is told where it landed"
+    assert "What a review comments on" in out, "and shown what it will apply to"
 
 
 def test_a_draft_the_user_rejects_is_not_written(tmp_home, monkeypatch):
@@ -230,8 +296,9 @@ def test_again_redraws_before_anything_is_saved(tmp_home, monkeypatch):
 
     cli._author_guidelines(tmp_home, {}, "d", _plan(), [], False)
 
-    assert (paths.guidelines_dir(tmp_home) / "review-rubric.md").read_text() \
-        .startswith("## Second")
+    assert guidelines_mod.parse(
+        paths.guidelines_dir(tmp_home) / "review-rubric.md", "review-rubric.md"
+    ).body.startswith("## Second")
 
 
 def test_a_non_interactive_build_writes_no_guideline(tmp_home, monkeypatch):
@@ -255,21 +322,37 @@ def test_a_failed_draft_does_not_fail_the_build(tmp_home, monkeypatch, capsys):
 
 # --- the listing ------------------------------------------------------------
 
-def test_guidelines_are_listed_as_numbered_rows_with_their_first_rule(
+def test_guidelines_are_listed_with_the_description_a_build_matches_on(
         tmp_home, monkeypatch, capsys):
-    """Same rows as the `workflows run` picker: a short list you scan and name."""
+    """Same rows as the `workflows run` picker, and the same line the build
+    chooses from -- so what decides an attachment is what the user reads."""
     monkeypatch.setattr(ui, "_forced", False)
     base = paths.guidelines_dir(tmp_home)
-    (base / "voice.md").write_text("## Say it plainly\n\nShort sentences.\n")
-    (base / "review-rubric.md").write_text("## Flag only real breakage\n\nOnly that.\n")
+    (base / "voice.md").write_text(
+        guidelines_mod.render("voice", "How I write prose", "## Say it plainly\n\nShort.\n"))
+    (base / "review-rubric.md").write_text(
+        guidelines_mod.render("review-rubric", "What a review flags", "## Flag breakage\n\nOnly.\n"))
 
     cli._print_guidelines(tmp_home, heading=False)
 
     lines = [_ANSI.sub("", ln).strip() for ln in capsys.readouterr().out.splitlines() if ln.strip()]
     assert lines == [
-        "1. review-rubric.md  Flag only real breakage",
-        "2. voice.md          Say it plainly",
+        "1. review-rubric.md  What a review flags",
+        "2. voice.md          How I write prose",
     ]
+
+
+def test_a_guideline_without_frontmatter_is_listed_by_its_first_rule(
+        tmp_home, monkeypatch, capsys):
+    """Files written before frontmatter was the format still read back."""
+    monkeypatch.setattr(ui, "_forced", False)
+    (paths.guidelines_dir(tmp_home) / "voice.md").write_text(
+        "## Say it plainly\n\nShort sentences.\n")
+
+    cli._print_guidelines(tmp_home, heading=False)
+
+    out = _ANSI.sub("", capsys.readouterr().out)
+    assert "voice.md" in out and "Say it plainly" in out
 
 
 def test_an_empty_store_says_where_guidelines_come_from(tmp_home, capsys):

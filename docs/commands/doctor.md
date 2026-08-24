@@ -48,6 +48,7 @@ px0 doctor --json | jq -r '.checks | to_entries[] | select(.value.ok == false) |
 | `connections` | How many connector connections are configured |
 | `workflows` | Every workflow file parses |
 | `unreferenced_guidelines` | Guideline files no workflow inlines |
+| `guideline_descriptions` | Guideline files with no `description` in their frontmatter, which a build cannot match a new workflow against |
 | `update` | Whether a newer px0 is available |
 | `daemon` | Whether the daemon is running |
 | `harness` | The configured coding agent is on `PATH` and responds |

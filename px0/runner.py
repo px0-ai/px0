@@ -12,11 +12,12 @@ import fcntl
 import json
 import re
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from px0 import claims, config as config_mod, harness, paths, retrieval
+from px0 import claims, config as config_mod, guidelines as guidelines_mod
+from px0 import harness, paths, retrieval
 from px0 import runs as runs_mod
 from px0 import tools, versioning
 from px0 import workflow as workflow_mod
@@ -42,15 +43,58 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Units accepted in a relative clock placeholder like `{{now-24h}}`.
+_TIME_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+_RELATIVE_TIME_RE = re.compile(r"^now-(\d+)([mhdw])$")
+
+
+def _time_value(name: str, filename_safe: bool = False) -> str | None:
+    """Resolves one clock placeholder, or None if `name` is not one.
+
+    The grammar these names come from is `workflow.TIME_PLACEHOLDER_RE`, which is
+    also what validation accepts, so a workflow can never name a placeholder that
+    passes validation and then resolves to nothing here.
+
+    Every digest workflow needs a window ("commits since yesterday") and a
+    scheduled one cannot be handed a literal timestamp, so `{{now-24h}}` is the
+    only way to write it. An argument gets ISO 8601 with a `Z`, which is what the
+    connectors' `since`/`until` parameters take; a path gets the same instant
+    with the colons swapped out, since `filename_safe` is the difference between
+    a timestamp and a filename.
+    """
+    now = _now()
+    stamp = "%Y-%m-%dT%H-%M-%S" if filename_safe else "%Y-%m-%dT%H:%M:%SZ"
+    if name == "now":
+        return now.strftime(stamp)
+    if name in ("today", "date"):
+        return now.date().isoformat()
+    if name == "datetime":
+        return now.strftime("%Y-%m-%dT%H-%M-%S")
+    if name == "time":
+        return now.strftime("%H-%M-%S")
+    m = _RELATIVE_TIME_RE.match(name)
+    if m:
+        delta = timedelta(**{_TIME_UNITS[m.group(2)]: int(m.group(1))})
+        return (now - delta).strftime(stamp)
+    return None
+
+
 def _lookup(context: dict, dotted: str) -> Any:
     """Resolves a dotted path like `input.foo` against a nested dict context.
-    Returns None if any segment is missing rather than raising."""
+
+    Falls through to the clock placeholders (`now`, `today`, `now-24h`) when the
+    context has no such key, so a workflow can express a time window without one
+    being passed in. The context wins, so a real input named `now` still shadows
+    the placeholder.
+
+    Returns None if the name is neither, rather than raising.
+    """
     node: Any = context
     for part in dotted.split("."):
         if isinstance(node, dict) and part in node:
             node = node[part]
         else:
-            return None
+            return _time_value(dotted)
     return node
 
 
@@ -150,9 +194,14 @@ def resolve_inputs(
 def render_prompt(wf: workflow_mod.Workflow, guideline_texts: dict[str, str], context: dict) -> str:
     """Builds the final prompt: renders the workflow body's templates against
     context, then inlines guideline text either at an explicit `{{guidelines}}`
-    placeholder or, if none is present, prepended before the body."""
+    placeholder or, if none is present, prepended before the body.
+
+    Keyed by store-relative path, headed by the guideline's name: the path is
+    what provenance records, the name is what reads as a heading in a prompt.
+    """
     guidelines_block = "\n\n".join(
-        f"# {name}\n\n{text}" for name, text in guideline_texts.items()
+        f"# {guidelines_mod.name_for(rel)}\n\n{text}"
+        for rel, text in guideline_texts.items()
     )
     body = render_value(wf.body, context)
     if not isinstance(body, str):
@@ -249,38 +298,53 @@ def _tool_call_loop(
     return output, tool_calls, usage
 
 
-# Recognized placeholders in an `output.path`. Both brace styles are accepted:
-# the prompt body references inputs as {{input_id}}, and a plan that carried
-# that habit into the path produced a file literally named
-# `report-{2026-08-17}.md` -- the inner {date} substituted, the outer braces
-# left behind.
-_OUTPUT_PLACEHOLDERS = ("date", "datetime", "time")
-
-
 def _render_output_path(template: str) -> str:
-    """Substitutes the supported placeholders in an output path template.
+    """Substitutes the clock placeholders in an output path template.
 
-    Raises RunError on an unknown placeholder rather than writing a filename
-    with braces in it.
+    Both brace styles are accepted: the prompt body references inputs as
+    {{input_id}}, and a plan that carried that habit into the path produced a
+    file literally named `report-{2026-08-17}.md` -- the inner {date}
+    substituted, the outer braces left behind.
+
+    The vocabulary is `workflow`'s, the same one an argument may use, and every
+    value is rendered filename-safe. Raises RunError on an unknown placeholder
+    rather than writing a filename with braces in it -- though `validate` reports
+    that before a run starts, so reaching this is a workflow edited mid-run.
     """
-    now = _now()
-    values = {
-        "date": date.today().isoformat(),
-        "datetime": now.strftime("%Y-%m-%dT%H-%M-%S"),
-        "time": now.strftime("%H-%M-%S"),
-    }
-    rendered = template
-    for name in _OUTPUT_PLACEHOLDERS:
-        rendered = rendered.replace("{{" + name + "}}", values[name])
-        rendered = rendered.replace("{" + name + "}", values[name])
-    leftover = re.findall(r"\{+([^{}]*)\}+", rendered)
-    if leftover:
-        supported = ", ".join("{" + n + "}" for n in _OUTPUT_PLACEHOLDERS)
-        raise RunError(
-            f"output.path has unknown placeholder(s): {', '.join(sorted(set(leftover)))} "
-            f"-- supported: {supported}"
-        )
+    def sub(m: re.Match) -> str:
+        value = _time_value(m.group(1), filename_safe=True)
+        return m.group(0) if value is None else value
+
+    rendered = workflow_mod._OUTPUT_TEMPLATE_RE.sub(sub, template)
+    errors = workflow_mod.output_path_errors(rendered)
+    if errors:
+        raise RunError(errors[0])
     return rendered
+
+
+def output_rel(rendered: str) -> str:
+    """Puts a rendered output path under the store's `output/` directory.
+
+    A plan writes `logs/daily.md` and means `output/logs/daily.md`, and one that
+    already said `outputs/` meant the same folder by a name the store does not
+    use. Every run's output lives under one root, whatever the plan called it.
+    """
+    if rendered.startswith("outputs/"):
+        return "output/" + rendered.removeprefix("outputs/")
+    if not rendered.startswith("output/"):
+        return f"output/{rendered}"
+    return rendered
+
+
+def output_destination(home: Path, path_template: str) -> Path:
+    """The absolute file an `output.path` will be written to, placeholders intact.
+
+    For reporting a workflow's destination before it has ever run. The same
+    normalization a run applies, so what a build promises is where the run puts
+    it -- and `output_rel` is the store-relative half of the same answer, which
+    is what a report shows once it has named the store it is relative to.
+    """
+    return (home / output_rel(path_template)).resolve()
 
 
 def _resolve_output_dest(home: Path, rendered: str) -> Path:
@@ -318,11 +382,7 @@ def route_output(
         return {"target": "stdout", "text": text}
     if target == "file":
         path_template = output_spec.get("path", "output/output-{date}.md")
-        rendered = _render_output_path(path_template)
-        if rendered.startswith("outputs/"):
-            rendered = "output/" + rendered.removeprefix("outputs/")
-        elif not rendered.startswith("output/"):
-            rendered = f"output/{rendered}"
+        rendered = output_rel(_render_output_path(path_template))
         dest = _resolve_output_dest(home, rendered)
         lock = paths.lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
@@ -480,10 +540,12 @@ def _run_once(
         raise fail(str(e), inputs_resolved=e.record.get("inputs_resolved", []))
 
     # Stage 4: render prompt
+    # The body only: a guideline's frontmatter is how px0 finds the file, not
+    # something the model needs, and spending prompt on it would be paying for
+    # the index alongside the content.
     guideline_texts, guidelines_inlined = {}, []
     for g in wf.guidelines:
-        text = (paths.guidelines_dir(home) / g).read_text()
-        guideline_texts[g] = text
+        guideline_texts[g] = guidelines_mod.body_of(home, g)
         guidelines_inlined.append({
             "path": g, "version": versioning.latest_version_number(home, f"guidelines/{g}")
         })

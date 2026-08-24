@@ -98,6 +98,15 @@ def accent(text: str, **kw) -> str:
     return paint(text, _ACCENT, **kw)
 
 
+def alert(text: str, **kw) -> str:
+    """Something that went wrong, inline: the counterpart to `accent`.
+
+    For a value inside a block that is otherwise neutral, where a `✗` status line
+    would break the block's alignment to say what the colour already says.
+    """
+    return paint(text, _ERR, **kw)
+
+
 def strong(text: str, **kw) -> str:
     """Emphasis without colour, for headings inside a plain block."""
     if not color_enabled(kw.get("stream")):
@@ -224,6 +233,39 @@ def bullet(text: str, stream=None) -> None:
     """One item in a list."""
     stream = stream or sys.stdout
     print(f"  {faint('·', stream=stream)} {text}", file=stream, flush=True)
+
+
+# "  · " before the label, two spaces after it: what a continuation line has to
+# clear to sit under the first value rather than under the label.
+_FIELD_LEAD = 4
+_FIELD_GAP = 2
+
+
+def field(label: str, value, *, width: int = 0, stream=None) -> None:
+    """One field of a report: a bullet, a dim aligned label, and its value.
+
+    `kv` with a bullet instead of a colon, for a block of fields rather than a
+    couple of lines -- and deliberately not a status line. A run's `output` or
+    `took` is a fact being reported, not a check that passed, and a column of
+    ticks down the side of facts reads as noise while making the one line that
+    *is* a verdict harder to find.
+
+    A list value prints one item per line, each under the first, so a field with
+    four tool ids in it stays readable at a glance instead of becoming a comma
+    run-on that wraps wherever the terminal happens to end.
+    """
+    stream = stream or sys.stdout
+    text = label.ljust(width) if width else label
+    line = f"  {faint('·', stream=stream)} {dim(text, stream=stream)}"
+
+    values = list(value) if isinstance(value, (list, tuple)) else [value]
+    values = [v for v in values if v != ""]
+    if values:
+        line += f"{' ' * _FIELD_GAP}{values[0]}"
+    print(line, file=stream, flush=True)
+    indent = " " * (_FIELD_LEAD + max(width, len(label)) + _FIELD_GAP)
+    for extra in values[1:]:
+        print(f"{indent}{extra}", file=stream, flush=True)
 
 
 def hint(text: str, stream=None) -> None:

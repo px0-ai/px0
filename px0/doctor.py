@@ -242,6 +242,29 @@ def _check_unreferenced_guidelines(home: Path) -> dict:
     return {"ok": True, "detail": detail, "files": files}
 
 
+def _check_guideline_descriptions(home: Path) -> dict:
+    """Counts guideline files with no `description` in their frontmatter.
+
+    Informational, never a failure: the file still works, and a run that names it
+    still inlines it. What it loses is discoverability -- `px0 workflows new`
+    matches a new workflow against descriptions, so an undescribed guideline
+    falls back to its first rule and will rarely be picked. Files written before
+    frontmatter was the format are exactly this case.
+    """
+    from px0 import guidelines as guidelines_mod
+
+    files = sorted(rel for rel, g in guidelines_mod.load_all(home).items()
+                   if not g.described)
+    detail = f"{len(files)} file(s) without a description"
+    if files:
+        detail += " -- they fall back to their first rule when a build looks for one"
+    check = {"ok": True, "detail": detail, "files": files}
+    if files:
+        check["fix"] = ("add `name` and `description` frontmatter with "
+                        "`px0 guidelines edit <name>`")
+    return check
+
+
 def _check_workflows(home: Path) -> dict:
     """Reports workflow files that fail to parse.
 
@@ -301,6 +324,7 @@ def run(home: Path, config: dict, quick: bool = False) -> dict:
         "connections": _check_connections(home),
         "workflows": _check_workflows(home),
         "unreferenced_guidelines": _check_unreferenced_guidelines(home),
+        "guideline_descriptions": _check_guideline_descriptions(home),
         "update": _check_update(home),
     }
     if not quick:

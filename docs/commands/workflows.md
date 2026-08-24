@@ -85,8 +85,46 @@ questions, the clarifying round is skipped — you are not asked twice.
 The workflow's id, which is also its filename and how you run it, is derived
 from the request by default; px0 prompts you to override it before saving.
 
+What it made is reported as the same bulleted block a run prints:
+
+```
+created github-daily-commit-summary
+  · workflow    ~/.px0/workflows/github-daily-commit-summary.md
+  · guidelines  ~/.px0/guidelines/summarization.md
+  · output      ~/.px0/output/logs/daily-commits-{{today}}.md
+  · tools       composio:GITHUB_LIST_COMMITS
+                composio:SLACK_SEND_MESSAGE
+```
+
+Paths are written from your home directory, so a row stays short and is still
+something a shell will open. `output` is where a run will put it — under the
+store's `output/` folder, which the frontmatter's `output.path` leaves implicit —
+with its clock placeholders left as written, since the file does not exist yet
+and today's date would be the wrong name tomorrow. A field holding several values
+gets a line each, aligned under the first.
+
 Needs a terminal to answer on: with stdin not a tty, there is nobody to
 interview, so px0 says so and exits rather than building from nothing.
+
+### Guidelines the build attaches
+
+Near the end of a build, px0 decides which of your existing
+[guidelines](guidelines.md) this workflow has to follow. It reads each one's
+frontmatter `description` — never its rules — and picks the ones whose standard
+the workflow's *output* is judged against, at most three. Whatever it picks is
+listed in the new workflow's `guidelines:` and inlined verbatim into every run.
+
+The bar is that following the guideline changes what the workflow produces.
+Touching the same subject is not enough: a standup that summarizes commits is
+not governed by your commit-message convention, and a workflow that lists open
+pull requests is not governed by your PR-description convention. `[]` is a
+normal and common answer, and it is also what a failed or unreadable model
+response produces — a wrong guideline costs every run, so none is preferred to a
+guess, and a build is never failed over this.
+
+Descriptions are what this pass reads, so the way to change what a workflow gets
+attached is to edit the description: `px0 guidelines edit <name>`. Anything under
+`guidelines/work/` is never offered.
 
 ### Guidelines the build writes
 
@@ -98,6 +136,7 @@ workflow itself, prints it with the path it would take, and asks:
 ```
 › guideline: Review rubric
   the workflow comments on PRs and has no rubric to comment against
+     applies when  What a review comments on. Use when the workflow reviews code.
 [..] would be saved as  guidelines/review-rubric.md
 
 ## Flag only real breakage
@@ -110,6 +149,11 @@ workflow itself, prints it with the path it would take, and asks:
 listed in the new workflow's `guidelines:`, so every run inlines them verbatim.
 The path is printed when it is written, and `px0 guidelines edit <name>` is how
 you make a draft yours.
+
+The "applies when" line is the file's `description`, written into its
+frontmatter. It is shown because it is not decoration: it is the line every
+later build matches this guideline against, so it decides which future workflows
+inherit the convention.
 
 This is the only way a guideline gets created — there is no
 `px0 guidelines new`. Asking someone to compose a convention from a blank page
@@ -124,6 +168,39 @@ convention nobody saw should not land in the store.
 ## `px0 workflows run`
 
 Execute a workflow now.
+
+When it ends, the run reports itself as a labelled block on stderr — the same
+shape a build prints, one field per line:
+
+```
+success github-daily-commit-summary
+  · run      run_20260824-093444-f88a
+  · output   ~/.px0/output/logs/daily-commits-2026-08-24.md
+  · tools    composio:GITHUB_LIST_COMMITS x2
+             slack.post_message (stubbed)
+  · took     39.6s
+  · dry run  write tools were stubbed, not called
+
+read it here:
+  px0 runs open run_20260824-093444-f88a
+```
+
+`output` is written the same way a build writes it, so what was promised and what
+was produced read alike. A stdout workflow says `printed below` instead, and the
+text follows on stdout. `tools` gets a line per tool, counting repeats rather
+than listing them twice and marking the write tools a `--dry-run` stubbed.
+`attempt` appears only when a retry was needed. A store outside your home
+directory — a `PX0_HOME` elsewhere — is printed in full, having no `~` to
+abbreviate against.
+
+The rows are bullets, not ticks: each one is a fact about the run rather than a
+check that passed, and the verdict is the heading. A failure keeps the same
+shape, adding an `error` row — coloured rather than glyphed, so it stays in the
+same column as everything else — and pointing at `px0 runs logs`.
+
+The block is on stderr and the output text on stdout, so `px0 workflows run x >
+report.md` writes the report and leaves the summary on screen. `--quiet`
+suppresses it.
 
 ### `workflow`
 
@@ -174,7 +251,8 @@ cat notes.txt | px0 workflows run summarize --stdin
 
 ### `--quiet`
 
-Suppress the progress line on stderr. The output itself still prints.
+Suppress the progress spinner and the outcome block on stderr. The output itself
+still prints, and a failure still reports its error.
 
 - **Input:** flag, no value. Default off.
 
@@ -303,8 +381,41 @@ px0 workflows show friday-pr-digest --json | jq .tools
 ## `px0 workflows validate`
 
 Check a workflow without running it: that its frontmatter parses, its tools and
-guidelines exist, its inputs are read-only, its cron expression is valid, and
-its output target is allowed.
+guidelines exist, its inputs are read-only, every input argument resolves to a
+real value, its cron expression is valid, and its output target is allowed.
+
+The argument check is the one that catches an unfinished workflow. An argument
+left as a placeholder (`owner: <OWNER>`) or referencing something nothing
+provides (`author: {{github_username}}`) used to be sent to the connector as
+written, and came back as the service's own error — GitHub answers
+`<OWNER>/<REPO>` with a 404 "Not Found", which reads as a missing repository
+rather than a workflow that was never finished. Both are now reported here, and
+by every run before it touches the network.
+
+An argument may reference:
+
+| Reference | Resolves to |
+| --------- | ----------- |
+| `{{input.<name>}}` | a value passed as `--input <name>=<value>` |
+| `{{config.<key>}}` | a key from the store's `config.toml` |
+| `{{<earlier_input_id>}}` | the result of an input declared *above* this one |
+| `{{now}}` | the current UTC time as an ISO 8601 timestamp |
+| `{{today}}`, `{{date}}` | today's date, `YYYY-MM-DD` |
+| `{{datetime}}` | the same instant as `now`, filename-safe |
+| `{{now-<N><unit>}}` | `N` units ago as an ISO 8601 timestamp — unit `m`, `h`, `d`, or `w`, so `{{now-24h}}` is 24 hours ago |
+
+The clock placeholders are how a workflow says "since yesterday": a scheduled run
+cannot be handed a literal timestamp, and `since: {{now-24h}}` is what a
+connector's `since` parameter wants. Anything outside this list is an error
+rather than a silent empty value.
+
+`output.path` takes the same clock placeholders and nothing else — no input ids,
+since a filename cannot hold a tool result. Either brace style works
+(`{date}` or `{{date}}`), and values are rendered filename-safe there: `{{now}}`
+is `2026-08-24T09-23-53` in a path and `2026-08-24T09:23:53Z` in an argument.
+An unknown one is reported here rather than when the run routes its output,
+which happens after the model call — a typo in a filename used to cost a whole
+run to find.
 
 ### `workflow`
 

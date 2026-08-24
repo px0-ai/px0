@@ -28,6 +28,7 @@ from px0 import (
     connect as connect_mod,
     credentials as creds_mod,
     daemon as daemon_mod,
+    guidelines as guidelines_mod,
     localtools,
     mcp as mcp_mod,
     notify as notify_mod,
@@ -585,6 +586,20 @@ def _abort_if_blocked(outcome: _AuthOutcome) -> None:
     sys.exit(EXIT_CONNECTOR_ERROR)
 
 
+def _select_guidelines(home: Path, config: dict, description: str, plan) -> list[str]:
+    """Attaches the guidelines this workflow's output is judged against.
+
+    A model reads each guideline's frontmatter description and picks the ones
+    that govern this workflow, which is the same question a person would answer
+    off the listing. Skipped without a spinner when the store has none, so an
+    empty store does not narrate a decision there was nothing to decide.
+    """
+    if not guidelines_mod.attachable(home):
+        return []
+    with ui.spinner("Checking which guidelines apply"):
+        return builder_mod.select_guidelines(home, config, description, plan)
+
+
 def _author_guidelines(home: Path, config: dict, description: str, plan,
                        attached: list[str], assume_yes: bool) -> list[str]:
     """Writes the guidelines this workflow depends on that the store lacks.
@@ -638,6 +653,11 @@ def _write_one_guideline(home: Path, config: dict, proposal, description: str,
         ui.heading(f"guideline: {proposal.title}")
         if proposal.why:
             ui.bullet(ui.dim(proposal.why))
+        # The description is shown because it is not decoration: it is the line
+        # every later `px0 workflows new` matches this file against, so a user
+        # who disagrees with it should see it before the file lands.
+        if proposal.description:
+            ui.kv("applies when", proposal.description)
         ui.info("would be saved as", f"guidelines/{proposal.path}", stream=sys.stdout)
         print()
         print(content, flush=True)
@@ -648,7 +668,8 @@ def _write_one_guideline(home: Path, config: dict, proposal, description: str,
             ui.info("skipped", stream=sys.stdout)
             return None
 
-        dest = builder_mod.save_guideline(home, proposal.path, content)
+        dest = builder_mod.save_guideline(home, proposal.path, content,
+                                          description=proposal.description)
         ui.ok("wrote", str(dest))
         ui.hint(f"reword it any time with `px0 guidelines edit {Path(proposal.path).stem}`")
         return proposal.path
@@ -840,7 +861,7 @@ def _build_workflow(home: Path, config: dict, description: str,
                 workflow_id = builder_mod.generate_slug(config, plan.description)
             ui.info("new id", workflow_id)
 
-    guidelines = builder_mod.choose_guidelines(home, description)
+    guidelines = _select_guidelines(home, config, description, plan)
     # After the commit to write, not before: nobody should be asked to author
     # a convention for a workflow they are about to cancel.
     guidelines += _author_guidelines(home, config, description, plan, guidelines, assume_yes)
@@ -849,18 +870,27 @@ def _build_workflow(home: Path, config: dict, description: str,
     dest = builder_mod.save_workflow(home, workflow_id, content)
 
     ui.heading(f"{'updated' if existing_id else 'created'} {ui.accent(workflow_id)}")
-    rows = [("workflow", str(dest))]
+    # Every path as `~/.px0/...`, the same way a run reports what it wrote.
+    rows = [("workflow", paths.display(dest))]
     if plan.trigger.get("schedule"):
         rows.append(("schedule", plan.trigger["schedule"]))
     if guidelines:
-        rows.append(("guidelines", ", ".join(f"guidelines/{g}" for g in guidelines)))
+        rows.append(("guidelines",
+                     [paths.display(paths.guidelines_dir(home) / g) for g in guidelines]))
     if plan.output.get("target") == "file" and plan.output.get("path"):
-        rows.append(("output", plan.output["path"]))
+        # Where a run will actually put it, not the fragment the plan wrote: a run
+        # files `output.path` under `output/`, which the frontmatter leaves
+        # implicit. Placeholders stay unrendered -- the file does not exist yet,
+        # and today's date would be the wrong name tomorrow.
+        rows.append(("output",
+                     paths.display(runner.output_destination(home, plan.output["path"]))))
     if selected:
-        rows.append(("tools", ", ".join(t.id for t in selected)))
+        rows.append(("tools", [t.id for t in selected]))
+    # Bullets rather than ticks, as in a run's own block: these are the workflow's
+    # fields, and the one thing that happened -- it was created -- is the heading.
     width = max(len(label) for label, _ in rows)
     for label, detail in rows:
-        ui.ok(label, detail, width=width)
+        ui.field(label, detail, width=width)
 
     if guidelines:
         ui.hint("each is inlined verbatim into every run of this workflow")
@@ -898,6 +928,82 @@ def _pick_workflow(home: Path, for_stdin: bool, verb: str = "run") -> str:
     return workflows[choice][0]
 
 
+def _tool_call_summary(tool_calls: list[dict]) -> list[str]:
+    """Which tools a run actually called, with repeats counted and stubs marked.
+
+    A run's own record of what it touched, one tool per line. `x2` rather than
+    two identical lines, because the interesting part is which tools ran, not how
+    long the list is.
+    """
+    counts: dict[str, int] = {}
+    stubbed: set[str] = set()
+    for call in tool_calls:
+        tool = call.get("tool") or "?"
+        counts[tool] = counts.get(tool, 0) + 1
+        if call.get("stubbed"):
+            stubbed.add(tool)
+    lines = []
+    for tool, n in counts.items():
+        label = tool if n == 1 else f"{tool} x{n}"
+        lines.append(f"{label} (stubbed)" if tool in stubbed else label)
+    return lines
+
+
+def _print_run_outcome(home: Path, workflow_id: str, record: dict,
+                       error: str = "") -> None:
+    """Reports a finished run as an aligned block, the way a build reports itself.
+
+    The one line this replaced put the run id and an output path in one string --
+    `run_2026... -> output/logs/daily.md` -- which is the shape that reads worst
+    when you want to act on it: neither half can be copied without editing, and
+    the path was relative to a store root that went unnamed. Every field is its
+    own bulleted row now, and every path is written `~/.px0/...`: short, and
+    still a path a shell will open.
+
+    Written to stderr, like the line before it: stdout belongs to the run's own
+    output text and to `--json`.
+    """
+    ok = not error and record.get("outcome") == "success"
+    verdict = "success" if ok else ui.alert("failed", stream=sys.stderr)
+    ui.heading(f"{verdict} {ui.accent(workflow_id, stream=sys.stderr)}", stream=sys.stderr)
+
+    rows = []
+    out = record.get("output") or {}
+    if record.get("id"):
+        rows.append(("run", record["id"]))
+    if out.get("target") == "file" and out.get("path"):
+        # `~/.px0/...`: short enough to read, and still a path the shell expands,
+        # which a bare `output/logs/daily.md` relative to an unnamed store is not.
+        rows.append(("output", paths.display(home / out["path"])))
+    elif out.get("target") == "stdout":
+        rows.append(("output", "printed below"))
+    if record.get("tool_calls"):
+        rows.append(("tools", _tool_call_summary(record["tool_calls"])))
+    if record.get("attempt", 1) > 1:
+        rows.append(("attempt", f"{record['attempt']} of {record.get('attempts', '?')}"))
+    if record.get("duration_seconds") is not None:
+        rows.append(("took", f"{record['duration_seconds']:.1f}s"))
+    if record.get("dry_run"):
+        rows.append(("dry run", "write tools were stubbed, not called"))
+    if error:
+        rows.append(("error", ui.alert(error, stream=sys.stderr)))
+
+    # Bullets, not ticks: every row here is a fact about the run, and the one
+    # verdict -- success or failed -- is the heading. The error carries its own
+    # colour rather than a `✗`, which would sit two columns left of every other
+    # label and break the block it is part of.
+    width = max(len(label) for label, _ in rows) if rows else 0
+    for label, detail in rows:
+        ui.field(label, detail, width=width, stream=sys.stderr)
+
+    if ok and out.get("target") == "file":
+        ui.hint("read it here:", stream=sys.stderr)
+        ui.command(f"px0 runs open {record['id']}", stream=sys.stderr)
+    elif not ok and record.get("id"):
+        ui.hint("what the run did before it failed:", stream=sys.stderr)
+        ui.command(f"px0 runs logs {record['id']}", stream=sys.stderr)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     """Handles `px0 workflows run`: executes a workflow with inputs collected from --stdin and
     --input KEY=VALUE flags, then prints the outcome and, depending on --json/--quiet
@@ -924,16 +1030,14 @@ def cmd_run(args: argparse.Namespace) -> None:
                 retry=not getattr(args, "no_retry", False),
             )
     except runner.RunError as e:
-        ui.err("run failed", str(e))
+        if args.quiet:
+            ui.err("run failed", str(e))
+        else:
+            _print_run_outcome(home, workflow_id, e.record, error=str(e))
         sys.exit(EXIT_USER_ERROR)
 
     if not args.quiet:
-        out = record.get("output", {})
-        detail = record["id"]
-        if out.get("target") == "file":
-            detail += f" -> {out.get('path')}"
-        role = ui.ok if record["outcome"] == "success" else ui.err
-        role(f"{workflow_id} {record['outcome']}", detail, stream=sys.stderr)
+        _print_run_outcome(home, workflow_id, record)
 
     if args.json:
         _dump(args, record)
@@ -984,32 +1088,21 @@ def _print_workflows(home: Path, heading: bool) -> None:
         ui.hint("none yet -- describe one with `px0 workflows new`")
 
 
-def _first_rule(path: Path) -> str:
-    """A guideline's first `## ` heading, as the one-line detail beside its name.
-
-    The headings are the rules, so the first one says more about what the file
-    holds than a byte count or a claim tally would.
-    """
-    try:
-        for line in path.read_text().splitlines():
-            if line.startswith("## "):
-                return line[3:].strip()
-    except OSError:
-        return "unreadable"
-    return ""
-
-
 def _print_guidelines(home: Path, heading: bool) -> None:
     """Every guideline, numbered the way `workflows run` numbers its picker.
 
     Same rows as the picker on purpose: guidelines are a short list you scan and
     then name, so it should look like the other short list px0 shows you.
+
+    The detail is the file's frontmatter description -- the same line a build
+    matches a new workflow against -- so what decides an attachment is what the
+    user reads here. Files written before frontmatter existed fall back to their
+    first rule rather than showing a blank column.
     """
-    base = paths.guidelines_dir(home)
-    files = sorted(base.rglob("*.md"))
+    files = guidelines_mod.load_all(home)
     if heading:
         ui.heading(f"guidelines {ui.dim(f'({len(files)})')}")
-    ui.numbered([(str(p.relative_to(base)), _first_rule(p)) for p in files])
+    ui.numbered([(rel, g.summary) for rel, g in files.items()])
     if not files:
         ui.hint("none yet -- `px0 workflows new` drafts one when a workflow needs it")
 
@@ -1868,8 +1961,9 @@ def cmd_runs(args: argparse.Namespace) -> None:
                     "run it directly to execute for real")
         with ui.spinner(f"Rerunning {wf_id}"):
             new_record = runner.run(home, config, wf_id, trigger="manual", dry_run=was_dry)
-        role = ui.ok if new_record["outcome"] == "success" else ui.err
-        role(f"reran as {new_record['id']}", new_record["outcome"], stream=sys.stderr)
+        # The same block `workflows run` prints: a rerun is a run, and the new
+        # run id is in the `run` row rather than folded into a sentence.
+        _print_run_outcome(home, wf_id, new_record)
         if new_record.get("output", {}).get("target") == "stdout":
             print(new_record["output"].get("text", ""))
         return

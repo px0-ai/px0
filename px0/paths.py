@@ -9,6 +9,27 @@ def store_home() -> Path:
     return Path(os.environ.get("PX0_HOME", "~/.px0")).expanduser()
 
 
+def display(path: Path | str) -> str:
+    """A path the way a person reads it: `~/.px0/output/daily.md`.
+
+    Shown instead of the full absolute form, which is mostly the reader's own
+    home directory repeated on every row, and instead of a bare store-relative
+    path, which does not say which store it is relative to. Still a path anyone
+    can paste into an editor, since the shell expands the `~`.
+
+    Left absolute when it is not under the home directory -- a `PX0_HOME`
+    somewhere else, or an output path that escaped the store.
+    """
+    p = Path(path)
+    try:
+        rel = p.relative_to(Path.home())
+    except ValueError:
+        return str(p)
+    # `relative_to` answers "." for the home directory itself, which would read
+    # as `~/.` -- a path that works and looks like a mistake.
+    return "~" if str(rel) == "." else f"~/{rel}"
+
+
 def workflows_dir(home: Path | None = None) -> Path:
     """Path to the versioned workflows folder under `home` (or the default store)."""
     return (home or store_home()) / "workflows"
