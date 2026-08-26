@@ -360,9 +360,15 @@ def revert_change(home: Path, change_id: str, actor: str) -> str | None:
 
 def _walk_versioned_files(home: Path) -> list[Path]:
     """Lists every file on disk that falls under version control: all
-    markdown under workflows/ and guidelines/, plus config.toml."""
+    markdown under workflows/, guidelines/, and memory/, plus config.toml.
+
+    memory/ is versioned for a reason the others are not: px0 writes to it on
+    its own initiative. What an assistant has come to believe about you should
+    be as reviewable and as revertible as anything you wrote yourself.
+    """
     files = []
-    for base in (paths.workflows_dir(home), paths.guidelines_dir(home)):
+    for base in (paths.workflows_dir(home), paths.guidelines_dir(home),
+                 paths.memory_dir(home)):
         if base.exists():
             files.extend(p for p in base.rglob("*.md") if p.is_file())
     cfg = paths.config_path(home)

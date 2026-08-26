@@ -67,6 +67,56 @@ would leave the key one change-log entry away. Both are scrubbed, or
 
 The retrieval index is not exported. Run `px0 brain reindex` after importing.
 
+## `px0 store sync`
+
+Bring this store and a shared folder into line, on more than one machine.
+
+`export` and `import` copy a whole store, which is the right answer once —
+setting up a second machine — and the wrong answer every time after, because it
+overwrites. So people pointed Dropbox at `~/.px0` instead, and that has a
+specific, quiet failure: the version history is a SQLite database, and two
+machines writing it produce a file that is neither machine's history. Nothing
+notices until a revert needs it.
+
+This is the deliberate version. Content is Markdown, so it merges file by file.
+History does not merge and is not pretended to: each machine keeps its own.
+
+```shell
+px0 store sync ~/Dropbox/px0-shared --dry-run   # what would move
+px0 store sync ~/Dropbox/px0-shared
+px0 store sync ~/Dropbox/px0-shared --pull      # take only
+px0 store sync ~/Dropbox/px0-shared --push      # send only
+```
+
+`workflows/`, `guidelines/`, `memory/`, `brain/`, and `tools/` travel.
+`.state/` never does — it holds the history, credentials, the retrieval index,
+and every queue, all of them either machine-specific or unmergeable.
+
+### Three rules, each because the alternative loses work
+
+**Nothing is overwritten silently.** A file changed on both sides is written
+beside yours as `<name>.md.conflict-<machine>` and reported. Two versions are
+two decisions, and px0 is not in a position to know which one you meant. The
+marker goes after the extension on purpose: a `.md` file in `workflows/`
+carrying the same `id:` would be loaded as a second workflow, and which of the
+two you got would depend on directory order.
+
+Once both sides hold the same bytes — because you resolved it, or because they
+converged — that is recorded as agreement, so the next ordinary edit syncs
+rather than reporting the same conflict again.
+
+**A sync never deletes.** A file missing on one side may be one that side has
+not pulled yet, and treating absence as deletion is how a sync loses work.
+
+**The remote is just a directory.** Whatever puts it on both machines —
+Dropbox, iCloud, a git repo, a USB stick — is your business and none of px0's.
+It is created for you on the first sync if its parent exists; a path whose
+parent is also missing is refused, because that is what a typo looks like and
+the wrong answer would be a store syncing somewhere nothing else can see.
+
+`px0 doctor` reports when the store itself looks like it sits inside a syncing
+folder, since that is the case this command exists to replace.
+
 ## Exit codes
 
 | Code | When |

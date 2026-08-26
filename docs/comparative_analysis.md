@@ -2,6 +2,20 @@
 
 This matrix evaluates **`px0`** alongside representative offerings across the AI agent, workflow automation, and personal knowledge landscape.
 
+`✓` supported, `~` supported with a deliberate limit (see the factor summary),
+`-` not offered, `?` not verified.
+
+> **On the other columns.** The px0 column is checked against this repository and
+> is kept current with it. The competitor columns were compiled when this page
+> was written and have not been re-verified since; treat them as a starting
+> point for your own comparison rather than as a claim about what those
+> projects can do today. Where a capability was added to px0 later, the
+> competitor cells for it read `?` rather than being guessed at.
+
+[^1]: This row was previously titled "Autonomous Self-Mutating Memory Loop" and
+scored `-` for px0. px0 now keeps a persistent memory of the user, so the row
+is renamed to describe the capability rather than one implementation of it.
+
 ---
 
 ## 1. Feature & Capability Matrix
@@ -21,7 +35,9 @@ This matrix evaluates **`px0`** alongside representative offerings across the AI
 | **Dry-Run Mode for Workflow Verification** | ✓ | - | - | - | ✓ | - | - |
 | **Workflow Change History & Rollback** | ✓ | - | - | - | - | - | - |
 | **Multi-Channel Chat Gateway (Discord/Telegram)**| - | ✓ | ✓ | - | ✓ | - | - |
-| **Autonomous Self-Mutating Memory Loop** | - | ✓ | - | - | - | - | - |
+| **Persistent Memory of the User** [^1] | ~ | ✓ | - | - | - | - | - |
+| **Writes Held for Human Approval** | ✓ | ? | ? | ? | ? | - | - |
+| **Self-Review from Its Own Run History** | ✓ | ? | ? | ? | ? | - | - |
 | **Multi-Agent Orchestration & Delegations** | - | ✓ | ✓ | ✓ | - | - | - |
 | **Full Python / TypeScript Code Framework** | - | - | - | ✓ | - | - | - |
 | **Drag-and-Drop Visual Graph Canvas** | - | - | - | - | ✓ | - | - |
@@ -44,7 +60,9 @@ This matrix evaluates **`px0`** alongside representative offerings across the AI
 - **Dry-Run Mode for Workflow Verification**: Allows testing a workflow structure, verifying inputs, and previewing planned actions before calling real external APIs or writing changes.
 - **Workflow Change History & Rollback**: Automatically snapshots workflow modifications, enabling users to inspect previous versions (`px0 changes`) and revert accidental edits.
 - **Multi-Channel Chat Gateway (Discord/Telegram)**: Connects agents directly into team chat platforms as persistent bots to converse with multiple team members across channels.
-- **Autonomous Self-Mutating Memory Loop**: An agentic memory architecture where the model autonomously rewrites its own memory, habits, and skills over long-running sessions.
+- **Persistent Memory of the User**: Standing facts about the user — their preferences, people, and projects — carried into every later run rather than re-established each time. px0 scores `~` rather than `✓` deliberately: it keeps such a memory (`px0 memory`, one versioned Markdown file per fact, inlined into every run) and drafts new ones from corrections you make, but it never writes one without being told to. The distinction is the point of the design, not a gap in it — an assistant that silently accumulates unreviewable beliefs about you is the failure mode this avoids.
+- **Writes Held for Human Approval**: A tool call that would leave a mark can be drafted rather than fired, shown in full with the output that prompted it, and sent only once a person agrees (`px0 approvals`). The run itself still completes.
+- **Self-Review from Its Own Run History**: The system reads its own past runs to say what is wrong with a workflow (`px0 workflows health`, arithmetic over run records) and to propose a revision, which can be replayed against the inputs a real past run had before it is accepted.
 - **Multi-Agent Orchestration & Delegations**: Native primitives for running multiple distinct AI agents (e.g., research agent, coder agent, reviewer agent) that pass messages and sub-tasks to each other.
 - **Full Python / TypeScript Code Framework**: A developer-centric SDK requiring code implementation, class inheritance, and custom logic to build agent workflows.
 - **Drag-and-Drop Visual Graph Canvas**: A web UI that allows users to connect nodes, routers, and logic branches on a visual canvas.

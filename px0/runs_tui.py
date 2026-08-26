@@ -43,6 +43,11 @@ def format_row(r: dict, widths: dict[str, int] | None = None) -> str:
     if r.get("dry_run"):
         # A rehearsal looked identical to a real run in the listing.
         marker += "  [dry-run]"
+    verdict = (r.get("review") or {}).get("verdict")
+    if verdict:
+        # A run someone judged reads differently from one nobody looked at, and
+        # the listing is where you go looking for the bad ones.
+        marker += f"  [{verdict}]"
     fields = [
         r.get("id", "").ljust(widths.get("id", 0)),
         str(r.get("workflow_id") or "").ljust(widths.get("workflow_id", 0)),
@@ -384,12 +389,16 @@ def _detail_view(stdscr, home: Path, config: dict, record_brief: dict) -> None:
                       _attr(_P_ACCENT, curses.A_BOLD) | curses.A_BOLD)
         
         # Metadata. Labels stay lowercase and aligned to match the plain commands.
+        review = record.get("review") or {}
         lines = [
             f"workflow: {record.get('workflow_id') or '-'}",
             f"trigger:  {record.get('trigger') or '-'}",
             f"outcome:  {record.get('outcome') or '-'}",
             f"duration: {record.get('duration_seconds', 'n/a')}s",
         ]
+        if review.get("verdict"):
+            note = f" -- {review['note']}" if review.get("note") else ""
+            lines.append(f"marked:   {review['verdict']}{note}")
 
         # Render prompt
         prompt = extract_rendered_prompt(raw_log)
@@ -440,7 +449,7 @@ def _detail_view(stdscr, home: Path, config: dict, record_brief: dict) -> None:
         stdscr.addstr(height - 2, 0, "─" * width, _attr(_P_FAINT, curses.A_DIM))
         _addkeys(stdscr, height - 1, width, [
             ("r", "rerun"), ("l", "log"), ("o", "output"),
-            ("w", "why"), ("esc", "back"),
+            ("w", "why"), ("m", "mark"), ("esc", "back"),
         ])
 
         key = stdscr.getch()
@@ -488,3 +497,31 @@ def _detail_view(stdscr, home: Path, config: dict, record_brief: dict) -> None:
             with _suspended():
                 print("--- provenance ---")
                 print(provenance.why(config, run_id))
+
+        elif key in (ord('m'), ord('M')):
+            # Marking belongs here more than anywhere: this is the screen where
+            # a person has just read what a run produced, which is the only
+            # moment they know whether it was any good.
+            with _suspended():
+                # Everything in here can fail in ways that must not take the
+                # browser down with them: the record can have aged out between
+                # the listing and the keystroke, and Ctrl-D at either prompt
+                # raises rather than answering.
+                try:
+                    print("--- mark this run ---")
+                    print("g = good, b = bad, c = clear, anything else cancels")
+                    answer = input("verdict: ").strip().lower()[:1]
+                    verdict = {"g": "good", "b": "bad"}.get(answer)
+                    if answer == "c":
+                        runs_mod.mark(config, run_id, None)
+                        print("cleared")
+                    elif verdict:
+                        note = input("what was right or wrong (optional): ").strip()
+                        runs_mod.mark(config, run_id, verdict, note=note)
+                        print(f"marked {verdict}")
+                    else:
+                        print("cancelled")
+                except (EOFError, KeyboardInterrupt):
+                    print("\ncancelled")
+                except (FileNotFoundError, ValueError, OSError) as e:
+                    print(f"could not mark it: {e}")

@@ -17,20 +17,33 @@ from px0 import cli
 # wrong as `px0 <entity> status`, the way `git status` would. `uninstall` is the
 # same kind of exception -- it acts on the install itself, not on one entity's
 # content, so `px0 <entity> uninstall` would read wrong the same way.
-FLAT = {"init", "doctor", "version", "update", "status", "completion", "uninstall"}
+#
+# `ask` is flat on the same grounds and is the one that needs saying out loud,
+# because an older `px0 ask` was deliberately removed and this is not it coming
+# back. That one was the brain-only ask, and it moved to `px0 brain search`'s
+# neighbour, `px0 brain ask`, precisely because it named one entity. The new
+# one routes a question to whichever of them can answer it -- the brain, a
+# workflow, a tool, memory, or nothing at all -- so there is no entity to put
+# in front of it. `px0 brain ask` still exists and still means the narrow
+# thing.
+FLAT = {"init", "doctor", "version", "update", "status", "completion",
+        "uninstall", "ask"}
 
 # The verbs each entity answers to. Anything added to a group should be added
 # here too, so the surface stays something you can read in one place.
 GROUPS = {
     "workflows":  {"new", "run", "edit", "list", "show", "validate", "delete", "rename",
-                   "copy", "disable", "enable"},
+                   "copy", "disable", "enable", "health", "improve", "replay", "recipes"},
     "brain":      {"add", "refresh", "list", "search", "ask", "reindex", "show", "rm",
                    "export"},
+    "approvals":  {"list", "show", "approve", "reject", "purge", "edit"},
+    "inbox":      {"list", "read", "archive", "clear"},
+    "memory":     {"list", "add", "show", "forget", "search", "suggest"},
     "guidelines": {"list", "log", "edit", "show", "rm"},
     "runs":       {"list", "show", "output", "rerun", "logs", "why", "cancel", "prune",
-                   "open"},
+                   "open", "mark", "events", "stats"},
     "changes":    {"list", "show", "revert"},
-    "store":      {"export", "list", "import", "path", "verify"},
+    "store":      {"export", "list", "import", "path", "verify", "sync"},
     "config":     {"list", "get", "set", "unset", "edit", "path", "model", "composio"},
     "tools":      {"list", "search", "call", "connect", "disconnect", "refresh"},
     "daemon":     {"install", "uninstall", "status", "start", "stop", "restart",
@@ -70,12 +83,23 @@ def test_each_entity_exposes_exactly_its_verbs(entity, verbs):
     assert _verbs(entity) == verbs
 
 
-@pytest.mark.parametrize("gone", ["new", "run", "list", "ask", "search", "why", "consolidate"])
+@pytest.mark.parametrize("gone", ["new", "run", "list", "search", "why", "consolidate"])
 def test_the_old_flat_verbs_are_gone(gone):
-    """A hard break: these must error, not resolve to something unexpected."""
+    """A hard break: these must error, not resolve to something unexpected.
+
+    `ask` used to be on this list and is deliberately no longer: see FLAT
+    above. The rest are verbs that named an entity and now live under it.
+    """
     assert gone not in _top_level()
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args([gone, "x"])
+
+
+def test_ask_routes_rather_than_naming_an_entity():
+    """The flat `ask` is the router, and the narrow brain-only ask is still
+    where it was -- so nothing that learned `px0 brain ask` has been broken."""
+    assert "ask" in _top_level()
+    assert "ask" in _verbs("brain")
 
 
 @pytest.mark.parametrize("argv, handler", [
@@ -192,3 +216,29 @@ def test_an_unknown_key_is_a_user_error_not_an_argparse_error():
     assert args.key == "not.a.key"
     with pytest.raises(ValueError, match="unknown config key"):
         config_mod.get_key({}, "not.a.key")
+
+
+def test_every_leaf_command_can_be_dispatched():
+    """Every leaf must resolve a `func`, or running it raises AttributeError in
+    main() instead of doing anything.
+
+    Inheritance is the subtlety and the reason this is worth pinning. Most
+    groups set one `func` on the group and every verb under it inherits;
+    `store` sets one per verb instead, so a verb added there without its own
+    `func` parses cleanly, appears in `--help`, satisfies the shape test above,
+    and then crashes when run. That is exactly how `store sync` first shipped.
+    """
+    missing = []
+
+    def walk(parser, path, inherited):
+        resolved = parser._defaults.get("func", inherited)
+        sub = _subparsers(parser)
+        if sub is None:
+            if resolved is None:
+                missing.append(path)
+            return
+        for name, child in sub.choices.items():
+            walk(child, f"{path} {name}", resolved)
+
+    walk(cli.build_parser(), "px0", None)
+    assert missing == []

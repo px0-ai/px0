@@ -145,6 +145,14 @@ class Workflow:
     # {"max_attempts": N, "backoff_seconds": S}: how many times a failed run is
     # retried before it is recorded as failed. Overrides runs.* config.
     retry: dict = field(default_factory=dict)
+    # True, False, or a list of tool ids: which of this workflow's write tools
+    # must wait for a person before they fire. None means "whatever
+    # tools.confirm_writes says", so a store-wide default still reaches the
+    # workflows that never mention it.
+    confirm: bool | list | None = None
+    # Whether a run keeps what its inputs resolved to, so a later revision can
+    # be compared against the same world. None follows `runs.capture_inputs`.
+    capture: bool | None = None
     guidelines: list[str] = field(default_factory=list)
     inputs: list[InputSpec] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
@@ -212,6 +220,8 @@ def parse(path: Path) -> Workflow:
         enabled=front.get("enabled", True),
         on_failure=front.get("on_failure", {}) or {},
         retry=front.get("retry", {}) or {},
+        confirm=front.get("confirm"),
+        capture=front.get("capture"),
         guidelines=front.get("guidelines", []) or [],
         inputs=inputs,
         tools=front.get("tools", []) or [],
@@ -322,6 +332,103 @@ def _validate_retry(wf: "Workflow") -> list[str]:
     return errors
 
 
+# What a pipeline stage may be conditional on. Kept to two, because both are
+# facts about the previous stage's output that px0 can check itself -- anything
+# richer would be a language, and a workflow body is where judgement belongs.
+PIPELINE_CONDITIONS = ("always", "has_output", "no_output")
+
+
+def pipeline_stages(wf: "Workflow") -> list[dict]:
+    """A pipeline's stages, normalized to `{workflow, when}`.
+
+    Accepts both shapes a pipeline can be written in: a plain list of ids, and
+    a list of mappings that say when each stage should run. The plain form is
+    every existing pipeline in every store, so it stays the default reading and
+    means `when: always`.
+    """
+    stages = []
+    for entry in wf.pipeline or []:
+        if isinstance(entry, str):
+            stages.append({"workflow": entry, "when": "always"})
+        elif isinstance(entry, dict):
+            stages.append({
+                "workflow": str(entry.get("workflow") or entry.get("id") or ""),
+                "when": str(entry.get("when") or "always"),
+            })
+    return stages
+
+
+def _validate_pipeline(wf: "Workflow", home: Path) -> list[str]:
+    """Checks a pipeline's stages exist and their conditions are ones px0 knows."""
+    if not wf.pipeline:
+        return []
+    errors = []
+    known = load_all(home)
+    for i, stage in enumerate(pipeline_stages(wf)):
+        if not stage["workflow"]:
+            errors.append(f"pipeline[{i}] names no workflow")
+            continue
+        if stage["workflow"] not in known:
+            errors.append(f"pipeline[{i}] references unknown workflow: {stage['workflow']}")
+        elif known[stage["workflow"]].pipeline:
+            errors.append(f"pipeline[{i}] stage {stage['workflow']!r} is itself a "
+                          "pipeline; pipelines cannot nest")
+        if stage["when"] not in PIPELINE_CONDITIONS:
+            errors.append(
+                f"pipeline[{i}].when must be one of {', '.join(PIPELINE_CONDITIONS)}, "
+                f"got {stage['when']!r}")
+        if i == 0 and stage["when"] != "always":
+            # There is no previous output for the first stage to be conditional
+            # on, so a condition there can only ever mean one thing and is
+            # almost certainly a mistake about which stage it belongs to.
+            errors.append("pipeline[0].when has no previous stage to test; "
+                          "put the condition on the stage that depends on it")
+    return errors
+
+
+def _validate_timezone(wf: "Workflow") -> list[str]:
+    """Checks `trigger.timezone` names a zone this machine knows.
+
+    Refused rather than ignored: a misspelled zone that silently fell back to
+    machine local time would look like it worked and fire at the wrong hour,
+    which is the exact failure the setting exists to prevent.
+    """
+    name = (wf.trigger or {}).get("timezone")
+    if name is None:
+        return []
+    if not isinstance(name, str) or not name.strip():
+        return ["trigger.timezone must be a zone name like 'Asia/Kolkata'"]
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(name)
+    except Exception:
+        return [f"trigger.timezone {name!r} is not a zone this machine knows"]
+    return []
+
+
+def _validate_confirm(wf: "Workflow", home: Path) -> list[str]:
+    """Checks a `confirm:` block: a bool, or a list of this workflow's own tools.
+
+    A named tool that the workflow cannot call is refused rather than ignored,
+    because the failure is silent and dangerous in one direction: a user who
+    misspells the tool they wanted held back gets a workflow that sends it
+    without asking, and nothing anywhere says so.
+    """
+    if wf.confirm is None or isinstance(wf.confirm, bool):
+        return []
+    if not isinstance(wf.confirm, list):
+        return ["confirm: must be true, false, or a list of tool ids"]
+    errors = []
+    for tool_id in wf.confirm:
+        if not isinstance(tool_id, str):
+            errors.append(f"confirm[] entries must be tool ids, got {tool_id!r}")
+        elif tool_id not in wf.tools:
+            errors.append(
+                f"confirm[] names {tool_id!r}, which is not in this workflow's tools")
+    return errors
+
+
 def _validate_watch(wf: "Workflow", home: Path) -> list[str]:
     """Checks a trigger.watch block: a read-only tool, and a field to dedupe on.
 
@@ -344,6 +451,13 @@ def _validate_watch(wf: "Workflow", home: Path) -> list[str]:
         errors.append(f"trigger.watch tool {tool_id!r} is a write tool; a watch only reads")
     if spec.get("args") is not None and not isinstance(spec["args"], dict):
         errors.append("trigger.watch.args must be a mapping")
+    minimum = spec.get("min_items")
+    if minimum is not None:
+        try:
+            if int(minimum) < 1:
+                errors.append("trigger.watch.min_items must be at least 1")
+        except (TypeError, ValueError):
+            errors.append(f"trigger.watch.min_items must be a number, got {minimum!r}")
     every = spec.get("every")
     if every is not None:
         try:
@@ -352,8 +466,10 @@ def _validate_watch(wf: "Workflow", home: Path) -> list[str]:
                 errors.append(f"trigger.watch.every must be at least {MIN_WATCH_SECONDS}s")
         except ValueError:
             errors.append(f"trigger.watch.every {every!r} is not a duration like '15m'")
-    if wf.output.get("target") not in (None, "file"):
-        errors.append("a watched workflow's output.target must be 'file'")
+    if wf.output.get("target") not in (None, "file", "inbox"):
+        # The rule exists because nobody is watching stdout when a poll fires.
+        # An inbox delivery answers that as well as a file does.
+        errors.append("a watched workflow's output.target must be 'file' or 'inbox'")
     return errors
 
 
@@ -456,15 +572,6 @@ def validate(wf: Workflow, home: Path) -> list[str]:
         if not tools.exists(t, home):
             errors.append(f"tools[] references unknown tool: {t}")
 
-    if wf.pipeline:
-        all_wf = load_all(home)
-        for stage in wf.pipeline:
-            if stage not in all_wf:
-                errors.append(f"pipeline[] references unknown workflow: {stage}")
-            elif all_wf[stage].pipeline:
-                errors.append(f"pipeline[] stage {stage!r} is itself a pipeline; "
-                               f"pipelines cannot nest")
-
     if not isinstance(wf.enabled, bool):
         errors.append(f"enabled must be true or false, got {wf.enabled!r}")
 
@@ -480,14 +587,24 @@ def validate(wf: Workflow, home: Path) -> list[str]:
             croniter(schedule)
         except (ValueError, KeyError) as e:
             errors.append(f"trigger.schedule {schedule!r} is not a valid cron expression: {e}")
-        if wf.output.get("target") not in (None, "file"):
-            errors.append("a scheduled workflow's output.target must be 'file'")
+        if wf.output.get("target") not in (None, "file", "inbox"):
+            # The rule exists because nobody is watching stdout at 6am. An
+            # inbox delivery answers that as well as a file does -- better,
+            # since it also says the output arrived.
+            errors.append(
+                "a scheduled workflow's output.target must be 'file' or 'inbox'")
 
     errors.extend(_validate_watch(wf, home))
+    errors.extend(_validate_confirm(wf, home))
+    errors.extend(_validate_timezone(wf))
+    errors.extend(_validate_pipeline(wf, home))
+    if wf.capture is not None and not isinstance(wf.capture, bool):
+        errors.append("capture: must be true or false")
 
     target = wf.output.get("target")
-    if target and target not in ("stdout", "file"):
-        errors.append(f"output.target must be 'stdout' or 'file', got {target!r}")
+    if target and target not in ("stdout", "file", "inbox"):
+        errors.append(
+            f"output.target must be 'stdout', 'file', or 'inbox', got {target!r}")
     if target == "file" and not wf.output.get("path"):
         errors.append("output.target 'file' requires output.path")
 
@@ -527,5 +644,10 @@ def watch_spec(wf: Workflow) -> dict | None:
         seconds = max(MIN_WATCH_SECONDS, harness.parse_duration(str(every)))
     except ValueError:
         seconds = 900.0
+    try:
+        minimum = max(1, int(spec.get("min_items") or 1))
+    except (TypeError, ValueError):
+        minimum = 1
     return {"tool": spec["tool"], "args": spec.get("args") or {},
-            "key": spec.get("key"), "every_seconds": seconds}
+            "key": spec.get("key"), "every_seconds": seconds,
+            "min_items": minimum}

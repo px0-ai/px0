@@ -128,6 +128,42 @@ daemon's own persisted state is `.state/schedule.json`.
 | `update.auto_install` | Install updates automatically rather than only reporting them |
 | `logs.*` | Retention applied by the nightly pass — see [`px0 runs`](runs.md#related-configuration) |
 
+## Answering approvals from elsewhere
+
+While something is waiting in [`px0 approvals`](approvals.md) and a reply
+channel is configured, each tick polls it for replies naming an approval and
+acts on them. Only while something is waiting: a store with an empty queue
+should not be asking a channel every minute to be told so.
+
+## Housekeeping
+
+The nightly pass tidies everything px0 accumulates and would otherwise keep
+forever — run logs and records, read inbox entries, resolved approvals,
+captured fixtures, and finished conversations. Each sweep is wrapped
+separately, so one unwritable folder does not stop the rest.
+
+## Which clock schedules are read against
+
+By default the daemon evaluates cron in the machine's local time. That is right
+until the machine moves: a laptop carried two timezones over silently shifts
+every "9am" report by two hours, and the same happens twice a year without
+moving at all.
+
+Pin it per workflow, or for the whole store:
+
+```yaml
+trigger:
+  schedule: "0 9 * * 1-5"
+  timezone: Asia/Kolkata
+```
+
+```shell
+px0 config set schedule.timezone Asia/Kolkata
+```
+
+`px0 daemon status` reports each next fire on the same clock the tick will use,
+so what it promises is what the daemon intends.
+
 ## Exit codes
 
 | Code | When |

@@ -20,7 +20,7 @@ import os
 import shlex
 import subprocess
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from px0 import config as config_mod, paths
@@ -104,12 +104,43 @@ def file_read(args: dict, ctx) -> str:
     return _truncate(text, ctx.config)
 
 
+# Parts of the store a workflow may never write through `file.write`, however
+# broad its roots. The store itself is an allowed root -- that is what lets a
+# workflow write into `output/` -- and without this that also meant a workflow
+# given `file.write` could rewrite its own `tools:` allowlist to grant itself
+# more tools on the next run, turn `confirm_writes` off in `config.toml`, or
+# read-modify-write `.state/credentials.toml`. Those are different powers from
+# "write a file", and nothing distinguished them.
+#
+# Everything here has a purpose-built tool already: `memory.remember` for
+# memory, `brain.add` for the brain, `px0 workflows edit` for a workflow.
+PROTECTED_STORE_PATHS = ("workflows", "guidelines", "memory", ".state")
+PROTECTED_STORE_FILES = ("config.toml",)
+
+
+def _refuse_if_control_surface(home: Path, path: Path) -> None:
+    """Refuses a write that would edit the store's own control files."""
+    store = Path(home).expanduser().resolve()
+    try:
+        rel = path.relative_to(store)
+    except ValueError:
+        return  # outside the store entirely: an ordinary allowed root
+    head = rel.parts[0] if rel.parts else ""
+    if head in PROTECTED_STORE_PATHS or str(rel) in PROTECTED_STORE_FILES:
+        raise LocalToolError(
+            f"file.write may not touch {rel} -- that is px0's own configuration, "
+            "and a workflow able to edit it could widen what it is allowed to do. "
+            "Use the command or tool for it instead (`px0 workflows edit`, "
+            "`memory.remember`, `brain.add`)")
+
+
 def file_write(args: dict, ctx) -> dict:
     """Writes a text file inside an allowed root, creating parent directories.
 
     Write tool: it replaces whatever was at that path.
     """
     path = resolve_within_roots(ctx.home, ctx.config, args.get("path", ""), must_exist=False)
+    _refuse_if_control_surface(ctx.home, path)
     content = args.get("content")
     if content is None:
         raise LocalToolError("file.write needs content")
@@ -244,6 +275,53 @@ def brain_add(args: dict, ctx) -> dict:
     return {k: str(getattr(result, k)) for k in fields if getattr(result, k, None)}
 
 
+def memory_remember(args: dict, ctx) -> dict:
+    """Writes one fact into the store's memory. Write tool: it adds a file.
+
+    This is what lets a run keep something it learned -- that a repository is
+    the one you meant, that a report should go to a different channel -- rather
+    than rediscovering it every time. It writes to the store, not to a service,
+    and every write is a versioned change, so what an assistant has come to
+    believe about you stays something you can read and revert.
+    """
+    from px0 import memory as memory_mod
+
+    text = str(args.get("text") or "").strip()
+    if not text:
+        raise LocalToolError("memory.remember needs text to remember")
+    try:
+        entry = memory_mod.remember(
+            ctx.home, text,
+            kind=str(args.get("kind") or "fact"),
+            subject=str(args.get("subject") or "").strip(),
+            source=str(args.get("source") or "workflow"),
+            actor="workflow")
+    except memory_mod.MemoryError_ as e:
+        raise LocalToolError(str(e)) from e
+    return {"name": entry.name, "kind": entry.kind, "subject": entry.subject}
+
+
+def memory_recall(args: dict, ctx) -> list[dict]:
+    """Looks up what px0 remembers about something. Read tool.
+
+    A run already gets the memories relevant to its own instructions inlined;
+    this is for the case where what it needs to look up depends on what it
+    found -- a name in a pull request, a project mentioned in an email.
+    """
+    from px0 import memory as memory_mod
+
+    query = str(args.get("query") or "").strip()
+    if not query:
+        raise LocalToolError("memory.recall needs a query")
+    limit = args.get("limit")
+    try:
+        limit = max(1, int(limit)) if limit is not None else 5
+    except (TypeError, ValueError):
+        limit = 5
+    found = memory_mod.relevant(ctx.home, query)[:limit]
+    return [{"subject": m.subject, "kind": m.kind, "text": m.text} for m in found]
+
+
 # id -> (provider, description, params, is_write, handler)
 BUILTINS = {
     "file.read": ("file", "Read a text file from an allowed root",
@@ -261,6 +339,11 @@ BUILTINS = {
                    "method": "str"}, True, http_post),
     "brain.add": ("brain", "Ingest a URL or file into the brain",
                   {"source": "str*", "to": "str"}, True, brain_add),
+    "memory.remember": ("memory", "Remember one fact about the user or their work",
+                        {"text": "str*", "subject": "str", "kind": "str"},
+                        True, memory_remember),
+    "memory.recall": ("memory", "Look up what px0 remembers about something",
+                      {"query": "str*", "limit": "int"}, False, memory_recall),
 }
 
 
@@ -276,6 +359,11 @@ class UserTool:
     is_write: bool
     timeout: int
     cwd: str | None = None
+    # Environment variables this tool needs, by name. Values are never written
+    # here: px0 passes through what the environment already holds, and reports
+    # the ones that are missing rather than running a command that will fail
+    # halfway with a confusing error from the far end.
+    env: list[str] = field(default_factory=list)
 
 
 def _validate_user_tool(data: dict, source: Path) -> UserTool:
@@ -295,6 +383,11 @@ def _validate_user_tool(data: dict, source: Path) -> UserTool:
     params = data.get("params") or {}
     if not isinstance(params, dict) or not all(isinstance(v, str) for v in params.values()):
         raise LocalToolError(f"{source.name}: params must be a table of name = \"type\"")
+    env = data.get("env") or []
+    if isinstance(env, str):
+        env = [env]
+    if not isinstance(env, list) or not all(isinstance(e, str) for e in env):
+        raise LocalToolError(f"{source.name}: env must be a list of variable names")
     return UserTool(
         id=tool_id,
         description=str(data.get("description") or tool_id),
@@ -303,6 +396,7 @@ def _validate_user_tool(data: dict, source: Path) -> UserTool:
         is_write=bool(data.get("is_write", True)),
         timeout=int(data.get("timeout") or 120),
         cwd=str(data["cwd"]) if data.get("cwd") else None,
+        env=[str(e) for e in env],
     )
 
 
@@ -359,6 +453,34 @@ def _substitute(argv: list[str], args: dict) -> list[str]:
     return out
 
 
+def _tool_env(tool: UserTool) -> dict | None:
+    """The environment one declared tool runs in.
+
+    A tool that declares nothing inherits the whole environment, which is what
+    every existing tool already relies on. A tool that *does* declare its
+    variables gets a deliberately narrow one instead -- PATH, HOME, and what it
+    named -- so a credential meant for one command is not handed to every other
+    command a workflow can reach.
+
+    A declared variable that is not set is refused before the command runs,
+    because the alternative is a tool that fails halfway with whatever error
+    the far end gives an unauthenticated request.
+    """
+    import os
+
+    if not tool.env:
+        return None
+    missing = [name for name in tool.env if not os.environ.get(name)]
+    if missing:
+        raise LocalToolError(
+            f"{tool.id} needs {', '.join(missing)} in the environment, and "
+            f"{'they are' if len(missing) > 1 else 'it is'} not set")
+    base = {key: os.environ[key] for key in ("PATH", "HOME", "LANG", "TZ")
+            if key in os.environ}
+    base.update({name: os.environ[name] for name in tool.env})
+    return base
+
+
 def run_user_tool(tool: UserTool, args: dict, ctx) -> dict:
     """Runs a user-declared tool: argv substitution, no shell, capped output."""
     argv = _substitute(tool.command, args)
@@ -369,9 +491,10 @@ def run_user_tool(tool: UserTool, args: dict, ctx) -> dict:
     cwd = None
     if tool.cwd:
         cwd = resolve_within_roots(ctx.home, ctx.config, tool.cwd, must_exist=False)
+    env = _tool_env(tool)
     try:
         proc = subprocess.run(argv, cwd=str(cwd) if cwd else None, capture_output=True,
-                              text=True, timeout=tool.timeout)
+                              text=True, timeout=tool.timeout, env=env)
     except FileNotFoundError:
         raise LocalToolError(f"{tool.id}: command not found: {argv[0]}") from None
     except subprocess.TimeoutExpired:
@@ -391,6 +514,10 @@ EXAMPLE_TOOL = '''# One TOML file per tool, in this folder. px0 reads them at ru
 # command      argv, not a shell line. {placeholders} come from params.
 # params       name = "type"; a trailing * marks it required.
 # is_write     true if the command changes anything. Defaults to true.
+# env          names of environment variables the command needs. Declaring any
+#              of them narrows what the command can see to PATH, HOME and those
+#              -- so a token meant for this tool is not handed to every other.
+#              px0 refuses to run the tool when one of them is unset.
 # timeout      seconds. Defaults to 120.
 # cwd          optional working directory, inside an allowed file root.
 

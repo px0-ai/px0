@@ -1,4 +1,4 @@
-"""Telling you a run failed.
+"""Telling you a run failed, or is waiting for you.
 
 A scheduled workflow that fails at 07:00 used to fail in silence: the record
 was written, and nothing else happened. That caps what you can trust the
@@ -15,6 +15,13 @@ Three channels, chosen by `notify.on_failure`:
 
 A workflow may override all of it with an `on_failure` block in frontmatter,
 so the noisy hourly job can stay quiet while the nightly report shouts.
+
+The same three channels carry the other thing a scheduled run can produce that
+nobody is watching for: a write it drafted and held for approval. That waits
+indefinitely by definition, so an approval nobody is told about is worse than
+no approval at all -- it is a message the user believes went out. It follows
+`notify.on_approval`, which falls back to the failure policy rather than
+needing to be configured separately.
 """
 
 import platform
@@ -79,6 +86,36 @@ def message_for(record: dict) -> tuple[str, str]:
     return title, body
 
 
+def approval_message(record: dict, queued: list[dict]) -> tuple[str, str]:
+    """The title and body describing writes a run drafted and held back."""
+    wf = record.get("workflow_id", "workflow")
+    tools = ", ".join(sorted({str(q.get("tool")) for q in queued if q.get("tool")}))
+    count = len(queued)
+    title = f"px0: {wf} is waiting for you"
+    body = (f"{wf} drafted {count} call(s) that need your approval"
+            + (f" ({tools})" if tools else "") + ".\n"
+            "See exactly what would be sent with `px0 approvals`.")
+    return title, body
+
+
+def on_approval(home, config: dict, record: dict, queued: list[dict],
+                wf_on_failure: dict | None = None) -> dict:
+    """Notifies that a run is waiting on a decision, per policy. Never raises.
+
+    Falls back to the failure policy when `notify.on_approval` is unset, so a
+    store that already said how it wants to hear about failures does not have
+    to say it twice -- and so turning notifications on at all covers both
+    things a scheduled run can leave for you.
+    """
+    if not queued:
+        return {"notified": False, "channel": "none"}
+    override = (config_mod.get(config, "notify.on_approval", "") or "").strip()
+    policy = _policy(config, wf_on_failure)
+    if override:
+        policy["notify"] = override
+    return _send(home, config, policy, *approval_message(record, queued))
+
+
 def on_failure(home, config: dict, record: dict, wf_on_failure: dict | None = None) -> dict:
     """Notifies about a failed run, per policy. Never raises.
 
@@ -86,11 +123,19 @@ def on_failure(home, config: dict, record: dict, wf_on_failure: dict | None = No
     failure to notify is still visible in `px0 runs show`.
     """
     policy = _policy(config, wf_on_failure)
+    return _send(home, config, policy, *message_for(record))
+
+
+def _send(home, config: dict, policy: dict, title: str, body: str) -> dict:
+    """Delivers one notification through whichever channel the policy names.
+
+    Shared by both callers rather than duplicated, so "desktop works but tool
+    is misconfigured" reports the same way whether what is waiting is a failure
+    or an approval.
+    """
     channel = policy["notify"]
     if channel in ("", "none"):
         return {"notified": False, "channel": "none"}
-
-    title, body = message_for(record)
 
     if channel == "desktop":
         ok, detail = _desktop(title, body)

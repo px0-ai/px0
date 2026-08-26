@@ -4,8 +4,18 @@ Every execution — a workflow run, or a `brain ask` — is recorded: what trigg
 it, which tools it called, what it produced, and whether it succeeded. Records
 outlive their logs, so history stays inspectable after the logs age out.
 
-Implemented by `px0/runs.py` (records and retention) and `px0/runs_tui.py` (the
-interactive browser).
+A run leaves three artifacts behind, all under `logs.path`:
+
+| Artifact | Kept for | What it is for |
+| -------- | -------- | -------------- |
+| The **record** (`records/`) | `logs.record_retention_days`, a year by default | The run's summary. What every listing and `px0 workflows health` reads |
+| The **raw log** (`runs/`) | `logs.retention_days`, a fortnight | The full prompts and replies, for a person reading one run |
+| The **event stream** (`events/`) | with the raw log | One JSON object per turn, tool call, and outcome — the machine-readable account |
+
+Nothing derives a verdict from the raw log, because the raw log is usually gone.
+
+Implemented by `px0/runs.py` (records, events, and retention) and
+`px0/runs_tui.py` (the interactive browser).
 
 ```
 px0 runs                                 # interactive browser
@@ -18,6 +28,9 @@ px0 runs why <run_id>
 px0 runs cancel <run-id> [--force]
 px0 runs prune [--dry-run]
 px0 runs open <run-id>
+px0 runs mark <run-id> [--good [NOTE] | --bad [NOTE] | --clear] [--note NOTE]
+px0 runs events <run-id> [--json]
+px0 runs stats [--since WHEN] [--json]
 ```
 
 ---
@@ -64,6 +77,106 @@ Print the records as JSON, and nothing else.
 px0 runs list --failed --since 7d
 px0 runs list --workflow friday-pr-digest --json | jq -r '.[].id'
 ```
+
+---
+
+## `px0 runs mark`
+
+Say whether a run's output was any good.
+
+This is the one thing about a run that px0 cannot work out for itself. A record
+says whether a run *executed* cleanly — not whether the digest it wrote was
+worth reading. A workflow that succeeds every Friday and produces something
+useless looks perfect in every other field there is, so without a mark
+`px0 workflows improve` would be guessing from execution telemetry alone.
+
+The mark is stored on the run's own record, shows up in `px0 runs list` as
+`[good]` or `[bad]`, and is the strongest evidence a proposal is argued from.
+
+### `run-id` (required)
+
+- **Input:** a run id.
+
+### `--good [NOTE]`, `--bad [NOTE]`
+
+The verdict, and optionally what was right or wrong about it in a sentence.
+
+- **Input:** an optional note. `--bad` on its own records the verdict with no
+  note; `--bad "it missed the two PRs I reviewed"` records both.
+
+A bare `--bad` says a run was wrong. The note says *how*, which is the part an
+improvement pass can act on — so px0 asks for one when you leave it out.
+
+### `--note NOTE`
+
+The same note, as its own flag, for when a script would rather not attach a
+value to the verdict.
+
+### `--clear`
+
+Remove an earlier mark, for one made in haste.
+
+```shell
+px0 runs mark run_20260821-091500-a1b2 --bad "it summarized last week, not this week"
+px0 runs mark run_20260821-091500-a1b2 --good
+px0 runs mark run_20260821-091500-a1b2 --clear
+```
+
+You can also mark from the interactive browser: press `m` on a run's detail
+screen, which is where you have just read what it produced.
+
+---
+
+## `px0 runs events`
+
+One run's structured event stream, oldest first: the prompt it built, each model
+call and what it cost, each tool call and whether it was allowed, and how the
+run ended.
+
+Tool **argument names** are recorded, never their values — a tool's arguments
+routinely carry the content of the work, and the event stream is meant to be
+the part of a run that is safe to keep.
+
+### `run-id` (required)
+
+- **Input:** a run id.
+
+### `--json`
+
+Print the events as a JSON array.
+
+```shell
+px0 runs events run_20260821-091500-a1b2
+px0 runs events run_20260821-091500-a1b2 --json | jq 'select(.kind == "tool_call")'
+```
+
+A run that predates event logging, or whose stream has aged out, prints a line
+saying so rather than an error. Set `logs.events = false` to stop writing them.
+
+---
+
+## `px0 runs stats`
+
+Runs rolled up by workflow: how many, how many failed, how many you marked bad,
+and the median duration. Arithmetic over the records — no model call, no
+network.
+
+### `--since WHEN`
+
+Only runs after a point in time.
+
+- **Input:** a relative span — `<n>d`, `<n>w`, or `<n>h`.
+
+### `--json`
+
+The full rollup, including each workflow's findings.
+
+```shell
+px0 runs stats --since 30d
+```
+
+For one workflow in detail, and for what its runs say is wrong with it, see
+[`px0 workflows health`](workflows.md).
 
 ---
 
@@ -221,6 +334,7 @@ Differs from `px0 runs output`, which prints the text recorded on the run.
 | `logs.retention_days_failed` | Days to keep logs for failed runs |
 | `logs.record_retention_days` | Days to keep run records, which outlive the logs |
 | `logs.max_file_size_mb` | Single log file rotation size cap |
+| `logs.events` | Whether each run writes a structured event stream |
 
 Retention is applied by the daemon's nightly pass.
 

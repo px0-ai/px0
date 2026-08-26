@@ -312,6 +312,45 @@ def _check_update(home: Path) -> dict:
     return {"ok": True, "detail": f"{__version__} is current as of {checked_at}"}
 
 
+def _check_sync_hazard(home: Path) -> dict:
+    """Whether this store sits inside a folder-syncing service.
+
+    A specific, quiet corruption: px0's version history is a SQLite database,
+    and Dropbox or iCloud copying it while two machines write produces a file
+    that is neither machine's history. Nothing notices until a revert needs it,
+    which is exactly the moment it cannot be recovered from.
+    """
+    from px0 import sync as sync_mod
+
+    service = sync_mod.hazard(home)
+    if not service:
+        return {"ok": True, "detail": "not inside a syncing folder"}
+    return {
+        "ok": False,
+        "detail": f"the store is inside {service}, which will corrupt its history",
+        "fix": "move the store elsewhere and share content with `px0 store sync <dir>`",
+    }
+
+
+def _check_agent_loop(config: dict) -> dict:
+    """Whether the configured loop is one this harness can actually run."""
+    from px0 import harness as harness_mod
+
+    mode = str(config_mod.get(config, "model.agent_loop", "builtin") or "builtin")
+    if mode != "mcp":
+        return {"ok": True, "detail": f"{mode} loop"}
+    cmd = harness_mod.resolve_harness_cmd(
+        config_mod.get(config, "model.harness_cmd", "claude -p"))
+    if harness_mod.supports_agent_loop(cmd):
+        return {"ok": True, "detail": f"mcp loop, supported by {cmd.split()[0]}"}
+    return {
+        "ok": False,
+        "detail": f"model.agent_loop is 'mcp' but {cmd.split()[0]} has no verified "
+                  "way to be handed tools, so every run with tools will fail",
+        "fix": "px0 config set model.agent_loop auto",
+    }
+
+
 def run(home: Path, config: dict, quick: bool = False) -> dict:
     """Runs all health checks and returns a report with per-check results plus an
     overall all_ok flag. quick=True skips the slower checks (daemon, harness,
@@ -326,6 +365,8 @@ def run(home: Path, config: dict, quick: bool = False) -> dict:
         "unreferenced_guidelines": _check_unreferenced_guidelines(home),
         "guideline_descriptions": _check_guideline_descriptions(home),
         "update": _check_update(home),
+        "sync_hazard": _check_sync_hazard(home),
+        "agent_loop": _check_agent_loop(config),
     }
     if not quick:
         checks["daemon"] = _check_daemon(home, config)

@@ -103,6 +103,35 @@ class Plan:
     raw: dict = field(default_factory=dict)
 
 
+def similar_workflows(home: Path, description: str, limit: int = 3) -> list[tuple[str, float]]:
+    """Workflows that already look like what is being described.
+
+    Local word overlap, not a model call: this runs before every build, and a
+    round trip to be told "no, nothing like it" on the common case would be a
+    tax on the ordinary path. Being approximate is fine because the result is
+    shown to a person, who can see at a glance whether it is the same job.
+
+    The failure this prevents is quiet: `px0 workflows new` never looked, so a
+    store accumulated three near-identical digests that each fired on their own
+    schedule and each cost a run.
+    """
+    from px0 import memory as memory_mod
+    from px0 import workflow as workflow_mod
+
+    wanted = memory_mod._terms(description)
+    if not wanted:
+        return []
+    scored = []
+    for wf in workflow_mod.load_all(home).values():
+        theirs = memory_mod._terms(f"{wf.description} {wf.request}")
+        if not theirs:
+            continue
+        overlap = len(wanted & theirs) / max(len(wanted | theirs), 1)
+        if overlap >= 0.4:
+            scored.append((wf.id, round(overlap, 2)))
+    return sorted(scored, key=lambda pair: -pair[1])[:limit]
+
+
 def clarify(config: dict, description: str, qa: list[tuple[str, str]]) -> list[str]:
     """Asks what is still ambiguous about the request.
 
@@ -782,6 +811,21 @@ def save_guideline(home: Path, rel_path: str, body: str, description: str = "",
     """
     from px0 import claims, versioning  # deferred: both import builder-adjacent modules
 
+    # Checked here as well as at every call site. This is the function that
+    # touches the disk, so it is the one place a traversing path has to be
+    # stopped for every caller to be safe -- callers that sanitize first pay
+    # nothing, and one that forgets does not write outside the store.
+    dest = (paths.guidelines_dir(home) / rel_path)
+    base = paths.guidelines_dir(home).resolve()
+    try:
+        resolved = dest.resolve()
+        escaped = resolved != base and base not in resolved.parents
+    except OSError:
+        escaped = True
+    if escaped:
+        raise BuilderError(
+            f"refusing to write a guideline outside the store: {rel_path!r}")
+
     front, rules = guidelines_mod.split_frontmatter(body)
     if front is None:
         content = guidelines_mod.render(guidelines_mod.name_for(rel_path),
@@ -789,7 +833,6 @@ def save_guideline(home: Path, rel_path: str, body: str, description: str = "",
     else:
         content = body if body.endswith("\n") else body + "\n"
 
-    dest = paths.guidelines_dir(home) / rel_path
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content)
     claims.capture_guideline_change(

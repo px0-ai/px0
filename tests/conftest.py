@@ -305,4 +305,13 @@ def _no_real_harness_calls(monkeypatch, request):
             "the test with @pytest.mark.allow_harness"
         )
 
+    def _refuse_detailed(config, prompt, timeout=120):
+        # Runs go through `invoke_detailed`, not `invoke`. Guarding only the
+        # latter left the runner free to shell out to the real binary.
+        raise harness.HarnessError(
+            "test called harness.invoke_detailed without mocking it -- mock it, "
+            "or mark the test with @pytest.mark.allow_harness"
+        )
+
     monkeypatch.setattr(harness, "invoke", _refuse)
+    monkeypatch.setattr(harness, "invoke_detailed", _refuse_detailed)

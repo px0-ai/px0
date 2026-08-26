@@ -10,12 +10,19 @@ no network, no model call.
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from px0 import config as config_mod, daemon as daemon_mod, paths
+from px0 import analysis as analysis_mod
+from px0 import approvals as approvals_mod
+from px0 import config as config_mod, daemon as daemon_mod, inbox as inbox_mod, paths
 from px0 import runs as runs_mod
 from px0 import workflow as workflow_mod
 
 # How far back a failure still counts as news.
 RECENT_HOURS = 24
+
+# How far back the health pass looks. Wider than the failure window on purpose:
+# a workflow that has quietly produced nothing useful for a fortnight is not
+# news in the last day, and it is exactly what this is meant to surface.
+HEALTH_DAYS = 14
 
 
 def _parse(value) -> datetime | None:
@@ -72,8 +79,28 @@ def collect(home: Path, config: dict, hours: int = RECENT_HOURS) -> dict:
             failures.append(entry)
 
     running = runs_mod.list_running(home)
+    waiting = approvals_mod.pending_count(home, config)
+    unread = inbox_mod.unread_count(home)
 
     notify_policy = (config_mod.get(config, "notify.on_failure", "") or "none").strip() or "none"
+
+    # The deterministic health pass, over a wider window than the failure list.
+    # Kept to problems only: `px0 status` answers "is anything broken", and a
+    # note about a tool nobody calls is not that. Cheap enough to belong here --
+    # records are read once and the rest is arithmetic -- but never allowed to
+    # take the command down, since status is what a person runs when something
+    # is already wrong.
+    health: list[dict] = []
+    try:
+        overview = analysis_mod.overview(
+            home, config, since=now - timedelta(days=HEALTH_DAYS))
+        for row in overview["workflows"]:
+            for finding in row["findings"]:
+                if finding["severity"] != "problem" or finding["code"] == "failing":
+                    continue  # failures already have their own line, above
+                health.append({"workflow": row["workflow"], **finding})
+    except Exception:
+        overview = {"workflows": [], "problems": 0}
 
     problems = []
     if scheduled and not daemon.get("alive"):
@@ -91,6 +118,24 @@ def collect(home: Path, config: dict, hours: int = RECENT_HOURS) -> dict:
             "detail": "a failed run tells you nothing: notify.on_failure is 'none'",
             "fix": "px0 config set notify.on_failure desktop",
         })
+    if waiting:
+        # Not a fault, but the one thing here that is blocked on the user
+        # rather than on px0 -- a drafted message nobody answers is a message
+        # that never goes out.
+        problems.append({
+            "detail": f"{waiting} drafted call(s) are waiting for you to approve or reject",
+            "fix": "px0 approvals",
+        })
+    for entry in health[:3]:
+        problems.append({
+            "detail": f"{entry['workflow']}: {entry['detail']}",
+            "fix": entry.get("fix") or f"px0 workflows health {entry['workflow']}",
+        })
+    if len(health) > 3:
+        problems.append({
+            "detail": f"{len(health) - 3} more workflow problem(s) not listed",
+            "fix": "px0 workflows health",
+        })
     for err in parse_errors:
         problems.append({"detail": err, "fix": "px0 workflows validate"})
 
@@ -105,6 +150,9 @@ def collect(home: Path, config: dict, hours: int = RECENT_HOURS) -> dict:
         "next_fires": next_fires,
         "runs": {"recent": len(recent), "failed": len(failures),
                  "running": running, "failures": failures[:5]},
+        "health": {"days": HEALTH_DAYS, "problems": health},
+        "approvals": waiting,
+        "inbox": unread,
         "notify": notify_policy,
         "problems": problems,
         "ok": not problems,

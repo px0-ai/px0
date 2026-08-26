@@ -22,8 +22,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from croniter import croniter
+from zoneinfo import ZoneInfo
 
-from px0 import claims, paths, retrieval, versioning
+from px0 import claims, config as config_mod, paths, retrieval, versioning
 from px0 import runs as runs_mod
 from px0 import workflow as workflow_mod
 
@@ -69,10 +70,51 @@ def save_schedule_state(home: Path, state: dict) -> None:
     p.write_text(json.dumps(state, indent=2))
 
 
+def resolve_zone(config: dict, wf) -> "ZoneInfo | None":
+    """The clock a workflow's schedule is read against.
+
+    Schedules were evaluated in whatever the machine's local time happened to
+    be, which is right until the machine moves. A laptop taken two timezones
+    over silently shifts every "9am" report by two hours, and the same thing
+    happens twice a year without moving at all. A workflow can now pin its own
+    zone, with `schedule.timezone` as the store-wide default; naming none keeps
+    the old behaviour of following the machine.
+    """
+    name = (getattr(wf, "trigger", None) or {}).get("timezone") \
+        or config_mod.get(config, "schedule.timezone", "")
+    if not name:
+        return None
+    try:
+        return ZoneInfo(str(name))
+    except Exception:
+        return None
+
+
+def _in_zone(when: datetime, zone) -> datetime:
+    """A timestamp read on a given clock, tolerating the naive ones already on
+    disk: state written before zones existed is local time, which is what it
+    was compared against then."""
+    if zone is None:
+        return when.replace(tzinfo=None) if when.tzinfo else when
+    return (when.replace(tzinfo=zone) if when.tzinfo is None
+            else when.astimezone(zone))
+
+
 def _due_fires(schedule: str, last_fire: datetime | None, now: datetime) -> list[datetime]:
     """Returns every cron fire time for `schedule` between the later of last_fire
     or today's midnight, and now. With no last_fire, starts one second before
-    midnight so a fire exactly at midnight is still included."""
+    midnight so a fire exactly at midnight is still included.
+
+    `now` carries the clock: pass an aware datetime to read the schedule in
+    that zone, and croniter keeps the offset through every fire it yields.
+    """
+    if last_fire is not None:
+        # A stored fire from before zones existed is naive; comparing it with
+        # an aware `now` raises rather than being wrong quietly, so it is read
+        # on the same clock the caller is using.
+        if (last_fire.tzinfo is None) != (now.tzinfo is None):
+            last_fire = (last_fire.replace(tzinfo=now.tzinfo) if now.tzinfo
+                         else last_fire.replace(tzinfo=None))
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = max(last_fire, midnight) if last_fire else midnight - timedelta(seconds=1)
     itr = croniter(schedule, start)
@@ -96,18 +138,73 @@ def tick(home: Path, config: dict, state: dict) -> dict:
         schedule = wf.trigger.get("schedule")
         if not schedule or wf.pipeline:
             continue
+        zone = resolve_zone(config, wf)
+        wf_now = datetime.now(zone) if zone else now
         last_fire_iso = state.get(wf.id)
         last_fire = datetime.fromisoformat(last_fire_iso) if last_fire_iso else None
-        fires = _due_fires(schedule, last_fire, now)
+        fires = _due_fires(schedule, last_fire, wf_now)
         for fire_time in fires:
-            late = (now - fire_time).total_seconds() > LATE_THRESHOLD_SECONDS
+            late = (wf_now - fire_time).total_seconds() > LATE_THRESHOLD_SECONDS
             spawn_run(home, wf.id, late, fire_time)
             _log_event(config, f"tick: spawned {wf.id} ({'late' if late else 'on-time'})")
             state[wf.id] = fire_time.isoformat()
 
     _tick_watches(home, config, state, now)
+    _tick_approval_replies(home, config)
     save_schedule_state(home, state)
     return state
+
+
+def _inbox_retention(home: Path, config: dict) -> int:
+    from px0 import inbox as inbox_mod
+
+    return inbox_mod.apply_retention(home, config)
+
+
+def _approvals_retention(home: Path, config: dict) -> int:
+    from px0 import approvals as approvals_mod
+
+    return approvals_mod.purge(home, config)
+
+
+def _fixture_retention(home: Path, config: dict) -> int:
+    from px0 import replay as replay_mod
+
+    return replay_mod.apply_retention(home, config)
+
+
+def _session_retention(home: Path, config: dict) -> int:
+    from px0 import session as session_mod
+
+    return session_mod.prune(home, config)
+
+
+def _tick_approval_replies(home: Path, config: dict) -> None:
+    """Acts on approvals answered from somewhere other than the terminal.
+
+    Only when there is something waiting: a store with an empty queue should
+    not be polling a channel every minute to be told so. Never raises -- a
+    misconfigured reply channel must not stop the tick that fires everything
+    else.
+    """
+    from px0 import approvals as approvals_mod
+
+    try:
+        if not approvals_mod.reply_config(config):
+            return
+        if not approvals_mod.pending_count(home, config):
+            return
+        result = approvals_mod.scan_replies(home, config)
+        for entry in result.get("acted") or []:
+            _log_event(config, f"approvals: {entry['id']} {entry['status']} "
+                               f"by reply from {entry['by']}")
+        for entry in result.get("ignored") or []:
+            _log_event(config, f"approvals: ignored a reply for {entry['approval_id']} "
+                               f"from untrusted sender {entry.get('sender')!r}")
+        if result.get("error"):
+            _log_event(config, f"approvals: reply poll failed: {result['error']}")
+    except Exception as e:
+        _log_event(config, f"approvals: reply poll raised: {e}")
 
 
 def _watch_state(state: dict, wf_id: str) -> dict:
@@ -188,10 +285,23 @@ def _tick_watches(home: Path, config: dict, state: dict, now: datetime) -> None:
         fresh = [k for k in keys if k not in seen]
         # First poll only learns the baseline. Otherwise adding a watch to an
         # inbox with 2,000 messages fires immediately on all of it.
+        minimum = max(1, int(spec.get("min_items") or 1))
         if ws.get("primed"):
-            if fresh:
-                spawn_run(home, wf.id, late=False, fire_time=now)
+            if len(fresh) >= minimum:
+                # What was new is handed to the run on stdin. A watch already
+                # fired once per poll however many items turned up, but the run
+                # it spawned was told nothing about them and had to go and look
+                # again -- which is both a second call and a different answer
+                # from the one that triggered it.
+                spawn_run(home, wf.id, late=False, fire_time=now,
+                          stdin_text="\n".join(fresh), trigger="watch")
                 _log_event(config, f"watch: spawned {wf.id} ({len(fresh)} new)")
+            elif fresh:
+                _log_event(config, f"watch: {wf.id} holding {len(fresh)} of "
+                                   f"{minimum} new item(s)")
+                # Held back rather than forgotten: leaving these out of `seen`
+                # is what lets them count again on the next poll.
+                keys = [k for k in keys if k not in set(fresh)]
         else:
             ws["primed"] = True
             _log_event(config, f"watch: primed {wf.id} with {len(keys)} existing items")
@@ -199,16 +309,43 @@ def _tick_watches(home: Path, config: dict, state: dict, now: datetime) -> None:
         ws["seen"] = (keys + [k for k in seen if k not in set(keys)])[:WATCH_SEEN_LIMIT]
 
 
-def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime) -> None:
+def spawn_run(home: Path, workflow_id: str, late: bool, fire_time: datetime,
+              stdin_text: str | None = None, trigger: str = "schedule") -> None:
     """Launches `px0 workflows run <workflow_id> --quiet` as a detached subprocess,
-    passing --late-scheduled-at when the fire was recovered rather than on-time."""
+    passing --late-scheduled-at when the fire was recovered rather than on-time.
+
+    `stdin_text` is piped to the run, which is how a watch tells the workflow
+    it triggered what was actually new.
+    """
     px0_bin = shutil.which("px0") or sys.executable
     args = [px0_bin] if px0_bin != sys.executable else [sys.executable, "-m", "px0.cli"]
     args += ["workflows", "run", workflow_id, "--quiet"]
     if late:
         args += ["--late-scheduled-at", fire_time.strftime("%H:%M")]
+    else:
+        # Without this the run records itself as manual, because a spawned
+        # subprocess has no other way of knowing what fired it.
+        args += ["--trigger", trigger]
+    if stdin_text is not None:
+        args += ["--stdin"]
     env = {**os.environ, "PX0_HOME": str(home)}
-    subprocess.Popen(args, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(
+        args, env=env,
+        stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if stdin_text is not None and proc.stdin is not None:
+        # Written and closed without waiting: the run is detached on purpose,
+        # and a daemon that blocked on one workflow's output would stop
+        # ticking every other schedule behind it.
+        try:
+            proc.stdin.write(stdin_text.encode())
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
 
 
 def recover_missed_fires(home: Path, config: dict) -> None:
@@ -235,7 +372,23 @@ def run_nightly(home: Path, config: dict) -> dict:
         report["ingest_queue"] = brain_mod.process_ingest_queue(home, config)
     except Exception as e:
         report["ingest_error"] = str(e)
-    report["retention"] = runs_mod.apply_retention(config)
+    try:
+        report["retention"] = runs_mod.apply_retention(config)
+    except Exception as e:
+        report["retention_error"] = str(e)[:200]
+    # Everything else px0 accumulates and would otherwise keep forever. Each is
+    # wrapped, because one unwritable folder should not stop the rest of
+    # housekeeping -- the nightly pass is the only thing that ever tidies up.
+    for name, sweep in (
+        ("inbox_pruned", lambda: _inbox_retention(home, config)),
+        ("approvals_purged", lambda: _approvals_retention(home, config)),
+        ("fixtures_pruned", lambda: _fixture_retention(home, config)),
+        ("sessions_pruned", lambda: _session_retention(home, config)),
+    ):
+        try:
+            report[name] = sweep()
+        except Exception as e:
+            report[f"{name}_error"] = str(e)[:200]
 
     # Weekly update check
     try:
@@ -343,7 +496,10 @@ def status(home: Path, config: dict) -> dict:
         schedule = wf.trigger.get("schedule")
         if not schedule:
             continue
-        itr = croniter(schedule, datetime.now())
+        # Read on the same clock the tick will use, or `px0 status` promises a
+        # time the daemon has no intention of firing at.
+        zone = resolve_zone(config, wf)
+        itr = croniter(schedule, datetime.now(zone) if zone else datetime.now())
         next_fires[wf.id] = itr.get_next(datetime).isoformat()
 
     return {"alive": alive, "pid": pid, "last_fires": state, "next_fires": next_fires}

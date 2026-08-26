@@ -22,7 +22,8 @@ def is_initialized(home: Path) -> bool:
 SECRET_CONFIG_KEYS = ("connectors.composio_api_key",)
 
 # What an export carries, and therefore what an import looks for.
-EXPORT_CONTENT = ("workflows", "guidelines", "brain", "output", "outputs", "tools")
+EXPORT_CONTENT = ("workflows", "guidelines", "memory", "brain", "output",
+                  "outputs", "tools")
 EXPORT_STATE = ("versions", "schema", "schedule.json")
 
 
@@ -278,6 +279,10 @@ def init(home: Path, harness_cmd: str | None = None) -> list[str]:
         # rather than having to be guessed at and created by hand.
         home / "brain" / "work",
         paths.output_dir(home),
+        # Scaffolded like guidelines/: px0 writes memories here as a side
+        # effect of conversations, and a folder that appears the first time
+        # that happens is one the user meets by surprise.
+        paths.memory_dir(home),
         paths.state_dir(home),
         paths.index_dir(home),
         paths.ingest_dir(home),

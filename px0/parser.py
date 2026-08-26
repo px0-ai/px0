@@ -21,7 +21,9 @@ import argparse
 from px0 import completion
 from px0 import config as config_mod
 from px0 import harness
+from px0 import memory
 from px0 import retrieval
+from px0 import route
 
 
 class _HelpFormatter(argparse.HelpFormatter):
@@ -100,6 +102,12 @@ def build(handlers) -> argparse.ArgumentParser:
     wp.add_argument("--no-retry", action="store_true",
                     help="attempt once, ignoring the workflow's retry policy")
     wp.add_argument("--late-scheduled-at", help=argparse.SUPPRESS)  # internal-use only: hidden from --help, set by the daemon for backfilled runs
+    # Also internal. The daemon runs a workflow by spawning this command, so
+    # without being told, a run fired by cron is indistinguishable from one a
+    # person typed -- and everything that treats unattended runs differently
+    # (the inbox, the circuit breaker, approval notices, the budget) was
+    # reading "manual" for every scheduled run there has ever been.
+    wp.add_argument("--trigger", choices=["schedule", "watch"], help=argparse.SUPPRESS)
     wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     wp.set_defaults(func=handlers.cmd_run)
 
@@ -113,6 +121,54 @@ def build(handlers) -> argparse.ArgumentParser:
     wp.add_argument("--no-discover", action="store_true",
                     help="use only px0's curated tools; skip the Composio catalogue search")
     wp.set_defaults(func=handlers.cmd_workflows_edit)
+
+    wp = wf_sub.add_parser("health", help="what a workflow's own runs say about it")
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit for one row per workflow")
+    wp.add_argument("--since", metavar="AGE",
+                    help="only runs newer than this, e.g. 30d")
+    wp.add_argument("--fix", action="store_true",
+                    help="apply the repairs px0 can make itself, one confirmation each")
+    wp.add_argument("--yes", action="store_true", help="skip those confirmations")
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_workflows_health)
+
+    wp = wf_sub.add_parser("improve",
+                           help="revise a workflow from what its runs actually did")
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit to pick one from a list")
+    wp.add_argument("--since", metavar="AGE",
+                    help="only learn from runs newer than this, e.g. 30d")
+    wp.add_argument("--dry-run", action="store_true",
+                    help="show the proposal and apply none of it")
+    wp.add_argument("--show-evidence", action="store_true",
+                    help="print exactly what the model would be given, and stop")
+    wp.add_argument("--yes", action="store_true",
+                    help="skip every prompt, including the confirmation of the rebuild")
+    wp.add_argument("--no-clarify", action="store_true",
+                    help="rebuild from the revised request without asking questions")
+    wp.add_argument("--no-discover", action="store_true",
+                    help="use only px0's curated tools; skip the Composio catalogue search")
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_workflows_improve)
+
+    wp = wf_sub.add_parser("recipes",
+                           help="things people build, as sentences to start from")
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_workflows_recipes)
+
+    wp = wf_sub.add_parser("replay",
+                           help="run a workflow's instructions against inputs it already had")
+    wp.add_argument("workflow")
+    wp.add_argument("--run", help="which captured run to replay; default the most recent")
+    wp.add_argument("--against", metavar="FILE",
+                    help="a file of alternative instructions to compare with")
+    wp.add_argument("--fixtures", action="store_true",
+                    help="list what has been captured, and stop")
+    wp.add_argument("--forget", action="store_true",
+                    help="delete this workflow's captured inputs")
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_workflows_replay)
 
     wp = wf_sub.add_parser("list", help="every workflow in the store")
     wp.set_defaults(func=handlers.cmd_workflows_list)
@@ -218,6 +274,29 @@ def build(handlers) -> argparse.ArgumentParser:
         rp2.add_argument("run_id")
     rp.add_argument("--running", action="store_true", help="only runs in flight right now")
 
+    rp8 = runs_sub.add_parser("mark", help="say whether a run's output was any good")
+    rp8.add_argument("run_id")
+    # The note is the verdict's own optional value -- `--bad "it missed X"` --
+    # rather than a trailing positional. As a positional it did not parse at
+    # all: argparse binds the positionals it meets before the first flag, so
+    # the note landed after `--bad` with nothing left to bind it to and was
+    # reported as an unrecognized argument.
+    verdict = rp8.add_mutually_exclusive_group()
+    verdict.add_argument("--good", nargs="?", const="", metavar="NOTE",
+                         help="it produced what you wanted, optionally saying why")
+    verdict.add_argument("--bad", nargs="?", const="", metavar="NOTE",
+                         help="it did not, optionally saying what was wrong")
+    verdict.add_argument("--clear", action="store_true", help="remove an earlier mark")
+    rp8.add_argument("--note", help="what was right or wrong about it, in a sentence")
+
+    rp9 = runs_sub.add_parser("events", help="one run's structured event stream")
+    rp9.add_argument("run_id")
+    rp9.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+
+    rp10 = runs_sub.add_parser("stats", help="runs rolled up by workflow")
+    rp10.add_argument("--since", metavar="AGE", help="only runs newer than this, e.g. 30d")
+    rp10.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+
     rp5 = runs_sub.add_parser("cancel", help="stop a run in flight")
     rp5.add_argument("run_id")
     rp5.add_argument("--force", action="store_true", help="SIGKILL instead of SIGTERM")
@@ -235,6 +314,98 @@ def build(handlers) -> argparse.ArgumentParser:
     rp4.add_argument("target_id", metavar="run_id")
     rp4.set_defaults(func=handlers.cmd_why)
     sp.set_defaults(func=handlers.cmd_runs)
+
+    # `ask` is flat for the same reason `status` is: it acts across every
+    # group rather than on one entity. Routing a question to the brain, a
+    # workflow, a tool, or nothing at all cannot sit under any single noun,
+    # and `px0 brain ask` was the old name for only the first of those.
+    sp = sub.add_parser("ask", help="ask a question and let px0 route it")
+    # Optional: with no question and a terminal, `ask` opens a conversation --
+    # which is where a follow-up can be understood and a correction kept.
+    sp.add_argument("question", nargs="?",
+                    help="the question; omit to open a conversation")
+    sp.add_argument("--continue", dest="continue_", action="store_true",
+                    help="carry on the last conversation")
+    sp.add_argument("--no-remember", action="store_true",
+                    help="do not offer to keep what a conversation taught px0")
+    sp.add_argument("--route", choices=list(route.ROUTES),
+                    help="skip the router and answer this way")
+    sp.add_argument("--explain", action="store_true",
+                    help="print where the question would go, and stop")
+    sp.add_argument("--k", type=int, default=None,
+                    help="passages to retrieve, when the answer comes from your brain")
+    sp.add_argument("--yes", action="store_true",
+                    help="run a workflow that can write without confirming it")
+    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    sp.set_defaults(func=handlers.cmd_ask)
+
+    sp = sub.add_parser("approvals", help="drafted write calls waiting for you")
+    ap_sub = sp.add_subparsers(dest="approvals_cmd", required=False, metavar="<command>")
+    ap = ap_sub.add_parser("list", help="everything waiting")
+    ap.add_argument("--all", action="store_true", help="include resolved ones")
+    ap.add_argument("--workflow", help="only drafts from this workflow")
+    ap.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    ap = ap_sub.add_parser("show", help="exactly what one call would send")
+    ap.add_argument("approval_id")
+    ap.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    ap = ap_sub.add_parser("edit", help="change what a drafted call would send")
+    ap.add_argument("approval_id")
+    ap.add_argument("--set", action="append", metavar="KEY=VALUE",
+                    help="change one argument; repeatable. Omit to open an editor")
+    ap.add_argument("--note", help="why you changed it")
+
+    ap = ap_sub.add_parser("approve", help="send one drafted call")
+    ap.add_argument("approval_id")
+    ap.add_argument("--yes", action="store_true", help="skip the confirmation")
+    ap = ap_sub.add_parser("reject", help="throw one drafted call away")
+    ap.add_argument("approval_id")
+    ap.add_argument("--reason", help="why, in a few words")
+    ap = ap_sub.add_parser("purge", help="delete resolved approvals past retention")
+    ap.add_argument("--days", type=int, help="keep resolved ones newer than this")
+    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    sp.set_defaults(func=handlers.cmd_approvals)
+
+    sp = sub.add_parser("inbox", help="what your scheduled workflows produced")
+    in_sub = sp.add_subparsers(dest="inbox_cmd", required=False, metavar="<command>")
+    ip = in_sub.add_parser("list", help="what is waiting")
+    ip.add_argument("--all", action="store_true", help="include what you have read")
+    ip.add_argument("--workflow", help="only entries from this workflow")
+    ip.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    ip = in_sub.add_parser("read", help="read one entry, marking it read")
+    ip.add_argument("entry_id", nargs="?", help="entry id; omit for the oldest unread")
+    ip.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    ip = in_sub.add_parser("archive", help="keep an entry but stop listing it")
+    ip.add_argument("entry_id")
+    ip = in_sub.add_parser("clear", help="delete entries you have read")
+    ip.add_argument("--all", action="store_true", help="delete unread ones too")
+    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    sp.set_defaults(func=handlers.cmd_inbox)
+
+    sp = sub.add_parser("memory", help="what px0 knows about you")
+    mem_sub = sp.add_subparsers(dest="memory_cmd", required=False, metavar="<command>")
+    mp = mem_sub.add_parser("list", help="everything px0 remembers")
+    mp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    mp = mem_sub.add_parser("add", help="tell px0 something to remember")
+    mp.add_argument("text")
+    mp.add_argument("--kind", choices=list(memory.KINDS), help="what sort of fact this is")
+    mp.add_argument("--subject", help="what it is about, in a few words")
+    mp.add_argument("--pin", action="store_true",
+                    help="always include this, whatever else is competing for room")
+    mp = mem_sub.add_parser("suggest",
+                            help="what px0 thinks it should remember, from your corrections")
+    mp.add_argument("--yes", action="store_true", help="keep all of them without asking")
+    mp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+
+    mp = mem_sub.add_parser("show", help="print one memory")
+    mp.add_argument("name")
+    mp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    mp = mem_sub.add_parser("forget", help="remove one memory, keeping its history")
+    mp.add_argument("name")
+    mp = mem_sub.add_parser("search", help="what px0 remembers about something")
+    mp.add_argument("query")
+    mp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    sp.set_defaults(func=handlers.cmd_memory)
 
     sp = sub.add_parser("brain", help="ingest, search, and ask over your brain")
     brain_sub = sp.add_subparsers(dest="brain_cmd", required=True, metavar="<command>")
@@ -360,6 +531,15 @@ def build(handlers) -> argparse.ArgumentParser:
                     help="let the import win on a collision")
     ip.set_defaults(func=handlers.cmd_store)
 
+    yp = store_sub.add_parser("sync",
+                              help="bring this store and a shared folder into line")
+    yp.add_argument("dir", help="a directory both machines can see")
+    yp.add_argument("--dry-run", action="store_true", help="say what would move, and stop")
+    yp.add_argument("--pull", action="store_true", help="only take changes, send none")
+    yp.add_argument("--push", action="store_true", help="only send changes, take none")
+    yp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    yp.set_defaults(func=handlers.cmd_store)
+
     pp = store_sub.add_parser("path", help="print the store's location")
     pp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     pp.set_defaults(func=handlers.cmd_store)
@@ -421,6 +601,9 @@ def build(handlers) -> argparse.ArgumentParser:
     sp = sub.add_parser("mcp", help="expose the brain and workflows over MCP")
     mcp_sub = sp.add_subparsers(dest="mcp_cmd", required=True, metavar="<command>")
     mp = mcp_sub.add_parser("serve", help="speak MCP on stdin and stdout")
+    # Not for people: a run in `model.agent_loop` mode starts px0 through this
+    # to hand the harness exactly its own tools, and the scope file says which.
+    mp.add_argument("--scope", help=argparse.SUPPRESS)
     mp.add_argument("--allow-runs", action="store_true",
                     help="let a client run workflows, which can post and send")
     sp.set_defaults(func=handlers.cmd_mcp)

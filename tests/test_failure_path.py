@@ -242,4 +242,4 @@ def test_force_sends_sigkill(tmp_home, monkeypatch):
 def test_retention_is_reachable_without_the_daemon(tmp_home, config):
     # apply_retention had exactly one caller -- the daemon's nightly pass -- so a
     # store that never installs the daemon kept every log forever.
-    assert runs_mod.apply_retention(config) == {"logs": 0, "records": 0}
+    assert runs_mod.apply_retention(config) == {"logs": 0, "events": 0, "records": 0}

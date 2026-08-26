@@ -182,3 +182,50 @@ def test_the_scaffolded_example_is_not_loaded_as_a_tool(tmp_home):
     # It ships as .toml.sample precisely so a fresh store has no tool nobody asked for.
     assert (paths.tools_dir(tmp_home) / "example.toml.sample").exists()
     assert localtools.load_user_tools(tmp_home) == ({}, [])
+
+
+# --- what file.write may not reach ----------------------------------------
+
+@pytest.mark.parametrize("target", [
+    "workflows/evil.md",          # would grant itself tools on the next run
+    "guidelines/tone.md",
+    "memory/fact.md",
+    "config.toml",                # would turn confirm_writes off
+    ".state/credentials.toml",
+])
+def test_file_write_cannot_edit_the_stores_own_configuration(tmp_home, target):
+    """The store is an allowed root, which is what lets a workflow write into
+    `output/`. Without a separate rule that also meant a workflow given
+    `file.write` could widen what it is allowed to do next run."""
+    from px0 import config as config_mod, paths as paths_mod, tools as tools_mod
+
+    cfg = config_mod.load(paths_mod.config_path(tmp_home))
+    with pytest.raises(Exception) as caught:
+        tools_mod.call(tmp_home, cfg, "file.write", {"path": target, "content": "x"})
+    assert "own configuration" in str(caught.value)
+
+
+@pytest.mark.parametrize("target", ["output/report.md", "brain/docs/note.md",
+                                    "output/nested/deep.md"])
+def test_file_write_still_writes_where_output_belongs(tmp_home, target):
+    from px0 import config as config_mod, paths as paths_mod, tools as tools_mod
+
+    cfg = config_mod.load(paths_mod.config_path(tmp_home))
+    result = tools_mod.call(tmp_home, cfg, "file.write",
+                            {"path": target, "content": "hello"})
+    assert (tmp_home / target).read_text() == "hello"
+    assert result["bytes"] == 5
+
+
+def test_a_path_outside_the_store_is_unaffected_by_the_rule(tmp_home, tmp_path):
+    """The rule is about px0's own control surfaces, not about a directory the
+    user deliberately allowed that happens to be named `workflows`."""
+    from px0 import config as config_mod, paths as paths_mod, tools as tools_mod
+
+    elsewhere = tmp_path / "elsewhere" / "workflows"
+    elsewhere.mkdir(parents=True)
+    cfg = config_mod.load(paths_mod.config_path(tmp_home))
+    config_mod.set_key(cfg, "tools.file_roots", str(tmp_path / "elsewhere"))
+    tools_mod.call(tmp_home, cfg, "file.write",
+                   {"path": str(elsewhere / "fine.md"), "content": "ok"})
+    assert (elsewhere / "fine.md").read_text() == "ok"

@@ -11,6 +11,10 @@ from a description), and `px0/runner.py` (execution).
 px0 workflows new
 px0 workflows run [workflow] [--input K=V] [--output {stdout,file}] [--timeout DURATION] [--no-retry] [--dry-run] [--stdin] [--quiet] [--json]
 px0 workflows edit [workflow] [--yes] [--no-clarify] [--no-discover]
+px0 workflows health [workflow] [--since AGE] [--fix] [--yes] [--json]
+px0 workflows improve [workflow] [--since AGE] [--dry-run] [--show-evidence] [--yes] [--no-clarify] [--no-discover] [--json]
+px0 workflows recipes [--json]
+px0 workflows replay <workflow> [--run ID] [--against FILE] [--fixtures] [--forget] [--json]
 px0 workflows list
 px0 workflows show <workflow> [--json]
 px0 workflows validate [workflow] [--json]
@@ -340,6 +344,235 @@ px0 workflows edit friday-pr-digest
 
 ---
 
+## `px0 workflows health`
+
+What a workflow's own runs say about it.
+
+Deterministic from end to end: it reads run records and does arithmetic, with no
+model call and no network. Every finding is one you can check by reading the
+same records yourself, which is what makes it safe to hand to
+[`px0 workflows improve`](#px0-workflows-improve) as evidence — a proposal is
+only as honest as the numbers under it.
+
+Implemented by `px0/analysis.py`.
+
+- **Arguments:** a workflow id, or none for one row per workflow.
+
+```shell
+px0 workflows health                        # a row per workflow
+px0 workflows health friday-pr-digest       # one in detail
+px0 workflows health friday-pr-digest --fix # apply what px0 can repair itself
+```
+
+### What it looks for
+
+A **problem** is costing you output you wanted. A **note** is worth knowing and
+may well be fine.
+
+| Finding | What it means |
+| ------- | ------------- |
+| `failing` | Runs that failed, grouped by cause — five failures of one thing read as one finding, not five |
+| `empty_output` | A run that succeeded and wrote nothing. Green in every listing there is, and useless |
+| `success_despite_tool_errors` | A run recorded success with every tool call erroring: the output was written from nothing |
+| `tool_refused` | The model reached for a tool this workflow may not use — either the instructions ask for work the allowlist cannot do, or the model is wandering |
+| `tool_erroring` | One tool failing a third of its calls or more. Now and then is the network; a third of the time is the workflow |
+| `dead_tools` | Allowlisted tools nothing has ever called. Each is described in the prompt on every run, so it is a bill paid for a capability nothing uses |
+| `timing_out` | Runs the clock killed, with the timeout that would have survived them |
+| `turn_cap` | Runs that used every tool-call turn available: the instructions ask for more steps than a run has |
+| `input_always_empty` | An input that resolves to nothing every time. The run still succeeds, and the model writes a report around the hole |
+| `input_degraded` | An optional input that keeps failing to resolve |
+| `marked_bad` | Runs you marked bad, with your own notes. The strongest signal there is |
+| `retry_pressure` | How often a run needs a second attempt |
+| `spans_versions` | The window mixes a workflow with the one it replaced, so rates in it are not about one file |
+| `cost_estimated` | Run cost here is px0's own estimate, and this backend could report real numbers |
+
+Dry runs are counted separately and excluded from every rate: a rehearsal never
+calls a write tool, so counting one in a tool's error rate would be counting a
+call that never happened.
+
+### `--since AGE`
+
+Only learn from runs newer than this.
+
+- **Input:** a relative span — `<n>d`, `<n>w`, or `<n>h`. Default: everything on
+  record.
+
+### `--fix`
+
+Apply the repairs px0 can make by itself, one confirmation each.
+
+Only two edits are ever made here, and both are narrow enough to describe in a
+sentence before you agree to them:
+
+- **Dropping a tool nothing has called.** This can only ever *reduce* what a
+  workflow may do.
+- **Raising a timeout** runs kept hitting, to half again above the slowest run
+  that did finish.
+
+Both touch the frontmatter only — never the instruction body, never adding a
+tool, never reaching a model. Each is recorded as a versioned change, so
+`px0 changes revert` undoes it. Anything that would change what a workflow
+*says* is `px0 workflows improve`.
+
+### `--yes`
+
+Skip the per-repair confirmations.
+
+### `--json`
+
+The full report as JSON: counts, findings, evidence, and which findings are
+fixable.
+
+---
+
+## `px0 workflows improve`
+
+Revise a workflow from what its runs actually did.
+
+The order is the point of the command. The deterministic report is computed and
+printed **first**, so you see the evidence before you see an opinion about it.
+Only then is the model asked for a revision, and what comes back is shown in
+full — as a diff against the request you actually wrote — before anything is
+applied.
+
+Implemented by `px0/improve.py`.
+
+- **Arguments:** a workflow id; omit it to pick one from a list.
+
+```shell
+px0 workflows improve friday-pr-digest --dry-run       # see the proposal, apply nothing
+px0 workflows improve friday-pr-digest --show-evidence # see what the model is given
+px0 workflows improve friday-pr-digest
+```
+
+### What it proposes, and what it may change by itself
+
+A proposal is an edit to the workflow's **request**, not to its file. A
+workflow's tools, inputs, and guideline list all follow from its request, so a
+model that rewrote the file directly would leave frontmatter describing a
+workflow that no longer exists. What comes back is a new request, applied
+through the same rebuild `px0 workflows edit` performs.
+
+Three rules hold, each because the obvious alternative is worse:
+
+- **Nothing is applied without being shown.** An improvement pass that quietly
+  rewrote a scheduled workflow would be the one place px0 stopped listing what
+  it was about to do.
+- **Tools are never widened on a model's say-so.** A proposal may argue for a
+  new tool, and that argument is printed, but the tool only ever arrives
+  through the confirm-and-authorize path `px0 workflows new` uses.
+- **A complaint about form belongs in a guideline.** "The summary is too long"
+  is not a fact about one workflow; it is a standard. A proposal may add rules
+  to a guideline, and those are confirmed separately and appended — your own
+  wording above them is never touched.
+
+### Marks are what make this worth running
+
+`px0 runs mark` is where the signal comes from. Without a marked run, a
+proposal has only execution telemetry to reason over — it will optimize what it
+can see (errors, latency) while the real defect goes untouched. When every run
+executed cleanly and none is marked, px0 says so and asks whether you want a
+proposal anyway.
+
+### `--since AGE`
+
+Only learn from runs newer than this.
+
+- **Input:** a relative span — `<n>d`, `<n>w`, or `<n>h`.
+
+### `--dry-run`
+
+Print the proposal and apply none of it.
+
+### `--show-evidence`
+
+Print exactly what the model would be given, as JSON, and stop. No model call is
+made. If you disagree with a proposal, this is what it was reasoning over.
+
+### `--yes`
+
+Skip every prompt, including the confirmation of the rebuild.
+
+### `--no-clarify`, `--no-discover`
+
+Passed through to the rebuild, as on `px0 workflows edit`.
+
+### `--json`
+
+The report and the proposal as JSON, applying nothing.
+
+---
+
+## `px0 workflows recipes`
+
+Sentences to start an interview from.
+
+px0 ships no workflows on purpose — a store full of things you did not ask for
+is one you have to read before you can trust it. The cost of that was a blank
+page: the hardest part of describing a job is knowing what sort of thing is
+describable.
+
+These are sentences, not files. Picking one answers the interview's first
+question and nothing else, so every workflow in the store is still one you
+asked for.
+
+```shell
+px0 workflows recipes
+```
+
+The full catalogue of 116 is in [Workflow use cases](../workflow_usecases.md).
+
+---
+
+## `px0 workflows replay`
+
+Run a workflow's instructions against inputs it already had.
+
+`px0 workflows improve` proposes a revision, you apply it, and you find out next
+Friday whether it helped. The reason it could not be checked sooner is that a
+workflow run twice compares two different worlds — the pull requests moved, the
+inbox filled. A **fixture** holds the world still.
+
+Neither the input tools nor the run's own tools are called: the comparison is
+about what a workflow *says*, and letting it act would both change the world
+and put back the variance the fixture removes.
+
+### Capturing inputs first
+
+Off by default, and deliberately so — a fixture is the content of your work.
+
+```yaml
+capture: true            # in the workflow's frontmatter
+```
+
+`runs.capture_inputs` turns it on store-wide for someone deliberately gathering
+fixtures; a workflow's own `capture: false` still opts out. Fixtures live under
+`.state/fixtures/`, never in the store proper, and age out on
+`runs.fixture_keep_days` — it is the only place the content of a run's inputs
+is written down.
+
+### Comparing two versions
+
+```shell
+px0 workflows replay digest --fixtures                     # what has been kept
+px0 workflows replay digest                                # today's instructions
+px0 workflows replay digest --against ./new-body.md        # both, side by side
+px0 workflows replay digest --forget                       # delete the fixtures
+```
+
+The diff is printed with a churn figure above it, because the first question
+about a revision is whether it changed anything at all — and one that rewrites
+every line of a working digest is worth looking at twice however good its
+reasoning read.
+
+One fixture is one data point. Replay a second captured run before trusting a
+difference.
+
+`px0 workflows improve` offers this in line: where a fixture exists, it shows
+what its proposal would have written, before you are asked to accept anything.
+
+---
+
 ## `px0 workflows list`
 
 Every workflow id with its description.
@@ -550,6 +783,95 @@ Frontmatter fields, beyond what the build writes for you.
 | `trigger.watch` | `{tool: <read-only tool>, args: {...}, key: <field>, every: 15m}`. Polls the tool and runs when an item it has not seen before appears |
 | `timeout` | A duration. Overridden for one run by `--timeout` |
 
+### Holding a write back
+
+Anything that speaks in your name can be drafted rather than sent:
+
+```yaml
+confirm: true            # every write this workflow makes waits for you
+confirm:                 # or only these
+  - slack.post_message
+```
+
+The run still happens and still produces its output; only the call that would
+leave a mark waits, in [`px0 approvals`](approvals.md), with its arguments shown
+in full. `tools.confirm_writes` sets the store-wide default, and a workflow's
+own `confirm:` overrides it in both directions.
+
+Naming a tool the workflow cannot call fails validation rather than being
+ignored — the failure is silent in the dangerous direction, since a misspelling
+would leave the tool you meant to hold back firing without asking.
+
+### Where the output goes
+
+```yaml
+output:
+  target: inbox          # deliver it to `px0 inbox`
+```
+
+```yaml
+output:
+  target: file
+  path: output/digest-{date}.md
+  inbox: true            # write the file *and* say it arrived
+```
+
+`stdout`, `file`, and `inbox` are the three targets. A scheduled or watched
+workflow must use `file` or `inbox`, because nobody is watching a terminal at
+6am — and scheduled runs deliver to the inbox automatically unless
+`inbox: false` says otherwise.
+
+### Pipelines that can skip a stage
+
+A pipeline is a list of workflow ids, each piped into the next. A stage can say
+when it should run:
+
+```yaml
+pipeline:
+  - find-new-errors
+  - workflow: open-tickets
+    when: has_output
+```
+
+`always` (the default), `has_output`, and `no_output` — three conditions, all
+facts about the previous stage's output that px0 can check itself. Anything
+richer would be a small language living in frontmatter, and the place for
+judgement about what to do next is a workflow body, which is written in English.
+
+A stage whose condition is not met is **skipped, not failed**, and the text it
+would have received passes through — so "post it only if there is something to
+post" does not break every stage after it. A condition on the first stage fails
+validation: there is no previous output to test, so it can only be a mistake
+about which stage it belongs to.
+
+### When px0 gives up on a workflow
+
+An unattended workflow that fails the same way `runs.disable_after_failures`
+times in a row (5 by default) is parked, and you are told through the same
+channel failures use. A dead connector otherwise means an hourly failure and an
+hourly notification for the rest of the week, with nothing learning that
+nothing has changed.
+
+It requires the *same* cause each time — a workflow failing three different
+ways is one to look at, not one stuck. A manual run never trips it: you are
+there, reading the error. The park is a versioned change like any other, so
+`px0 changes revert` undoes it, and `px0 workflows enable` is the ordinary way
+back.
+
+### Which clock a schedule is read against
+
+```yaml
+trigger:
+  schedule: "0 9 * * 1-5"
+  timezone: Asia/Kolkata
+```
+
+Without one, schedules follow the machine — which is right until the machine
+travels, and wrong twice a year without it moving at all. `schedule.timezone`
+sets a store-wide default. A zone this machine does not know fails validation
+rather than falling back silently, since a silent fallback looks like it worked
+and fires at the wrong hour.
+
 ### Watching instead of scheduling
 
 A watch fires on something happening rather than on the clock. px0 polls the
@@ -565,7 +887,13 @@ trigger:
       since: "-1d"
     key: url
     every: 30m
+    min_items: 1
 ```
+
+What was new is piped to the run on stdin, so the workflow acts on the items
+that triggered it rather than going back to look and getting a different
+answer. `min_items` waits until that many have turned up; anything held back
+still counts on the next poll.
 
 The first poll only records a baseline, so adding a watch to a busy source does
 not immediately fire on everything already there. Composio's own event triggers

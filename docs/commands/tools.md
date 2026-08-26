@@ -78,12 +78,50 @@ Four kinds of tool, all callable the same way:
 | Kind | Where it comes from | Example |
 | ---- | ------------------- | ------- |
 | curated | Hand-written in `px0/tools.py` | `github.list_my_prs` |
-| local | Runs on this machine, `px0/localtools.py` | `file.read`, `shell.run`, `brain.add` |
+| local | Runs on this machine, `px0/localtools.py` | `file.read`, `shell.run`, `brain.add`, `memory.remember` |
 | user-declared | A TOML file in the store's `tools/` folder | `local.deploy_status` |
 | discovered | Found in Composio's catalogue by `px0 workflows new` | `composio:LINEAR_CREATE_ISSUE` |
 
 A malformed file in `tools/` is reported as a warning here and skipped, so one
 bad declaration never hides the rest.
+
+Two of the local tools are how a run keeps what it learns rather than
+rediscovering it every time:
+
+| Tool | | What it does |
+| ---- | - | ------------ |
+| `memory.remember` | write | Write one fact about you or your work into `memory/` |
+| `memory.recall` | read | Look up what px0 remembers, mid-run |
+
+`remember` is a write tool, so it can be held for approval like any other. See
+[`px0 memory`](memory.md).
+
+### What `file.write` may not reach
+
+The store is an allowed root, which is what lets a workflow write into
+`output/`. It may not write to `workflows/`, `guidelines/`, `memory/`,
+`.state/`, or `config.toml` — a workflow able to edit those could widen what it
+is allowed to do on its next run, or turn `tools.confirm_writes` off. Each has
+its own route: `px0 workflows edit`, `memory.remember`, `brain.add`.
+
+### Giving a declared tool a credential
+
+A tool in `tools/*.toml` inherits whatever environment px0 was started with,
+which works and hands every command the same secrets. Naming what it needs
+narrows that instead:
+
+```toml
+id = "local.deploy_status"
+command = ["./scripts/deploy-status.sh", "{env}"]
+params = { env = "str*" }
+env = ["DEPLOY_TOKEN"]
+```
+
+Declaring any variable narrows the command's environment to `PATH`, `HOME`, and
+the ones named — so a token meant for one tool is not handed to every other
+tool a workflow can reach. A declared variable that is not set is refused
+before the command runs, rather than failing halfway with whatever error the
+far end gives an unauthenticated request. Values are never written in the file.
 
 ---
 

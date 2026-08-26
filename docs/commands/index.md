@@ -10,18 +10,23 @@ px0 <group> <verb> [arguments] [options]
 `px0 brain add`, `px0 workflows run`, `px0 guidelines list`. The only flat
 commands — no verb — are the ones that act on the install rather than on anything
 in the store: `init`, `update`, `version`, `doctor`, `status`,
-`completion`, and `uninstall`.
+`completion`, and `uninstall` — plus `ask`, which routes a question to whichever
+of them can answer it and so has no single entity to name.
 
 ## Groups
 
 | Group | What it manages | Module |
 | ----- | --------------- | ------ |
 | [`init`](init.md) | Scaffolding a new store | `px0/store.py` |
-| [`workflows`](workflows.md) | Building, running, and editing workflows | `px0/workflow.py`, `px0/builder.py`, `px0/runner.py` |
+| [`ask`](ask.md) | One question, routed to whoever can answer it | `px0/route.py` |
+| [`workflows`](workflows.md) | Building, running, editing, and improving workflows | `px0/workflow.py`, `px0/builder.py`, `px0/runner.py`, `px0/analysis.py`, `px0/improve.py` |
 | [`brain`](brain.md) | Ingesting, searching, and asking over your material | `px0/brain.py`, `px0/retrieval.py`, `px0/ask.py` |
 | [`guidelines`](guidelines.md) | The conventions px0 follows when it works | `px0/authoring.py`, `px0/claims.py` |
 | [`tools`](tools.md) | What workflows can call, and what is authorized | `px0/tools.py`, `px0/connect.py` |
-| [`runs`](runs.md) | Inspecting and replaying past executions | `px0/runs.py`, `px0/runs_tui.py` |
+| [`runs`](runs.md) | Inspecting, judging, and replaying past executions | `px0/runs.py`, `px0/runs_tui.py` |
+| [`approvals`](approvals.md) | Write calls waiting for you to send or discard | `px0/approvals.py` |
+| [`inbox`](inbox.md) | What your scheduled workflows produced | `px0/inbox.py` |
+| [`memory`](memory.md) | What px0 knows about you | `px0/memory.py` |
 | [`daemon`](daemon.md) | Running workflows on a schedule | `px0/daemon.py` |
 | [`changes`](changes.md) | The store's change log, across files | `px0/versioning.py` |
 | [`store`](store.md) | The store as a whole | `px0/store.py` |
@@ -31,6 +36,7 @@ in the store: `init`, `update`, `version`, `doctor`, `status`,
 | [`completion`](completion.md) | Shell completion scripts | `px0/completion.py` |
 | [`mcp`](mcp.md) | Serving the brain and workflows over MCP | `px0/mcp.py` |
 | [`doctor`](doctor.md) | Checking that everything is wired up | `px0/doctor.py` |
+| [`version`](version.md) | The installed version | `px0/__init__.py` |
 | [`uninstall`](uninstall.md) | Removing px0 and its store entirely | `px0/cli.py` |
 
 ## Conventions

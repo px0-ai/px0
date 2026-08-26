@@ -14,10 +14,44 @@ was curious what px0 could do.
 """
 
 import json
+import re
 import sys
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "px0"
+
+# MCP tool names are identifiers; px0 tool ids are dotted (`github.list_prs`).
+# The mapping is deterministic in both directions, and the scope carries it, so
+# a run's records still name the tool the user allowlisted rather than the
+# mangled form the protocol needed.
+_NAME_SAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def mcp_name(tool_id: str) -> str:
+    """The MCP-safe name for a px0 tool id."""
+    return _NAME_SAFE.sub("_", tool_id)
+
+
+def _json_schema(params: dict) -> dict:
+    """Turns px0's compact param spec (`{"path": "str*"}`) into JSON Schema.
+
+    A trailing `*` marks a required parameter, which is the only piece of the
+    notation a schema needs that the type alone does not carry.
+    """
+    types = {"str": "string", "int": "integer", "number": "number",
+             "bool": "boolean", "object": "object", "list": "array",
+             "array": "array"}
+    properties, required = {}, []
+    for name, raw in (params or {}).items():
+        spec = str(raw)
+        if spec.endswith("*"):
+            required.append(name)
+            spec = spec[:-1]
+        properties[name] = {"type": types.get(spec.strip(), "string")}
+    schema = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
 
 
 def _text(content: str) -> dict:
@@ -176,7 +210,130 @@ def call_tool(home, config, name: str, args: dict, allow_runs: bool) -> dict:
     return _error(f"unknown tool: {name}")
 
 
-def handle(home, config, message: dict, allow_runs: bool) -> dict | None:
+# --- run scope: px0's own tools, handed to the harness's agent loop --------
+#
+# px0's builtin loop drives the model turn by turn over a text protocol, which
+# caps a run at `runs.max_tool_turns` and re-sends the whole conversation each
+# time. The harness is itself an agent with a real tool-calling loop, so the
+# alternative is to stop driving it: expose exactly this workflow's allowlisted
+# tools over MCP and let it work.
+#
+# Everything px0 enforces still holds, because it is enforced here rather than
+# in the loop that was removed: a tool outside the allowlist is refused, a
+# write is stubbed on a dry run, a held-back write is queued for approval, and
+# every call lands in the run's event stream.
+
+
+def scope_tool_definitions(home, scope: dict) -> list[dict]:
+    """MCP descriptors for exactly the tools one run may call."""
+    from px0 import tools as tools_mod
+
+    defs = []
+    for tool_id in scope.get("tools") or []:
+        spec = tools_mod.resolve(tool_id, home)
+        if spec is None:
+            continue
+        note = " (this call is held for the user's approval before it fires)" \
+            if tool_id in set(scope.get("confirm_tools") or []) else ""
+        defs.append({
+            "name": mcp_name(tool_id),
+            "description": f"{spec.description}{note}",
+            "inputSchema": _json_schema(spec.params),
+        })
+    return defs
+
+
+def _append_scope_call(scope: dict, entry: dict) -> None:
+    """Records one call where the run that spawned this server can read it back.
+
+    The server is a separate process -- the harness starts it, not px0 -- so
+    the run cannot observe these calls directly. This sidecar is how a run
+    reconstructs what its own tools did.
+    """
+    path = scope.get("calls_path")
+    if not path:
+        return
+    try:
+        with open(path, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def call_scoped(home, config, scope: dict, name: str, args: dict) -> dict:
+    """Runs one tool on behalf of a scoped run, enforcing everything px0 does.
+
+    The allowlist is checked against the ids in the scope rather than against
+    the name the client sent, so a client that invents an MCP tool name gets a
+    refusal and not a call.
+    """
+    from px0 import approvals as approvals_mod
+    from px0 import runs as runs_mod
+    from px0 import tools as tools_mod
+
+    args = args or {}
+    by_name = {mcp_name(t): t for t in scope.get("tools") or []}
+    tool_id = by_name.get(name)
+    run_id = scope.get("run_id")
+
+    if tool_id is None:
+        if run_id:
+            runs_mod.append_event(config, run_id, "tool_refused", tool=name,
+                                  allowed=list(scope.get("tools") or []))
+        _append_scope_call(scope, {"tool": name, "refused": True, "failed": True,
+                                   "is_write": False,
+                                   "result_summary": "not in this workflow's tools"})
+        return _error(f"{name} is not in this workflow's tools: allowlist")
+
+    try:
+        is_write = tools_mod.is_write(tool_id, home)
+    except KeyError:
+        is_write = False
+
+    if scope.get("dry_run") and is_write:
+        _append_scope_call(scope, {"tool": tool_id, "is_write": True,
+                                   "stubbed": True, "failed": False,
+                                   "args": args, "result_summary": "stubbed"})
+        return _text("stubbed: this is a dry run, so the call was not made")
+
+    if is_write and tool_id in set(scope.get("confirm_tools") or []):
+        approval = approvals_mod.queue(
+            home, run_id=run_id or "", workflow_id=scope.get("workflow_id", ""),
+            tool=tool_id, args=args, reason=scope.get("reason", ""))
+        if run_id:
+            runs_mod.append_event(config, run_id, "approval_queued", tool=tool_id,
+                                  approval=approval["id"])
+        _append_scope_call(scope, {"tool": tool_id, "is_write": True,
+                                   "queued": True, "failed": False, "args": args,
+                                   "approval": approval["id"],
+                                   "result_summary": "queued for approval"})
+        return _text("drafted and shown to the user for approval; it has not "
+                     "been sent. Write your answer as though it will be.")
+
+    try:
+        result = tools_mod.call(home, config, tool_id, args)
+    except Exception as e:
+        if run_id:
+            runs_mod.append_event(config, run_id, "tool_call", tool=tool_id,
+                                  is_write=is_write, failed=True,
+                                  error=str(e)[:300])
+        _append_scope_call(scope, {"tool": tool_id, "is_write": is_write,
+                                   "failed": True, "args": args,
+                                   "result_summary": f"error: {e}"[:500]})
+        return _error(f"{tool_id} failed: {e}")
+
+    if run_id:
+        runs_mod.append_event(config, run_id, "tool_call", tool=tool_id,
+                              is_write=is_write, failed=False,
+                              arg_keys=sorted(args.keys())
+                              if isinstance(args, dict) else None)
+    _append_scope_call(scope, {"tool": tool_id, "is_write": is_write,
+                               "failed": False, "args": args,
+                               "result_summary": str(result)[:500]})
+    return _text(json.dumps(result, default=str)[:20000])
+
+
+def handle(home, config, message: dict, allow_runs: bool, scope: dict | None = None) -> dict | None:
     """Handles one JSON-RPC message. Returns the response, or None for a notification."""
     method = message.get("method")
     msg_id = message.get("id")
@@ -195,12 +352,17 @@ def handle(home, config, message: dict, allow_runs: bool) -> dict | None:
     if method == "ping":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": msg_id,
-                "result": {"tools": tool_definitions(allow_runs)}}
+        tools = (scope_tool_definitions(home, scope) if scope
+                 else tool_definitions(allow_runs))
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": tools}}
     if method == "tools/call":
         params = message.get("params") or {}
-        result = call_tool(home, config, params.get("name", ""), params.get("arguments") or {},
-                           allow_runs)
+        name, arguments = params.get("name", ""), params.get("arguments") or {}
+        # A scoped server serves one run and exposes nothing else -- not the
+        # brain, not other workflows -- so a run cannot reach past its own
+        # allowlist by way of the server that was started for it.
+        result = (call_scoped(home, config, scope, name, arguments) if scope
+                  else call_tool(home, config, name, arguments, allow_runs))
         return {"jsonrpc": "2.0", "id": msg_id, "result": result}
     if msg_id is None:
         return None
@@ -217,7 +379,8 @@ def _version() -> str:
         return "0"
 
 
-def serve(home, config, allow_runs: bool = False, stdin=None, stdout=None) -> None:
+def serve(home, config, allow_runs: bool = False, stdin=None, stdout=None,
+          scope: dict | None = None) -> None:
     """Reads JSON-RPC messages from stdin and writes responses to stdout.
 
     One message per line, which is what MCP's stdio transport sends. Anything
@@ -241,7 +404,7 @@ def serve(home, config, allow_runs: bool = False, stdin=None, stdout=None) -> No
             stdout.flush()
             continue
         try:
-            response = handle(home, config, message, allow_runs)
+            response = handle(home, config, message, allow_runs, scope)
         except Exception as e:
             response = {"jsonrpc": "2.0", "id": message.get("id"),
                         "error": {"code": -32603, "message": str(e)}}

@@ -18,8 +18,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 from px0 import (
+    analysis as analysis_mod,
+    approvals as approvals_mod,
     ask as ask_mod,
     authoring,
+    commands as commands_mod,
     catalogue as catalogue_mod,
     completion as completion_mod,
     builder as builder_mod,
@@ -29,7 +32,11 @@ from px0 import (
     credentials as creds_mod,
     daemon as daemon_mod,
     guidelines as guidelines_mod,
+    improve as improve_mod,
+    inbox as inbox_mod,
+    replay as replay_mod,
     localtools,
+    memory as memory_mod,
     mcp as mcp_mod,
     notify as notify_mod,
     status as status_mod,
@@ -234,6 +241,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     folders = [
         ("workflows", "one Markdown file per workflow px0 runs"),
         ("guidelines", "claims px0 follows, one file per topic"),
+        ("memory", "what px0 knows about you, one file per fact"),
         ("brain", "what you've read and kept"),
         ("output", "what runs produce"),
     ]
@@ -244,6 +252,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     ui.hint("try next:")
     ui.command('px0 workflows new')
+    # Offered beside it because a fresh store has no workflows, and `ask` is
+    # the one thing that already works on an empty one.
+    ui.command('px0 ask "what can you do?"')
 
     # Surfaced here because a fresh store is exactly when someone who already
     # keeps notes somewhere would want to know they need not move them.
@@ -767,6 +778,24 @@ def _build_workflow(home: Path, config: dict, description: str,
     """
     assume_yes = getattr(args, "yes", False)
 
+    # Before spending a build: does this already exist? Nothing looked, so a
+    # store could accumulate three near-identical digests, each on its own
+    # schedule, each costing a run.
+    if existing_id is None:
+        near = builder_mod.similar_workflows(home, description)
+        if near:
+            ui.warn("you may already have this",
+                    ", ".join(f"{wf_id}" for wf_id, _ in near))
+            for wf_id, _score in near:
+                wf = workflow_mod.load_all(home).get(wf_id)
+                if wf:
+                    ui.field(wf_id, wf.description or wf.request, width=0)
+            print(flush=True)
+            ui.hint("editing the one you have keeps its history and its schedule:")
+            ui.command(f"px0 workflows edit {near[0][0]}")
+            if not _confirm("build a new one anyway?", assume_yes):
+                return
+
     try:
         qa = _clarify_loop(config, description,
                            skip=assume_yes or already_clarified
@@ -1002,6 +1031,15 @@ def _print_run_outcome(home: Path, workflow_id: str, record: dict,
     elif not ok and record.get("id"):
         ui.hint("what the run did before it failed:", stream=sys.stderr)
         ui.command(f"px0 runs logs {record['id']}", stream=sys.stderr)
+    if ok and record.get("id") and not record.get("dry_run"):
+        # Whether the output was any *good* is the one thing no record can
+        # infer, and the moment the user has just read it is the only moment
+        # they know. Offered here rather than asked, so a scripted run is not
+        # blocked on an answer.
+        ui.hint("if it came back wrong, say so -- it is what `improve` learns from:",
+                stream=sys.stderr)
+        ui.command(f'px0 runs mark {record["id"]} --bad "what was wrong"',
+                   stream=sys.stderr)
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -1018,7 +1056,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         cli_inputs[key] = value
 
     output_override = {"target": args.output} if args.output else None
-    trigger = "late" if args.late_scheduled_at else "manual"
+    # "late" wins over the spawner's own label: a backfilled fire is still a
+    # scheduled one, and the record needs to say it ran behind.
+    trigger = ("late" if args.late_scheduled_at
+               else getattr(args, "trigger", None) or "manual")
 
     try:
         with ui.spinner(f"Running {workflow_id}", quiet=args.quiet or args.json):
@@ -1859,6 +1900,555 @@ def _print_runs(config: dict, records: list, as_json: bool) -> None:
         print(runs_tui.format_row(r, widths))
 
 
+SEVERITY_LABEL = {"problem": "problem", "note": "note"}
+
+
+def _print_findings(findings: list[dict], *, indent: str = "  ") -> None:
+    """Prints a health report's findings, problems first.
+
+    A problem is coloured and a note is not, because the whole point of the
+    split is that a reader can skim past the notes. Each finding's fix sits
+    under it as a command rather than being folded into the sentence, so it can
+    be copied without editing.
+    """
+    if not findings:
+        ui.ok("nothing to report", "these runs look healthy")
+        return
+    for finding in findings:
+        detail = finding["detail"]
+        if finding["severity"] == "problem":
+            print(f"{indent}{ui.alert('problem')}  {detail}", flush=True)
+        else:
+            print(f"{indent}{ui.dim('note')}     {detail}", flush=True)
+        # `remedy`, not `hint`: a hint opens with a blank line, which is right
+        # for a closing next step and wrong under every row of a list.
+        if finding.get("fixable"):
+            ui.remedy(f"px0 can fix this: {analysis_mod.describe_fix(finding)}")
+        elif finding.get("fix"):
+            ui.command(f"{indent}{finding['fix']}")
+
+
+def _print_health(home: Path, report: dict) -> None:
+    """The full report for one workflow: what the window held, then what it says."""
+    runs = report.get("runs", {})
+    ui.heading(f"health {ui.accent(report['workflow'])}")
+    rows = [("runs", f"{runs.get('live', 0)} live"
+                     + (f", {runs['dry_runs']} dry" if runs.get("dry_runs") else ""))]
+    if runs.get("live"):
+        rows.append(("outcome", f"{runs.get('success', 0)} ok, {runs.get('failed', 0)} failed"))
+    if runs.get("median_seconds") is not None:
+        rows.append(("duration", f"{runs['median_seconds']}s median, "
+                                 f"{runs['slowest_seconds']}s slowest"))
+    if runs.get("cost_measured"):
+        cost = f"{runs.get('input_tokens', 0):,} in / {runs.get('output_tokens', 0):,} out"
+        if runs.get("cost_usd"):
+            cost += f", ${runs['cost_usd']}"
+        rows.append(("tokens", cost))
+    elif runs.get("estimated_tokens"):
+        rows.append(("tokens", f"~{runs['estimated_tokens']:,} (estimated, not measured)"))
+    if report.get("tools"):
+        rows.append(("tools", ", ".join(report["tools"])))
+    width = max(len(label) for label, _ in rows)
+    for label, value in rows:
+        ui.field(label, value, width=width)
+    print(flush=True)
+    _print_findings(report.get("findings", []))
+
+
+def cmd_workflows_health(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows health`: what a workflow's own runs say about it.
+
+    Deterministic from end to end -- it reads run records and does arithmetic,
+    with no model call and no network -- so it is cheap enough to run whenever,
+    and its findings are ones the user can check against the same records.
+
+    `--fix` applies the repairs px0 can make by itself. Those are deliberately
+    only ever narrowing (dropping a tool nothing has called) or a timeout the
+    records show is too short, each confirmed one at a time and each recorded as
+    a versioned change. Anything that would change what a workflow *says* is
+    `px0 workflows improve`, which asks a model and then asks the user.
+    """
+    home, config = _ctx()
+    since = _parse_since(args.since) if getattr(args, "since", None) else None
+
+    if not getattr(args, "workflow", None):
+        overview = analysis_mod.overview(home, config, since=since)
+        if getattr(args, "json", False):
+            _dump(args, overview)
+            return
+        rows = overview["workflows"]
+        if not rows:
+            ui.info("no workflows yet")
+            ui.command("px0 workflows new")
+            return
+        ui.heading("workflow health")
+        width = max(len(r["workflow"]) for r in rows)
+        for row in rows:
+            if row["problems"]:
+                state = ui.alert(f"{row['problems']} problem"
+                                 + ("s" if row["problems"] > 1 else ""))
+            elif not row["runs"]:
+                state = ui.dim("no runs")
+            else:
+                state = "ok"
+            detail = f"{row['runs']} run(s)"
+            if row["marked_bad"]:
+                detail += f", {row['marked_bad']} marked bad"
+            if row["headline"]:
+                detail += f" -- {row['headline']}"
+            ui.field(row["workflow"], f"{state}  {ui.dim(detail)}", width=width)
+        if overview["orphan_runs"]:
+            print(flush=True)
+            ui.info("runs recorded for workflows no longer in this store",
+                    ", ".join(f"{k} ({v})" for k, v in overview["orphan_runs"].items()))
+        print(flush=True)
+        ui.hint("look at one in detail:")
+        ui.command("px0 workflows health <workflow>")
+        return
+
+    workflow_id = args.workflow
+    report = analysis_mod.health(home, config, workflow_id, since=since)
+    if report.get("error"):
+        ui.err(report["error"])
+        sys.exit(EXIT_USER_ERROR)
+    if getattr(args, "json", False):
+        _dump(args, report)
+        return
+
+    _print_health(home, report)
+
+    repairs = analysis_mod.fixable(report)
+    if not getattr(args, "fix", False):
+        if repairs:
+            # `hint` opens with its own blank line; a second one here left a gap.
+            ui.hint(f"{len(repairs)} of these px0 can fix itself:")
+            ui.command(f"px0 workflows health {workflow_id} --fix")
+        if any(f["severity"] == "problem" and not f.get("fixable")
+               for f in report.get("findings", [])):
+            ui.hint("for the rest, have px0 revise the workflow from these runs:")
+            ui.command(f"px0 workflows improve {workflow_id}")
+        return
+
+    if not repairs:
+        ui.info("nothing here px0 can fix on its own")
+        ui.hint("a change to what the workflow says goes through:")
+        ui.command(f"px0 workflows improve {workflow_id}")
+        return
+
+    print(flush=True)
+    ui.heading("proposed repairs")
+    ui.remark("Frontmatter only -- what the workflow says is left alone. Each one "
+              "is recorded as a change, so `px0 changes revert` undoes it.")
+    chosen = []
+    for finding in repairs:
+        ui.bullet(analysis_mod.describe_fix(finding))
+        ui.field("because", finding["detail"], width=7)
+        if _confirm("apply this?", getattr(args, "yes", False)):
+            chosen.append(finding)
+    if not chosen:
+        ui.info("nothing applied")
+        return
+
+    result = analysis_mod.apply_fixes(home, config, workflow_id, chosen)
+    if not result["changed"]:
+        ui.info("nothing applied", "the workflow already says this")
+        return
+    ui.ok("applied", "; ".join(result["applied"]))
+    if result.get("change_id"):
+        ui.kv("change", result["change_id"])
+        ui.hint("undo it with:")
+        ui.command(f"px0 changes revert {result['change_id']}")
+    errors = workflow_mod.validate(workflow_mod.load(home, workflow_id), home)
+    if errors:
+        # Only reachable if a repair collided with something else in the file;
+        # better to say so immediately than to let the next scheduled run find it.
+        ui.warn("the workflow no longer validates", "; ".join(errors))
+        ui.command(f"px0 changes revert {result['change_id']}")
+
+
+def _print_diff(changes: list[tuple[str, str]], limit: int = 60) -> None:
+    """Prints a unified diff, coloured by side and truncated."""
+    for marker, text in changes[:limit]:
+        if marker == "-":
+            print("    " + ui.alert(f"- {text}"), flush=True)
+        elif marker == "+":
+            print("    " + ui.accent(f"+ {text}"), flush=True)
+        elif marker == "@":
+            print("    " + ui.dim(text), flush=True)
+        else:
+            print("    " + ui.dim(f"  {text}"), flush=True)
+    if len(changes) > limit:
+        ui.hint(f"{len(changes) - limit} more line(s) not shown")
+
+
+def cmd_workflows_recipes(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows recipes`: sentences to start an interview from.
+
+    px0 ships no workflows on purpose, and the cost of that was a blank page:
+    the hardest part of describing a job is knowing what sort of thing is
+    describable. These are sentences, not files -- picking one answers the
+    interview's first question and nothing else, so every workflow in the store
+    is still one the user asked for.
+    """
+    from px0 import starters
+
+    home, config = _ctx()
+    existing = set(workflow_mod.load_all(home))
+    rows = [(rid, sentence, touches) for rid, sentence, touches in starters.RECIPES]
+    if getattr(args, "json", False):
+        _dump(args, [{"id": r, "sentence": s_, "touches": t, "built": r in existing}
+                     for r, s_, t in rows])
+        return
+
+    ui.heading("things people build")
+    ui.remark("These are sentences, not workflows. Pick one and px0 asks you "
+              "the rest -- or say something else entirely.")
+    options = []
+    for rid, sentence, touches in rows:
+        mark = ui.dim("  (you have this)") if rid in existing else ""
+        options.append((sentence, f"{ui.dim(touches)}{mark}"))
+
+    choice = ui.select("Start from one of these", options)
+    if choice is None:
+        ui.hint("or describe your own:")
+        ui.command("px0 workflows new")
+        return
+    _build_workflow(home, config, rows[choice][1], args, existing_id=None)
+
+
+def cmd_workflows_replay(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows replay`: run a workflow's instructions against
+    inputs it already had.
+
+    A workflow run twice compares two different worlds -- the pull requests
+    moved, the inbox filled -- so nothing could be held still long enough to
+    say whether a change to the wording helped. A fixture holds it still.
+
+    Neither the input tools nor the run's own tools are called here. The
+    comparison is about what a workflow *says*; letting it act would both
+    change the world and put back the variance the fixture removes.
+    """
+    home, config = _ctx()
+    workflow_id = args.workflow
+
+    if getattr(args, "forget", False):
+        removed = replay_mod.forget(home, workflow_id, getattr(args, "run", None))
+        ui.ok("forgotten", f"{removed} fixture(s)")
+        return
+
+    fixtures = replay_mod.listing(home, workflow_id)
+    if getattr(args, "fixtures", False):
+        if getattr(args, "json", False):
+            _dump(args, fixtures)
+            return
+        if not fixtures:
+            ui.info("nothing captured for this workflow")
+            ui.hint("keep what a run reads, so a revision can be compared against it:")
+            ui.command(f"px0 workflows show {workflow_id}   # add `capture: true`")
+            return
+        width = max(len(f["run_id"]) for f in fixtures)
+        for fixture in fixtures:
+            ui.field(fixture["run_id"],
+                     f"{', '.join(fixture['inputs']) or 'no inputs'}  "
+                     f"{ui.dim(str(fixture['bytes']) + ' bytes')}", width=width)
+        return
+
+    try:
+        wf = workflow_mod.load(home, workflow_id)
+        run_id = getattr(args, "run", None)
+        if not run_id:
+            latest = replay_mod.latest_for(home, workflow_id)
+            if latest is None:
+                raise replay_mod.ReplayError(
+                    f"nothing captured for {workflow_id} -- add `capture: true` to it "
+                    "and run it once")
+            run_id = latest["run_id"]
+        fixture = replay_mod.read(home, workflow_id, run_id)
+    except (workflow_mod.WorkflowError, replay_mod.ReplayError) as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+    alternative = None
+    if getattr(args, "against", None):
+        try:
+            alternative = Path(args.against).read_text()
+        except OSError as e:
+            ui.err(f"could not read {args.against}", str(e))
+            sys.exit(EXIT_USER_ERROR)
+
+    ui.heading(f"replaying {ui.accent(workflow_id)}")
+    ui.kv("inputs from", run_id)
+    ui.kv("resolved", ", ".join(sorted((fixture.get("inputs") or {}).keys())) or "none")
+
+    with ui.spinner("Running the current instructions"):
+        before = replay_mod.answer_for(
+            config, replay_mod.render_with(home, config, wf, fixture))
+
+    if alternative is None:
+        if getattr(args, "json", False):
+            _dump(args, {"workflow": workflow_id, "run": run_id, "output": before})
+            return
+        print(flush=True)
+        ui.render_markdown(before)
+        ui.hint("compare a rewrite against the same inputs:")
+        ui.command(f"px0 workflows replay {workflow_id} --against ./new-body.md")
+        return
+
+    with ui.spinner("Running the alternative"):
+        after = replay_mod.answer_for(
+            config, replay_mod.render_with(home, config, wf, fixture, body=alternative))
+
+    summary = replay_mod.summarize(before, after)
+    if getattr(args, "json", False):
+        _dump(args, {"workflow": workflow_id, "run": run_id,
+                     "before": before, "after": after, "summary": summary})
+        return
+
+    print(flush=True)
+    if summary["identical"]:
+        ui.info("identical output", "the two sets of instructions agree on this input")
+        return
+    ui.kv("changed", f"+{summary['added']} / -{summary['removed']} lines "
+                     f"({summary['churn']:.0%} of the original)")
+    print(flush=True)
+    _print_diff(replay_mod.diff(before, after))
+    print(flush=True)
+    ui.remark("One input is one data point. Replay a second captured run before "
+              "trusting a difference this shows.")
+
+
+def _print_proposal(wf, proposal: "improve_mod.Proposal") -> None:
+    """Shows a proposal in full before anything is asked of the user.
+
+    The diff comes first and everything else hangs off it, because the revised
+    request is the change: tools and guidelines follow from it when the
+    workflow is rebuilt.
+    """
+    ui.heading(f"proposal for {ui.accent(wf.id)}")
+    if proposal.diagnosis:
+        ui.say(proposal.diagnosis)
+        print(flush=True)
+
+    if proposal.changes_request(wf.request):
+        print(f"  {ui.dim('request')}", flush=True)
+        for marker, text in improve_mod.request_diff(wf.request, proposal.request):
+            if marker == "-":
+                print("    " + ui.alert(f"- {text}"), flush=True)
+            elif marker == "+":
+                print("    " + ui.accent(f"+ {text}"), flush=True)
+            else:
+                print("    " + ui.dim(f"  {text}"), flush=True)
+        print(flush=True)
+    else:
+        ui.kv("request", "unchanged")
+
+    if proposal.tool_drops:
+        ui.kv("tools to drop", ", ".join(proposal.tool_drops))
+    if proposal.tool_adds:
+        ui.kv("tools it argues for", ", ".join(proposal.tool_adds))
+        ui.hint("a new tool is never added on this say-so -- the rebuild asks you "
+                "to confirm and authorize it, as `px0 workflows new` does")
+    for edit in proposal.guideline_edits:
+        label = "new guideline" if edit.is_new else "guideline"
+        ui.kv(label, edit.path)
+        if edit.why:
+            ui.field("because", edit.why, width=10)
+        for line in edit.addition.strip().splitlines():
+            print(f"      {ui.dim(line)}", flush=True)
+    if proposal.reasoning:
+        print(flush=True)
+        ui.field("reasoning", proposal.reasoning, width=10)
+    ui.field("confidence", proposal.confidence, width=10)
+
+
+def _replay_proposal(home: Path, config: dict, wf, proposal, args) -> None:
+    """Runs the current instructions and the proposed ones over one fixture.
+
+    Shown before the user is asked to accept anything, because "here is what it
+    would have written last Friday" settles a question that no amount of
+    reasoning about the records can. Failures here are reported and stepped
+    over: a replay is evidence, and being unable to gather it is not a reason
+    to refuse the proposal.
+    """
+    fixture_meta = replay_mod.latest_for(home, wf.id)
+    try:
+        fixture = replay_mod.read(home, wf.id, fixture_meta["run_id"])
+        with ui.spinner("Replaying both against real inputs"):
+            before = replay_mod.answer_for(
+                config, replay_mod.render_with(home, config, wf, fixture))
+            after = replay_mod.answer_for(
+                config, replay_mod.render_with(home, config, wf, fixture,
+                                                body=proposal.body))
+    except (replay_mod.ReplayError, harness.HarnessError) as e:
+        ui.warn("could not replay", str(e))
+        return
+
+    summary = replay_mod.summarize(before, after)
+    ui.heading(f"what changes, on {fixture_meta['run_id']}")
+    if summary["identical"]:
+        ui.info("identical output",
+                "on this input the revision changes nothing at all")
+        return
+    ui.kv("changed", f"+{summary['added']} / -{summary['removed']} lines "
+                     f"({summary['churn']:.0%} of the original)")
+    print(flush=True)
+    _print_diff(replay_mod.diff(before, after), limit=40)
+
+
+def cmd_workflows_improve(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows improve`: revise a workflow from what its runs did.
+
+    The order matters and is the point of the command. The deterministic report
+    is computed and printed first, so the user sees the evidence before they see
+    an opinion about it. Only then is the model asked for a revision, and what
+    comes back is shown in full -- as a diff against the request the user
+    actually wrote -- before anything is applied.
+
+    Applying goes through `_build_workflow`, the same path `px0 workflows edit`
+    takes. That is what keeps a revision honest: the tools, inputs, and guideline
+    list are regenerated from the new request and confirmed by the user, rather
+    than being asserted by the proposal.
+    """
+    home, config = _ctx()
+    workflow_id = args.workflow or _pick_workflow(home, for_stdin=False, verb="improve")
+    since = _parse_since(args.since) if getattr(args, "since", None) else None
+
+    try:
+        wf, report, case = improve_mod.load_case(home, config, workflow_id, since=since)
+    except workflow_mod.WorkflowError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+    if getattr(args, "show_evidence", False):
+        # Exactly what the model is handed, so a user can disagree with a
+        # proposal by reading what it was reasoning over.
+        _dump(args, case)
+        return
+
+    if not getattr(args, "json", False):
+        _print_health(home, report)
+        print(flush=True)
+
+    if not report["runs"].get("records"):
+        ui.err("nothing to learn from", f"{workflow_id} has no runs on record in this window")
+        ui.hint("run it a few times first, and mark what it produces:")
+        ui.command(f"px0 workflows run {workflow_id}")
+        sys.exit(EXIT_USER_ERROR)
+
+    marked = sum(1 for r in case.get("marked_runs", []))
+    if not marked and report.get("ok"):
+        ui.info("these runs all executed cleanly and none is marked",
+                "a proposal would be guessing at what to change")
+        ui.hint("tell px0 what was wrong with one, and it has something to work from:")
+        ui.command("px0 runs mark <run-id> --bad \"what was wrong\"")
+        if not _confirm("ask for a proposal anyway?", getattr(args, "yes", False)):
+            return
+
+    try:
+        with ui.spinner("Reading the runs"):
+            proposal = improve_mod.propose(config, case)
+    except improve_mod.ImproveError as e:
+        ui.err("no proposal", str(e))
+        sys.exit(EXIT_MODEL_ERROR)
+
+    improve_mod.reconcile_guideline_edits(home, proposal.guideline_edits)
+
+    if getattr(args, "json", False):
+        _dump(args, {"report": report, "proposal": {
+            "diagnosis": proposal.diagnosis, "request": proposal.request,
+            "reasoning": proposal.reasoning, "confidence": proposal.confidence,
+            "tool_adds": proposal.tool_adds, "tool_drops": proposal.tool_drops,
+            "guideline_edits": [dataclasses.asdict(e) for e in proposal.guideline_edits],
+            "changes_request": proposal.changes_request(wf.request),
+        }})
+        return
+
+    _print_proposal(wf, proposal)
+    print(flush=True)
+
+    # A proposal argued from records is still an argument. Where the workflow
+    # has kept a fixture, it can be settled instead: the same inputs through
+    # the old instructions and the new ones, side by side.
+    if proposal.body and replay_mod.latest_for(home, workflow_id):
+        if getattr(args, "yes", False) or _confirm(
+                "compare the two against a run's real inputs?", False):
+            _replay_proposal(home, config, wf, proposal, args)
+            print(flush=True)
+
+    if proposal.is_empty(wf.request):
+        ui.info("no change proposed", "these runs do not support one")
+        return
+
+    if getattr(args, "dry_run", False):
+        ui.info("dry run", "nothing applied")
+        ui.hint("apply it with:")
+        ui.command(f"px0 workflows improve {workflow_id}")
+        return
+
+    # The guideline edits are settled first and separately. They are the
+    # cheaper, more reusable half of most proposals -- a rule about how output
+    # should read helps every workflow that carries the file -- and a user who
+    # rejects the rebuild should still be able to keep them.
+    for edit in proposal.guideline_edits:
+        verb = "write" if edit.is_new else "add these rules to"
+        if _confirm(f"{verb} {edit.path}?", getattr(args, "yes", False)):
+            path = improve_mod.apply_guideline_edit(home, edit)
+            ui.ok("guideline", paths.display(path))
+
+    if not proposal.changes_request(wf.request):
+        ui.info("the request itself is unchanged", "nothing left to rebuild")
+        return
+
+    request = proposal.request
+    if not getattr(args, "yes", False):
+        choice = ui.select("The revised request", [
+            ("rebuild with it", "regenerate the workflow, confirming tools as usual"),
+            ("edit it first", "reword the request, then rebuild"),
+            ("cancel", "change nothing"),
+        ])
+        if choice is None or choice == 2:
+            ui.info("nothing changed")
+            return
+        if choice == 1:
+            print(flush=True)
+            ui.say(request)
+            print(flush=True)
+            typed = ui.prompt("Your wording (blank to keep the above):\n  ").strip()
+            if typed:
+                request = typed
+
+    # `already_clarified`: the proposal was written against this workflow's own
+    # runs and the user has just approved its wording. Putting them through the
+    # clarify interview here would ask about ambiguity that the evidence, not a
+    # question, already settled.
+    _build_workflow(home, config, request, args, existing_id=workflow_id,
+                    already_clarified=True)
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    """Handles `px0 ask`: see `commands.cmd_ask`."""
+    home, config = _ctx()
+    commands_mod.cmd_ask(home, config, args)
+
+
+def cmd_approvals(args: argparse.Namespace) -> None:
+    """Handles `px0 approvals`: see `commands.cmd_approvals`."""
+    home, config = _ctx()
+    commands_mod.cmd_approvals(home, config, args)
+
+
+def cmd_inbox(args: argparse.Namespace) -> None:
+    """Handles `px0 inbox`: see `commands.cmd_inbox`."""
+    home, config = _ctx()
+    commands_mod.cmd_inbox(home, config, args)
+
+
+def cmd_memory(args: argparse.Namespace) -> None:
+    """Handles `px0 memory`: see `commands.cmd_memory`."""
+    home, config = _ctx()
+    commands_mod.cmd_memory(home, config, args)
+
+
 def cmd_runs(args: argparse.Namespace) -> None:
     """Handles `px0 runs` subcommands: list, show, output, rerun, logs -- inspecting
     and replaying past workflow run records."""
@@ -1891,6 +2481,93 @@ def cmd_runs(args: argparse.Namespace) -> None:
         since = _parse_since(args.since) if args.since else None
         records = runs_mod.list_records(config, workflow=args.workflow, failed=args.failed, since=since)
         _print_runs(config, records, as_json=args.json)
+        return
+
+    if args.runs_cmd == "mark":
+        # Each verdict flag carries its own optional note, so both
+        # `--bad "it missed X"` and `--bad --note "it missed X"` work.
+        good, bad = getattr(args, "good", None), getattr(args, "bad", None)
+        note = (getattr(args, "note", None) or good or bad or "").strip()
+        verdict = None
+        if good is not None:
+            verdict = "good"
+        elif bad is not None:
+            verdict = "bad"
+        elif not getattr(args, "clear", False):
+            ui.err("say what you thought of it", "pass --good or --bad, or --clear")
+            ui.command('px0 runs mark <run-id> --bad "what was wrong"')
+            sys.exit(EXIT_USER_ERROR)
+        try:
+            record = runs_mod.mark(config, args.run_id, verdict, note=note)
+        except (FileNotFoundError, runs_mod.RunIdError, ValueError) as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        if verdict is None:
+            ui.ok("cleared", f"{args.run_id} is unmarked again")
+            return
+        ui.ok(f"marked {verdict}", args.run_id)
+        if verdict == "bad" and not note:
+            # A bare "bad" says a run was wrong. A note says how, which is the
+            # part an improvement pass can actually act on.
+            ui.hint("a sentence on what was wrong makes this worth much more:")
+            ui.command(f'px0 runs mark {args.run_id} --bad "it missed X"')
+        wf_id = record.get("workflow_id")
+        if wf_id and verdict == "bad":
+            ui.hint("when a few of these have piled up:")
+            ui.command(f"px0 workflows improve {wf_id}")
+        return
+
+    if args.runs_cmd == "events":
+        try:
+            events = runs_mod.read_events(config, args.run_id)
+        except runs_mod.RunIdError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        if args.json:
+            _dump(args, events)
+            return
+        if not events:
+            ui.info(f"no event stream for {args.run_id}",
+                    "the run predates event logging, or retention removed it")
+            ui.hint("logs.events controls whether new runs write one")
+            return
+        for event in events:
+            fields = {k: v for k, v in event.items()
+                      if k not in ("ts", "run", "kind") and v is not None}
+            stamp = str(event.get("ts", ""))[11:19]
+            detail = "  ".join(f"{k}={json.dumps(v, default=str)}"
+                               if not isinstance(v, str) else f"{k}={v}"
+                               for k, v in fields.items())
+            print(f"{ui.dim(stamp)}  {event.get('kind', '?'):<20} {detail}"[:2000],
+                  flush=True)
+        return
+
+    if args.runs_cmd == "stats":
+        since = _parse_since(args.since) if args.since else None
+        overview = analysis_mod.overview(home, config, since=since)
+        if args.json:
+            _dump(args, overview)
+            return
+        rows = overview["workflows"]
+        if not rows:
+            ui.info("no workflows yet")
+            return
+        ui.heading("runs by workflow")
+        width = max(len(r["workflow"]) for r in rows)
+        for row in rows:
+            parts = [f"{row['runs']} run(s)"]
+            if row["failed"]:
+                parts.append(ui.alert(f"{row['failed']} failed"))
+            if row["marked_bad"]:
+                parts.append(f"{row['marked_bad']} marked bad")
+            if row["median_seconds"] is not None:
+                parts.append(f"{row['median_seconds']}s median")
+            ui.field(row["workflow"], "  ".join(parts), width=width)
+        print(flush=True)
+        ui.kv("total runs", overview["total_runs"])
+        if overview["problems"]:
+            ui.hint(f"{overview['problems']} problem(s) across these workflows:")
+            ui.command("px0 workflows health")
         return
 
     if args.runs_cmd == "cancel":
@@ -2270,6 +2947,51 @@ def cmd_store(args: argparse.Namespace) -> None:
             store_mod.export(home, Path(args.dir))
         ui.ok("exported", f"{args.dir}  (credentials excluded)")
         ui.hint(f"load it elsewhere with `px0 store import {args.dir}`")
+        return
+
+    if args.store_cmd == "sync":
+        from px0 import sync as sync_mod
+
+        remote = Path(args.dir).expanduser()
+        try:
+            result = sync_mod.sync(home, remote,
+                                   dry_run=getattr(args, "dry_run", False),
+                                   pull_only=getattr(args, "pull", False),
+                                   push_only=getattr(args, "push", False))
+        except sync_mod.SyncError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        if getattr(args, "json", False):
+            _dump(args, result)
+            return
+
+        if not result["applied"]:
+            ui.heading("what a sync would do")
+            ui.kv("send", f"{len(result['push'])} file(s)")
+            ui.kv("take", f"{len(result['pull'])} file(s)")
+            ui.kv("conflict", f"{len(result['conflict'])} file(s)")
+            for rel in result["conflict"][:10]:
+                ui.field("both changed", rel, width=12)
+            return
+
+        ui.ok("synced", f"{len(result['pushed'])} sent, {len(result['pulled'])} taken")
+        if result["conflicts"]:
+            # Never merged and never chosen between: two versions are two
+            # decisions, and only the person who made them knows which one
+            # they meant.
+            print(flush=True)
+            ui.warn(f"{len(result['conflicts'])} file(s) changed in both places",
+                    "nothing was overwritten")
+            for entry in result["conflicts"]:
+                ui.field(entry["path"], f"theirs kept as {entry['theirs']}", width=0)
+            ui.hint("open both, keep what you meant, and delete the other")
+        hazard = sync_mod.hazard(home)
+        if hazard:
+            ui.warn(f"this store looks like it is inside {hazard}",
+                    "px0's history is a SQLite database, which a folder-syncing "
+                    "tool will corrupt if two machines write it")
+            ui.hint("move the store out of it and use this command instead:")
+            ui.command("px0 config path")
         return
 
     if args.store_cmd == "path":
@@ -2698,6 +3420,12 @@ def cmd_status(args: argparse.Namespace) -> None:
     for failure in runs["failures"]:
         ui.err(f"{failure['workflow']}  {failure['id']}", failure["error"][:120])
 
+    # The two queues that are waiting on the person rather than on px0.
+    if report.get("inbox"):
+        ui.kv("inbox", f"{report['inbox']} unread")
+    if report.get("approvals"):
+        ui.kv("approvals", f"{report['approvals']} waiting")
+
     if report["problems"]:
         print()
         for problem in report["problems"]:
@@ -2728,7 +3456,20 @@ def cmd_mcp(args: argparse.Namespace) -> None:
         sys.exit(EXIT_USER_ERROR)
     # Progress output would corrupt the protocol stream, which is stdout.
     ui.set_color(False)
-    mcp_mod.serve(home, config, allow_runs=getattr(args, "allow_runs", False))
+    scope = None
+    scope_path = getattr(args, "scope", None)
+    if scope_path:
+        # Started by a run, to serve that run and nothing else. A bad scope
+        # file must not degrade into the full server, which would expose the
+        # brain and every workflow to a client that asked for one workflow's
+        # tools.
+        try:
+            scope = json.loads(Path(scope_path).read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            ui.err(f"unreadable run scope: {e}")
+            sys.exit(EXIT_USER_ERROR)
+    mcp_mod.serve(home, config, allow_runs=getattr(args, "allow_runs", False),
+                  scope=scope)
 
 
 def _run_completion(argv: list[str]) -> None:

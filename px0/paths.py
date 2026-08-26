@@ -40,6 +40,11 @@ def guidelines_dir(home: Path | None = None) -> Path:
     return (home or store_home()) / "guidelines"
 
 
+def memory_dir(home: Path | None = None) -> Path:
+    """Path to the versioned memory folder: what px0 knows about the user."""
+    return (home or store_home()) / "memory"
+
+
 def output_dir(home: Path | None = None) -> Path:
     """Path to the tool-managed output folder under `home` (or the default store)."""
     return (home or store_home()) / "output"

@@ -8,6 +8,9 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "model": {
         "harness_cmd": "claude -p",
+        "output_format": "auto",
+        "verbose": False,
+        "agent_loop": "builtin",
     },
     "brain": {
         "path": "~/.px0/brain",
@@ -29,6 +32,7 @@ DEFAULTS: dict[str, Any] = {
         "retention_days_failed": 60,
         "record_retention_days": 365,
         "max_file_size_mb": 20,
+        "events": True,
     },
     "update": {
         "channel": "stable",
@@ -37,18 +41,49 @@ DEFAULTS: dict[str, Any] = {
     },
     "tools": {
         "allow_shell": False,
+        "confirm_writes": False,
         "file_roots": [],
         "http_timeout": 20,
         "max_output_bytes": 20000,
     },
     "notify": {
         "on_failure": "",
+        "on_approval": "",
         "channel": "",
         "target": "",
     },
     "runs": {
         "max_attempts": 1,
         "retry_backoff_seconds": 30,
+        "max_tool_turns": 12,
+        "disable_after_failures": 5,
+        "capture_inputs": False,
+        "fixture_keep_days": 14,
+        "daily_budget_usd": 0.0,
+        "daily_token_budget": 0,
+    },
+    "approvals": {
+        "expire_days": 7,
+        "keep_resolved_days": 30,
+        "reply_tool": "",
+        "reply_args": "",
+        "reply_from": [],
+        "reply_text_field": "",
+        "reply_sender_field": "",
+    },
+    "inbox": {
+        "auto": True,
+        "keep_days": 30,
+    },
+    "ask": {
+        "session_days": 7,
+    },
+    "memory": {
+        "enabled": True,
+        "budget_chars": 4000,
+    },
+    "schedule": {
+        "timezone": "",
     },
     "retrieval": {
         "qmd_cmd": "qmd",
@@ -63,8 +98,11 @@ def _toml_value(v: Any) -> str:
     (recursively), or a quoted/escaped string for anything else."""
     if isinstance(v, bool):  # must precede the int check: bool is a subclass of int
         return "true" if v else "false"
-    if isinstance(v, int):
-        return str(v)
+    if isinstance(v, (int, float)):
+        # Floats included: without this a budget of 5.0 was written as the
+        # string "5.0" and read back as one, so every comparison against it
+        # was a comparison with text.
+        return repr(v) if isinstance(v, float) else str(v)
     if isinstance(v, list):
         return "[" + ", ".join(_toml_value(x) for x in v) + "]"
     s = str(v).replace("\\", "\\\\").replace('"', '\\"')
@@ -155,6 +193,27 @@ SCHEMA: dict[str, dict[str, Any]] = {
                 "(claude, gemini, pi, opencode) expands to its full command, or pass any "
                 "literal command. `px0 config model` sets this interactively.",
     },
+    "model.output_format": {
+        "type": str, "choices": ["auto", "text", "json"],
+        "help": "whether to ask the harness for a structured envelope around its reply. "
+                "\"auto\" (the default) uses one wherever px0 knows the flag for that "
+                "backend, which is what makes a run's token counts real numbers rather "
+                "than px0's own estimate; \"text\" runs the harness exactly as typed",
+    },
+    "model.agent_loop": {
+        "type": str, "choices": ["builtin", "auto", "mcp"],
+        "help": "who drives the tool calls. \"builtin\" (the default) is px0's own loop, "
+                "capped at runs.max_tool_turns; \"mcp\" hands the workflow's tools to the "
+                "harness over MCP and lets it run its own loop, which removes that cap and "
+                "is what a workflow needing many steps wants; \"auto\" does that wherever "
+                "px0 has verified flags for the configured harness and falls back otherwise",
+    },
+    "model.verbose": {
+        "type": bool, "choices": None,
+        "help": "ask the harness to narrate what it is doing, and keep what it prints on "
+                "stderr in the run log -- useful when a workflow is behaving oddly and "
+                "the reply alone does not say why",
+    },
     "brain.path": {
         "type": str, "choices": None,
         "help": "directory the brain lives in -- point it at an Obsidian vault (or any "
@@ -213,6 +272,12 @@ SCHEMA: dict[str, dict[str, Any]] = {
         "type": int, "choices": None,
         "help": "single log file rotation size cap, in MB",
     },
+    "logs.events": {
+        "type": bool, "choices": None,
+        "help": "write each run's structured event stream (one JSON object per turn, tool "
+                "call, and outcome), which is what `px0 runs events` prints and what "
+                "`px0 workflows health` reads; ages out with the run logs",
+    },
     "update.channel": {
         "type": str, "choices": ["stable", "beta"],
         "help": "release channel; not functionally checked in this build -- "
@@ -234,6 +299,12 @@ SCHEMA: dict[str, dict[str, Any]] = {
                 "off by default because a workflow that can run a shell can do anything "
                 "you can",
     },
+    "tools.confirm_writes": {
+        "type": bool, "choices": None,
+        "help": "hold every write tool call for approval before it fires, across every "
+                "workflow -- a workflow's own confirm: overrides this in both directions. "
+                "The drafted call waits in `px0 approvals` with its arguments shown in full",
+    },
     "tools.file_roots": {
         "type": list, "choices": None,
         "help": "extra directories the file.read and file.write tools may touch, on top of "
@@ -254,6 +325,12 @@ SCHEMA: dict[str, dict[str, Any]] = {
                 "notification, \"tool\" sends through notify.channel, \"none\" (the "
                 "default) stays silent",
     },
+    "notify.on_approval": {
+        "type": str, "choices": ["", "none", "desktop", "tool"],
+        "help": "how you hear that an unattended run drafted a write and is waiting for "
+                "your approval; empty follows notify.on_failure, so a store that already "
+                "said how it wants to hear about failures does not say it twice",
+    },
     "notify.channel": {
         "type": str, "choices": None,
         "help": "tool id used for failure notifications when notify.on_failure is \"tool\", "
@@ -272,6 +349,106 @@ SCHEMA: dict[str, dict[str, Any]] = {
     "runs.retry_backoff_seconds": {
         "type": int, "choices": None,
         "help": "seconds to wait before the second attempt, doubling for each attempt after",
+    },
+    "runs.max_tool_turns": {
+        "type": int, "choices": None,
+        "help": "how many tool-call turns one run may take in px0's own loop; a run that "
+                "needs more stops short with its work half done. Ignored when "
+                "model.agent_loop is 'mcp', where the harness runs its own loop",
+    },
+    "runs.capture_inputs": {
+        "type": bool, "choices": None,
+        "help": "keep what every run's inputs resolved to, so a revision can be replayed "
+                "against the same data. Off by default and deliberately so: a fixture is "
+                "the content of your work. A workflow's own capture: overrides this",
+    },
+    "runs.fixture_keep_days": {
+        "type": int, "choices": None,
+        "help": "days a captured fixture is kept; it is the only place the content of a "
+                "run's inputs is written down, so this window is short",
+    },
+    "runs.disable_after_failures": {
+        "type": int, "choices": None,
+        "help": "park an unattended workflow after this many consecutive failures of the "
+                "same cause, announced through the notify channel; 0 lets it keep trying. "
+                "A manual run never trips it -- you are there, reading the error",
+    },
+    "runs.daily_budget_usd": {
+        "type": float, "choices": None,
+        "help": "stop unattended runs once the day's measured cost reaches this; 0 is off. "
+                "Only counts what the harness reported, so it needs model.output_format to "
+                "be asking for it. Manual runs are never blocked",
+    },
+    "runs.daily_token_budget": {
+        "type": int, "choices": None,
+        "help": "the same ceiling against px0's own token estimate, for a harness that "
+                "reports no costs; 0 is off",
+    },
+    "approvals.expire_days": {
+        "type": int, "choices": None,
+        "help": "days a drafted write call stays approvable before it goes stale -- a "
+                "message written on Tuesday should not be sendable on Friday; 0 never expires",
+    },
+    "approvals.keep_resolved_days": {
+        "type": int, "choices": None,
+        "help": "days to keep approvals that were sent, rejected, or expired",
+    },
+    "approvals.reply_tool": {
+        "type": str, "choices": None,
+        "help": "read-only tool polled for replies that approve or reject a drafted call, "
+                "e.g. slack.read_channel or gmail.search_messages; empty means approvals "
+                "can only be answered at the terminal",
+    },
+    "approvals.reply_args": {
+        "type": str, "choices": None,
+        "help": "JSON arguments for approvals.reply_tool, e.g. {\"channel\": \"#ops\"}",
+    },
+    "approvals.reply_from": {
+        "type": list, "choices": None,
+        "help": "who may answer by reply -- usernames or addresses, comma-separated. "
+                "Required: without it, anyone who can post in that channel could empty "
+                "your approval queue",
+    },
+    "approvals.reply_text_field": {
+        "type": str, "choices": None,
+        "help": "which field of the reply tool's result holds the message text; empty "
+                "tries the usual names (text, body, message, snippet)",
+    },
+    "approvals.reply_sender_field": {
+        "type": str, "choices": None,
+        "help": "which field holds who sent it; empty tries the usual names "
+                "(user, from, sender, author)",
+    },
+    "inbox.auto": {
+        "type": bool, "choices": None,
+        "help": "deliver scheduled and watched runs to the inbox automatically; a workflow's "
+                "own output.inbox overrides this either way",
+    },
+    "inbox.keep_days": {
+        "type": int, "choices": None,
+        "help": "days to keep inbox entries you have read or archived; unread entries are "
+                "never dropped",
+    },
+    "ask.session_days": {
+        "type": int, "choices": None,
+        "help": "days a conversation is kept under .state/ before it is pruned; what was "
+                "worth keeping from it is in memory/ by then. 0 keeps them indefinitely",
+    },
+    "memory.enabled": {
+        "type": bool, "choices": None,
+        "help": "inline what px0 remembers about you into every run's prompt; off keeps the "
+                "memory/ folder and stops reading it",
+    },
+    "memory.budget_chars": {
+        "type": int, "choices": None,
+        "help": "how much remembered text a single run may inline, so a store that has been "
+                "running for a year does not turn every prompt into a biography",
+    },
+    "schedule.timezone": {
+        "type": str, "choices": None,
+        "help": "zone every schedule is read against, e.g. 'Asia/Kolkata'; a workflow's own "
+                "trigger.timezone wins. Empty follows the machine, which is right until the "
+                "machine travels or the clocks change",
     },
     "retrieval.qmd_cmd": {
         "type": str, "choices": None,
@@ -310,6 +487,11 @@ def _coerce(key: str, raw: str) -> Any:
             return int(raw)
         except ValueError:
             raise ValueError(f"{key} expects an integer, got {raw!r}") from None
+    if t is float:
+        try:
+            return float(raw)
+        except ValueError:
+            raise ValueError(f"{key} expects a number, got {raw!r}") from None
     if t is list:
         # A comma-separated list is what fits on a command line. Without this the
         # raw string was stored whole, so a multi-pattern value silently became

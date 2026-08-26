@@ -14,7 +14,7 @@ Toolkit names come from Composio's live catalogue, which held 1,364 toolkits whe
 
 ## What the workflow format supports
 
-Every row below is a variation on five moves. The constraint column is what decides whether an idea is buildable.
+Every row below is a variation on the moves in this table. The constraint column is what decides whether an idea is buildable.
 
 | Move                 | What it gives a workflow                                       | The constraint that shapes it                                     |
 | -------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -23,10 +23,14 @@ Every row below is a variation on five moves. The constraint column is what deci
 | `inputs: workflow`   | One workflow calls another and uses its text as context         | The sub-run's output stays in memory and is never written         |
 | `tools:`             | The only place a workflow may post, send, file, or update       | Shown to you as writes at build time, so delivery stays explicit  |
 | `guidelines:`        | Inlines your conventions verbatim, so output sounds like you    | The file must exist under `guidelines/` or the workflow is invalid |
-| `trigger.schedule`   | Cron, run by the daemon                                         | A scheduled workflow's `output.target` must be `file`             |
+| `trigger.schedule`   | Cron, run by the daemon                                         | A scheduled workflow's `output.target` must be `file` or `inbox`  |
+| `trigger.watch`      | Fires on something new turning up rather than on the clock      | Polls a read-only tool; what is new arrives on the run's stdin    |
+| `trigger.timezone`   | Reads the schedule on a named clock, not the machine's          | A zone this machine does not know fails validation                |
 | `pipeline:`          | Chains whole workflows into one job                              | One level deep. A stage that is itself a pipeline is rejected     |
+| `confirm:`           | Holds this workflow's writes for you to approve before they fire | Read tools never wait. Named tools must be ones the workflow has  |
+| `capture:`           | Keeps what a run's inputs resolved to, so a revision can be replayed against it | Off unless asked for: a fixture is the content of your work |
 
-One consequence is worth stating plainly. Because a scheduled run must write its output to a file, "post it to Slack" is never `output.target`. It is a Slack write tool the workflow calls itself. Every row below is written that way.
+One consequence is worth stating plainly. Because a scheduled run's output goes to a file or to [your inbox](commands/inbox.md) — never to a terminal nobody is watching — "post it to Slack" is never `output.target`. It is a Slack write tool the workflow calls itself. Every row below is written that way, and any of those write tools can be held for approval with `confirm:` rather than firing unattended.
 
 Check any of them before letting it act:
 

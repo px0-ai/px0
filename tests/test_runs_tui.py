@@ -76,12 +76,15 @@ def test_tool_call_loop_elapsed_seconds(tmp_home, monkeypatch):
     # Mock runs_mod.append_raw_log
     monkeypatch.setattr(runs_mod, "append_raw_log", lambda *a: None)
 
-    # Mock harness.invoke
+    # Mock the harness. The loop calls `invoke_detailed`, not `invoke`, because
+    # a run records what the call cost as well as what it said.
     turns = [
         'TOOL_CALL: {"tool": "slack.post_message", "args": {}}',
         'Final Answer'
     ]
-    monkeypatch.setattr(harness, "invoke", lambda *a, **kw: turns.pop(0) if turns else "Final Answer")
+    monkeypatch.setattr(
+        harness, "invoke_detailed",
+        lambda *a, **kw: harness.Reply(text=turns.pop(0) if turns else "Final Answer"))
 
     # Run tool call loop
     output, tool_calls, usage = runner._tool_call_loop(

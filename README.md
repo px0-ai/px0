@@ -129,6 +129,7 @@ px0 status              # is anything broken
 px0 workflows list      # what you can run
 px0 runs                # browse past runs
 px0 runs why <run-id>   # how a run reached its result
+px0 runs events <run-id># every turn, tool call, and what it cost
 ```
 
 A scheduled workflow that fails is silent unless you ask it not to be. Pick how
@@ -144,6 +145,208 @@ px0 config set notify.target "#ops"
 Per workflow, an `on_failure` block in its frontmatter wins over both, so the
 noisy hourly job can stay quiet while the nightly report shouts. A `retry` block
 decides how many times a failed run is attempted first.
+
+## Just ask it
+
+You do not have to know what px0 has. Ask, and it works out who should answer —
+what you have told it, what you have read, a workflow you already built, a
+single read-only call, or nothing at all:
+
+```shell
+px0 ask "when does my standup go out?"
+px0 ask "what did that post say about backpressure?"
+px0 ask "which pull requests did I review this week?"
+```
+
+The route it chose is printed above the answer, so a question that went
+somewhere surprising says so. A question is never permission to act: a workflow
+that can write is confirmed by name first, and the router is only ever shown
+read-only tools.
+
+Ask the same thing three times and px0 offers to make it a workflow and put it
+on a schedule — the point being not that you repeated yourself, but that you
+keep doing by hand something that could be waiting for you.
+
+## It holds a conversation
+
+```shell
+px0 ask                  # ask, follow up, correct
+px0 ask --continue       # carry on the last one
+```
+
+A follow-up is understood in terms of what came before, so "and last week?"
+still lands. And when you put px0 right, that correction is not thrown away
+when the command exits — which is what the next section is about.
+
+## It remembers
+
+Tell px0 something once:
+
+```shell
+px0 memory add "standup goes out before 09:30, and never mentions unfinished work"
+```
+
+Every run from then on gets that as context. Memories are one Markdown file
+each under `memory/`, versioned like everything else — so what px0 has come to
+believe about you is something you can read, correct, and revert.
+
+You mostly will not type them, though. When you mark a run bad, or correct px0
+in a conversation, it reads what you said for the part that will still be true
+next month and offers to keep it:
+
+```shell
+px0 runs mark <run-id> --bad "it covered last week; my week is Mon-Fri"
+px0 memory suggest
+```
+
+It proposes; you accept. Nothing is remembered without a yes.
+
+## Draft it and ask me
+
+An assistant is only as useful as what you dare let it do. px0 can hold back
+any call that leaves a mark:
+
+```yaml
+confirm: true            # in the workflow's frontmatter
+```
+
+```shell
+px0 config set tools.confirm_writes true    # or for everything
+```
+
+The run still happens and still produces its output — only the write waits. You
+see exactly what would be sent, next to the thing it is announcing:
+
+```shell
+px0 approvals                     # what is waiting
+px0 approvals show <id>           # the arguments in full, and the digest
+px0 approvals approve <id>        # sends precisely that, not a fresh run
+```
+
+Approving calls the tool with the arguments you read. It does not re-run the
+workflow, which would draft something else against a later hour. Wrong channel
+rather than wrong message? Fix it in place:
+
+```shell
+px0 approvals edit <id> --set channel=#ops
+```
+
+And since approvals happen when you are away from the desk, px0 can watch a
+channel for replies — `approve apr_...` — from senders you name. It refuses to
+run with a reply channel and no sender list, because that would be a queue
+anyone able to post there could empty.
+
+## Somewhere to read what it produced
+
+A nightly workflow used to write a file you had to remember to open. Now it
+delivers:
+
+```shell
+px0 inbox                # what arrived while you were away
+px0 inbox read           # the oldest unread
+```
+
+Scheduled and watched runs deliver automatically; manual ones do not, since you
+were there. Unread entries are never aged out.
+
+## Workflows that get better
+
+A workflow you wrote once is a workflow that was right once. px0 keeps enough
+about every run to say what has happened to it since, and it does that in two
+halves — one that needs no model at all, and one that does.
+
+### What the runs say, computed not guessed
+
+```shell
+px0 workflows health                        # a row per workflow
+px0 workflows health friday-pr-digest       # one in detail
+```
+
+This is arithmetic over your own run records. No model call, no network. It
+finds the things that are invisible from any single run: a tool that has been
+failing a third of its calls, an allowlisted tool nothing has ever used and
+every run still pays to describe, an input that has quietly resolved to nothing
+for a month while the model wrote a report around the hole, runs that succeeded
+and produced nothing at all.
+
+Two of those px0 can repair on its own, each behind its own confirmation:
+
+```shell
+px0 workflows health friday-pr-digest --fix
+```
+
+It will only ever drop a tool nothing has called, or raise a timeout runs kept
+hitting. Both touch the frontmatter and nothing else, and both land as versioned
+changes, so `px0 changes revert` undoes them.
+
+### Tell it when the output was wrong
+
+The one thing no record can infer is whether what a run produced was any good. A
+Friday digest that runs green every week and comes back useless looks perfect in
+every field px0 has:
+
+```shell
+px0 runs mark <run-id> --bad "it summarized last week, not this week"
+```
+
+One sentence, stored on the run. It is what the next step actually learns from,
+and `px0 runs` shows you which runs carry one.
+
+### Have it revise the workflow
+
+```shell
+px0 workflows improve friday-pr-digest
+```
+
+px0 prints the evidence first, then asks the model what the workflow should say
+instead, then shows you the answer as a diff against the request *you* wrote —
+before anything is applied. What it proposes is a new request, rebuilt through
+exactly the path `px0 workflows edit` takes, so the tools and inputs stay
+consistent with it. A complaint about how output reads becomes a guideline
+instead, which fixes every workflow that carries it rather than just this one.
+
+It will never widen what a workflow can reach on its own: a new tool still goes
+through the same confirm-and-authorize step as when you first built it. Use
+`--dry-run` to see a proposal and apply none of it, and `--show-evidence` to see
+exactly what the model was given.
+
+## Checking a change before trusting it
+
+A revision used to mean waiting until Friday to find out. Let a workflow keep
+what it read, and both versions can be run against the same world:
+
+```yaml
+capture: true            # in the workflow's frontmatter
+```
+
+```shell
+px0 workflows replay digest --against ./new-body.md
+```
+
+`px0 workflows improve` offers this in line — you see what its proposal would
+have written last Friday before deciding anything. Fixtures stay under
+`.state/`, never travel, and age out: capture is off by default because a
+fixture is the content of your work.
+
+## It stops trying
+
+An unattended workflow that fails the same way five times running is parked and
+you are told. A dead connector used to mean an hourly failure and an hourly
+notification for the rest of the week, with nothing noticing that nothing had
+changed. A manual run never trips it — you are there, reading the error — and
+`px0 workflows enable` is the way back.
+
+## More than one machine
+
+```shell
+px0 store sync ~/Dropbox/px0-shared
+```
+
+Your workflows, guidelines, memory, and brain travel; the version history stays
+put, because it is a SQLite database and pointing a folder-syncing tool at it
+is how people were quietly corrupting it. A file changed in both places is kept
+beside yours rather than overwritten — two versions are two decisions, and px0
+does not know which one you meant.
 
 ## Try it without setting up any app
 
@@ -214,6 +417,7 @@ laptop:
 | `file.read`, `file.write`, `file.list` | Read and write files, inside the store and any directory you allow |
 | `http.get`, `http.post` | Fetch or post to a URL that is not an app px0 has a connector for |
 | `brain.add` | File something into your brain, so "save what I read" is a workflow |
+| `memory.remember`, `memory.recall` | Keep and look up a fact about you or your work |
 | `shell.run` | Run one local command. Off until you turn it on |
 
 ```shell
@@ -268,6 +472,7 @@ Your store is `~/.px0`. Set `PX0_HOME` to move it.
 | ------------- | --------------------------------------------------------------------- |
 | `workflows/`  | The jobs px0 can run                                                  |
 | `guidelines/` | How you work                                                          |
+| `memory/`     | What px0 knows about you                                              |
 | `brain/`      | What you have read and kept (or point `brain.path` at your own vault) |
 | `output/`     | What runs produced                                                    |
 | `tools/`      | Tools you wrote yourself, one small TOML file each                     |
@@ -286,13 +491,25 @@ px0 changes show <change-id>
 | `px0 workflows new`       | Interview you, then turn what you say into a workflow |
 | `px0 workflows run`       | Run one now                                    |
 | `px0 workflows edit`      | Revise a workflow and rebuild it               |
+| `px0 ask`                 | Ask anything; px0 routes it                    |
 | `px0 workflows disable`   | Park one without deleting it                   |
+| `px0 workflows health`    | What a workflow's own runs say about it        |
+| `px0 workflows improve`   | Revise a workflow from what its runs did       |
 | `px0 status`              | Whether anything needs attention               |
 | `px0 brain add`           | Save a URL or file to your brain               |
 | `px0 brain ask`           | Ask a question across your brain               |
 | `px0 guidelines list`     | The conventions px0 follows                     |
 | `px0 guidelines edit`     | Reword one in your own words                    |
 | `px0 runs`                | Browse past runs                               |
+| `px0 runs mark`           | Say whether a run's output was any good        |
+| `px0 runs stats`          | Runs rolled up by workflow                     |
+| `px0 inbox`               | What your scheduled workflows produced         |
+| `px0 approvals`           | Write calls waiting for you to send            |
+| `px0 memory`              | What px0 knows about you                       |
+| `px0 memory suggest`      | What it thinks it should remember              |
+| `px0 workflows replay`    | Check a revision against inputs it already had |
+| `px0 workflows recipes`   | Sentences to start from, if the page is blank  |
+| `px0 store sync`          | Share a store between your machines            |
 | `px0 tools search`        | Find a tool in Composio's catalogue            |
 | `px0 tools connect`       | Authorize an app                               |
 | `px0 tools list --status` | What workflows can call, and what is connected |

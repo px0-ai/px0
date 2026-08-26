@@ -78,6 +78,27 @@ that is what selects the store.
 | `retrieval.k_default` | Passages retrieved when a call names no `k` |
 | `model.harness_cmd` | The backend `brain_ask` asks to write the answer |
 
+## Serving one run instead of the store
+
+`px0 mcp serve --scope <file>` is a second mode, and it is not for people to
+run: a workflow using `model.agent_loop` starts px0 through it so the harness
+can be handed exactly that workflow's tools.
+
+It changes what the server *is*. The store-wide server exposes the brain,
+workflow listings, and guidelines. A scoped one exposes nothing but the tools
+one workflow allowlisted — because a run reaching past its own allowlist by way
+of the server started for it would defeat the allowlist entirely.
+
+Everything px0 enforces still holds, moved into the server from the loop it
+replaces:
+
+- A tool outside the scope is refused, not called.
+- A write is stubbed on a dry run.
+- A held-back write is queued for [approval](approvals.md).
+- Every call lands in the run's event stream, readable with `px0 runs events`.
+
+See [`model.agent_loop`](../reference/configuration.md#model) for when to use it.
+
 ## Exit codes
 
 | Code | When |
