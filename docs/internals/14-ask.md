@@ -35,7 +35,7 @@ def candidates(home, config) -> dict:
 
 Only read tools are offered. A router that could reach a write tool would be one bad classification away from sending something, and the whole argument for a front door is that asking it a question is safe.
 
-Disabled workflows are excluded. `has_brain` is checked so the router is never offered a route that can only fail. `MAX_CANDIDATES` is 60 per kind: the index is cheap but the prompt is not, and a store with two hundred workflows should not spend most of a routing call listing them.
+Disabled workflows are excluded, and so is any workflow with a required [var](04-workflow-file.md#vars-and-what-makes-a-workflow-a-template): the router has no way to supply one, so offering a template would spend a model call to reach a run that refuses, and read as px0 having picked the wrong workflow. `has_brain` is checked for the same reason -- the router is never offered a route that can only fail. `MAX_CANDIDATES` is 60 per kind: the index is cheap but the prompt is not, and a store with two hundred workflows should not spend most of a routing call listing them.
 
 Each workflow entry carries a `writes` flag, so the CLI knows to confirm before running one.
 

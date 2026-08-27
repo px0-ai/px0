@@ -49,6 +49,7 @@ from px0 import (
     runner,
     runs as runs_mod,
     store as store_mod,
+    templates as templates_mod,
     tools,
     parser as parser_mod,
     ui,
@@ -1042,6 +1043,46 @@ def _print_run_outcome(home: Path, workflow_id: str, record: dict,
                    stream=sys.stderr)
 
 
+def _fill_template_vars(home: Path, workflow_id: str, cli_inputs: dict,
+                        args: argparse.Namespace) -> None:
+    """Asks for a template's vars, when there is somebody there to ask.
+
+    A workflow with `vars:` is usually one somebody else wrote, so the first run
+    of it is exactly the moment nobody knows what to pass. The runner refuses a
+    missing required var on its own, and that refusal is what covers the daemon
+    and every scripted run; this only spares an interactive user having to read
+    it once to learn what the flags were.
+
+    Skipped for anything that is not a person at a terminal: `--stdin` is
+    already reading the stream the answers would come from, `--json` and
+    `--quiet` are asking for machine output, and a run the daemon spawned
+    carries `--trigger`.
+    """
+    if (args.stdin or getattr(args, "json", False) or args.quiet
+            or getattr(args, "trigger", None) or not sys.stdin.isatty()):
+        return
+    try:
+        wf = workflow_mod.load(home, workflow_id)
+    except workflow_mod.WorkflowError:
+        return  # the runner reports it, and writes a record while doing so
+    _filled, missing = workflow_mod.var_values(wf, cli_inputs)
+    if not missing:
+        return
+    specs = {v["name"]: v for v in workflow_mod.declared_vars(wf)}
+    ui.info(f"{workflow_id} is a template",
+            f"it needs {len(missing)} value{'s' if len(missing) != 1 else ''}")
+    for name in missing:
+        spec = specs.get(name) or {}
+        if spec.get("description"):
+            ui.field(name, spec["description"])
+        if spec.get("values"):
+            ui.hint("for example: " + ", ".join(spec["values"]))
+        answer = ui.prompt(f"  {name}: ").strip()
+        if answer:
+            cli_inputs[name] = answer
+    print(flush=True)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     """Handles `px0 workflows run`: executes a workflow with inputs collected from --stdin and
     --input KEY=VALUE flags, then prints the outcome and, depending on --json/--quiet
@@ -1054,6 +1095,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     for kv in args.input or []:
         key, _, value = kv.partition("=")
         cli_inputs[key] = value
+    _fill_template_vars(home, workflow_id, cli_inputs, args)
 
     output_override = {"target": args.output} if args.output else None
     # "late" wins over the spawner's own label: a backfilled fire is still a
@@ -1118,7 +1160,12 @@ def _print_workflows(home: Path, heading: bool) -> None:
         ui.heading(f"workflows {ui.dim(f'({len(workflows)})')}")
     width = max((len(w) for w, _ in workflows), default=0)
     for wid, wf in workflows:
-        print(f"  {wid.ljust(width)}  {ui.dim(wf.description)}")
+        # A template is a different kind of thing to run -- it has to be given
+        # values first -- so the listing says so rather than letting the first
+        # attempt be the way you find out.
+        mark = ui.faint(f"  [template: {len(workflow_mod.declared_vars(wf))} vars]") \
+            if workflow_mod.is_template(wf) else ""
+        print(f"  {wid.ljust(width)}  {ui.dim(wf.description)}{mark}")
     # Broken files are skipped by load_all, so they have to be reported here or
     # they vanish silently -- the whole point of skipping was to keep the rest
     # usable, not to hide the breakage.
@@ -1234,6 +1281,7 @@ def cmd_workflows_show(args: argparse.Namespace) -> None:
             "id": wf.id, "path": str(wf.path.relative_to(home)), "version": wf.version,
             "description": wf.description, "request": wf.request, "enabled": wf.enabled,
             "trigger": wf.trigger, "guidelines": wf.guidelines, "tools": wf.tools,
+            "vars": workflow_mod.declared_vars(wf),
             "inputs": [dataclasses.asdict(i) for i in wf.inputs],
             "output": wf.output, "timeout": wf.timeout, "pipeline": wf.pipeline,
             "on_failure": wf.on_failure, "retry": wf.retry, "body": wf.body,
@@ -1354,6 +1402,246 @@ def cmd_workflows_copy(args: argparse.Namespace) -> None:
     authoring.write_file(home, dest, body, evidence=f"copied from {args.workflow}")
     ui.ok("copied", f"{args.workflow} -> {new_id}")
     ui.hint(f"edit it with `px0 workflows edit {new_id}`")
+
+
+def _print_candidates(found: list) -> None:
+    """What the scan found, before the model is asked anything about it.
+
+    Printed first for the same reason `px0 workflows improve` prints its health
+    report first: the deterministic half decides what may be touched at all, and
+    a user should read that before reading an opinion about it. Nothing outside
+    this list can end up as a var, whatever the model answers.
+    """
+    ui.heading(f"values found in this workflow {ui.dim(f'({len(found)})')}")
+    width = max((len(c.kind) for c in found), default=0)
+    for cand in found:
+        where = ", ".join(cand.locations[:3])
+        if len(cand.locations) > 3:
+            where += f", +{len(cand.locations) - 3} more"
+        print(f"  {ui.dim(cand.kind.ljust(width))}  {cand.literal}", flush=True)
+        print(f"  {' ' * width}  {ui.faint(where)}", flush=True)
+
+
+def _print_template_proposal(wf, proposal, counts: dict) -> None:
+    """The vars in full, before the file is touched."""
+    ui.heading(f"template for {ui.accent(wf.id)}")
+    if proposal.summary:
+        ui.say(proposal.summary)
+        print(flush=True)
+    for var in proposal.vars:
+        ui.kv(var.name, f"{var.literal}  {ui.dim('->')}  {var.token()}")
+        ui.field("what it is", var.description, width=12)
+        if var.values:
+            ui.field("for example", ", ".join(var.values), width=12)
+        if var.default is not None:
+            ui.field("default", var.default, width=12)
+        else:
+            ui.field("required", "no default; every run has to be given one", width=12)
+        touched = counts.get(var.name, 0)
+        ui.field("replaces", f"{touched} occurrence(s) in this file", width=12)
+        print(flush=True)
+    for skip in proposal.skipped:
+        if skip.get("literal"):
+            ui.field(f"left alone: {skip['literal']}", skip.get("why", ""), width=0)
+    if proposal.dropped:
+        # A literal the model asked for that the scan never offered. Named
+        # rather than swallowed: it is usually the model having misread the file,
+        # and that is worth seeing.
+        ui.warn("not in the scan, so dropped", ", ".join(proposal.dropped))
+
+
+def cmd_workflows_templatize(args: argparse.Namespace) -> None:
+    """Handles `px0 workflows templatize`: lift this installation's values into vars.
+
+    The order is the point of the command, and it is the same order
+    `px0 workflows improve` uses. The deterministic scan runs and is printed
+    first, so the user sees the complete set of literals that could possibly be
+    touched. Only then is the model asked which of them belong to the
+    installation rather than to the job. What comes back is printed in full,
+    diffed against the file, and validated as a workflow before a byte is
+    written -- because the output of this command is a file the user is likely
+    to hand to somebody else.
+    """
+    home, config = _ctx()
+    workflow_id = args.workflow or _pick_workflow(home, for_stdin=False, verb="templatize")
+    as_json = getattr(args, "json", False)
+
+    try:
+        wf, found, payload = templates_mod.load_case(home, workflow_id)
+    except workflow_mod.WorkflowError as e:
+        ui.err(str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+    new_id = None
+    if getattr(args, "to", None):
+        try:
+            new_id = authoring.check_id(args.to, "workflow id")
+        except authoring.AuthoringError as e:
+            ui.err(str(e))
+            sys.exit(EXIT_USER_ERROR)
+        if new_id in workflow_mod.load_all(home):
+            ui.err(f"{new_id} already exists")
+            sys.exit(EXIT_USER_ERROR)
+
+    if getattr(args, "candidates", False):
+        if as_json:
+            _dump(args, payload)
+            return
+        if not found:
+            ui.info("nothing found", "this workflow carries no literal worth lifting out")
+            return
+        _print_candidates(found)
+        return
+
+    if not found:
+        ui.info("nothing to templatize",
+                "no literal in this workflow's inputs or body belongs to one installation")
+        ui.hint("a workflow becomes shareable when it reads a named repository, "
+                "channel, or folder -- this one names none")
+        return
+
+    # Said before the model call, not after: a scheduled workflow templatized in
+    # place is a workflow that fails every fire, and finding that out after
+    # paying for a proposal is the wrong order.
+    unattended = ("scheduled" if (wf.trigger or {}).get("schedule")
+                  else "watched" if (wf.trigger or {}).get("watch") else "")
+    if unattended and not new_id and not as_json:
+        ui.warn(f"{workflow_id} is {unattended}",
+                "nothing passes --input to an unattended fire, so a var with no "
+                "default would fail every run")
+        ui.hint("keep the template beside the working workflow instead:")
+        ui.command(f"px0 workflows templatize {workflow_id} --to {workflow_id}-template")
+        if not _confirm("templatize it in place anyway?", getattr(args, "yes", False)):
+            return
+        print(flush=True)
+
+    if not as_json:
+        _print_candidates(found)
+        print(flush=True)
+
+    try:
+        with ui.spinner("Working out what belongs to this installation"):
+            proposal = templates_mod.propose(config, payload)
+    except templates_mod.TemplateError as e:
+        ui.err("no template", str(e))
+        sys.exit(EXIT_MODEL_ERROR)
+
+    if not proposal.vars:
+        if as_json:
+            _dump(args, {"workflow": workflow_id, "vars": [], "applied": False,
+                         "summary": proposal.summary, "dropped": proposal.dropped})
+            return
+        ui.info("no vars proposed", "everything here reads as part of the job")
+        if proposal.dropped:
+            ui.warn("not in the scan, so dropped", ", ".join(proposal.dropped))
+        return
+
+    original = wf.path.read_text()
+    try:
+        new_text, counts = templates_mod.apply(original, proposal.vars)
+    except templates_mod.TemplateError as e:
+        ui.err("could not rewrite the file", str(e))
+        sys.exit(EXIT_USER_ERROR)
+
+    # A literal that contains another means the shorter one has nowhere left to
+    # match once the longer is substituted, so it is dropped from the block
+    # rather than declared and unused. Named, because the user just read it in
+    # the proposal.
+    unused = [v.name for v in proposal.vars if counts.get(v.name, 0) == 0]
+    proposal.vars = [v for v in proposal.vars if counts.get(v.name, 0) > 0]
+    if not proposal.vars:
+        ui.info("nothing was substituted",
+                "every proposed value was already covered by a longer one")
+        return
+
+    dest = wf.path if new_id is None else wf.path.parent / f"{new_id}.md"
+    if new_id is not None:
+        new_text = authoring.set_frontmatter_key(new_text, "id", new_id)
+
+    # Validated before it is written, never after. The result of this command is
+    # a file meant to leave the machine, and a template that does not parse is
+    # worse than no template: it fails for its next reader, in their store,
+    # over a mistake made here.
+    try:
+        rewritten = workflow_mod.parse_text(new_text, dest)
+        errors = workflow_mod.validate(rewritten, home)
+    except workflow_mod.WorkflowError as e:
+        errors = [str(e)]
+    # Only what this rewrite introduced. A workflow can already be invalid for
+    # reasons that have nothing to do with templatizing it -- a tool whose app
+    # was disconnected, a guideline someone deleted -- and refusing to write the
+    # template over a fault that was there before would leave the user unable to
+    # do the one thing they asked for.
+    existing = set(workflow_mod.validate(wf, home))
+    inherited = [e for e in errors if e in existing]
+    errors = [e for e in errors if e not in existing]
+
+    if as_json:
+        _dump(args, {
+            "workflow": workflow_id,
+            "to": new_id,
+            "summary": proposal.summary,
+            "vars": [dataclasses.asdict(v) | {"sites": counts.get(v.name, 0)}
+                     for v in proposal.vars],
+            "skipped": proposal.skipped,
+            "dropped": proposal.dropped,
+            "errors": errors,
+            "inherited_errors": inherited,
+            "run_command": templates_mod.example_command_for(
+                new_id or workflow_id, workflow_mod.declared_vars(rewritten)),
+            # Reporting only, as with `px0 workflows improve --json`: the write
+            # is the interactive path, because it is shown as a diff first.
+            "applied": False,
+        })
+        return
+
+    _print_template_proposal(wf, proposal, counts)
+    if unused:
+        ui.info("covered by a longer value, so not declared", ", ".join(unused))
+    for message in inherited:
+        ui.warn("already true of this workflow", message)
+
+    if errors:
+        ui.err("the template would not be a valid workflow", "nothing was written")
+        for message in errors:
+            ui.bullet(message)
+        sys.exit(EXIT_USER_ERROR)
+
+    print(f"  {ui.dim(str(dest.relative_to(home)))}", flush=True)
+    _print_diff(replay_mod.diff(original, new_text), limit=60)
+    print(flush=True)
+
+    if getattr(args, "dry_run", False):
+        ui.info("dry run", "nothing written")
+        ui.hint("write it with:")
+        ui.command(f"px0 workflows templatize {workflow_id}"
+                   + (f" --to {new_id}" if new_id else ""))
+        return
+
+    question = (f"Write this template to {dest.relative_to(home)}?" if new_id
+                else f"Rewrite {dest.relative_to(home)} as a template?")
+    if not _confirm(question, getattr(args, "yes", False)):
+        ui.info("nothing changed")
+        return
+
+    result = authoring.write_file(
+        home, dest, new_text,
+        evidence=(f"templatized from {workflow_id}" if new_id
+                  else f"templatized {workflow_id}"))
+    ui.ok("templatized", str(dest.relative_to(home)))
+    ui.hint("run it by naming each var:")
+    ui.command(templates_mod.example_command_for(
+        new_id or workflow_id, workflow_mod.declared_vars(rewritten)))
+    if (wf.trigger or {}).get("schedule"):
+        # The schedule is deliberately never templatized -- a cron expression is
+        # validated when the file loads, and the daemon has no `--input` to give
+        # it -- so whoever installs this has to set their own.
+        ui.hint(f"the schedule stays as {wf.trigger['schedule']}; whoever installs "
+                "this edits it with `px0 workflows edit`")
+    if result.get("change_id"):
+        ui.hint(f"undo with `px0 changes revert {result['change_id']}`")
+    if new_id:
+        daemon_mod.restart_if_running(home, config)
 
 
 def cmd_workflows_enable(args: argparse.Namespace) -> None:

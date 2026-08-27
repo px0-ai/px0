@@ -33,7 +33,8 @@ FLAT = {"init", "doctor", "version", "update", "status", "completion",
 # here too, so the surface stays something you can read in one place.
 GROUPS = {
     "workflows":  {"new", "run", "edit", "list", "show", "validate", "delete", "rename",
-                   "copy", "disable", "enable", "health", "improve", "replay", "recipes"},
+                   "copy", "disable", "enable", "health", "improve", "replay", "recipes",
+                   "templatize"},
     "brain":      {"add", "refresh", "list", "search", "ask", "reindex", "show", "rm",
                    "export"},
     "approvals":  {"list", "show", "approve", "reject", "purge", "edit"},

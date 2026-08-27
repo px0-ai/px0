@@ -1,6 +1,6 @@
 # 5. Building a workflow
 
-Modules: `px0/builder.py`, `px0/catalogue.py`, and `cli._build_workflow`
+Modules: `px0/builder.py`, `px0/catalogue.py`, `px0/templates.py`, and `cli._build_workflow`
 
 `px0 workflows new` turns a sentence into a working file. It does that with six harness passes, each with a job small enough that a model can do it well, and it stops to ask a person twice.
 
@@ -216,6 +216,60 @@ Checked in both places on purpose. `save_guideline` is the function that touches
 A rebuild, not a text edit. The file is generated: its tools, inputs, and guideline list all follow from the request. Editing the request and regenerating keeps those consistent, where hand-editing the body would leave the frontmatter describing a workflow that no longer exists. The old version stays in the store's history either way.
 
 Pinning the id is what makes an edit replace the workflow rather than forking a near-duplicate under a slightly different name.
+
+## Templatizing, which is building in reverse
+
+`px0 workflows templatize` takes a working workflow and removes what is local to one store. Module: `px0/templates.py`.
+
+A built workflow is full of one installation's facts: the repository it reads, the channel it posts to, the folder it files things under. That is right for the person who described it and is exactly what stops anyone else running it. Templatizing lifts those literals into `{{input.<name>}}` references and declares each one in a [`vars:` block](04-workflow-file.md#vars-and-what-makes-a-workflow-a-template).
+
+The pass structure mirrors [part 13](13-feedback.md) rather than the six passes above: a deterministic half that decides what is true, then one model call that interprets it.
+
+### The scan decides what is eligible; the model only names it
+
+`candidates(wf)` walks the file and returns every literal that could become a var. `propose(config, payload)` then asks the model which of them belong to the installation, and reads the answer against that set: a proposed var whose literal is not in it is dropped and reported as dropped.
+
+This is the same rule as "tools are never widened by a model's say-so" in the improvement loop, and it is a rule for the same reason. A model that could introduce a literal to replace would be editing text it had misread, and the edit lands in a file the user is about to hand to somebody else.
+
+Two asymmetric rules decide eligibility:
+
+- Every string value in `inputs[].args` and `inputs[].retrieve` is a candidate. An argument's value is a setting by construction. That is what an argument is.
+- In the body, only channels, addresses, URLs, and handles are candidates. A body is the instructions. Replacing an arbitrary phrase there changes what the workflow says rather than what it is pointed at, and there is no way to tell from the text which one you have done.
+
+`eligible()` then rejects four shapes: shorter than three characters, longer than 120 (an argument that long is prose, not a setting), already a `{{...}}` reference, and the `<OWNER>` placeholder shape -- which is a workflow left unfinished, not a value.
+
+### Only what a run can resolve
+
+`{{input.x}}` is substituted in exactly two places: an input's `args`/`retrieve`, resolved by `runner.resolve_inputs`, and the body, rendered by `runner.render_prompt`. So those are the only surfaces `apply` rewrites.
+
+The exclusions are not oversights, and each one would produce a file that is shareable and unrunnable:
+
+| Surface | Why it is left alone |
+| ------- | -------------------- |
+| `trigger.schedule` | Validated by `croniter` when the file loads, and the daemon has no `--input` to hand it |
+| `trigger.watch.args` | Polled by the daemon, which has no inputs either |
+| `output.path` | `output_path_errors` accepts the clock placeholders and nothing else |
+| `tools`, `guidelines` | Ids, not values |
+
+### A var is a value, not a location
+
+One literal appearing in three places becomes one var substituted three times. The alternative -- a var per site -- means a stranger filling in the same repository name three times and getting it wrong once.
+
+Substitution runs longest literal first, and `apply` sorts to guarantee it rather than trusting the caller. Given both `acme` and `acme/api`, doing the short one first leaves `{{input.owner}}/api`, which is a repository nobody named. A consequence is that the shorter literal can end up matching nothing, and a var that replaced nothing is dropped from the block rather than declared -- declaring it would fail the "nothing references this" validation rule.
+
+### Re-dumping the frontmatter, and what that costs
+
+`apply` loads the frontmatter, transforms the whitelisted parts, and re-dumps it. It does not patch the text line by line, because changing a value nested three levels inside an argument by text surgery is how YAML gets corrupted.
+
+The cost is that a comment inside the frontmatter block does not survive. That is the trade, and three things pay for it: the result is diffed before anything is written, it is parsed and validated as a workflow before anything is written, and the write goes through `authoring`, so `px0 changes revert` puts the original back.
+
+`_Dumper` indents block sequences under their key, which PyYAML's default does not. Without it, re-dumping a hand-written file reformats the store's whole frontmatter into a second style, and the diff a user is asked to approve is mostly whitespace.
+
+### Validated as a workflow, and only the new errors count
+
+The CLI parses the rewritten text with `workflow.parse_text` and validates it before writing. What it refuses on is the difference between the new errors and the errors the workflow already had. A workflow can be invalid for reasons that have nothing to do with templatizing it -- a tool whose app was disconnected, a guideline someone deleted -- and refusing to write the template over a fault that was there before would leave the user unable to do the one thing they asked for. Inherited errors are printed as warnings instead.
+
+`parse_text` exists for this: `parse` is `parse_text` over `path.read_text()`, so a rewrite can be checked before it replaces the file that worked.
 
 ## Next
 

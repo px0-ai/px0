@@ -310,6 +310,45 @@ through the same confirm-and-authorize step as when you first built it. Use
 `--dry-run` to see a proposal and apply none of it, and `--show-evidence` to see
 exactly what the model was given.
 
+## Workflows somebody else can run
+
+A workflow that works is full of your own facts: your repository, your channel,
+your folder. That is what stops anyone else running it. px0 can lift those out:
+
+```shell
+px0 workflows templatize friday-pr-digest --to pr-digest-template
+```
+
+It scans the file for every literal that belongs to one installation rather than
+to the job, shows you the list, and declares each one as a var with a
+description and the values somebody else would plausibly put there:
+
+```yaml
+vars:
+  - name: repo
+    description: The repository whose pull requests the digest covers, as owner/name
+    values:
+      - vercel/next.js
+  - name: channel
+    description: The Slack channel the digest is posted to
+```
+
+The literals become `{{input.repo}}` and `{{input.channel}}` wherever a run can
+resolve them, and the workflow is then run by naming them:
+
+```shell
+px0 workflows run pr-digest-template --input repo=vercel/next.js --input channel=#eng
+```
+
+Run it without them and it refuses before calling anything, naming what is
+missing. At a terminal it asks you instead, showing each description — which is
+what makes the first run of somebody else's workflow something other than a
+guessing game.
+
+The rewrite is shown as a diff and validated as a workflow before it is written,
+`--to` leaves the workflow doing your actual work alone, and `px0 changes revert`
+undoes it either way.
+
 ## Checking a change before trusting it
 
 A revision used to mean waiting until Friday to find out. Let a workflow keep
@@ -495,6 +534,7 @@ px0 changes show <change-id>
 | `px0 workflows disable`   | Park one without deleting it                   |
 | `px0 workflows health`    | What a workflow's own runs say about it        |
 | `px0 workflows improve`   | Revise a workflow from what its runs did       |
+| `px0 workflows templatize`| Lift your own values out, so others can run it |
 | `px0 status`              | Whether anything needs attention               |
 | `px0 brain add`           | Save a URL or file to your brain               |
 | `px0 brain ask`           | Ask a question across your brain               |

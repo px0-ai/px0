@@ -29,6 +29,7 @@ Every row below is a variation on the moves in this table. The constraint column
 | `pipeline:`          | Chains whole workflows into one job                              | One level deep. A stage that is itself a pipeline is rejected     |
 | `confirm:`           | Holds this workflow's writes for you to approve before they fire | Read tools never wait. Named tools must be ones the workflow has  |
 | `capture:`           | Keeps what a run's inputs resolved to, so a revision can be replayed against it | Off unless asked for: a fixture is the content of your work |
+| `vars:`              | Turns the row into a template anyone can fill in, one `--input` per value | Written by `px0 workflows templatize`. An unattended workflow's vars all need defaults |
 
 One consequence is worth stating plainly. Because a scheduled run's output goes to a file or to [your inbox](commands/inbox.md) — never to a terminal nobody is watching — "post it to Slack" is never `output.target`. It is a Slack write tool the workflow calls itself. Every row below is written that way, and any of those write tools can be held for approval with `confirm:` rather than firing unattended.
 

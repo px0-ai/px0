@@ -199,6 +199,20 @@ def build(handlers) -> argparse.ArgumentParser:
     wp.add_argument("new_id", metavar="new-id")
     wp.set_defaults(func=handlers.cmd_workflows_copy)
 
+    wp = wf_sub.add_parser("templatize",
+                           help="lift this installation's own values out into vars")
+    wp.add_argument("workflow", nargs="?",
+                    help="workflow id; omit to pick one from a list")
+    wp.add_argument("--to", metavar="NEW-ID",
+                    help="write the template as a new workflow, leaving this one as it is")
+    wp.add_argument("--candidates", action="store_true",
+                    help="print what the scan found and stop, with no model call")
+    wp.add_argument("--dry-run", action="store_true",
+                    help="show the template and write nothing")
+    wp.add_argument("--yes", action="store_true", help="skip the confirmation")
+    wp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    wp.set_defaults(func=handlers.cmd_workflows_templatize)
+
     wp = wf_sub.add_parser("disable", help="stop a workflow firing, without deleting it")
     wp.add_argument("workflow")
     wp.set_defaults(func=handlers.cmd_workflows_enable)

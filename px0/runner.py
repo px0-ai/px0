@@ -192,8 +192,19 @@ def resolve_inputs(
     Returns (context, meta) where meta is a per-input list of resolution
     outcomes for the run record. An optional input that fails resolves to None
     and is marked degraded rather than aborting the run; a required input that
-    fails raises RunError."""
-    context: dict = {"config": config, "input": cli_inputs}
+    fails raises RunError.
+
+    A workflow that declares `vars:` is checked first: a required var nobody
+    supplied stops the run here, before a single tool is called. Without that
+    check `{{input.repo}}` resolves to None and the connector is asked for a
+    repository called nothing -- which comes back as somebody else's 404 and
+    reads as a missing repository rather than as a template nobody filled in.
+    """
+    filled, missing = workflow_mod.var_values(wf, cli_inputs)
+    if missing:
+        raise RunError(workflow_mod.missing_vars_message(wf, missing),
+                       {"inputs_resolved": []})
+    context: dict = {"config": config, "input": {**cli_inputs, **filled}}
     meta: list[dict] = []
 
     for inp in wf.inputs:

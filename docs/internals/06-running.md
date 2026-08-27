@@ -54,7 +54,22 @@ The run captures hand edits before reading anything, so a file edited five secon
 
 ## Stage 3: resolving inputs
 
-`resolve_inputs` walks every `InputSpec` in order and builds a context dict seeded with `{"config": config, "input": cli_inputs}`.
+`resolve_inputs` starts by settling the workflow's declared vars, then walks every `InputSpec` in order and builds a context dict seeded with `{"config": config, "input": {**cli_inputs, **defaults}}`.
+
+The var check comes first, and it comes before the network:
+
+```python
+filled, missing = workflow_mod.var_values(wf, cli_inputs)
+if missing:
+    raise RunError(workflow_mod.missing_vars_message(wf, missing),
+                   {"inputs_resolved": []})
+```
+
+A [template](04-workflow-file.md#vars-and-what-makes-a-workflow-a-template) with a required var nobody supplied is refused here rather than resolving `{{input.repo}}` to `None` and asking a connector for a repository called nothing. GitHub answers that with a 404, which reads as a missing repository rather than as a template nobody filled in -- the same failure `input_arg_errors` was written to prevent, arriving by a different route.
+
+A var with a `default` contributes it here, and a value passed with `--input` always wins over the default. Both reach the body as well as the arguments, because the body is rendered against this same context in stage 4.
+
+`cli._fill_template_vars` asks for missing vars before the runner is called, but only when there is a person at a terminal: not with `--stdin` (which is already reading the stream the answers would come from), not with `--json` or `--quiet`, and not for a run the daemon spawned, which carries `--trigger`. The refusal above is what covers all of those, and the prompt only spares an interactive user having to read it once to learn what the flags were.
 
 Each input's arguments are rendered against the context built so far, so an input may reference the ones above it. `_with_retry` wraps connector calls with exponential backoff up to `connectors.retries`, and never retries `ConnectorNotConfigured` -- that means the connector is not set up, not that the call failed transiently.
 

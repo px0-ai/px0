@@ -48,6 +48,7 @@ Summarize `{{prs}}` into a short digest, then post it to #eng-standup.
 | `confirm` | `bool` or `list` | Which writes wait for a person; `None` follows `tools.confirm_writes` |
 | `capture` | `bool` | Whether a run keeps what its inputs resolved to |
 | `guidelines` | `list[str]` | Files inlined verbatim into every run |
+| `vars` | `list[dict]` | Values a run has to be given before it can start |
 | `inputs` | `list[InputSpec]` | Context gathered before the prompt runs |
 | `tools` | `list[str]` | What the model may call during the run |
 | `output` | `dict` | `target`, `path`, `inbox` |
@@ -114,7 +115,7 @@ A template referencing something nothing provides (`author: {{github_username}}`
 
 The same function runs over a plan the builder has not saved yet and over a workflow on disk. It takes plain dicts so both callers can use it, and takes the advice text as a parameter, because a build can regenerate and a run cannot.
 
-`_walk_strings` recurses into nested dicts and lists, so a placeholder buried in a sub-object is found and reported with a dotted location like `args.filter.repo`.
+`walk_strings` recurses into nested dicts and lists, so a placeholder buried in a sub-object is found and reported with a dotted location like `args.filter.repo`. It is public because `templates` walks the same values looking for literals to lift out, and two walkers over one structure would drift.
 
 ### Rules and their reasons
 
@@ -130,9 +131,39 @@ The same function runs over a plan the builder has not saved yet and over a work
 | `trigger.watch.every` must be at least 60 seconds | Anything faster burns quota polling for a job that is waiting by definition |
 | `retry.max_attempts` is capped at 10 | A retry policy survives a blip; it does not hammer a broken system all night |
 | Pipelines cannot nest | One level of composition, checked here rather than at run time |
+| Every `vars[]` entry needs a name and a description | The description is the whole point of declaring one: a var a stranger cannot interpret is worse than the literal it replaced |
+| A `vars[]` entry must be referenced by something a run renders | Otherwise it is a knob the file advertises and no run reads, so the installer supplies a value and watches it change nothing |
+| A scheduled or watched workflow cannot have a required var | Nothing passes `--input` to an unattended fire, so it would not run badly, it would fail every time, at 6am, having looked valid when it was written |
 | `output.path` may only use clock placeholders | The path is rendered after the model call, so a typo would otherwise be found at the most expensive possible moment |
 
 `output_path_errors` is the last one, and it exists because of when the path is rendered. A run resolves `output.path` in stage 7, after the model has already been paid for. Checking it at validation time turns "a failed run" into "a workflow that could never have succeeded", which is a different and more useful message.
+
+## Vars, and what makes a workflow a template
+
+A `vars:` block is the file format's answer to a workflow being shareable. Everything else in a workflow file describes a job; a var names a value that belongs to whoever is running it.
+
+```yaml
+vars:
+  - name: repo
+    description: The repository whose pull requests the digest covers, as owner/name
+    values:
+      - vercel/next.js
+    default: null
+```
+
+`declared_vars(wf)` normalizes the block to `{name, description, values, default, required}`. Two decisions in that function are worth stating.
+
+A var is required unless it carries a `default` or says `required: false`. That way round because the common case for a shared template is a value only the installer can know, and the safe reading of a value nobody supplied is to refuse the run rather than to send something somewhere with a blank in it.
+
+The `values` list is examples, and is never enforced. It exists so a stranger can pattern-match the shape of what to put there. Enforcing them would mean treating a model's plausible list of repository names as an authority on which repositories exist, which it is not.
+
+`references_var(wf, name)` decides whether a var is used, and it only counts the two surfaces a run actually renders: an input's `args`/`retrieve`, and the body. A var mentioned in the `description` is not referenced, because nothing will ever substitute it. That is why the validation rule is worth having rather than pedantic.
+
+`var_values(wf, cli_inputs)` returns `(defaults to contribute, required vars nobody supplied)`. An empty string counts as not supplied: `--input channel=` is a mistake every time, since nothing useful is ever named by the empty string, and the alternative is a connector being asked to post to a channel called nothing.
+
+`missing_vars_message(wf, missing)` is one line naming what is missing and the exact command that supplies it. It is what the run refusal prints, and it is here rather than in the CLI because the daemon and the MCP surface hit the same refusal.
+
+Where these are enforced is [part 6](06-running.md); where the block gets written is [part 5](05-building.md).
 
 ## Loading
 

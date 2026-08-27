@@ -92,7 +92,7 @@ some new features to the codebase
 | `02-store-and-config.md` | `paths`, `store`, `config` |
 | `03-versioning.md` | `versioning`, `claims`, `authoring` |
 | `04-workflow-file.md` | `workflow` |
-| `05-building.md` | `builder`, `catalogue`, `cli._build_workflow` |
+| `05-building.md` | `builder`, `catalogue`, `templates`, `cli._build_workflow` |
 | `06-running.md` | `runner` |
 | `07-harness.md` | `harness` |
 | `08-tools.md` | `tools`, `localtools`, `catalogue`, `connect` |

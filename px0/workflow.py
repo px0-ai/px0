@@ -154,6 +154,11 @@ class Workflow:
     # be compared against the same world. None follows `runs.capture_inputs`.
     capture: bool | None = None
     guidelines: list[str] = field(default_factory=list)
+    # Declared run-time values: one mapping per var, each with a name, a
+    # description, and the values somebody else might plausibly put there. A
+    # workflow that has them is a template -- the literals belonging to one
+    # installation have been lifted out of it. See `px0/templates.py`.
+    vars: list[dict] = field(default_factory=list)
     inputs: list[InputSpec] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     output: dict = field(default_factory=dict)
@@ -190,7 +195,17 @@ def parse(path: Path) -> Workflow:
     from the Markdown body. Raises WorkflowError if the file has no
     frontmatter delimiters or the frontmatter section is malformed.
     Missing frontmatter keys fall back to their dataclass defaults."""
-    text = path.read_text()
+    return parse_text(path.read_text(), path)
+
+
+def parse_text(text: str, path: Path) -> Workflow:
+    """`parse` over text that is not on disk yet.
+
+    Split out so a rewrite can be validated before it is written: `px0
+    workflows templatize` builds a new file in memory and has to know it still
+    parses and still validates before it replaces the one that worked. `path`
+    is carried for the error messages and for the Workflow's own field.
+    """
     if not text.startswith("---"):
         raise WorkflowError(f"{path}: missing frontmatter")
     parts = text.split("---", 2)  # ["", frontmatter, body]
@@ -223,6 +238,7 @@ def parse(path: Path) -> Workflow:
         confirm=front.get("confirm"),
         capture=front.get("capture"),
         guidelines=front.get("guidelines", []) or [],
+        vars=front.get("vars", []) or [],
         inputs=inputs,
         tools=front.get("tools", []) or [],
         output=front.get("output", {}),
@@ -473,17 +489,21 @@ def _validate_watch(wf: "Workflow", home: Path) -> list[str]:
     return errors
 
 
-def _walk_strings(value, trail: str = ""):
+def walk_strings(value, trail: str = ""):
     """Yields every (dotted location, string) pair inside a nested args value, so
-    a placeholder buried in a list or a sub-object is found too."""
+    a placeholder buried in a list or a sub-object is found too.
+
+    Public because `templates` walks the same values looking for literals to
+    lift out, and two walkers over one structure would drift.
+    """
     if isinstance(value, str):
         yield trail, value
     elif isinstance(value, dict):
         for k, v in value.items():
-            yield from _walk_strings(v, f"{trail}.{k}" if trail else str(k))
+            yield from walk_strings(v, f"{trail}.{k}" if trail else str(k))
     elif isinstance(value, list):
         for i, v in enumerate(value):
-            yield from _walk_strings(v, f"{trail}[{i}]")
+            yield from walk_strings(v, f"{trail}[{i}]")
 
 
 def input_arg_errors(inputs: list[dict], fix: str) -> list[str]:
@@ -510,7 +530,7 @@ def input_arg_errors(inputs: list[dict], fix: str) -> list[str]:
             value = inp.get(field_name)
             if not value:
                 continue
-            for where, text in _walk_strings(value):
+            for where, text in walk_strings(value):
                 location = f"{field_name}.{where}" if where else field_name
                 if _PLACEHOLDER_ARG_RE.match(text.strip()):
                     errors.append(
@@ -545,6 +565,176 @@ def _validate_input_args(wf: Workflow) -> list[str]:
         [{"id": inp.id, "args": inp.args, "retrieve": inp.retrieve} for inp in wf.inputs],
         fix=f"rebuild the workflow with `px0 workflows edit {wf.id}`, naming the real value",
     )
+
+
+# A var name, as it is typed at the command line: `--input repo=owner/name`.
+# Dots are excluded because `{{input.a.b}}` reads as a nested lookup, and a var
+# called `a.b` would be a name that can never resolve.
+_VAR_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
+def is_template(wf: Workflow) -> bool:
+    """Whether this workflow declares vars, and so has to be filled in to run."""
+    return bool(declared_vars(wf))
+
+
+def declared_vars(wf: Workflow) -> list[dict]:
+    """A workflow's `vars:` block, normalized to
+    `{name, description, values, default, required}`.
+
+    A var is required unless it carries a `default` or says `required: false`.
+    That way round because the common case for a shared template is a value
+    only the installer can know -- their repository, their channel -- and the
+    safe reading of a value nobody supplied is to refuse the run, not to send
+    something somewhere with a blank in it.
+    """
+    out: list[dict] = []
+    for entry in wf.vars or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        default = entry.get("default")
+        default = None if default is None else str(default)
+        out.append({
+            "name": name,
+            "description": str(entry.get("description") or "").strip(),
+            "values": [str(v) for v in (entry.get("values") or [])],
+            "default": default,
+            "required": default is None and entry.get("required", True) is not False,
+        })
+    return out
+
+
+def _var_reference(name: str) -> re.Pattern:
+    """Matches `{{input.<name>}}` the way the runner matches it."""
+    return re.compile(r"\{\{\s*input\." + re.escape(name) + r"\s*\}\}")
+
+
+def references_var(wf: Workflow, name: str) -> bool:
+    """Whether anything a run renders actually reads this var.
+
+    Only the two surfaces a run renders count: an input's `args`/`retrieve`, and
+    the body. A var mentioned anywhere else -- in the description, in a comment
+    -- is a var that will never be substituted into anything.
+    """
+    pattern = _var_reference(name)
+    if pattern.search(wf.body or ""):
+        return True
+    for inp in wf.inputs:
+        for value in (inp.args, inp.retrieve):
+            if not value:
+                continue
+            for _where, text in walk_strings(value):
+                if pattern.search(text):
+                    return True
+    return False
+
+
+def _validate_vars(wf: Workflow) -> list[str]:
+    """Checks a `vars:` block: named, described, unique, and actually used.
+
+    An undescribed var is refused rather than allowed through, because the
+    description is the entire point of declaring one. A var is only worth
+    having when a stranger can read it and know what to put there; without that
+    line, a template is a file that fails with a name they have never seen.
+
+    A var nothing references is refused for the mirror-image reason: it is a
+    knob the file advertises and no run reads, so the installer supplies a value
+    and watches it change nothing.
+    """
+    if wf.vars in (None, []):
+        return []
+    if not isinstance(wf.vars, list):
+        return ["vars: must be a list of mappings, each with a name and a description"]
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(wf.vars):
+        if not isinstance(entry, dict):
+            errors.append(f"vars[{i}] must be a mapping with a name and a description")
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            errors.append(f"vars[{i}] has no name")
+            continue
+        if not _VAR_NAME_RE.match(name):
+            errors.append(f"vars[{i}] name {name!r} must start with a letter and use "
+                          "only letters, digits, underscores, and dashes")
+            continue
+        if name in seen:
+            errors.append(f"vars[] declares {name!r} twice")
+            continue
+        seen.add(name)
+        if not str(entry.get("description") or "").strip():
+            errors.append(f"vars[] entry {name!r} has no description; it is what "
+                          "tells whoever installs this what to put there")
+        values = entry.get("values")
+        if values is not None and (not isinstance(values, list)
+                                   or any(isinstance(v, (list, dict)) for v in values)):
+            errors.append(f"vars[] entry {name!r}: values must be a list of plain values")
+        if isinstance(entry.get("default"), (list, dict)):
+            errors.append(f"vars[] entry {name!r}: default must be a single value")
+        if "required" in entry and not isinstance(entry["required"], bool):
+            errors.append(f"vars[] entry {name!r}: required must be true or false")
+        if not references_var(wf, name):
+            errors.append(f"vars[] declares {name!r}, which nothing in this workflow "
+                          f"references -- use it as {{{{input.{name}}}}} in an input's "
+                          "args or in the body, or drop it")
+
+    # A schedule and a required var cannot both be true. Nothing supplies
+    # `--input` to a fire the daemon starts, so such a workflow does not run
+    # badly, it fails every time -- and it fails at 6am, unattended, having
+    # looked valid when it was written. Refused here instead, where the person
+    # who can fix it is reading.
+    unattended = "scheduled" if (wf.trigger or {}).get("schedule") else (
+        "watched" if (wf.trigger or {}).get("watch") else "")
+    if unattended:
+        required = [v["name"] for v in declared_vars(wf) if v["required"]]
+        if required:
+            errors.append(
+                f"this workflow is {unattended}, so nothing can pass it "
+                f"--input, but vars[] requires {', '.join(required)} -- give each "
+                "one a default, or keep the template as a separate workflow "
+                "(`px0 workflows templatize <id> --to <id>-template`)")
+    return errors
+
+
+def var_values(wf: Workflow, cli_inputs: dict) -> tuple[dict, list[str]]:
+    """(defaults to contribute, required vars nobody supplied) for a run.
+
+    An empty string counts as not supplied. `--input channel=` is a mistake
+    every time -- nothing useful is ever named by the empty string -- and the
+    alternative is a connector being asked to post to a channel called nothing.
+    """
+    filled: dict = {}
+    missing: list[str] = []
+    seen: set[str] = set()
+    for spec in declared_vars(wf):
+        if spec["name"] in seen:
+            continue  # a duplicate is refused by validation; do not repeat it here
+        seen.add(spec["name"])
+        supplied = cli_inputs.get(spec["name"])
+        if isinstance(supplied, str) and not supplied.strip():
+            supplied = None
+        if supplied is not None:
+            continue
+        if spec["default"] is not None:
+            filled[spec["name"]] = spec["default"]
+        elif spec["required"]:
+            missing.append(spec["name"])
+        else:
+            filled[spec["name"]] = ""
+    return filled, missing
+
+
+def missing_vars_message(wf: Workflow, missing: list[str]) -> str:
+    """One line naming what a template still needs, and how to pass it."""
+    flags = " ".join(f"--input {name}=<value>" for name in missing)
+    noun = "a value" if len(missing) == 1 else "values"
+    return (f"{wf.id} needs {noun} for {', '.join(missing)} -- "
+            f"run it as `px0 workflows run {wf.id} {flags}`")
 
 
 def validate(wf: Workflow, home: Path) -> list[str]:
@@ -596,6 +786,7 @@ def validate(wf: Workflow, home: Path) -> list[str]:
 
     errors.extend(_validate_watch(wf, home))
     errors.extend(_validate_confirm(wf, home))
+    errors.extend(_validate_vars(wf))
     errors.extend(_validate_timezone(wf))
     errors.extend(_validate_pipeline(wf, home))
     if wf.capture is not None and not isinstance(wf.capture, bool):

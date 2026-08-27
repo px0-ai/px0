@@ -75,6 +75,12 @@ def candidates(home: Path, config: dict) -> dict:
     for wf in sorted(workflow_mod.load_all(home).values(), key=lambda w: w.id):
         if not wf.enabled:
             continue
+        # A template is not a candidate: the router has no way to supply the
+        # values it declares, so routing a question to one can only ever end in
+        # the run refusing. Offering it would spend a model call to reach a
+        # dead end and read as px0 picking the wrong workflow.
+        if any(v["required"] for v in workflow_mod.declared_vars(wf)):
+            continue
         workflows.append({
             "id": wf.id,
             "description": wf.description or wf.request,

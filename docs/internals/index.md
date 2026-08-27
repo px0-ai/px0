@@ -14,7 +14,7 @@ Every part names the modules it covers, so you can read the code alongside it.
 | [2. The store and configuration](02-store-and-config.md) | `~/.px0`, the config schema, path resolution, export and verify | `paths`, `store`, `config` |
 | [3. Versioning and undo](03-versioning.md) | Content-addressed blobs, the SQLite manifest, checkpoint scans, claim aliasing | `versioning`, `claims`, `authoring` |
 | [4. The workflow file](04-workflow-file.md) | Frontmatter as machine contract, the placeholder grammar, every validation rule | `workflow` |
-| [5. Building a workflow](05-building.md) | Six harness passes, catalogue search, authorization before planning | `builder`, `catalogue` |
+| [5. Building a workflow](05-building.md) | Six harness passes, catalogue search, authorization before planning, templatizing | `builder`, `catalogue`, `templates` |
 | [6. Running a workflow](06-running.md) | The eight stages, both agent loops, usage accounting, pipelines | `runner` |
 | [7. The harness layer](07-harness.md) | Shelling out to a coding agent, capability tables, envelope parsing, downgrades | `harness` |
 | [8. Tools and connectors](08-tools.md) | Four tool kinds in one namespace, Composio execution, authorization on demand | `tools`, `localtools`, `catalogue`, `connect` |

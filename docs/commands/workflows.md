@@ -21,6 +21,7 @@ px0 workflows validate [workflow] [--json]
 px0 workflows delete [workflow] [--yes]
 px0 workflows rename <workflow> <new-id>
 px0 workflows copy <workflow> <new-id>
+px0 workflows templatize [workflow] [--to NEW-ID] [--candidates] [--dry-run] [--yes] [--json]
 px0 workflows disable <workflow>
 px0 workflows enable <workflow>
 ```
@@ -227,6 +228,10 @@ Supply an input the workflow declares. Repeatable.
 ```shell
 px0 workflows run report --input since=2026-08-01 --input team=payments
 ```
+
+A workflow that declares [`vars`](#values-somebody-else-has-to-fill-in) is asked
+for interactively when one is missing and you are at a terminal, and refuses
+before any tool is called when you are not.
 
 ### `--output {stdout,file}`
 
@@ -738,6 +743,155 @@ px0 workflows edit monday-pr-digest
 
 ---
 
+## `px0 workflows templatize`
+
+Lift this installation's own values out of a workflow and declare them as vars,
+so that somebody else can fill them in. A workflow that reads your repository
+and posts to your channel becomes one that reads a repository and posts to a
+channel, with a `vars:` block saying what each of those is.
+
+- **Arguments:** a workflow id, or omit it to pick one from a list.
+
+```shell
+px0 workflows templatize friday-pr-digest
+px0 workflows templatize friday-pr-digest --to pr-digest-template
+```
+
+It runs in three steps, and the order is the point of the command.
+
+**The scan.** Every literal that could become a var is found by a deterministic
+walk of the file, and printed before anything else happens. Nothing outside that
+list can end up as a var, whatever the model says next.
+
+**The proposal.** The model is asked which of those literals belong to the
+installation rather than to the job, and to write each one a description and the
+values somebody else would plausibly put there. A var whose literal was not in
+the scan is dropped and named as dropped; so is one with no description.
+
+**The rewrite.** The file is rebuilt with each literal replaced by
+`{{input.<name>}}` and a `vars:` block added, shown as a diff, validated as a
+workflow, and only then written. The write goes through the version history, so
+`px0 changes revert` puts the original back.
+
+```
+› templatize friday-pr-digest
+
+values found in this workflow (4)
+  repo     octocat/hello-world
+           inputs.prs.args.repo, body
+  channel  #eng-standup
+           body
+  value    octocat
+           inputs.prs.args.reviewer, body
+  value    open pull requests I reviewed
+           inputs.prs.args.query
+
+template for friday-pr-digest
+
+  repo: octocat/hello-world  ->  {{input.repo}}
+  · what it is    The repository whose pull requests the digest covers, as owner/name
+  · for example   vercel/next.js, rails/rails
+  · required      no default; every run has to be given one
+  · replaces      2 occurrence(s) in this file
+
+  · left alone: open pull requests I reviewed  this is what the workflow is about
+```
+
+### What is templatized, and what is left alone
+
+Only the surfaces a run can actually resolve `{{input.<name>}}` in:
+
+| Surface | Templatized | Why |
+| ------- | ----------- | --- |
+| `inputs[].args` | Every string value | An argument's value is a setting by construction, and it is rendered against the run's inputs before any tool is called |
+| `inputs[].retrieve` | Every string value | Same, and the same rendering |
+| The body | Channels, addresses, URLs, and handles only | The rest of a body is the instructions. Lifting a phrase out of instructions changes what the workflow says, not what it is pointed at |
+| `trigger.schedule` | Never | A cron expression is validated when the file loads, and nothing passes `--input` to a fire the daemon starts |
+| `output.path` | Never | An output path accepts the clock placeholders and nothing else |
+| `tools`, `guidelines` | Never | Those are ids, not values |
+
+One literal in three places is one var substituted three times, not three vars.
+The alternative is somebody filling in the same repository name three times and
+getting it wrong once.
+
+### `workflow`
+
+Which workflow to templatize.
+
+- **Input:** a workflow id, as printed by `px0 workflows list`.
+- **Default:** omit it to pick from a list interactively.
+
+### `--to NEW-ID`
+
+Write the template as a new workflow and leave this one exactly as it is.
+
+- **Input:** a workflow id that does not already exist.
+- **Default:** without it, the file is rewritten in place -- which is what you
+  want when the workflow was always meant to be shared, and not what you want
+  when it is the one doing your work every Friday.
+
+```shell
+px0 workflows templatize friday-pr-digest --to pr-digest-template
+```
+
+### `--candidates`
+
+Print what the scan found and stop. No model call, no network.
+
+Useful for the question "is there anything here worth sharing at all", and for
+seeing the complete set of literals that a proposal could possibly touch.
+
+### `--dry-run`
+
+Show the proposal and the diff, and write nothing.
+
+### `--yes`
+
+Skip the confirmation before the file is written.
+
+### `--json`
+
+Print the proposal, the vars, the run command, and any validation errors as
+JSON, and write nothing. Reporting only, the same way `px0 workflows improve`
+treats `--json`: the write is the interactive path, because it is shown as a
+diff first.
+
+### Filling one in
+
+A workflow with vars is run by naming them:
+
+```shell
+px0 workflows run pr-digest-template --input repo=vercel/next.js --input channel=#eng
+```
+
+Run it without them and it refuses before a single tool is called, naming what
+is missing and the flags to pass. At a terminal it asks for each one instead,
+showing the description and the examples from the `vars:` block, so the first
+run of somebody else's template is not a guessing game.
+
+`px0 workflows list` marks a workflow that has vars, because it is a different
+kind of thing to run.
+
+Two surfaces cannot fill a template in, so neither offers one: [`px0 ask`](ask.md)
+leaves templates out of what it routes a question to, and the
+[MCP server](mcp.md) has no way to pass values, so `workflow_run` on a template
+is refused the same way an unsupplied run is.
+
+### A scheduled workflow cannot require a var
+
+Nothing passes `--input` to a fire the daemon starts. A scheduled or watched
+workflow with a required var would therefore fail every fire, unattended, having
+looked valid when it was written -- so it fails validation instead. Either give
+every var a `default`, or keep the template as a separate workflow:
+
+```shell
+px0 workflows templatize friday-pr-digest --to pr-digest-template
+```
+
+The warning comes before the model call, not after.
+
+---
+
 ## `px0 workflows disable`
 
 Stop a workflow firing, without deleting it. Sets `enabled: false` in its
@@ -782,6 +936,53 @@ Frontmatter fields, beyond what the build writes for you.
 | `trigger.schedule` | A cron expression. A scheduled workflow's `output.target` must be `file` |
 | `trigger.watch` | `{tool: <read-only tool>, args: {...}, key: <field>, every: 15m}`. Polls the tool and runs when an item it has not seen before appears |
 | `timeout` | A duration. Overridden for one run by `--timeout` |
+| `vars` | The values this workflow has to be given before it can run. Written by [`templatize`](#px0-workflows-templatize) |
+
+### Values somebody else has to fill in
+
+A workflow that declares `vars:` is a template: the values belonging to one
+installation have been lifted out of it.
+
+```yaml
+vars:
+  - name: repo
+    description: The repository whose pull requests the digest covers, as owner/name
+    values:
+      - vercel/next.js
+      - rails/rails
+  - name: since
+    description: How far back to look
+    values:
+      - 7d
+      - 30d
+    default: 7d
+```
+
+Each var is referenced as `{{input.<name>}}` in an input's `args`/`retrieve` or
+in the body, and supplied at run time with `--input <name>=<value>`.
+
+| Field | What it does |
+| ----- | ------------ |
+| `name` | How it is referenced, and how it is typed: `--input repo=...`. Letters, digits, underscores, and dashes |
+| `description` | What whoever installs this is told to put there. Required: a var nobody can interpret is worse than a literal |
+| `values` | Examples, or the full set when there is one. Read as examples and never enforced, because a plausible list of repository names is not an authority on which repositories exist |
+| `default` | Makes the var optional. Worth giving to a lookback window; never to anything that decides who receives something |
+| `required` | `false` lets a run proceed with the value empty. A var is required unless it has a `default` or says this |
+
+Four rules the file format holds to, each because the alternative fails quietly:
+
+- A var with no description fails validation.
+- A var nothing references fails validation. It is a knob the file advertises
+  and no run reads, so the installer supplies a value and watches it change
+  nothing.
+- A required var nobody supplied stops the run before any tool is called,
+  rather than resolving to nothing and asking a connector for a repository
+  called nothing.
+- A scheduled or watched workflow cannot have a required var at all, because
+  nothing passes `--input` to an unattended fire.
+
+Write one with [`px0 workflows templatize`](#px0-workflows-templatize) rather
+than by hand.
 
 ### Holding a write back
 

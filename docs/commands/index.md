@@ -19,7 +19,7 @@ of them can answer it and so has no single entity to name.
 | ----- | --------------- | ------ |
 | [`init`](init.md) | Scaffolding a new store | `px0/store.py` |
 | [`ask`](ask.md) | One question, routed to whoever can answer it | `px0/route.py` |
-| [`workflows`](workflows.md) | Building, running, editing, and improving workflows | `px0/workflow.py`, `px0/builder.py`, `px0/runner.py`, `px0/analysis.py`, `px0/improve.py` |
+| [`workflows`](workflows.md) | Building, running, editing, improving, and templatizing workflows | `px0/workflow.py`, `px0/builder.py`, `px0/runner.py`, `px0/analysis.py`, `px0/improve.py`, `px0/templates.py` |
 | [`brain`](brain.md) | Ingesting, searching, and asking over your material | `px0/brain.py`, `px0/retrieval.py`, `px0/ask.py` |
 | [`guidelines`](guidelines.md) | The conventions px0 follows when it works | `px0/authoring.py`, `px0/claims.py` |
 | [`tools`](tools.md) | What workflows can call, and what is authorized | `px0/tools.py`, `px0/connect.py` |
