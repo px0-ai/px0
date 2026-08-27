@@ -11,6 +11,7 @@ you can open in any editor.
 | Section | What is in it |
 | ------- | ------------- |
 | [Command reference](commands/index.md) | Every command group, verb, and option |
+| [Internals](internals/index.md) | How px0 is built, in 18 parts, and the reasoning behind each piece |
 | [Workflow use cases](workflow_usecases.md) | 116 jobs to build, and the apps each one touches |
 | [Configuration keys](reference/configuration.md) | Every `config.toml` key, its type and effect |
 | [Store layout](reference/store-layout.md) | What each folder and state file holds |

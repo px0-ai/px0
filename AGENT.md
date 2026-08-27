@@ -72,6 +72,63 @@ some new features to the codebase
 - All documentation files are located in the `docs/` directory.
 - **Always keep the documentation updated.** If you add a new feature, change an API, or update core logic, you MUST update the corresponding markdown files in `docs/` to reflect these changes.
 
+### Where each kind of documentation lives
+
+| Directory | What belongs there | Update when |
+| --------- | ------------------ | ----------- |
+| `docs/commands/` | One file per command group: every verb, flag, and option | The CLI surface changes: a new verb, a renamed flag, changed defaults |
+| `docs/internals/` | The internals series: how each subsystem is built and why | Core logic, a module's design, an invariant, or a safety rule changes |
+| `docs/reference/` | `configuration.md` (every `config.toml` key) and `store-layout.md` | A config key or a store path is added, renamed, or removed |
+| `docs/reference.md` | Generated API reference | Never edit by hand; run `python scripts/gen_docs.py` |
+| `docs/index.md` | The documentation map | A new top-level section is added |
+
+### Keeping `docs/internals/` current
+
+`docs/internals/` is an ordered series of 18 parts plus `index.md`. Each part names the modules it covers in its opening line. That mapping is the index for finding what to update.
+
+| Part | Modules it documents |
+| ---- | -------------------- |
+| `01-architecture.md` | The whole package: layering, dependency direction, exit codes |
+| `02-store-and-config.md` | `paths`, `store`, `config` |
+| `03-versioning.md` | `versioning`, `claims`, `authoring` |
+| `04-workflow-file.md` | `workflow` |
+| `05-building.md` | `builder`, `catalogue`, `cli._build_workflow` |
+| `06-running.md` | `runner` |
+| `07-harness.md` | `harness` |
+| `08-tools.md` | `tools`, `localtools`, `catalogue`, `connect` |
+| `09-brain.md` | `brain`, `retrieval`, `ask` |
+| `10-context.md` | `guidelines`, `memory`, `runner.render_prompt` |
+| `11-daemon.md` | `daemon` |
+| `12-trust.md` | `approvals`, `localtools`, `mcp`, `runner`, `notify` |
+| `13-feedback.md` | `analysis`, `improve`, `replay`, `runs` |
+| `14-ask.md` | `route`, `session`, `commands`, `inbox` |
+| `15-mcp.md` | `mcp` |
+| `16-sync.md` | `sync`, `store` |
+| `17-cli.md` | `parser`, `cli`, `ui`, `completion`, `runs_tui`, `status` |
+| `18-release.md` | `update`, `doctor`, `__init__`, `scripts/`, `tests/` |
+
+Rules for keeping it accurate:
+
+- **When you change a module, update the part that documents it.** Find the part from the table above. This is not optional; a stale internals doc is worse than no internals doc, because it is read as authoritative.
+- **When you add a module,** add it to a part that already covers its area, or add a new part and register it in both `docs/internals/index.md` and the table above.
+- **When you delete or rename a module,** remove or update every reference to it across the series, including the "Modules:" line at the top of each part and the index table.
+- **Document the reasoning, not the code.** Each part explains why a design was chosen and which failure the alternative caused. If your change fixes a bug that a reader would otherwise reintroduce, write down what the bug was.
+- **Keep every code excerpt real.** Excerpts are quoted from the source. If you change the code an excerpt quotes, update the excerpt or remove it.
+- **Keep cross-references working.** Parts link to each other by relative path (`[part 6](06-running.md)`). Check any link you touch.
+- **Keep the "Next" footer intact.** Every part ends by pointing at the next one; the last part points back at the index.
+- **Format with the `ape-style-markdown` conventions.** No hard-wrapped prose lines, no emojis, no bold or italics for emphasis, ASCII punctuation only (no em dash, en dash, curly quotes, or ellipsis character), fenced code blocks with a language tag, and aligned table separators.
+
+Verify no prohibited punctuation slipped in:
+
+```shell
+python3 -c "
+import pathlib
+bad = set('—–…×•“”‘’')
+print([(str(p), i) for p in pathlib.Path('docs').rglob('*.md')
+       for i, l in enumerate(p.read_text().splitlines(), 1)
+       for ch in l if ch in bad or ord(ch) > 127] or 'clean')"
+```
+
 ## Implementation Guidelines
 
 - **Always cover all edge cases**: When implementing any feature, fix, or refactor, thoroughly identify, handle, and test all edge cases (e.g., boundary conditions, empty/null inputs, malformed data, unexpected errors, and failure paths). Ensure code is resilient and fails gracefully where appropriate.
