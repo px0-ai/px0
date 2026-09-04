@@ -51,7 +51,11 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["px0"]
+packages = ["px0", "px0.web"]
+
+[tool.setuptools.package-data]
+px0 = ["web/static/*"]
+
 
 [tool.pytest.ini_options]
 markers = [

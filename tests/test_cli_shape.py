@@ -27,7 +27,8 @@ from px0 import cli
 # in front of it. `px0 brain ask` still exists and still means the narrow
 # thing.
 FLAT = {"init", "doctor", "version", "update", "status", "completion",
-        "uninstall", "ask"}
+        "uninstall", "ask", "ui"}
+
 
 # The verbs each entity answers to. Anything added to a group should be added
 # here too, so the surface stays something you can read in one place.

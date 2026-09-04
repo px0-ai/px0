@@ -3815,6 +3815,22 @@ def _notify_update() -> None:
         ui.command("px0 update")
 
 
+def cmd_ui(args) -> None:
+    """Launches the px0 web management interface."""
+    from px0.web import server as web_server
+
+    home, config = _ctx()
+    web_server.start_server(
+        home=home,
+        config=config,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+    )
+
+
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: parses args, dispatches to the selected subcommand's handler,
     and translates known exception types into the appropriate exit code."""

@@ -1,1 +1,2 @@
 include VERSION
+recursive-include px0/web/static *

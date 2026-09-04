@@ -631,6 +631,12 @@ def build(handlers) -> argparse.ArgumentParser:
     sp = sub.add_parser("version", help="print version and build info")
     sp.set_defaults(func=handlers.cmd_version)
 
+    sp = sub.add_parser("ui", help="start the web dashboard")
+    sp.add_argument("--port", type=int, default=8080, help="port to bind the web server to (default: 8080)")
+    sp.add_argument("--host", default="127.0.0.1", help="host to bind the web server to (default: 127.0.0.1)")
+    sp.add_argument("--no-browser", action="store_true", help="do not automatically open the browser")
+    sp.set_defaults(func=handlers.cmd_ui)
+
     sp = sub.add_parser("doctor", help="run integrity and health checks")
     sp.add_argument("--quick", action="store_true")
     sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -641,3 +647,4 @@ def build(handlers) -> argparse.ArgumentParser:
     sp.set_defaults(func=handlers.cmd_uninstall)
 
     return p
+
