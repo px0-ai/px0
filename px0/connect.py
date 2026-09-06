@@ -278,9 +278,9 @@ def setup_composio(home: Path, api_key: str) -> dict:
         if "401" in str(e) or "AuthenticationError" in str(type(e)):
             raise ValueError(
                 "\nInvalid Composio API key.\n"
-                "Please create one from the Composio platform:\n"
-                "https://composio.dev > Get Started > Settings > API Keys\n"
-                "Please put the key to proceed.\n"
+                "Use a Composio project API key, not a consumer API key.\n"
+                "At https://composio.dev, switch to Platform mode, select your project, then open Settings > Project Settings > API Keys\n"
+                "Enter the project API key to proceed.\n"
             ) from e
 
         if not _is_cert_error(e):
@@ -310,9 +310,9 @@ def setup_composio(home: Path, api_key: str) -> dict:
             if "401" in str(retry_exc) or "AuthenticationError" in str(type(retry_exc)):
                 raise ValueError(
                     "\nInvalid Composio API key.\n"
-                    "Please create one from the Composio platform:\n"
-                    "https://composio.dev > Get Started > Settings > API Keys\n"
-                    "Please put the key to proceed.\n"
+                    "Use a Composio project API key, not a consumer API key.\n"
+                    "At https://composio.dev, switch to Platform mode, select your project, then open Settings > Project Settings > API Keys\n"
+                    "Enter the project API key to proceed.\n"
                 ) from retry_exc
             raise ComposioUnreachable(
                 f"\nCould not reach the Composio API ({COMPOSIO_HOST}) even using the CA "

@@ -42,7 +42,7 @@ You will need:
 
 - Python 3.11 or newer.
 - A coding agent CLI that px0 uses as its model backend: `claude`, `gemini`, `pi`, or `opencode`. px0 reuses that CLI's own login, so pick whichever one you already sign into.
-- A [Composio](https://composio.dev) API key, for workflows that reach other apps. You can skip this and add it later.
+- A [Composio](https://composio.dev) project API key, for workflows that reach other apps. You can skip this and add it later.
 
 Then run:
 
@@ -72,7 +72,9 @@ pip install -e .
 px0 init
 ```
 
-This creates `~/.px0` and asks for your Composio API key. Skip the key if you do not have one yet, and set it later with `px0 config composio <key>`.
+Use a **project API key**, not a consumer API key. In the Composio dashboard, switch to **Platform** mode, select your project, then open **Settings → Project Settings → API Keys**.
+
+This creates `~/.px0` and asks for your Composio project API key. Skip the key if you do not have one yet, and set it later with `px0 config composio <key>`.
 
 Using a backend other than `claude`? Point px0 at it:
 

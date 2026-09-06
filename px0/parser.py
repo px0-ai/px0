@@ -79,7 +79,7 @@ def build(handlers) -> argparse.ArgumentParser:
         choices=sorted(harness.KNOWN_HARNESSES),
         help="coding agent CLI to use as the model backend (default: claude)",
     )
-    sp.add_argument("--composio-key", help="Composio API key")
+    sp.add_argument("--composio-key", help="Composio project API key")
     sp.set_defaults(func=handlers.cmd_init)
 
     sp = sub.add_parser("workflows", help="build, run, and list workflows")
@@ -599,8 +599,8 @@ def build(handlers) -> argparse.ArgumentParser:
     cpp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
     config_sub.add_parser("model", help="pick a harness and model interactively")
-    cop = config_sub.add_parser("composio", help="set the Composio API key")
-    cop.add_argument("key", nargs="?", help="Composio API key; prompted for if omitted")
+    cop = config_sub.add_parser("composio", help="set the Composio project API key")
+    cop.add_argument("key", nargs="?", help="Composio project API key; prompted for if omitted")
     sp.set_defaults(func=handlers.cmd_config)
 
     sp = sub.add_parser("status", help="whether anything needs attention")

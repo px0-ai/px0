@@ -164,11 +164,13 @@ px0 config set model.harness_cmd "my-agent --print"
 
 ## `px0 config composio`
 
-Store the Composio API key, after verifying it against Composio.
+Store the Composio project API key, after verifying it against Composio.
+
+Use a **project API key**, not a consumer API key. In the Composio dashboard, switch to **Platform** mode, select your project, then open **Settings → Project Settings → API Keys**.
 
 ### `key`
 
-- **Input:** a Composio API key.
+- **Input:** a Composio project API key.
 - **Default:** omit it and you are prompted, so the key does not land in your
   shell history.
 - If the network intercepts TLS, px0 finds a CA bundle that trusts it, saves it

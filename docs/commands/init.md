@@ -45,10 +45,12 @@ px0 init --harness gemini
 
 ### `--composio-key KEY`
 
-Composio API key, used to authorize the external apps workflows call. Verified
+Composio project API key, used to authorize the external apps workflows call. Verified
 against Composio before being saved.
 
-- **Input:** a Composio API key string.
+Use a **project API key**, not a consumer API key. In the Composio dashboard, switch to **Platform** mode, select your project, then open **Settings → Project Settings → API Keys**.
+
+- **Input:** a Composio project API key string.
 - **Default:** none. If omitted, `init` prompts for one interactively; you can
   skip the prompt and add it later with `px0 config composio`.
 - Stored in `connectors.composio_api_key`. `px0 store export` redacts it, along

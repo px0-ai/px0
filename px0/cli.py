@@ -181,15 +181,16 @@ def cmd_init(args: argparse.Namespace) -> None:
     existing_key = cfg.get("connectors", {}).get("composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
 
     if composio_key is None:
+        ui.hint("use a project API key, not a consumer API key; switch to Platform mode in Composio, select your project, then open Settings > Project Settings > API Keys")
         ui.hint("needs \"read all\" and \"write all\" privileges on Composio -- workflows "
                 "authorize individual toolkits later, but the key itself must be able to grant them")
 
     while True:
         if composio_key is None:
             if existing_key:
-                label = f"Composio API key {ui.dim(f'[{_mask_key(existing_key)}, Enter to keep]')}: "
+                label = f"Composio project API key {ui.dim(f'[{_mask_key(existing_key)}, Enter to keep]')}: "
             else:
-                label = "Composio API key: "
+                label = "Composio project API key: "
             try:
                 user_input = ui.prompt(label)
             except EOFError:
@@ -204,17 +205,17 @@ def cmd_init(args: argparse.Namespace) -> None:
             if not user_input:
                 if existing_key:
                     break
-                ui.warn("a Composio API key is required", "enter one, or Ctrl-C to abort")
+                ui.warn("a Composio project API key is required", "enter one, or Ctrl-C to abort")
                 continue
             composio_key = user_input
 
         if not composio_key:
-            ui.warn("a Composio API key is required", "enter one, or Ctrl-C to abort")
+            ui.warn("a Composio project API key is required", "enter one, or Ctrl-C to abort")
             composio_key = None
             continue
 
         try:
-            with ui.spinner("Verifying Composio API key"):
+            with ui.spinner("Verifying Composio project API key"):
                 result = connect_mod.setup_composio(home, composio_key)
             created.append("composio credentials")
             if result.get("ca_bundle"):
@@ -3410,7 +3411,7 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 
 def _set_composio_key(home: Path, key: str | None) -> None:
-    """Stores the Composio API key after verifying it against the live API.
+    """Stores the Composio project API key after verifying it against the live API.
 
     This is the whole of connection setup: individual apps authorize themselves
     when a workflow first needs them, so there is nothing else to configure
@@ -3420,7 +3421,8 @@ def _set_composio_key(home: Path, key: str | None) -> None:
     existing = cfg.get("connectors", {}).get("composio_api_key") or os.environ.get("COMPOSIO_API_KEY")
 
     if not key:
-        label = "Composio API key"
+        ui.hint("use a project API key, not a consumer API key; switch to Platform mode in Composio, select your project, then open Settings > Project Settings > API Keys")
+        label = "Composio project API key"
         if existing:
             label += f" {ui.dim(f'[{_mask_key(existing)}, Enter to keep]')}"
         try:
@@ -3431,11 +3433,11 @@ def _set_composio_key(home: Path, key: str | None) -> None:
             if existing:
                 ui.info("kept the existing key")
                 return
-            ui.err("a Composio API key is required")
+            ui.err("a Composio project API key is required")
             sys.exit(EXIT_USER_ERROR)
 
     try:
-        with ui.spinner("Verifying Composio API key"):
+        with ui.spinner("Verifying Composio project API key"):
             result = connect_mod.setup_composio(home, key)
     except connect_mod.ComposioUnreachable as e:
         ui.err(str(e).strip())
@@ -3447,7 +3449,7 @@ def _set_composio_key(home: Path, key: str | None) -> None:
     if result.get("ca_bundle"):
         ui.info("TLS is intercepted on this network",
                 f"verifying against {result['ca_bundle']}")
-    ui.ok("Composio API key stored")
+    ui.ok("Composio project API key stored")
     ui.hint("apps authorize themselves when a workflow first needs them; see:")
     ui.command("px0 tools list")
 

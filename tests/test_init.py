@@ -48,7 +48,7 @@ def test_cmd_init_with_existing_key_keeps_as_is_on_empty_input(tmp_path, monkeyp
     cli.cmd_init(args)
 
     assert len(prompt_displayed) == 1
-    assert "Composio API key" in prompt_displayed[0]
+    assert "Composio project API key" in prompt_displayed[0]
     assert "exis..._123" in prompt_displayed[0]      # masked, never the whole key
     assert "existing_secret_key_123" not in prompt_displayed[0]
 
@@ -81,7 +81,7 @@ def test_cmd_init_with_existing_key_updates_on_new_input(tmp_path, monkeypatch):
     cli.cmd_init(args)
 
     assert len(prompt_displayed) == 1
-    assert "Composio API key" in prompt_displayed[0]
+    assert "Composio project API key" in prompt_displayed[0]
     assert "exis..._123" in prompt_displayed[0]      # masked, never the whole key
     assert "existing_secret_key_123" not in prompt_displayed[0]
 
@@ -110,7 +110,7 @@ def test_cmd_init_fresh_prompts_without_brackets(tmp_path, monkeypatch):
 
     assert len(prompt_displayed) == 1
     # no [brackets] when there is no existing key to keep
-    assert prompt_displayed[0].endswith("Composio API key: ")
+    assert prompt_displayed[0].endswith("Composio project API key: ")
     assert "[" not in prompt_displayed[0]
 
     cfg = config_mod.load(paths.config_path(home))
