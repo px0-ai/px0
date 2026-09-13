@@ -27,7 +27,7 @@ flowchart TD
         Files["Source Files / .gitignore"]
     end
 
-    Browser <-->|HTTP / JSON (Gzip)| Server
+    Browser <-->|"HTTP / JSON (Gzip)"| Server
     Server --> IndexEngine
     Server --> SearchEngine
     Server --> HLEngine
@@ -40,7 +40,7 @@ flowchart TD
 
 ### Core Components
 
-1. Single Binary Distribution (`main.go`): Embeds the web UI (HTML, CSS, JS ~74 KB) via `go:embed`. Runs with no runtime dependencies, no CGO, no node_modules.
+1. Single Binary Distribution (`main.go`): Embeds the web UI (HTML, CSS, JS ~74 KB) and the vendored Mermaid ESM build (~3.7 MB) via `go:embed`. Runs with no runtime dependencies, no CGO, no node_modules.
 2. In-Memory Path Index (`index.go`): Collects and maintains file paths, directory trees, and basenames in compact structures for instant path resolution and fuzzy lookups.
 3. Optimized Ignore Engine (`ignore.go`): Fast multi-level `.gitignore` evaluator using classification-based matching without regex backtracking where possible.
 4. Windowed Syntax Highlighting Engine (`highlight.go`): Slotted file reader and Chroma tokenizer that works on viewport windows rather than entire multi-megabyte files.
@@ -100,6 +100,7 @@ flowchart TD
 
 - Stateless Server Render: `/api/markdown` converts the whole file on each request with goldmark (GitHub Flavored Markdown tables, task lists, strikethrough and autolinks, plus footnotes) and caches nothing. Files over 4 MB (`maxMarkdownBytes`) are refused and the tab falls back to its source view.
 - One Highlighter: Fenced code goes through the code view's Chroma lexers and `classFor` token classes (`highlightLines`), so a theme colours both. Unlabelled fences and fences over 256 KB (`maxFenceBytes`) stay plain, because guessing a language from content is slow and often wrong.
+- Lazy Mermaid Diagrams (`web/src/mermaid.js`, `web/src/mermaid-view.js`, `scripts/vendor-mermaid.sh`): fences marked `mermaid` draw as soon as a preview opens, in a zoomable card, with the library vendored offline and imported only for previews that contain one. The pipeline, cache headers and failure fallback are in [`docs/internals/mermaid.md`](docs/internals/mermaid.md).
 - Source Line Anchors: An AST transformer (`lineMarker`) writes `data-line` on headings, paragraphs, lists, list items, blockquotes, code blocks and tables. Line-based navigation (outline, go to line, search hits, history, `openFile` with a line) lands on the block holding that line, and switching between preview and source keeps the reader at the same block. Heading ids follow GitHub's rules (`headingIDs`), so tables of contents written for GitHub work.
 - Sanitised in the Browser: goldmark passes raw HTML through, because READMEs rely on it for centred logos and `<details>`. The preview runs on px0's own origin, which also serves the language server install endpoints, so `web/src/markdown.js` treats the response as untrusted. It parses the HTML into an inert `DOMParser` document, removes script-capable elements (`script`, `style`, `iframe`, `svg`, `math`, forms, media) with their content, unwraps elements not on an allowlist, and keeps only attributes that can neither run script nor load anything. Classes survive only for footnotes and highlighter tokens, and every `id` gets an `md-` prefix so a heading called "status" cannot shadow `#status`. Links keep an href only for `http`, `https` and `mailto`; images load only `http`, `https` and `data:image`. Schemes are tested after removing the tabs and newlines the URL parser ignores. A reference without a scheme resolves against the file's directory (a leading `/` means the workspace root, as on GitHub): images load through `/api/raw`, links open the file in px0 (`#L12` lands on a line), and folder links reveal the folder in the explorer. Only the cleaned nodes are adopted into the page.
 - Overlay, Not Replacement: `#mdview` covers `#viewport`, which keeps its rows, so switching to the source is instant. The choice persists in `localStorage` under `px0.mdPreview`. Find in file (Ctrl+F) searches the preview's rendered text in the page, marking matches with the code view's text-node walker.

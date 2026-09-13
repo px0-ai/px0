@@ -104,7 +104,15 @@ func (s *Server) scavenge() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.lastReq.Store(time.Now().UnixNano())
-	w.Header().Set("Cache-Control", "no-store")
+	// Vendored assets under /static/lib/ are immutable and far heavier than the
+	// rest of the UI (Mermaid alone is megabytes), so they opt out of the
+	// global no-store the same way a versioned CDN asset would. Everything
+	// else stays no-store: the API answers from a live workspace.
+	if strings.HasPrefix(r.URL.Path, "/static/lib/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		s.mux.ServeHTTP(w, r)
 		return

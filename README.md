@@ -62,6 +62,7 @@ make dist
 
 - **Blazing Fast Code Navigation**: Fuzzy search files (`Cmd/Ctrl+P`), document symbols (`Cmd/Ctrl+Shift+O`), and full project regex scan (`Cmd/Ctrl+Shift+F`) in milliseconds.
 - **Rich Syntax Highlighting**: Built-in native tokenization for ~280 languages via Chroma.
+- **Rendered Markdown & Mermaid Diagrams**: `.md` files open as a rendered GitHub-Flavored Markdown document (`Alt+M` toggles source/preview), with theme-highlighted code fences and Mermaid diagrams in zoomable cards.
 - **Custom Themes**: Ships 14 built-in themes, including Tokyo Night (default), Paper, Catppuccin, Dracula, GitHub Dark, Gruvbox, Monokai, Nord, One Dark, Rose Pine, and Solarized. Switch via the button at the bottom of the sidebar or `Select Theme` in the command palette. See [STYLING.md](STYLING.md) to write your own.
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection of local LSPs (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`, etc.) for precise Go-to-Definition (`F12`), Hover info, and cross-references. Falls back automatically to instant regex outlines when no LSP is installed.
 - **Virtual DOM / Zero Overhead**: Opening a 400,000-line file costs the same as a 10-line file; only visible lines render in the browser.
@@ -200,7 +201,7 @@ px0 --update
 | `Shift+F12` | Find all references |
 | `←` / `→`, `Home` / `End` (`Cmd+←` / `Cmd+→` on macOS) | Move the (read-only) caret along the line; click places it |
 | `Ctrl+Home` / `Ctrl+End` (`Cmd+↑` / `Cmd+↓` on macOS) | Top / bottom of file |
-| `Alt+Z` / `Alt+L` | Toggle word wrap / line numbers |
+| `Alt+Z` / `Alt+L` / `Alt+M` | Toggle word wrap / line numbers / rendered Markdown preview |
 | `Alt+C` / `Alt+A` / `Alt+U` | With code selected: copy reference / copy for agent / find usages |
 | `Alt+Shift+H` | Call trail: callers and callees of the function under the cursor, expandable level by level |
 | `Hover` | Type signature & doc hover |

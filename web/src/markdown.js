@@ -9,6 +9,7 @@ import { showPanel } from './panels.js';
 import { revealDir } from './tree.js';
 import { findbar, runFind } from './find.js';
 import { hideHover } from './hover.js';
+import { renderMermaidBlocks, forgetMermaid } from './mermaid.js';
 
 /* Markdown tabs open rendered. The server converts the file with goldmark and
    passes raw HTML through, so nothing it returns is trusted: mdSanitize rebuilds
@@ -36,6 +37,7 @@ export function syncPreview() {
   mdShown = want;
   mdDrawn = null;
   mdview.hidden = !want;
+  forgetMermaid(mdArticle);
   mdArticle.replaceChildren();
   if (want) drawPreview(want);
 }
@@ -59,8 +61,10 @@ async function drawPreview(d) {
     }
     if (gen !== mdGen || mdShown !== d) return;
   }
+  forgetMermaid(mdArticle);
   mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
   mdEnhance();
+  renderMermaidBlocks(mdArticle).catch(() => {});
   mdDrawn = d;
   const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
   if (target) mdScrollTo(target);
@@ -207,6 +211,7 @@ const MD_ALERTS = { note: 'Note', tip: 'Tip', important: 'Important', warning: '
 function mdEnhance() {
   for (const q of $$('blockquote', mdArticle)) mdAlert(q);
   for (const pre of $$('pre', mdArticle)) {
+    if (pre.dataset.lang === 'mermaid') continue; // the diagram loader replaces this block
     const wrap = document.createElement('div');
     wrap.className = 'md-pre';
     if (pre.dataset.lang) wrap.dataset.lang = pre.dataset.lang;

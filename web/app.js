@@ -256,11 +256,11 @@
   }
   function toPos(node, off) {
     if (node === rowsEl) {
-      const row2 = rowsEl.children[off] || rowsEl.lastElementChild;
-      if (!row2)
+      const row = rowsEl.children[off] || rowsEl.lastElementChild;
+      if (!row)
         return null;
       const atEnd = !rowsEl.children[off];
-      return { line: +row2.dataset.l, col: atEnd ? $(".c", row2).textContent.length : 0 };
+      return { line: +row.dataset.l, col: atEnd ? $(".c", row).textContent.length : 0 };
     }
     const el = node.nodeType === 1 ? node : node.parentElement;
     const row = el && el.closest(".row");
@@ -1349,11 +1349,11 @@
       node = p.offsetNode;
       off = p.offset;
     } else if (document.caretRangeFromPoint) {
-      const r2 = document.caretRangeFromPoint(x, y);
-      if (!r2)
+      const r = document.caretRangeFromPoint(x, y);
+      if (!r)
         return null;
-      node = r2.startContainer;
-      off = r2.startOffset;
+      node = r.startContainer;
+      off = r.startOffset;
     } else
       return null;
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
@@ -1837,14 +1837,14 @@
     const d = doc_();
     if (!d || at.path !== d.path)
       return;
-    const seq2 = ++hoverSeq;
+    const seq = ++hoverSeq;
     let j;
     try {
       j = await api("/api/lsp/hover", { path: d.path, line: at.line, col: at.col, wait: 4000 });
     } catch {
       return;
     }
-    if (seq2 !== hoverSeq || doc_() !== d)
+    if (seq !== hoverSeq || doc_() !== d)
       return;
     setLspState(j);
     if (!j || j.empty || !j.signature && !j.doc)
@@ -1957,6 +1957,502 @@
     });
   }
 
+  // web/src/mermaid-view.js
+  var MM_MIN = 0.25;
+  var MM_MAX = 4;
+  var MM_STEP = 1.25;
+  var MM_PAD = 28;
+  var MM_INLINE_H = 0.8;
+  var MM_INLINE_CAP = 720;
+  var MM_KEEP = 72;
+  function svgSize(svg) {
+    const box = svg && svg.viewBox ? svg.viewBox.baseVal : null;
+    return { w: box && box.width ? box.width : 0, h: box && box.height ? box.height : 0 };
+  }
+  function buildStage(svgText) {
+    const view = document.createElement("div");
+    view.className = "mm-view";
+    const stage = document.createElement("div");
+    stage.className = "mm-stage";
+    stage.innerHTML = svgText;
+    view.append(stage);
+    const svg = stage.querySelector("svg");
+    if (svg) {
+      svg.removeAttribute("style");
+      svg.style.maxWidth = "none";
+    }
+    const { w, h } = svgSize(svg);
+    return { view, stage, svg, w, h };
+  }
+  function fitScale(view, w, h, maxH) {
+    const cw = view.clientWidth || 0;
+    if (!w || !cw)
+      return 1;
+    const byW = (cw - MM_PAD) / w;
+    const byH = maxH && h ? (maxH - MM_PAD) / h : Infinity;
+    return Math.min(1, byW, byH);
+  }
+  function inlineMaxH() {
+    const vh = window.innerHeight || 800;
+    return Math.min(MM_INLINE_CAP, Math.round(vh * MM_INLINE_H));
+  }
+  function sizeSvg(svg, w, h, z) {
+    if (svg && w && h) {
+      svg.setAttribute("width", String(Math.round(w * z)));
+      svg.setAttribute("height", String(Math.round(h * z)));
+    }
+  }
+  function wireStage(view, { zoom, pan }) {
+    view.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = view.getBoundingClientRect();
+      zoom(e.deltaY < 0 ? MM_STEP : 1 / MM_STEP, e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+    view.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0)
+        return;
+      e.preventDefault();
+      let { clientX: px, clientY: py } = e;
+      view.classList.add("dragging");
+      const move = (ev) => {
+        pan(ev.clientX - px, ev.clientY - py);
+        px = ev.clientX;
+        py = ev.clientY;
+      };
+      const end = () => {
+        view.classList.remove("dragging");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
+    });
+  }
+  var fitted = new WeakMap;
+  function mountDiagram(target, svgText) {
+    const { view, svg, w, h } = buildStage(svgText);
+    const bar = document.createElement("div");
+    bar.className = "mm-bar";
+    const label = document.createElement("span");
+    label.className = "mm-label";
+    label.textContent = "mermaid";
+    const zoomBtn = document.createElement("button");
+    zoomBtn.type = "button";
+    zoomBtn.className = "mm-btn";
+    zoomBtn.title = "Zoom diagram";
+    zoomBtn.setAttribute("aria-label", "Zoom diagram");
+    zoomBtn.textContent = "⤢";
+    bar.append(label, zoomBtn);
+    const card = document.createElement("div");
+    card.className = "mm-card";
+    card.append(bar, view);
+    target.replaceChildren(card);
+    const refit = () => {
+      const cap = inlineMaxH();
+      const z = fitScale(view, w, h, cap);
+      sizeSvg(svg, w, h, z);
+      view.style.height = Math.min(Math.max(140, Math.round(h * z + MM_PAD)), cap + MM_PAD) + "px";
+    };
+    refit();
+    fitted.get(target)?.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(refit);
+      ro.observe(view);
+      fitted.set(target, ro);
+    }
+    view.title = "Click to zoom";
+    view.addEventListener("click", () => openZoomCard(svgText));
+    zoomBtn.addEventListener("click", () => openZoomCard(svgText));
+  }
+  function openZoomCard(svgText) {
+    const { view, stage, svg, w, h } = buildStage(svgText);
+    const backdrop = document.createElement("div");
+    backdrop.className = "mm-backdrop";
+    const card = document.createElement("div");
+    card.className = "mm-zoom-card";
+    card.tabIndex = -1;
+    const bar = document.createElement("div");
+    bar.className = "mm-bar";
+    const label = document.createElement("span");
+    label.className = "mm-label";
+    label.textContent = "mermaid";
+    const controls = document.createElement("div");
+    controls.className = "mm-zoom";
+    const pct = document.createElement("button");
+    pct.type = "button";
+    pct.className = "mm-pct";
+    pct.title = "Reset zoom to fit";
+    pct.setAttribute("aria-label", "Reset zoom to fit");
+    const mkBtn = (text, cls, title, on) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "mm-btn" + (cls ? " " + cls : "");
+      b.textContent = text;
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.addEventListener("click", on);
+      return b;
+    };
+    let z = 1, tx = 0, ty = 0;
+    const draw = () => {
+      sizeSvg(svg, w, h, z);
+      stage.style.transform = "translate(" + Math.round(tx) + "px," + Math.round(ty) + "px)";
+      pct.textContent = Math.round(z * 100) + "%";
+    };
+    const keepInside = () => {
+      const vw = view.clientWidth || 0, vh = view.clientHeight || 0;
+      const cw = w * z, ch = h * z;
+      const kx = Math.min(MM_KEEP, cw), ky = Math.min(MM_KEEP, ch);
+      tx = Math.min(vw - kx, Math.max(kx - cw, tx));
+      ty = Math.min(vh - ky, Math.max(ky - ch, ty));
+    };
+    const fit = () => {
+      const cw = view.clientWidth || 0, ch = view.clientHeight || 0;
+      if (!w || !cw)
+        return 1;
+      const byW = (cw - MM_PAD) / w;
+      const byH = ch && h ? (ch - MM_PAD) / h : Infinity;
+      return Math.min(2, byW, byH);
+    };
+    const reset = () => {
+      z = Math.min(MM_MAX, Math.max(MM_MIN, fit()));
+      tx = ((view.clientWidth || 0) - w * z) / 2;
+      ty = ((view.clientHeight || 0) - h * z) / 2;
+      draw();
+    };
+    const zoomAt = (factor, cx, cy) => {
+      const before = z;
+      z = Math.min(MM_MAX, Math.max(MM_MIN, z * factor));
+      const k = z / before;
+      tx = cx - (cx - tx) * k;
+      ty = cy - (cy - ty) * k;
+      keepInside();
+      draw();
+    };
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape")
+        close();
+    };
+    controls.append(mkBtn("−", "", "Zoom out", () => {
+      zoomAt(1 / MM_STEP, (view.clientWidth || 0) / 2, (view.clientHeight || 0) / 2);
+    }), pct, mkBtn("+", "", "Zoom in", () => {
+      zoomAt(MM_STEP, (view.clientWidth || 0) / 2, (view.clientHeight || 0) / 2);
+    }), mkBtn("×", "mm-close", "Close", close));
+    pct.addEventListener("click", reset);
+    bar.append(label, controls);
+    card.append(bar, view);
+    backdrop.append(card);
+    document.body.append(backdrop);
+    view.title = "Scroll to zoom · Drag to pan";
+    reset();
+    wireStage(view, {
+      zoom: zoomAt,
+      pan: (dx, dy) => {
+        tx += dx;
+        ty += dy;
+        keepInside();
+        draw();
+      }
+    });
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop)
+        close();
+    });
+    document.addEventListener("keydown", onKey);
+    card.focus();
+  }
+
+  // web/src/mermaid.js
+  var MERMAID_VERSION = "11.17.2";
+  var MERMAID_URL = "/static/lib/mermaid/" + MERMAID_VERSION + "/mermaid.esm.min.mjs";
+  var MAX_BLOCKS = 50;
+  var MAX_CHARS = 2000;
+  var MM_LABEL_W = 200;
+  var MM_THEME_CSS = "foreignObject > div {" + " display: table !important;" + " white-space: break-spaces !important;" + " max-width: " + MM_LABEL_W + "px !important;" + " overflow-wrap: anywhere; }" + " g.cluster foreignObject > div {" + " display: table-cell !important;" + " white-space: nowrap !important;" + " max-width: none !important;" + " width: auto !important; }";
+  var MD_MERMAID = 'pre[data-lang="mermaid"] > code';
+  var mermaidPromise = null;
+  var mermaidModule = null;
+  var renderQueue = Promise.resolve();
+  var svgSeq = 0;
+  var themeWatcher = null;
+  var rendered = new Set;
+  var snapshots = new WeakMap;
+  async function loadMermaid() {
+    if (!mermaidPromise) {
+      const u = MERMAID_URL;
+      mermaidPromise = import(u).then((mod) => {
+        const mermaid = mod.default || mod;
+        mermaid.initialize(mermaidConfig());
+        mermaidModule = mermaid;
+        return mermaid;
+      }).catch((err) => {
+        mermaidPromise = null;
+        throw err;
+      });
+    }
+    return mermaidPromise;
+  }
+  var colorCtx = null;
+  function readHex(name) {
+    const g = getComputedStyle(document.documentElement);
+    const raw = g.getPropertyValue(name).trim();
+    if (!raw)
+      return "";
+    if (!colorCtx)
+      colorCtx = document.createElement("canvas").getContext("2d");
+    if (!colorCtx)
+      return "";
+    colorCtx.fillStyle = "#000000";
+    colorCtx.fillStyle = raw;
+    const value = colorCtx.fillStyle;
+    if (value.charAt(0) === "#")
+      return value;
+    const m = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(value);
+    if (!m)
+      return "";
+    colorCtx.fillStyle = g.getPropertyValue("--bg").trim() || "#000000";
+    const over = colorCtx.fillStyle;
+    if (over.charAt(0) !== "#")
+      return "";
+    const a = parseFloat(m[4]);
+    const chan = (i) => parseInt(m[i], 10) * a + parseInt(over.slice((i - 1) * 2 + 1, (i - 1) * 2 + 3), 16) * (1 - a);
+    const byte = (n) => Math.round(n).toString(16).padStart(2, "0");
+    return "#" + byte(chan(1)) + byte(chan(2)) + byte(chan(3));
+  }
+  var colorOf = (name, fallback) => readHex(name) || fallback;
+  function isDark() {
+    const scheme = getComputedStyle(document.documentElement).getPropertyValue("color-scheme");
+    if (scheme.indexOf("dark") >= 0)
+      return true;
+    if (scheme.indexOf("light") >= 0)
+      return false;
+    const bg = readHex("--bg");
+    if (!/^#[0-9a-f]{6}$/i.test(bg))
+      return true;
+    const r = parseInt(bg.slice(1, 3), 16), g = parseInt(bg.slice(3, 5), 16), b = parseInt(bg.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128;
+  }
+  function mermaidConfig() {
+    const g = getComputedStyle(document.documentElement);
+    const text = (name) => g.getPropertyValue(name).trim();
+    const dark = isDark();
+    const bg = colorOf("--bg", "#0d1117");
+    const bg2 = colorOf("--bg2", "#010409");
+    const bg3 = colorOf("--bg3", "#161b22");
+    const bg4 = colorOf("--bg4", "#21262d");
+    const fg = colorOf("--fg", "#e6edf3");
+    const dim = colorOf("--dim", "#8b949e");
+    const line = colorOf("--line", "#30363d");
+    const accent = colorOf("--accent", "#1f6feb");
+    const accentFg = colorOf("--accent-fg", "#58a6ff");
+    const err = colorOf("--err", "#f85149");
+    const k = colorOf("--k", fg), kt = colorOf("--kt", k), nf = colorOf("--nf", fg);
+    const nc = colorOf("--nc", nf), nb = colorOf("--nb", fg), nv = colorOf("--nv", fg);
+    const s = colorOf("--s", fg), m = colorOf("--m", fg), o = colorOf("--o", fg), c = colorOf("--c", dim);
+    return {
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      layout: "dagre",
+      suppressErrorRendering: true,
+      themeCSS: MM_THEME_CSS,
+      flowchart: { htmlLabels: true, wrappingWidth: MM_LABEL_W, subGraphTitleMargin: { top: 8, bottom: 16 } },
+      sequence: { wrap: true },
+      darkMode: dark,
+      themeVariables: {
+        darkMode: dark,
+        background: bg,
+        primaryColor: bg3,
+        primaryTextColor: fg,
+        primaryBorderColor: line,
+        secondaryColor: bg2,
+        secondaryTextColor: fg,
+        secondaryBorderColor: line,
+        tertiaryColor: bg4,
+        tertiaryTextColor: fg,
+        tertiaryBorderColor: line,
+        lineColor: dim,
+        textColor: fg,
+        mainBkg: bg3,
+        nodeBorder: line,
+        nodeTextColor: fg,
+        clusterBkg: bg2,
+        clusterBorder: line,
+        titleColor: fg,
+        edgeLabelBackground: bg,
+        labelBackground: bg,
+        actorBkg: bg3,
+        actorBorder: line,
+        actorTextColor: fg,
+        actorLineColor: line,
+        signalColor: fg,
+        signalTextColor: fg,
+        labelBoxBkgColor: bg3,
+        labelBoxBorderColor: line,
+        labelTextColor: fg,
+        loopTextColor: fg,
+        noteBkgColor: bg4,
+        noteBorderColor: line,
+        noteTextColor: fg,
+        activationBkgColor: bg4,
+        activationBorderColor: line,
+        sequenceNumberColor: bg,
+        classText: fg,
+        stateBkg: bg3,
+        labelColor: fg,
+        altBackground: bg2,
+        errorBkgColor: bg3,
+        errorTextColor: err,
+        pie1: k,
+        pie2: nf,
+        pie3: s,
+        pie4: m,
+        pie5: o,
+        pie6: c,
+        pie7: accent,
+        pie8: accentFg,
+        pie9: kt,
+        pie10: nc,
+        pie11: nb,
+        pie12: nv,
+        fontFamily: text("--ui"),
+        fontSize: text("--fs")
+      }
+    };
+  }
+  function enqueue(target) {
+    renderQueue = renderQueue.then(() => renderTarget(target)).catch(() => {});
+  }
+  function note(pre, text, isErr) {
+    let el = pre.nextElementSibling;
+    if (!el || !el.classList || !el.classList.contains("md-mermaid-note")) {
+      el = document.createElement("small");
+      el.className = "md-mermaid-note";
+      el.style.cssText = "display:block;padding:2px 0 8px";
+      pre.after(el);
+    }
+    el.style.color = isErr ? "var(--err)" : "var(--faint)";
+    el.textContent = text;
+  }
+  async function parseDetail(mermaid, src) {
+    try {
+      await mermaid.parse(src);
+    } catch (err) {
+      const msg = String(err && err.message || err).split(`
+`).slice(0, 3).join(" ").trim();
+      if (msg)
+        return msg.slice(0, 140);
+    }
+    return "invalid diagram syntax";
+  }
+  function sourceBlock(src) {
+    const pre = document.createElement("pre");
+    pre.className = "md-code";
+    pre.dataset.lang = "mermaid";
+    const code = document.createElement("code");
+    code.textContent = src;
+    pre.appendChild(code);
+    return pre;
+  }
+  function fail(target, src, err) {
+    rendered.delete(target);
+    const original = snapshots.get(target) || sourceBlock(src);
+    target.replaceWith(original);
+    const at = original.dataset.line ? " (line " + original.dataset.line + ")" : "";
+    note(original, "Mermaid" + at + ": " + (err && err.message ? String(err.message).split(`
+`)[0] : "render failed").slice(0, 140), true);
+  }
+  async function renderTarget(target) {
+    if (!target.isConnected)
+      return;
+    const src = target.dataset.mermaidSource;
+    if (!src)
+      return;
+    let mermaid;
+    try {
+      mermaid = await loadMermaid();
+    } catch (err) {
+      fail(target, src, err);
+      return;
+    }
+    let svg;
+    try {
+      const parsed = await mermaid.parse(src, { suppressErrors: true });
+      if (!parsed)
+        throw new Error(await parseDetail(mermaid, src));
+      svg = (await mermaid.render("px0-mermaid-" + ++svgSeq, src)).svg;
+      if (!svg)
+        throw new Error("render produced no SVG");
+    } catch (err) {
+      fail(target, src, err);
+      return;
+    }
+    if (!target.isConnected)
+      return;
+    mountDiagram(target, svg);
+    rendered.add(target);
+  }
+  function watchTheme() {
+    if (themeWatcher)
+      return;
+    themeWatcher = new MutationObserver(() => {
+      if (!mermaidModule)
+        return;
+      mermaidModule.initialize(mermaidConfig());
+      for (const node of rendered) {
+        if (!node.isConnected) {
+          rendered.delete(node);
+          continue;
+        }
+        enqueue(node);
+      }
+    });
+    themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  }
+  async function renderMermaidBlocks(root) {
+    if (!root || !root.querySelectorAll)
+      return;
+    const codes = root.querySelectorAll(MD_MERMAID);
+    if (!codes.length)
+      return;
+    watchTheme();
+    let seen = 0;
+    for (const code of codes) {
+      seen++;
+      const pre = code.parentElement;
+      if (seen > MAX_BLOCKS) {
+        note(pre, "Diagram not rendered: this preview has more than " + MAX_BLOCKS + " diagrams.");
+        continue;
+      }
+      if (code.textContent.length > MAX_CHARS) {
+        note(pre, "Diagram not rendered: source is longer than " + MAX_CHARS + " characters.");
+        continue;
+      }
+      const node = document.createElement("div");
+      node.className = "md-mermaid";
+      node.dataset.mermaidSource = code.textContent;
+      if (pre.dataset.line)
+        node.dataset.line = pre.dataset.line;
+      snapshots.set(node, pre);
+      pre.replaceWith(node);
+      enqueue(node);
+    }
+  }
+  function forgetMermaid(root) {
+    if (!root)
+      return;
+    for (const node of rendered) {
+      if (!node.isConnected || root.contains(node))
+        rendered.delete(node);
+    }
+  }
+
   // web/src/markdown.js
   var mdview = $("#mdview");
   var mdArticle = $("#md");
@@ -1976,6 +2472,7 @@
     mdShown = want;
     mdDrawn = null;
     mdview.hidden = !want;
+    forgetMermaid(mdArticle);
     mdArticle.replaceChildren();
     if (want)
       drawPreview(want);
@@ -2000,12 +2497,14 @@
       if (gen !== mdGen || mdShown !== d)
         return;
     }
+    forgetMermaid(mdArticle);
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
+    renderMermaidBlocks(mdArticle).catch(() => {});
     mdDrawn = d;
-    const target2 = d.mdAnchor && mdFindAnchor(d.mdAnchor);
-    if (target2)
-      mdScrollTo(target2);
+    const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
+    if (target)
+      mdScrollTo(target);
     else if (d.mdLine)
       previewLine(d.mdLine);
     else
@@ -2057,7 +2556,7 @@
   function mdSanitize(html, docPath) {
     const body = new DOMParser().parseFromString(html, "text/html").body;
     const dir = docPath.slice(0, docPath.lastIndexOf("/") + 1);
-    const base2 = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
+    const base = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
     for (const el of [...body.querySelectorAll("*")]) {
       if (!body.contains(el))
         continue;
@@ -2089,19 +2588,19 @@
       if (tag === "input")
         el.disabled = true;
       if (tag === "img")
-        mdSetImage(el, mdURL(attrs.src || ""), base2);
+        mdSetImage(el, mdURL(attrs.src || ""), base);
       if (tag === "a" && attrs.href)
-        mdSetLink(el, mdURL(attrs.href), base2);
+        mdSetLink(el, mdURL(attrs.href), base);
     }
     const frag = document.createDocumentFragment();
     while (body.firstChild)
       frag.appendChild(document.adoptNode(body.firstChild));
     return frag;
   }
-  function mdLocal(ref, base2) {
+  function mdLocal(ref, base) {
     let u;
     try {
-      u = new URL(ref, base2);
+      u = new URL(ref, base);
     } catch {
       return null;
     }
@@ -2113,7 +2612,7 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img, src, base) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
@@ -2121,12 +2620,12 @@
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
     } else if (src) {
-      const t = mdLocal(src, base2);
+      const t = mdLocal(src, base);
       if (t)
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
-  function mdSetLink(a, href, base2) {
+  function mdSetLink(a, href, base) {
     if (href.startsWith("#")) {
       a.setAttribute("href", href);
       a.dataset.anchor = href.slice(1);
@@ -2141,7 +2640,7 @@
       a.rel = "noopener noreferrer";
       return;
     }
-    const t = mdLocal(href, base2);
+    const t = mdLocal(href, base);
     if (!t)
       return;
     a.setAttribute("href", "/api/raw?path=" + encodeURIComponent(t.path));
@@ -2154,17 +2653,19 @@
     for (const q of $$("blockquote", mdArticle))
       mdAlert(q);
     for (const pre of $$("pre", mdArticle)) {
-      const wrap2 = document.createElement("div");
-      wrap2.className = "md-pre";
+      if (pre.dataset.lang === "mermaid")
+        continue;
+      const wrap = document.createElement("div");
+      wrap.className = "md-pre";
       if (pre.dataset.lang)
-        wrap2.dataset.lang = pre.dataset.lang;
-      pre.replaceWith(wrap2);
+        wrap.dataset.lang = pre.dataset.lang;
+      pre.replaceWith(wrap);
       const copy = document.createElement("button");
       copy.className = "md-copy";
       copy.title = "Copy code";
       copy.setAttribute("aria-label", "Copy code");
       copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
-      wrap2.append(pre, copy);
+      wrap.append(pre, copy);
     }
   }
   function mdAlert(q) {
@@ -2343,7 +2844,7 @@
   }
   function showPreviewHit(i) {
     const marks = $$("mark.md-hit", mdArticle);
-    marks.forEach((m2, k) => m2.classList.toggle("on", k === i));
+    marks.forEach((m, k) => m.classList.toggle("on", k === i));
     const m = marks[i];
     if (!m)
       return;
@@ -2660,9 +3161,9 @@
     let idx = S2.tabs.findIndex((t) => t.path === path);
     if (idx < 0) {
       let j;
-      const start2 = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
+      const start = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
       try {
-        j = await api("/api/file", { path, start: start2, count: CHUNK });
+        j = await api("/api/file", { path, start, count: CHUNK });
       } catch (e) {
         setStatusNote(path + ": " + e.message);
         return;
@@ -2671,7 +3172,7 @@
         showImage(path);
         return;
       }
-      const d2 = {
+      const d = {
         path,
         name: path.split("/").pop(),
         lang: j.lang,
@@ -2679,7 +3180,7 @@
         maxCols: j.maxCols,
         size: j.size,
         lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        chunks: new Set([start / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
@@ -2689,12 +3190,12 @@
         markdown: !!j.markdown
       };
       for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
+        d.lines[j.start + i] = j.lines[i];
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs.push(d);
       idx = S2.tabs.length - 1;
       if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
+        refineChunk(d, start / CHUNK);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -3018,6 +3519,7 @@
     });
     addEventListener("keydown", (e) => {
       const mod = e[MOD];
+      const alt = e.altKey && (!mod || e.getModifierState && e.getModifierState("AltGraph"));
       if (e.key === "Escape") {
         if (!overlay.hidden) {
           closePalette();
@@ -3103,14 +3605,14 @@
         render();
         return;
       }
-      if (mod && (e.key === "w" || e.key === "W") || e.altKey && e.code === "KeyW") {
+      if (mod && (e.key === "w" || e.key === "W") || alt && e.code === "KeyW") {
         e.preventDefault();
         e.stopPropagation();
         if (S2.active >= 0)
           closeTab(S2.active);
         return;
       }
-      if (e.altKey && e.shiftKey && !mod && e.code === "KeyT") {
+      if (alt && e.shiftKey && e.code === "KeyT") {
         e.preventDefault();
         reopenClosedTab();
         return;
@@ -3139,31 +3641,31 @@
           switchTab((S2.active + (e.shiftKey ? -1 : 1) + S2.tabs.length) % S2.tabs.length);
         return;
       }
-      if (e.altKey && e.shiftKey && e.code === "KeyH") {
+      if (alt && e.shiftKey && e.code === "KeyH") {
         e.preventDefault();
         showCalls();
         return;
       }
-      if (e.altKey && !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+      if (alt && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
         e.preventDefault();
         switchTab(+e.code.slice(5) - 1);
         return;
       }
-      if (e.altKey && !mod && !e.shiftKey && SEL_KEYS[e.code] && runSelectionAction(SEL_KEYS[e.code])) {
+      if (alt && !e.shiftKey && SEL_KEYS[e.code] && runSelectionAction(SEL_KEYS[e.code])) {
         e.preventDefault();
         return;
       }
-      if (e.altKey && e.code === "KeyZ") {
+      if (alt && e.code === "KeyZ") {
         e.preventDefault();
         toggleWordWrap();
         return;
       }
-      if (e.altKey && e.code === "KeyL") {
+      if (alt && e.code === "KeyL") {
         e.preventDefault();
         toggleLineNumbers();
         return;
       }
-      if (e.altKey && !mod && !e.shiftKey && e.code === "KeyM") {
+      if (alt && !e.shiftKey && e.code === "KeyM") {
         e.preventDefault();
         togglePreview();
         return;

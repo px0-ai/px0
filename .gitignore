@@ -22,3 +22,5 @@ build/
 # Logs
 *.log
 px0
+skills
+node_modules/

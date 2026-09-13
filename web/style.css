@@ -457,6 +457,31 @@ body.hide-lines .c { padding-left: 16px; }
 .md-alert-caution { --alert: var(--err); }
 .md blockquote.md-alert { padding: 8px 16px; color: var(--fg); border-left-color: var(--alert); }
 .md .md-alert-title { margin: 0 0 4px; font-weight: 600; color: var(--alert); }
+/* Mermaid diagrams: the card web/src/mermaid.js mints once a fence renders. */
+.md .md-mermaid { margin: 0 0 16px; }
+.mm-card { overflow: hidden; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; }
+.mm-bar { display: flex; align-items: center; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--line); }
+.mm-label { font: 10.5px/1 var(--mono); letter-spacing: .04em; color: var(--faint); text-transform: uppercase; }
+.mm-zoom { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.mm-btn, .mm-pct { border: 0; padding: 0; color: var(--dim); background: none; border-radius: 4px; cursor: pointer; }
+.mm-btn { width: 22px; height: 22px; font-size: 14px; line-height: 1; }
+.mm-pct { height: 22px; padding: 0 7px; font: 10.5px/1 var(--mono); }
+.mm-btn:hover, .mm-pct:hover { color: var(--fg); background: var(--bg3); }
+.mm-view { overflow: auto; overscroll-behavior: contain; }
+/* max-content plus min-width keeps a small diagram centred inside the column. */
+.mm-stage { display: flex; align-items: center; justify-content: center; width: max-content; min-width: 100%; min-height: 100%; padding: 14px; box-sizing: border-box; }
+.mm-view svg { display: block; }
+/* Inline card: fitted and clickable; zooming happens in the modal card. */
+.mm-card .mm-view { cursor: zoom-in; }
+/* Zoom card: a fixed viewport; the stage is translated, not scrolled, so
+   dragging pans at every zoom level. */
+.mm-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .55); }
+.mm-zoom-card { display: flex; flex-direction: column; width: min(92vw, 1080px); height: min(85vh, 780px); overflow: hidden; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); outline: none; }
+.mm-zoom-card .mm-bar { padding: 6px 8px 6px 12px; }
+.mm-zoom-card .mm-view { flex: 1; min-height: 0; overflow: hidden; cursor: grab; }
+.mm-zoom-card .mm-stage { display: block; width: max-content; min-width: 0; min-height: 0; padding: 0; will-change: transform; }
+.mm-zoom-card .mm-view.dragging { cursor: grabbing; }
+.mm-close { font-size: 16px; }
 
 #imgview { position: absolute; inset: 0; display: grid; place-items: center; overflow: auto; padding: 32px; }
 #imgview img { max-width: 100%; image-rendering: pixelated; box-shadow: var(--shadow); background: repeating-conic-gradient(var(--bg3) 0 25%, transparent 0 50%) 0 0/16px 16px; }

@@ -42,6 +42,21 @@ func TestMarkdownPreview(t *testing.T) {
 	}
 }
 
+// A diagram fence must reach the browser as plain escaped source: the client
+// loader reads it verbatim from pre[data-lang="mermaid"] > code.
+func TestMermaidFenceStaysPlain(t *testing.T) {
+	out, err := renderMarkdown([]byte("```mermaid\ngraph TD\n  A[Start] --> B{Done?}\n```\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `<pre class="md-code" data-line="2" data-lang="mermaid"><code>graph TD`) {
+		t.Errorf("mermaid fence shape changed:\n%s", out)
+	}
+	if strings.Contains(out, "<i class=") {
+		t.Errorf("mermaid fence must not be lexed into token markup:\n%s", out)
+	}
+}
+
 func TestHeadingIDsFollowGitHub(t *testing.T) {
 	ids := &headingIDs{seen: map[string]bool{}}
 	for _, c := range []struct{ in, want string }{

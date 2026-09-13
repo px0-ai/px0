@@ -80,6 +80,11 @@ export function initShortcuts() {
   addEventListener('keydown', e => {
     const mod = e[MOD];
 
+    // Right-Alt/AltGr arrives as Ctrl+Alt on many layouts; treat it as plain
+    // Alt so Alt shortcuts still fire. getModifierState tells real Ctrl+Alt
+    // (no AltGraph) apart from AltGr.
+    const alt = e.altKey && (!mod || (e.getModifierState && e.getModifierState('AltGraph')));
+
     if (e.key === 'Escape') {
       if (!overlay.hidden) { closePalette(); return; }
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
@@ -114,13 +119,13 @@ export function initShortcuts() {
     if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(S.lastWord); return; }
     if (mod && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); document.body.classList.toggle('side-hidden'); layout(); render(); return; }
     // Alt shortcuts match e.code: on a Mac, Option+letter types a symbol, so e.key is not the letter.
-    if ((mod && (e.key === 'w' || e.key === 'W')) || (e.altKey && e.code === 'KeyW')) {
+    if ((mod && (e.key === 'w' || e.key === 'W')) || (alt && e.code === 'KeyW')) {
       e.preventDefault();
       e.stopPropagation();
       if (S.active >= 0) closeTab(S.active);
       return;
     }
-    if (e.altKey && e.shiftKey && !mod && e.code === 'KeyT') { e.preventDefault(); reopenClosedTab(); return; }
+    if (alt && e.shiftKey && e.code === 'KeyT') { e.preventDefault(); reopenClosedTab(); return; }
     if (e.key === 'F12') {
       e.preventDefault();
       if (e.shiftKey) findReferences(); else gotoDefinition();
@@ -133,23 +138,23 @@ export function initShortcuts() {
       if (S.tabs.length > 1) switchTab((S.active + (e.shiftKey ? -1 : 1) + S.tabs.length) % S.tabs.length);
       return;
     }
-    if (e.altKey && e.shiftKey && e.code === 'KeyH') { e.preventDefault(); showCalls(); return; }
-    if (e.altKey && !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) { e.preventDefault(); switchTab(+e.code.slice(5) - 1); return; }
+    if (alt && e.shiftKey && e.code === 'KeyH') { e.preventDefault(); showCalls(); return; }
+    if (alt && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) { e.preventDefault(); switchTab(+e.code.slice(5) - 1); return; }
     // Selection actions, live only while the status bar is showing them.
-    if (e.altKey && !mod && !e.shiftKey && SEL_KEYS[e.code] && runSelectionAction(SEL_KEYS[e.code])) { e.preventDefault(); return; }
-    if (e.altKey && e.code === 'KeyZ') {
+    if (alt && !e.shiftKey && SEL_KEYS[e.code] && runSelectionAction(SEL_KEYS[e.code])) { e.preventDefault(); return; }
+    if (alt && e.code === 'KeyZ') {
       e.preventDefault();
       toggleWordWrap();
       return;
     }
 
-    if (e.altKey && e.code === 'KeyL') {
+    if (alt && e.code === 'KeyL') {
       e.preventDefault();
       toggleLineNumbers();
       return;
     }
 
-    if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyM') {
+    if (alt && !e.shiftKey && e.code === 'KeyM') {
       e.preventDefault();
       togglePreview();
       return;
