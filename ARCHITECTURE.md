@@ -27,15 +27,15 @@ flowchart TD
         Files["Source Files / .gitignore"]
     end
 
-    Browser <-->|HTTP / JSON (Gzip)| Server
+    UI <-->|"HTTP / JSON (Gzip)"| Server
     Server --> IndexEngine
     Server --> SearchEngine
     Server --> HLEngine
     Server --> LSPMgr
-    IndexEngine --> FS
-    SearchEngine --> FS
-    HLEngine --> FS
-    LSPMgr --> FS
+    IndexEngine --> Files
+    SearchEngine --> Files
+    HLEngine --> Files
+    LSPMgr --> Files
 ```
 
 ### Core Components
