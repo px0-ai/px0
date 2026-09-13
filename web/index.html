@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <!-- Every web/themes/*.css joined by the server. See STYLING.md. -->
 <link rel="stylesheet" href="/static/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body class="right-hidden">
 <div id="app">
@@ -57,6 +58,7 @@
       <div id="viewport">
         <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
       </div>
+      <div id="md-preview" hidden></div>
       <div id="minimap-hits"></div>
 
       <!-- Welcome / Empty State Screen -->
@@ -115,6 +117,7 @@
         <button class="footer-btn" data-action="symbols" title="Go to Symbol ({Mod+Shift+O})"><span class="footer-btn-label">Symbols</span><kbd class="footer-kbd" data-keys="Mod+Shift+O"></kbd></button>
         <button class="footer-btn" data-action="find" title="Find in File ({Mod+F})"><span class="footer-btn-label">Find</span><kbd class="footer-kbd" data-keys="Mod+F"></kbd></button>
         <button class="footer-btn" data-action="goto" title="Go to Line ({Mod+G})"><span class="footer-btn-label">Go to</span><kbd class="footer-kbd" data-keys="Mod+G"></kbd></button>
+        <button class="footer-btn" data-action="preview-md" id="btn-preview-md" title="Toggle Preview ({Alt+P})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+P"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
         <button class="footer-btn" data-action="line-numbers" title="Toggle Line Numbers ({Alt+L})"><span class="footer-btn-label">Lines</span><kbd class="footer-kbd" data-keys="Alt+L"></kbd></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>

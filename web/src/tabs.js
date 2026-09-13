@@ -57,6 +57,11 @@ export async function openFile(path, opts = {}) {
   S.lsp.server = (d.lsp && d.lsp.server) || '';
   S.lsp.missing = (d.lsp && d.lsp.missing) || '';
   warmLSP(d);
+  
+  hideMarkdownPreview();
+  const btnMd = $('#btn-preview-md');
+  if (btnMd) btnMd.hidden = !d.name.toLowerCase().endsWith('.md');
+  
   drawTabs(); drawCrumbs(); layout();
 
   if (line) { d.cur = line; centerLine(line); }
@@ -139,7 +144,14 @@ export function switchTab(i) {
   S.lsp.server = (S.tabs[i].lsp && S.tabs[i].lsp.server) || '';
   S.lsp.missing = (S.tabs[i].lsp && S.tabs[i].lsp.missing) || '';
   warmLSP(S.tabs[i]);
+
+  hideMarkdownPreview();
+  const d = S.tabs[i];
+  const btnMd = $('#btn-preview-md');
+  if (btnMd) btnMd.hidden = !d.name.toLowerCase().endsWith('.md');
+
   drawTabs(); drawCrumbs(); layout();
+
   vp.scrollTop = S.tabs[i].scrollTop;
   render(); updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
@@ -163,6 +175,47 @@ export function showImage(path) {
 export function hideImage() {
   const b = $('#imgview');
   if (b) b.remove();
+}
+
+let mdPreviewActive = false;
+
+export function hideMarkdownPreview() {
+  mdPreviewActive = false;
+  const prev = $('#md-preview');
+  const vpEl = $('#viewport');
+  const btn = $('#btn-preview-md');
+  if (prev) prev.hidden = true;
+  if (vpEl) vpEl.hidden = false;
+  if (btn) btn.classList.remove('active');
+}
+
+export async function toggleMarkdownPreview() {
+  const d = doc_();
+  if (!d) return;
+  const btn = $('#btn-preview-md');
+  const prev = $('#md-preview');
+  const vpEl = $('#viewport');
+  
+  if (mdPreviewActive) {
+    hideMarkdownPreview();
+    render();
+  } else {
+    mdPreviewActive = true;
+    if (btn) btn.classList.add('active');
+    if (prev) {
+      prev.innerHTML = '<div class="hint">Loading preview...</div>';
+      prev.hidden = false;
+    }
+    if (vpEl) vpEl.hidden = true;
+    try {
+      const res = await fetch('/api/raw?path=' + encodeURIComponent(d.path));
+      if (!res.ok) throw new Error('Failed to load markdown');
+      const text = await res.text();
+      if (prev && mdPreviewActive) prev.innerHTML = '<div class="md-preview-inner">' + marked.parse(text) + '</div>';
+    } catch (e) {
+      if (prev && mdPreviewActive) prev.innerHTML = '<div class="md-preview-inner"><div class="hint">Error loading preview: ' + esc(e.message) + '</div></div>';
+    }
+  }
 }
 
 export function initTabs() {

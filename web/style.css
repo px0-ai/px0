@@ -372,6 +372,20 @@ body.hide-lines .c { padding-left: 16px; }
 #imgview { position: absolute; inset: 0; display: grid; place-items: center; overflow: auto; padding: 32px; }
 #imgview img { max-width: 100%; image-rendering: pixelated; box-shadow: var(--shadow); background: repeating-conic-gradient(var(--bg3) 0 25%, transparent 0 50%) 0 0/16px 16px; }
 
+#md-preview { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; z-index: 5; }
+.md-preview-inner { padding: 32px 48px; max-width: 800px; margin: 0 auto; }
+#md-preview h1, #md-preview h2, #md-preview h3, #md-preview h4, #md-preview h5, #md-preview h6 { margin-top: 24px; margin-bottom: 16px; font-weight: 600; line-height: 1.25; }
+#md-preview h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--bg3); }
+#md-preview h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--bg3); }
+#md-preview p, #md-preview blockquote, #md-preview ul, #md-preview ol, #md-preview dl, #md-preview table, #md-preview pre { margin-top: 0; margin-bottom: 16px; }
+#md-preview a { color: var(--accent); text-decoration: none; }
+#md-preview a:hover { text-decoration: underline; }
+#md-preview code { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: var(--bg2); padding: 2px 4px; border-radius: 4px; }
+#md-preview pre { background: var(--bg2); padding: 16px; overflow: auto; border-radius: 6px; }
+#md-preview pre code { background: transparent; padding: 0; font-size: 0.9em; }
+#md-preview blockquote { margin: 0; padding: 0 1em; color: var(--faint); border-left: 4px solid var(--bg3); }
+#md-preview img { max-width: 100%; box-sizing: content-box; }
+
 #empty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); }
 .empty-inner { text-align: center; color: var(--faint); }
 .empty-logo { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin-bottom: 28px; }

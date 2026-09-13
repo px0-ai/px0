@@ -3,7 +3,7 @@ import { $, $$, esc, S, doc_, isMac, MOD, LH, keyCaps } from './state.js';
 import { vp, sizer } from './ui.js';
 import { layout, render, paint, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { updateStatus } from './status.js';
-import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
+import { closeTab, switchTab, reopenClosedTab, toggleMarkdownPreview } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
 import { openFind, clearFind, findbar } from './find.js';
@@ -68,6 +68,7 @@ export function initShortcuts() {
     else if (act === 'symbols') openPalette('symbol');
     else if (act === 'find') openFind(S.lastWord);
     else if (act === 'goto') openPalette('line');
+    else if (act === 'preview-md') toggleMarkdownPreview();
     else if (act === 'wrap') toggleWordWrap();
     else if (act === 'line-numbers') toggleLineNumbers();
     else if (act === 'palette') openPalette('command');
@@ -143,6 +144,13 @@ export function initShortcuts() {
     if (e.altKey && e.code === 'KeyL') {
       e.preventDefault();
       toggleLineNumbers();
+      return;
+    }
+
+    if (e.altKey && e.code === 'KeyP') {
+      e.preventDefault();
+      const btnMd = $('#btn-preview-md');
+      if (btnMd && !btnMd.hidden) toggleMarkdownPreview();
       return;
     }
 
