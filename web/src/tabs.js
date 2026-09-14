@@ -18,6 +18,35 @@ import { syncDiffView } from './diff.js';
 const closedTabs = [];
 const MAX_CLOSED = 20;
 
+function isImageTab(d) {
+  return !!(d && d.image);
+}
+
+function showImageTab(d) {
+  document.body.classList.add('image-tab');
+  showImage(d.path);
+}
+
+function hideImageTab() {
+  document.body.classList.remove('image-tab');
+  hideImage();
+}
+
+function activateImageTab(d, { push, path }) {
+  $('#empty').hidden = true;
+  showImageTab(d);
+  syncPreview();
+  syncDiffView();
+  S.at = null;
+  S.lsp.state = 'off';
+  S.lsp.server = '';
+  S.lsp.missing = '';
+  drawTabs();
+  drawCrumbs();
+  updateStatus();
+  if (push) pushHistory(path);
+}
+
 export async function openFile(path, opts = {}) {
   const { line, push = true, col } = opts;
   let idx = S.tabs.findIndex(t => t.path === path);
@@ -31,9 +60,9 @@ export async function openFile(path, opts = {}) {
       return;
     }
     if (j.image) {
-      showImage(path);
-      return;
-    }
+      S.tabs.push({ path, name: path.split('/').pop(), image: true, size: j.size });
+      idx = S.tabs.length - 1;
+    } else {
     const d = {
       path, name: path.split('/').pop(), lang: j.lang, total: j.total, maxCols: j.maxCols,
       size: j.size, lines: new Array(j.total), chunks: new Set([start / CHUNK]),
@@ -47,15 +76,21 @@ export async function openFile(path, opts = {}) {
     idx = S.tabs.length - 1;
     if (j.refine) refineChunk(d, start / CHUNK);
     loadGutter(d);
+    }
   }
   const prev = doc_();
-  if (prev && prev !== S.tabs[idx]) prev.scrollTop = vp.scrollTop;
+  if (prev && prev !== S.tabs[idx] && !isImageTab(prev)) prev.scrollTop = vp.scrollTop;
   if (prev !== S.tabs[idx]) clearSelectAll();
   S.active = idx;
   const d = S.tabs[idx];
 
+  if (isImageTab(d)) {
+    activateImageTab(d, { push, path });
+    return;
+  }
+
   $('#empty').hidden = true;
-  hideImage();
+  hideImageTab();
   syncPreview();
   syncDiffView();
   if (!S.at || S.at.path !== d.path) S.at = null;
@@ -120,6 +155,7 @@ export function closeTab(i) {
   }
   if (S.tabs.length === 0) {
     S.active = -1;
+    hideImageTab();
     syncPreview();
     syncDiffView();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
@@ -129,6 +165,15 @@ export function closeTab(i) {
   }
   S.active = Math.min(i, S.tabs.length - 1);
   const d = doc_();
+  if (isImageTab(d)) {
+    syncPreview();
+    syncDiffView();
+    drawTabs(); drawCrumbs();
+    showImageTab(d);
+    updateStatus();
+    return;
+  }
+  hideImageTab();
   syncPreview();
   syncDiffView();
   drawTabs(); drawCrumbs(); layout();
@@ -160,22 +205,36 @@ export function switchTab(i) {
   if (i === S.active || !S.tabs[i]) return;
   clearLink();
   const prev = doc_();
-  if (prev) prev.scrollTop = vp.scrollTop;
+  if (prev && !isImageTab(prev)) prev.scrollTop = vp.scrollTop;
   S.active = i;
-  syncPreview();
-  syncDiffView();
+  const d = S.tabs[i];
   clearFind();
   clearSelectAll();
   S.at = null;
-  S.lsp.state = (S.tabs[i].lsp && S.tabs[i].lsp.state) || 'off';
-  S.lsp.server = (S.tabs[i].lsp && S.tabs[i].lsp.server) || '';
-  S.lsp.missing = (S.tabs[i].lsp && S.tabs[i].lsp.missing) || '';
-  warmLSP(S.tabs[i]);
+  if (isImageTab(d)) {
+    syncPreview();
+    syncDiffView();
+    S.lsp.state = 'off';
+    S.lsp.server = '';
+    S.lsp.missing = '';
+    drawTabs(); drawCrumbs();
+    showImageTab(d);
+    updateStatus();
+    pushHistory(d.path);
+    return;
+  }
+  hideImageTab();
+  syncPreview();
+  syncDiffView();
+  S.lsp.state = (d.lsp && d.lsp.state) || 'off';
+  S.lsp.server = (d.lsp && d.lsp.server) || '';
+  S.lsp.missing = (d.lsp && d.lsp.missing) || '';
+  warmLSP(d);
   drawTabs(); drawCrumbs(); layout();
-  vp.scrollTop = S.tabs[i].scrollTop;
+  vp.scrollTop = d.scrollTop;
   render(); updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
-  pushHistory(S.tabs[i].path, S.tabs[i].cur);
+  pushHistory(d.path, d.cur);
 }
 
 export function drawCrumbs() {

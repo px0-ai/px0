@@ -516,6 +516,7 @@ body.hide-lines .c { padding-left: 16px; }
 .md blockquote.md-alert { padding: 8px 16px; color: var(--fg); border-left-color: var(--alert); }
 .md .md-alert-title { margin: 0 0 4px; font-weight: 600; color: var(--alert); }
 
+body.image-tab #viewport { visibility: hidden; }
 #imgview { position: absolute; inset: 0; display: grid; place-items: center; overflow: auto; padding: 32px; }
 #imgview img { max-width: 100%; image-rendering: pixelated; box-shadow: var(--shadow); background: repeating-conic-gradient(var(--bg3) 0 25%, transparent 0 50%) 0 0/16px 16px; }
 
