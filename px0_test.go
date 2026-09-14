@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -598,6 +599,54 @@ func TestListenPortFallback(t *testing.T) {
 
 	if addr2 == addr1 {
 		t.Fatalf("second listener got the same address %s", addr2)
+	}
+}
+
+func TestResolveTarget(t *testing.T) {
+	root := t.TempDir()
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "report #1.json")
+	if err := os.WriteFile(file, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dirRoot, initialFile, err := resolveTarget(root)
+	if err != nil {
+		t.Fatalf("resolveTarget(directory): %v", err)
+	}
+	if dirRoot != resolvedRoot || initialFile != "" {
+		t.Fatalf("resolveTarget(directory) = %q, %q; want %q, empty", dirRoot, initialFile, resolvedRoot)
+	}
+
+	fileRoot, initialFile, err := resolveTarget(file)
+	if err != nil {
+		t.Fatalf("resolveTarget(file): %v", err)
+	}
+	if fileRoot != resolvedRoot || initialFile != filepath.Base(file) {
+		t.Fatalf("resolveTarget(file) = %q, %q; want %q, %q", fileRoot, initialFile, resolvedRoot, filepath.Base(file))
+	}
+}
+
+func TestResolveTargetRejectsMissingPath(t *testing.T) {
+	if _, _, err := resolveTarget(filepath.Join(t.TempDir(), "missing.go")); err == nil {
+		t.Fatal("resolveTarget accepted a missing path")
+	}
+}
+
+func TestViewerURL(t *testing.T) {
+	got := viewerURL("127.0.0.1:7777", "report #1.json")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("viewerURL returned an invalid URL: %v", err)
+	}
+	if u.Scheme != "http" || u.Host != "127.0.0.1:7777" || u.Query().Get("path") != "report #1.json" {
+		t.Fatalf("viewerURL = %q", got)
+	}
+	if got := viewerURL("127.0.0.1:7777", ""); got != "http://127.0.0.1:7777" {
+		t.Fatalf("viewerURL without a file = %q", got)
 	}
 }
 

@@ -3837,6 +3837,9 @@
     }
     updateStatus();
     await drawTree("", treeEl, 0);
+    const initialPath = new URLSearchParams(window.location.search).get("path");
+    if (initialPath)
+      await openFile(initialPath);
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
         measure();

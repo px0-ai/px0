@@ -1,7 +1,7 @@
 // web/src/main.js
 import { $, S, api, applyKeyLabels } from './state.js';
 import { measure, layout, render, initRenderer, updateEditorOptionControls } from './renderer.js';
-import { initTabs } from './tabs.js';
+import { initTabs, openFile } from './tabs.js';
 import { initCursor } from './cursor.js';
 import { initHover } from './hover.js';
 import { initSelectionBar } from './selbar.js';
@@ -76,6 +76,9 @@ initStatusFit();
   }
   updateStatus();
   await drawTree('', treeEl, 0);
+
+  const initialPath = new URLSearchParams(window.location.search).get('path');
+  if (initialPath) await openFile(initialPath);
 
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { measure(); layout(); render(); });

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -37,7 +38,7 @@ func main() {
 		quiet        = flag.Bool("quiet", false, "suppress narration")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [directory]\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [file or directory]\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -75,16 +76,9 @@ func main() {
 	if flag.NArg() > 0 {
 		target = flag.Arg(0)
 	}
-	root, err := filepath.Abs(target)
+	root, initialFile, err := resolveTarget(target)
 	if err != nil {
 		fatal(err)
-	}
-	if st, err := os.Stat(root); err != nil || !st.IsDir() {
-		fatal(fmt.Errorf("not a directory: %s", root))
-	}
-	// Resolve symlinks so the traversal guard compares like with like.
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
 	}
 
 	ln, addr, err := listen(*host, *port)
@@ -97,7 +91,7 @@ func main() {
 
 	srv := &http.Server{Handler: NewServer(ix, lsp)}
 
-	url := "http://" + addr
+	url := viewerURL(addr, initialFile)
 	uiHeading("px0 "+version, nil, os.Stdout)
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
@@ -141,6 +135,40 @@ func main() {
 		fatal(err)
 	}
 	lsp.Close()
+}
+
+// resolveTarget turns a directory into a workspace root. For a regular file,
+// its parent becomes the workspace and the file is opened after the UI loads.
+func resolveTarget(target string) (root, initialFile string, err error) {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid target %s: %w", abs, err)
+	}
+	st, err := os.Stat(resolved)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid target %s: %w", abs, err)
+	}
+	if st.IsDir() {
+		return resolved, "", nil
+	}
+	if !st.Mode().IsRegular() {
+		return "", "", fmt.Errorf("not a regular file or directory: %s", abs)
+	}
+	return filepath.Dir(resolved), filepath.Base(resolved), nil
+}
+
+func viewerURL(addr, initialFile string) string {
+	u := url.URL{Scheme: "http", Host: addr}
+	if initialFile != "" {
+		q := u.Query()
+		q.Set("path", filepath.ToSlash(initialFile))
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
 }
 
 // listen binds the requested port, walking forward if it is already taken so a

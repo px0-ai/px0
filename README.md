@@ -125,14 +125,15 @@ Run `./benchmark.sh --vscode .` to measure both on your active machine:
 
 ## Usage
 
-Run `px0` pointing to any directory:
+Run `px0` with an optional file or directory:
 
 ```bash
 px0                 # view the current workspace
 px0 ~/src/kernel    # view another repository
+px0 ~/src/app.go    # view a file in its parent workspace
 ```
 
-`px0` starts the local viewer, prints the URL, and opens your default browser immediately.
+`px0` starts the local viewer, prints the URL, and opens your default browser immediately. When given a file, it uses the parent directory as the workspace and opens that file in a tab.
 
 ### Updating px0
 
