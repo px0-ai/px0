@@ -6,6 +6,7 @@ import { setLspState } from './status.js';
 import { wordAtPoint } from './cursor.js';
 import { findReferences } from './lsp.js';
 import { showCalls } from './calls.js';
+import { ensureBlame, blameHTML } from './blame.js';
 
 export const hovercard = $('#hovercard');
 export const HOVER_DELAY = 380;   // rest time before the card opens
@@ -45,6 +46,12 @@ export function onMove({ x, y, mod }) {
     else return; // still on the same word: nothing to do
   }
 
+  if (S.blame) {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => blameHoverAt(x, y), HOVER_DELAY);
+    return;
+  }
+
   if (S.lsp.state !== 'ready' && S.lsp.state !== 'indexing') return;
   clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => hoverAt(x, y), HOVER_DELAY);
@@ -53,6 +60,28 @@ export function onMove({ x, y, mod }) {
 export function hoverAt(x, y) {
   const at = doc_() ? wordAtPoint(x, y) : null;
   if (at && at.word) showHover(at, x, y);
+}
+
+// Line hit-test only (document.elementFromPoint + the row's data-l), cheaper
+// than wordAtPoint's text-node walk since blame doesn't care about columns or
+// word boundaries -- "point anywhere in the line" is the whole point.
+async function blameHoverAt(x, y) {
+  const d = doc_();
+  const row = d && document.elementFromPoint(x, y)?.closest('.row');
+  const line = row && +row.dataset.l;
+  if (!line) return;
+  const seq = ++hoverSeq;
+  const blame = await ensureBlame(d);
+  if (seq !== hoverSeq || doc_() !== d) return; // pointer moved on, or tab switched
+  const ci = blame ? blame.lines[line - 1] : -1; // blame null (unavailable) must not fall through to >= 0
+  const commit = ci >= 0 ? blame.commits[ci] : null;
+  if (!commit) return;
+
+  S.hover = { line };
+  S.hoverAnchor = { x, y };
+  hovercard.innerHTML = blameHTML(commit);
+  hovercard.hidden = false;
+  placeHover(x, y);
 }
 
 export async function showHover(at, x, y) {

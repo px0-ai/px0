@@ -74,6 +74,7 @@ export const S = {
   wrap: true,        // word wrap (default ON)
   lineNumbers: true, // line numbers gutter (default ON)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
+  blame: false,      // git blame on hover (default OFF)
 };
 
 export const doc_ = () => (S.active >= 0 ? S.tabs[S.active] : null);
