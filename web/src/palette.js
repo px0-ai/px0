@@ -13,6 +13,7 @@ import { showCalls, openLspSetup } from './calls.js';
 import { showHelp } from './shortcuts.js';
 import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
 import { togglePreview } from './markdown.js';
+import { isImage } from './image.js';
 
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
@@ -89,13 +90,13 @@ export const refreshPalette = debounce(async () => {
   if (mode === 'line') {
     const d = doc_();
     const n = parseInt(q, 10);
-    pal.items = (d && n > 0) ? [{ kind: 'line', n: Math.min(n, d.total), label: 'Line ' + Math.min(n, d.total), sub: d.path }] : [];
+    pal.items = (d && !isImage(d) && n > 0) ? [{ kind: 'line', n: Math.min(n, d.total), label: 'Line ' + Math.min(n, d.total), sub: d.path }] : [];
   } else if (mode === 'command') {
     const lq = q.toLowerCase();
     pal.items = COMMANDS.filter(c => c.name.toLowerCase().includes(lq)).map(c => ({ kind: 'cmd', cmd: c, label: c.name, sub: '' }));
   } else if (mode === 'symbol') {
     const d = doc_();
-    if (d && !d.outline) { try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; } catch { d.outline = []; } }
+    if (d && !isImage(d) && !d.outline) { try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; } catch { d.outline = []; } }
     const lq = q.toLowerCase();
     pal.items = ((d && d.outline) || []).filter(s => !lq || s.name.toLowerCase().includes(lq))
       .slice(0, 400).map(s => ({ kind: 'sym', n: s.line, label: s.name, sub: s.kind, right: String(s.line) }));
@@ -159,7 +160,7 @@ export function acceptPalette() {
   closePalette();
   if (it.kind === 'file') openFile(it.path);
   else if (it.kind === 'sym' || it.kind === 'line') {
-    const d = doc_(); if (!d) return;
+    const d = doc_(); if (!d || isImage(d)) return;
     d.cur = it.n; centerLine(it.n); render(); updateStatus(); pushHistory(d.path, it.n);
   } else if (it.kind === 'cmd') it.cmd.run();
   else if (it.kind === 'theme') setTheme(it.id);

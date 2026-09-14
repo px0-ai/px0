@@ -24,6 +24,9 @@ The editor surface is defined in [`web/index.html`](../../web/index.html):
       <div id="caret" hidden></div>
     </div>
   </div>
+  <div id="mdview" hidden>...</div>
+  <div id="diffview" hidden>...</div>
+  <div id="imgview" hidden><img id="img" alt=""></div>
   <div id="findbar">...</div>
 </div>
 ```
@@ -177,3 +180,22 @@ Pressing `Ctrl+A` / `Cmd+A` outside a text input does not use the browser's nati
 - `paint()` visually shades all currently rendered rows.
 - File contents are retrieved once from `/api/raw` so that `Ctrl+C` copies the entire file to the clipboard cleanly.
 - Esc, click, or tab switching clears whole-file selection mode.
+
+## 9. Image Tabs (No Virtualization)
+
+Binary images (`.png`, `.jpg`, `.svg`, ...) open as real tabs, not as a detached
+overlay: `openFile()` turns the server's `{ image: true }` reply into a lightweight
+doc (`web/src/tabs.js`) carrying `{ image: true, size }` with no lines, chunks,
+gutter, LSP state, or outline. `syncImage()` (`web/src/image.js`) shows a single
+reused `<img>` in `#imgview` over `#viewport` — the same overlay pattern the
+Markdown preview and diff view use — pointed at `/api/raw?path=...`, so switching
+between images never mounts more than one bitmap.
+
+Because the doc lives in `S.tabs` like any code file, tab management is free:
+`switchTab()`, `closeTab()`, the close cross, `Alt+W`, `Ctrl+Tab`, `Alt+1…9`, and
+`reopenClosedTab()` (`Alt+Shift+T`) all work unchanged. Everything code-specific
+is guarded out for these docs: `layout()` / `paint()` / `placeCaret()` /
+`ensureChunks()` (`renderer.js`), gutter fetch, `warmLSP()`, outline, in-file find,
+whole-file select, cursor moves, diff layouts, and call trails return early, so an
+image tab costs one tab entry plus the decoded bitmap — zero chunk traffic, zero
+idle CPU.

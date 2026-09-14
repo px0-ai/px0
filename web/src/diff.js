@@ -7,6 +7,7 @@
 import { $, S, doc_, esc, api } from './state.js';
 import { syncPreview } from './markdown.js';
 import { setStatusNote, updateStatus } from './status.js';
+import { isImage } from './image.js';
 
 export const diffview = $('#diffview');
 const diffContent = $('#diffcontent');
@@ -48,14 +49,14 @@ export function syncDiffView() {
 export async function toggleDiff() {
   if (!S.meta?.git) return;
   const d = doc_();
-  if (!d) return;
+  if (!d || isImage(d)) return;
   if (!d.diffMode && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
   setDiffMode(d.diffMode ? 'source' : (layoutPref() || 'split'));
 }
 
 export async function setDiffMode(mode) {
   const d = doc_();
-  if (!d) return;
+  if (!d || isImage(d)) return;
   if (mode !== 'source' && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
   if (mode === 'source') {
     d.diffMode = null;

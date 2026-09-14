@@ -1,6 +1,7 @@
 // web/src/renderer.js
 import { $, S, doc_, api, LH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
+import { isImage } from './image.js';
 
 export function measure() {
   const m = $('#measure');
@@ -10,7 +11,7 @@ export function measure() {
 
 export function layout() {
   const d = doc_();
-  if (!d) return;
+  if (!d || isImage(d)) return;
   const digits = String(d.total).length;
   editor.style.setProperty('--gw', digits);
   const gutter = S.lineNumbers ? (digits * S.chW + 30) : 16;
@@ -54,6 +55,12 @@ export function render() {
 export function paint() {
   const d = doc_();
   if (!d) { const c = $('#caret'); if (c) c.hidden = true; return; }
+  if (isImage(d)) {
+    // Image tabs show the shared <img> overlay instead of virtual rows.
+    rowsEl.innerHTML = '';
+    const c = $('#caret'); if (c) c.hidden = true;
+    return;
+  }
   const top = vp.scrollTop;
   const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
   const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
@@ -94,6 +101,7 @@ export function placeCaret() {
   const el = $('#caret');
   if (!el) return null;
   const d = doc_();
+  if (!d || isImage(d)) { if (el) el.hidden = true; return null; }
   const row = d && rowFor(d.cur);
   if (!row) { el.hidden = true; return null; }
   const code = $('.c', row);
@@ -274,6 +282,7 @@ export function rowFor(line) {
 }
 
 export function ensureChunks(d, first, last) {
+  if (!d || isImage(d)) return;
   const c0 = Math.floor(first / CHUNK), c1 = Math.floor(Math.max(first, last - 1) / CHUNK);
   for (let c = c0; c <= c1; c++) {
     if (d.chunks.has(c) || d.pending.has(c)) continue;

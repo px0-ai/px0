@@ -82,7 +82,7 @@ function revealCaretX(x) {
 
 /* Left/Right along the line, wrapping onto the neighbouring line at either end. */
 export function moveCol(delta) {
-  const d = doc_(); if (!d) return;
+  const d = doc_(); if (!d || d.image) return;
   const row = rowFor(d.cur);
   const len = row ? $('.c', row).textContent.length : 0;
   const col = Math.min(d.col || 0, len) + delta;
@@ -99,13 +99,13 @@ export function moveCol(delta) {
 }
 
 export function caretToEdge(end) {
-  const d = doc_(); if (!d) return;
+  const d = doc_(); if (!d || d.image) return;
   d.col = end ? Infinity : 0;
   revealCaretX(placeCaret());
 }
 
 export function moveCursor(delta) {
-  const d = doc_(); if (!d) return;
+  const d = doc_(); if (!d || d.image) return;
   d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
   const y = (d.cur - 1) * LH;
   if (y < vp.scrollTop) vp.scrollTop = y - LH;

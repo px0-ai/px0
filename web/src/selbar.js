@@ -4,6 +4,7 @@ import { vp, copyToClipboard, showToast } from './ui.js';
 import { render } from './renderer.js';
 import { findReferences } from './lsp.js';
 import { fitStatus } from './status.js';
+import { isImage } from './image.js';
 
 /* While code is selected, the left of the status bar trades its navigation
    buttons for actions on the selection, and hands them back once the selection
@@ -80,6 +81,7 @@ export function updateSelectionBar() {
 export function selectAll() {
   const d = doc_();
   if (!d) return;
+  if (isImage(d)) { showToast('!', 'Select works on code files'); return; }
   window.getSelection()?.removeAllRanges();
   S.selAll = d;
   allInfo = null;

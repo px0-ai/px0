@@ -1,6 +1,6 @@
 // web/src/tabs.js
 import { $, esc, S, doc_, api, LH, CHUNK, withKeys } from './state.js';
-import { vp, sizer, rowsEl, editor } from './ui.js';
+import { vp, sizer, rowsEl } from './ui.js';
 import { render, layout, refineChunk } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
 import { pushHistory } from './history.js';
@@ -13,6 +13,7 @@ import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
 import { syncDiffView, layoutPref } from './diff.js';
+import { isImage, syncImage } from './image.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
@@ -31,49 +32,73 @@ export async function openFile(path, opts = {}) {
       return;
     }
     if (j.image) {
-      showImage(path);
-      return;
+      // Image files become lightweight tabs (no lines, gutter, LSP or
+      // outline), rendered by a single reused <img> in syncImage().
+      S.tabs.push({
+        path, name: path.split('/').pop(), image: true,
+        size: j.size, total: 0, maxCols: 0,
+        lines: [], chunks: new Set(), pending: new Set(), refining: new Set(),
+        scrollTop: 0, imgScroll: 0, cur: 1, col: 0,
+        outline: [], outlineLSP: true, gutter: null,
+        lsp: { state: 'off', server: '' },
+        markdown: false, diffMode: null, diffAvailable: false,
+      });
+      idx = S.tabs.length - 1;
+    } else {
+      const hasDiff = !!j.diffAvailable;
+      const d = {
+        path, name: path.split('/').pop(), lang: j.lang, total: j.total, maxCols: j.maxCols,
+        size: j.size, lines: new Array(j.total), chunks: new Set([start / CHUNK]),
+        pending: new Set(), refining: new Set(), scrollTop: 0, cur: line || 1,
+        outline: null, gen: 0, markdown: !!j.markdown, gutter: null,
+        diffMode: hasDiff ? (layoutPref() || 'split') : null,
+        diffAvailable: hasDiff,
+        diffDismissed: false,
+      };
+      for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
+      d.lsp = j.lsp || { state: 'off', server: '' };
+      S.tabs.push(d);
+      idx = S.tabs.length - 1;
+      if (j.refine) refineChunk(d, start / CHUNK);
+      loadGutter(d);
     }
-    const hasDiff = !!j.diffAvailable;
-    const d = {
-      path, name: path.split('/').pop(), lang: j.lang, total: j.total, maxCols: j.maxCols,
-      size: j.size, lines: new Array(j.total), chunks: new Set([start / CHUNK]),
-      pending: new Set(), refining: new Set(), scrollTop: 0, cur: line || 1,
-      outline: null, gen: 0, markdown: !!j.markdown, gutter: null,
-      diffMode: hasDiff ? (layoutPref() || 'split') : null,
-      diffAvailable: hasDiff,
-      diffDismissed: false,
-    };
-    for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
-    d.lsp = j.lsp || { state: 'off', server: '' };
-    S.tabs.push(d);
-    idx = S.tabs.length - 1;
-    if (j.refine) refineChunk(d, start / CHUNK);
-    loadGutter(d);
   }
   const prev = doc_();
-  if (prev && prev !== S.tabs[idx]) prev.scrollTop = vp.scrollTop;
+  if (prev && prev !== S.tabs[idx]) saveScroll(prev);
   if (prev !== S.tabs[idx]) clearSelectAll();
   S.active = idx;
   const d = S.tabs[idx];
 
   $('#empty').hidden = true;
-  hideImage();
+  syncImage();
   syncPreview();
   syncDiffView();
   if (!S.at || S.at.path !== d.path) S.at = null;
   S.lsp.state = (d.lsp && d.lsp.state) || 'off';
   S.lsp.server = (d.lsp && d.lsp.server) || '';
   S.lsp.missing = (d.lsp && d.lsp.missing) || '';
-  warmLSP(d);
+  if (!isImage(d)) warmLSP(d);
   drawTabs(); drawCrumbs(); layout();
 
-  if (line) { d.cur = line; centerLine(line); }
+  if (isImage(d)) {
+    if (push) pushHistory(path, 1, col);
+  } else if (line) { d.cur = line; centerLine(line); }
   else vp.scrollTop = d.scrollTop;
   render();
   updateStatus();
-  if ($('#panel-outline')?.classList.contains('active')) loadOutline();
-  if (push) pushHistory(path, line || d.cur, col);
+  if (!isImage(d) && $('#panel-outline')?.classList.contains('active')) loadOutline();
+  if (!isImage(d) && push) pushHistory(path, line || d.cur, col);
+}
+
+// The code viewport and the image viewer scroll independently; stash the one
+// that is currently visible so switching tabs restores each where it was left.
+function saveScroll(d) {
+  if (isImage(d)) {
+    const v = $('#imgview');
+    if (v) d.imgScroll = v.scrollTop;
+  } else {
+    d.scrollTop = vp.scrollTop;
+  }
 }
 
 // VS Code-style diff gutter for the normal file view. Fetches once per opened
@@ -109,7 +134,12 @@ export async function reloadOpenTabs() {
 
   const activeDoc = doc_();
   if (activeDoc) {
-    activeDoc.scrollTop = vp.scrollTop;
+    if (isImage(activeDoc)) {
+      const iv = $('#imgview');
+      if (iv) activeDoc.imgScroll = iv.scrollTop;
+    } else {
+      activeDoc.scrollTop = vp.scrollTop;
+    }
     if (previewing(activeDoc)) {
       const mv = $('#mdview');
       if (mv) activeDoc.mdScroll = mv.scrollTop;
@@ -197,13 +227,15 @@ export async function reloadOpenTabs() {
     S.lsp.state = (d.lsp && d.lsp.state) || 'off';
     S.lsp.server = (d.lsp && d.lsp.server) || '';
     S.lsp.missing = (d.lsp && d.lsp.missing) || '';
-    warmLSP(d);
+    if (!isImage(d)) warmLSP(d);
+    syncImage();
     syncPreview();
     syncDiffView();
     layout();
-    vp.scrollTop = d.scrollTop;
+    if (isImage(d)) { const iv = $('#imgview'); if (iv) iv.scrollTop = d.imgScroll || 0; }
+    else vp.scrollTop = d.scrollTop;
     render();
-    if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+    if (!isImage(d) && $('#panel-outline')?.classList.contains('active')) loadOutline();
   }
 
   drawTabs();
@@ -222,13 +254,23 @@ export function closeTab(i) {
   const [closed] = S.tabs.splice(i, 1);
   if (closed) {
     if (closed.path) {
-      // The active tab's scrollTop is only saved on switch, so read the live one.
-      const scrollTop = i === S.active ? vp.scrollTop : closed.scrollTop;
+      // The active tab's scroll is only saved on switch, so read the live one.
+      let scrollTop = closed.scrollTop || 0;
+      if (isImage(closed)) {
+        const v = $('#imgview');
+        scrollTop = (i === S.active && v) ? v.scrollTop : (closed.imgScroll || 0);
+        closed.imgScroll = scrollTop;
+      } else {
+        scrollTop = i === S.active ? vp.scrollTop : closed.scrollTop;
+      }
       closedTabs.push({ path: closed.path, cur: closed.cur, scrollTop });
       if (closedTabs.length > MAX_CLOSED) closedTabs.shift();
-      api('/api/close', { path: closed.path })
-        .then(() => refreshMetrics())
-        .catch(() => {});
+      if (!isImage(closed)) {
+        // Images never opened a server doc; nothing to evict.
+        api('/api/close', { path: closed.path })
+          .then(() => refreshMetrics())
+          .catch(() => {});
+      }
     }
     // Release large arrays to assist garbage collection
     closed.lines = null;
@@ -239,6 +281,7 @@ export function closeTab(i) {
   }
   if (S.tabs.length === 0) {
     S.active = -1;
+    syncImage();
     syncPreview();
     syncDiffView();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
@@ -248,10 +291,13 @@ export function closeTab(i) {
   }
   S.active = Math.min(i, S.tabs.length - 1);
   const d = doc_();
+  syncImage();
   syncPreview();
   syncDiffView();
   drawTabs(); drawCrumbs(); layout();
-  vp.scrollTop = d.scrollTop; render(); updateStatus();
+  if (isImage(d)) { const v = $('#imgview'); if (v) v.scrollTop = d.imgScroll || 0; }
+  else vp.scrollTop = d.scrollTop;
+  render(); updateStatus();
 }
 
 // Reopens the most recently closed file that is not open already, where it was left.
@@ -261,7 +307,9 @@ export async function reopenClosedTab() {
     if (S.tabs.some(d => d.path === t.path)) continue;
     await openFile(t.path, { line: t.cur });
     if (doc_()?.path !== t.path) return;
-    vp.scrollTop = t.scrollTop;
+    const d = doc_();
+    if (isImage(d)) { const v = $('#imgview'); if (v) v.scrollTop = t.scrollTop || 0; d.imgScroll = t.scrollTop || 0; }
+    else vp.scrollTop = t.scrollTop;
     render(); updateStatus();
     return;
   }
@@ -279,8 +327,9 @@ export function switchTab(i) {
   if (i === S.active || !S.tabs[i]) return;
   clearLink();
   const prev = doc_();
-  if (prev) prev.scrollTop = vp.scrollTop;
+  if (prev) saveScroll(prev);
   S.active = i;
+  syncImage();
   syncPreview();
   syncDiffView();
   clearFind();
@@ -289,31 +338,18 @@ export function switchTab(i) {
   S.lsp.state = (S.tabs[i].lsp && S.tabs[i].lsp.state) || 'off';
   S.lsp.server = (S.tabs[i].lsp && S.tabs[i].lsp.server) || '';
   S.lsp.missing = (S.tabs[i].lsp && S.tabs[i].lsp.missing) || '';
-  warmLSP(S.tabs[i]);
+  if (!isImage(S.tabs[i])) warmLSP(S.tabs[i]);
   drawTabs(); drawCrumbs(); layout();
-  vp.scrollTop = S.tabs[i].scrollTop;
+  if (isImage(S.tabs[i])) { const v = $('#imgview'); if (v) v.scrollTop = S.tabs[i].imgScroll || 0; }
+  else vp.scrollTop = S.tabs[i].scrollTop;
   render(); updateStatus();
-  if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+  if (!isImage(S.tabs[i]) && $('#panel-outline')?.classList.contains('active')) loadOutline();
   pushHistory(S.tabs[i].path, S.tabs[i].cur);
 }
 
 export function drawCrumbs() {
   const el = $('#crumbs');
   if (el) el.innerHTML = '';
-}
-
-export function showImage(path) {
-  hideImage();
-  const box = document.createElement('div');
-  box.id = 'imgview';
-  box.innerHTML = '<img src="/api/raw?path=' + encodeURIComponent(path) + '" alt="">';
-  editor.appendChild(box);
-  $('#empty').hidden = true;
-}
-
-export function hideImage() {
-  const b = $('#imgview');
-  if (b) b.remove();
 }
 
 export function initTabs() {

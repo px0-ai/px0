@@ -5,6 +5,8 @@ import { render, paint } from './renderer.js';
 import { centerLine } from './tabs.js';
 import { updateStatus } from './status.js';
 import { mdview, previewing, findInPreview, showPreviewHit, clearPreviewMarks, previewHitOffsets, scrollPreviewTo } from './markdown.js';
+import { isImage } from './image.js';
+import { showToast } from './ui.js';
 
 export const findbar = $('#findbar');
 export const findInput = $('#find-input');
@@ -23,7 +25,9 @@ function editorSelection() {
 /* Seed priority: live editor selection, then the query already in an open
    findbar, then the caller's fallback (the last double-clicked word). */
 export function openFind(seed) {
-  if (!doc_()) return;
+  const d0 = doc_();
+  if (!d0) return;
+  if (isImage(d0)) { showToast('!', 'Find works on code files'); return; }
   const sel = editorSelection();
   if (sel) findInput.value = sel;
   else if (findbar.hidden && seed) findInput.value = seed;
@@ -42,7 +46,7 @@ export function clearFind() {
 }
 
 export const runFind = debounce(async () => {
-  const d = doc_(); if (!d) return;
+  const d = doc_(); if (!d || isImage(d)) return;
   const q = findInput.value;
   // The Markdown preview is searched as rendered text, in the page itself.
   if (previewing(d)) {
@@ -81,7 +85,7 @@ export function drawMinimap(hits, total) {
 }
 
 export function jumpToHit(i) {
-  const d = doc_(); if (!d || !S.find || !S.find.hits.length) return;
+  const d = doc_(); if (!d || isImage(d) || !S.find || !S.find.hits.length) return;
   const n = S.find.hits.length;
   S.find.active = ((i % n) + n) % n;
   if (S.find.preview) {
@@ -108,7 +112,7 @@ export function initFind() {
   $('#find-close').addEventListener('click', clearFind);
   $('#minimap-hits').addEventListener('click', e => {
     const r = $('#minimap-hits').getBoundingClientRect();
-    const d = doc_(); if (!d) return;
+    const d = doc_(); if (!d || isImage(d)) return;
     if (previewing(d)) { scrollPreviewTo((e.clientY - r.top) / r.height); return; }
     centerLine(Math.round((e.clientY - r.top) / r.height * d.total));
     render();

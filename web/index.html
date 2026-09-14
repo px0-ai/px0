@@ -95,6 +95,9 @@
       <div id="mdview" hidden><article id="md" class="md"></article></div>
       <!-- Diff view: covers the code view while a diff layout is active (Mod+D toggles) -->
       <div id="diffview" hidden><div id="diffcontent"></div></div>
+      <!-- Image view: covers the code view while an image tab is active; one
+        reused <img> serves every image tab (see web/src/image.js) -->
+      <div id="imgview" hidden><img id="img" alt=""></div>
       <div id="minimap-hits"></div>
 
       <!-- Welcome / Empty State Screen -->

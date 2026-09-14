@@ -41,6 +41,7 @@ function target(node) {
 
 export async function showCalls(arg) {
   const d = doc_();
+  if (d && d.image) { showRightInspector('calls'); hint('Call trails work on code files.'); return; }
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   showRightInspector('calls');
   cancelLspSetup();

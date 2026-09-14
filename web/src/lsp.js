@@ -6,6 +6,7 @@ import { openFile } from './tabs.js';
 import { showPanel } from './panels.js';
 import { renderResults, runSearch } from './search.js';
 import { inspectReferences } from './inspector.js';
+import { isImage } from './image.js';
 
 /* Language servers answer precisely but can take a long time to wake up, while
    the regex index answers in milliseconds and is always there. So: use the
@@ -18,7 +19,7 @@ import { inspectReferences } from './inspector.js';
    about whatever happens to sit at column 0. Those go to the text index. */
 export function positionNow(word) {
   const d = doc_();
-  if (!d) return null;
+  if (!d || isImage(d)) return null;
   if (S.at && S.at.word && S.at.path === d.path) return S.at;
   if (word) return { word, line: d.cur, col: 0, imprecise: true };
   return null;
@@ -32,6 +33,7 @@ export function canAskServer(at) {
    until it is up. Without this the first hover would find the server still
    "starting" and quietly do nothing, with no way for the state to advance. */
 export async function warmLSP(d, tries = 0) {
+  if (!d || isImage(d)) return;
   if (!d.lsp || d.lsp.state === 'off' || d.lsp.state === 'ready' || d.lsp.state === 'failed') return;
   if (tries > 20) return;
   let j;

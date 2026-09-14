@@ -4,11 +4,17 @@ import { centerLine } from './tabs.js';
 import { render } from './renderer.js';
 import { updateStatus, setLspState } from './status.js';
 import { pushHistory } from './history.js';
+import { isImage } from './image.js';
 
 export async function loadOutline() {
   const d = doc_();
   const el = $('#outline');
   if (!d) { if (el) el.innerHTML = '<div class="hint">No file open.</div>'; return; }
+  if (isImage(d)) {
+    d.outline = d.outline || [];
+    drawOutline();
+    return;
+  }
   if (!d.outline) {
     try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; }
     catch { d.outline = []; }
@@ -20,6 +26,7 @@ export async function loadOutline() {
 /* A language server's document symbols beat regex on every axis, so swap them
    in whenever one answers. Panel only: this never moves the viewport. */
 export async function upgradeOutline(d) {
+  if (!d || isImage(d)) return;
   if (d.outlineLSP || S.lsp.state === 'off' || S.lsp.state === 'failed') return;
   d.outlineLSP = true;
   let j;

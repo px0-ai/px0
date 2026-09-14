@@ -168,6 +168,7 @@ export function initShortcuts() {
     if (e.key === '?') { e.preventDefault(); showHelp(); return; }
     const d = doc_();
     if (!d) return;
+    if (d.image) return; // image tabs: only tab management keys apply (handled above)
     if (previewing(d)) { if (previewKey(e)) e.preventDefault(); return; }
     const toTop = () => { vp.scrollTop = 0; d.cur = 1; render(); updateStatus(); };
     const toBottom = () => { vp.scrollTop = sizer.offsetHeight; d.cur = d.total; render(); updateStatus(); };

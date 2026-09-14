@@ -1,13 +1,14 @@
 import { $, S, doc_, api, withKeys } from './state.js';
 import { previewing } from './markdown.js';
 import { layoutPref } from './diff.js';
+import { isImage } from './image.js';
 
 export function updateStatus() {
   const d = doc_();
   const sizeEl = $('#st-size');
   if (sizeEl) sizeEl.textContent = d ? fmtBytes(d.size) : '';
 
-  const isMd = !!(d && d.markdown), shown = previewing(d);
+  const isMd = !!(d && d.markdown && !isImage(d)), shown = previewing(d);
   const mdBtn = $('[data-action="md-preview"]');
   if (mdBtn) {
     mdBtn.hidden = !isMd;
@@ -20,7 +21,7 @@ export function updateStatus() {
     for (const b of sw.children) b.classList.toggle('on', isMd && (b.dataset.md === 'preview') === shown);
   }
 
-  const hasDiff = !!(d && d.diffAvailable);
+  const hasDiff = !!(d && d.diffAvailable && !isImage(d));
   const isDiffOn = !!(d && d.diffMode);
   const currentLayout = (d && d.diffMode) || layoutPref();
   const dsw = $('#diff-switch');

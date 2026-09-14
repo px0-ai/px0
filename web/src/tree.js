@@ -45,8 +45,8 @@ export const FILE_KIND = {
   json: 'data', yaml: 'data', yml: 'data', toml: 'data', ini: 'data', xml: 'data',
   csv: 'data', env: 'data', lock: 'data', mod: 'data', sum: 'data',
   md: 'doc', markdown: 'doc', txt: 'doc', rst: 'doc', adoc: 'doc',
-  html: 'web', htm: 'web', css: 'web', scss: 'web', less: 'web', svg: 'web', vue: 'web',
-  png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', webp: 'img', ico: 'img', avif: 'img',
+  html: 'web', htm: 'web', css: 'web', scss: 'web', less: 'web', vue: 'web',
+  png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', webp: 'img', ico: 'img', avif: 'img', svg: 'img', bmp: 'img',
 };
 
 export function fileKind(name) {

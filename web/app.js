@@ -112,6 +112,33 @@
     }
   }
 
+  // web/src/image.js
+  var isImage = (d = doc_()) => !!(d && d.image);
+  var view = () => $("#imgview");
+  var img = () => $("#img");
+  function syncImage() {
+    const d = doc_();
+    const v = view();
+    if (!v)
+      return;
+    if (!isImage(d)) {
+      v.hidden = true;
+      return;
+    }
+    const el = img();
+    const src = "/api/raw?path=" + encodeURIComponent(d.path);
+    if (el && el.dataset.path !== d.path) {
+      el.dataset.path = d.path;
+      el.alt = d.name || d.path;
+      el.src = src;
+    }
+    if (typeof d.imgScroll === "number")
+      v.scrollTop = d.imgScroll;
+    else
+      v.scrollTop = 0;
+    v.hidden = false;
+  }
+
   // web/src/renderer.js
   function measure() {
     const m = $("#measure");
@@ -120,7 +147,7 @@
   }
   function layout() {
     const d = doc_();
-    if (!d)
+    if (!d || isImage(d))
       return;
     const digits = String(d.total).length;
     editor.style.setProperty("--gw", digits);
@@ -175,6 +202,13 @@
         c.hidden = true;
       return;
     }
+    if (isImage(d)) {
+      rowsEl.innerHTML = "";
+      const c = $("#caret");
+      if (c)
+        c.hidden = true;
+      return;
+    }
     const top = vp.scrollTop;
     const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
     const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
@@ -212,6 +246,11 @@
     if (!el)
       return null;
     const d = doc_();
+    if (!d || isImage(d)) {
+      if (el)
+        el.hidden = true;
+      return null;
+    }
     const row = d && rowFor(d.cur);
     if (!row) {
       el.hidden = true;
@@ -399,6 +438,8 @@
     return null;
   }
   function ensureChunks(d, first, last) {
+    if (!d || isImage(d))
+      return;
     const c0 = Math.floor(first / CHUNK), c1 = Math.floor(Math.max(first, last - 1) / CHUNK);
     for (let c = c0;c <= c1; c++) {
       if (d.chunks.has(c) || d.pending.has(c))
@@ -494,6 +535,11 @@
         el.innerHTML = '<div class="hint">No file open.</div>';
       return;
     }
+    if (isImage(d)) {
+      d.outline = d.outline || [];
+      drawOutline();
+      return;
+    }
     if (!d.outline) {
       try {
         d.outline = (await api("/api/outline", { path: d.path })).symbols || [];
@@ -505,6 +551,8 @@
     upgradeOutline(d);
   }
   async function upgradeOutline(d) {
+    if (!d || isImage(d))
+      return;
     if (d.outlineLSP || S2.lsp.state === "off" || S2.lsp.state === "failed")
       return;
     d.outlineLSP = true;
@@ -690,7 +738,6 @@
     css: "web",
     scss: "web",
     less: "web",
-    svg: "web",
     vue: "web",
     png: "img",
     jpg: "img",
@@ -698,7 +745,9 @@
     gif: "img",
     webp: "img",
     ico: "img",
-    avif: "img"
+    avif: "img",
+    svg: "img",
+    bmp: "img"
   };
   function fileKind(name) {
     const i = name.lastIndexOf(".");
@@ -817,8 +866,13 @@
     return line ? line.trim() : "";
   }
   function openFind(seed) {
-    if (!doc_())
+    const d0 = doc_();
+    if (!d0)
       return;
+    if (isImage(d0)) {
+      showToast("!", "Find works on code files");
+      return;
+    }
     const sel = editorSelection();
     if (sel)
       findInput.value = sel;
@@ -840,7 +894,7 @@
   }
   var runFind = debounce(async () => {
     const d = doc_();
-    if (!d)
+    if (!d || isImage(d))
       return;
     const q = findInput.value;
     if (previewing(d)) {
@@ -894,7 +948,7 @@
   }
   function jumpToHit(i) {
     const d = doc_();
-    if (!d || !S2.find || !S2.find.hits.length)
+    if (!d || isImage(d) || !S2.find || !S2.find.hits.length)
       return;
     const n = S2.find.hits.length;
     S2.find.active = (i % n + n) % n;
@@ -930,7 +984,7 @@
     $("#minimap-hits").addEventListener("click", (e) => {
       const r = $("#minimap-hits").getBoundingClientRect();
       const d = doc_();
-      if (!d)
+      if (!d || isImage(d))
         return;
       if (previewing(d)) {
         scrollPreviewTo((e.clientY - r.top) / r.height);
@@ -1197,7 +1251,7 @@
   // web/src/lsp.js
   function positionNow(word) {
     const d = doc_();
-    if (!d)
+    if (!d || isImage(d))
       return null;
     if (S2.at && S2.at.word && S2.at.path === d.path)
       return S2.at;
@@ -1209,6 +1263,8 @@
     return !at.imprecise && (S2.lsp.state === "ready" || S2.lsp.state === "indexing");
   }
   async function warmLSP(d, tries = 0) {
+    if (!d || isImage(d))
+      return;
     if (!d.lsp || d.lsp.state === "off" || d.lsp.state === "ready" || d.lsp.state === "failed")
       return;
     if (tries > 20)
@@ -1411,7 +1467,7 @@
   }
   function moveCol(delta) {
     const d = doc_();
-    if (!d)
+    if (!d || d.image)
       return;
     const row = rowFor(d.cur);
     const len = row ? $(".c", row).textContent.length : 0;
@@ -1435,14 +1491,14 @@
   }
   function caretToEdge(end) {
     const d = doc_();
-    if (!d)
+    if (!d || d.image)
       return;
     d.col = end ? Infinity : 0;
     revealCaretX(placeCaret());
   }
   function moveCursor(delta) {
     const d = doc_();
-    if (!d)
+    if (!d || d.image)
       return;
     d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
     const y = (d.cur - 1) * LH;
@@ -1663,6 +1719,11 @@
   }
   async function showCalls(arg) {
     const d = doc_();
+    if (d && d.image) {
+      showRightInspector("calls");
+      hint("Call trails work on code files.");
+      return;
+    }
     const at = arg && arg.word ? arg : positionNow(typeof arg === "string" ? arg : S2.lastWord);
     showRightInspector("calls");
     cancelLspSetup();
@@ -2142,17 +2203,17 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img2, src, base2) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
-        img.setAttribute("src", src);
+        img2.setAttribute("src", src);
     } else if (src.startsWith("//")) {
-      img.setAttribute("src", src);
+      img2.setAttribute("src", src);
     } else if (src) {
       const t = mdLocal(src, base2);
       if (t)
-        img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
+        img2.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
   function mdSetLink(a, href, base2) {
@@ -2450,7 +2511,7 @@
     if (!S2.meta?.git)
       return;
     const d = doc_();
-    if (!d)
+    if (!d || isImage(d))
       return;
     if (!d.diffMode && !d.diffAvailable) {
       setStatusNote("No diff — clean file or not a git repo");
@@ -2460,7 +2521,7 @@
   }
   async function setDiffMode(mode) {
     const d = doc_();
-    if (!d)
+    if (!d || isImage(d))
       return;
     if (mode !== "source" && !d.diffAvailable) {
       setStatusNote("No diff — clean file or not a git repo");
@@ -2655,7 +2716,7 @@
     const sizeEl = $("#st-size");
     if (sizeEl)
       sizeEl.textContent = d ? fmtBytes(d.size) : "";
-    const isMd = !!(d && d.markdown), shown2 = previewing(d);
+    const isMd = !!(d && d.markdown && !isImage(d)), shown2 = previewing(d);
     const mdBtn = $('[data-action="md-preview"]');
     if (mdBtn) {
       mdBtn.hidden = !isMd;
@@ -2668,7 +2729,7 @@
       for (const b of sw.children)
         b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown2);
     }
-    const hasDiff = !!(d && d.diffAvailable);
+    const hasDiff = !!(d && d.diffAvailable && !isImage(d));
     const isDiffOn = !!(d && d.diffMode);
     const currentLayout = d && d.diffMode || layoutPref();
     const dsw = $("#diff-switch");
@@ -2850,6 +2911,10 @@
     const d = doc_();
     if (!d)
       return;
+    if (isImage(d)) {
+      showToast("!", "Select works on code files");
+      return;
+    }
     window.getSelection()?.removeAllRanges();
     S2.selAll = d;
     allInfo = null;
@@ -2947,49 +3012,72 @@
         return;
       }
       if (j.image) {
-        showImage(path);
-        return;
+        S2.tabs.push({
+          path,
+          name: path.split("/").pop(),
+          image: true,
+          size: j.size,
+          total: 0,
+          maxCols: 0,
+          lines: [],
+          chunks: new Set,
+          pending: new Set,
+          refining: new Set,
+          scrollTop: 0,
+          imgScroll: 0,
+          cur: 1,
+          col: 0,
+          outline: [],
+          outlineLSP: true,
+          gutter: null,
+          lsp: { state: "off", server: "" },
+          markdown: false,
+          diffMode: null,
+          diffAvailable: false
+        });
+        idx = S2.tabs.length - 1;
+      } else {
+        const hasDiff = !!j.diffAvailable;
+        const d2 = {
+          path,
+          name: path.split("/").pop(),
+          lang: j.lang,
+          total: j.total,
+          maxCols: j.maxCols,
+          size: j.size,
+          lines: new Array(j.total),
+          chunks: new Set([start2 / CHUNK]),
+          pending: new Set,
+          refining: new Set,
+          scrollTop: 0,
+          cur: line || 1,
+          outline: null,
+          gen: 0,
+          markdown: !!j.markdown,
+          gutter: null,
+          diffMode: hasDiff ? layoutPref() || "split" : null,
+          diffAvailable: hasDiff,
+          diffDismissed: false
+        };
+        for (let i = 0;i < j.lines.length; i++)
+          d2.lines[j.start + i] = j.lines[i];
+        d2.lsp = j.lsp || { state: "off", server: "" };
+        S2.tabs.push(d2);
+        idx = S2.tabs.length - 1;
+        if (j.refine)
+          refineChunk(d2, start2 / CHUNK);
+        loadGutter(d2);
       }
-      const hasDiff = !!j.diffAvailable;
-      const d2 = {
-        path,
-        name: path.split("/").pop(),
-        lang: j.lang,
-        total: j.total,
-        maxCols: j.maxCols,
-        size: j.size,
-        lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
-        pending: new Set,
-        refining: new Set,
-        scrollTop: 0,
-        cur: line || 1,
-        outline: null,
-        gen: 0,
-        markdown: !!j.markdown,
-        gutter: null,
-        diffMode: hasDiff ? layoutPref() || "split" : null,
-        diffAvailable: hasDiff,
-        diffDismissed: false
-      };
-      for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
-      idx = S2.tabs.length - 1;
-      if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
-      prev.scrollTop = vp.scrollTop;
+      saveScroll(prev);
     if (prev !== S2.tabs[idx])
       clearSelectAll();
     S2.active = idx;
     const d = S2.tabs[idx];
     $("#empty").hidden = true;
-    hideImage();
+    syncImage();
     syncPreview();
     syncDiffView();
     if (!S2.at || S2.at.path !== d.path)
@@ -2997,21 +3085,34 @@
     S2.lsp.state = d.lsp && d.lsp.state || "off";
     S2.lsp.server = d.lsp && d.lsp.server || "";
     S2.lsp.missing = d.lsp && d.lsp.missing || "";
-    warmLSP(d);
+    if (!isImage(d))
+      warmLSP(d);
     drawTabs();
     drawCrumbs();
     layout();
-    if (line) {
+    if (isImage(d)) {
+      if (push)
+        pushHistory(path, 1, col);
+    } else if (line) {
       d.cur = line;
       centerLine(line);
     } else
       vp.scrollTop = d.scrollTop;
     render();
     updateStatus();
-    if ($("#panel-outline")?.classList.contains("active"))
+    if (!isImage(d) && $("#panel-outline")?.classList.contains("active"))
       loadOutline();
-    if (push)
+    if (!isImage(d) && push)
       pushHistory(path, line || d.cur, col);
+  }
+  function saveScroll(d) {
+    if (isImage(d)) {
+      const v = $("#imgview");
+      if (v)
+        d.imgScroll = v.scrollTop;
+    } else {
+      d.scrollTop = vp.scrollTop;
+    }
   }
   function loadGutter(d) {
     if (!S2.meta?.git)
@@ -3044,7 +3145,13 @@
       return;
     const activeDoc = doc_();
     if (activeDoc) {
-      activeDoc.scrollTop = vp.scrollTop;
+      if (isImage(activeDoc)) {
+        const iv = $("#imgview");
+        if (iv)
+          activeDoc.imgScroll = iv.scrollTop;
+      } else {
+        activeDoc.scrollTop = vp.scrollTop;
+      }
       if (previewing(activeDoc)) {
         const mv = $("#mdview");
         if (mv)
@@ -3123,13 +3230,20 @@
       S2.lsp.state = d.lsp && d.lsp.state || "off";
       S2.lsp.server = d.lsp && d.lsp.server || "";
       S2.lsp.missing = d.lsp && d.lsp.missing || "";
-      warmLSP(d);
+      if (!isImage(d))
+        warmLSP(d);
+      syncImage();
       syncPreview();
       syncDiffView();
       layout();
-      vp.scrollTop = d.scrollTop;
+      if (isImage(d)) {
+        const iv = $("#imgview");
+        if (iv)
+          iv.scrollTop = d.imgScroll || 0;
+      } else
+        vp.scrollTop = d.scrollTop;
       render();
-      if ($("#panel-outline")?.classList.contains("active"))
+      if (!isImage(d) && $("#panel-outline")?.classList.contains("active"))
         loadOutline();
     }
     drawTabs();
@@ -3149,11 +3263,20 @@
     const [closed] = S2.tabs.splice(i, 1);
     if (closed) {
       if (closed.path) {
-        const scrollTop = i === S2.active ? vp.scrollTop : closed.scrollTop;
+        let scrollTop = closed.scrollTop || 0;
+        if (isImage(closed)) {
+          const v = $("#imgview");
+          scrollTop = i === S2.active && v ? v.scrollTop : closed.imgScroll || 0;
+          closed.imgScroll = scrollTop;
+        } else {
+          scrollTop = i === S2.active ? vp.scrollTop : closed.scrollTop;
+        }
         closedTabs.push({ path: closed.path, cur: closed.cur, scrollTop });
         if (closedTabs.length > MAX_CLOSED)
           closedTabs.shift();
-        api("/api/close", { path: closed.path }).then(() => refreshMetrics()).catch(() => {});
+        if (!isImage(closed)) {
+          api("/api/close", { path: closed.path }).then(() => refreshMetrics()).catch(() => {});
+        }
       }
       closed.lines = null;
       closed.chunks?.clear?.();
@@ -3163,6 +3286,7 @@
     }
     if (S2.tabs.length === 0) {
       S2.active = -1;
+      syncImage();
       syncPreview();
       syncDiffView();
       rowsEl.innerHTML = "";
@@ -3175,24 +3299,37 @@
     }
     S2.active = Math.min(i, S2.tabs.length - 1);
     const d = doc_();
+    syncImage();
     syncPreview();
     syncDiffView();
     drawTabs();
     drawCrumbs();
     layout();
-    vp.scrollTop = d.scrollTop;
+    if (isImage(d)) {
+      const v = $("#imgview");
+      if (v)
+        v.scrollTop = d.imgScroll || 0;
+    } else
+      vp.scrollTop = d.scrollTop;
     render();
     updateStatus();
   }
   async function reopenClosedTab() {
     while (closedTabs.length) {
       const t = closedTabs.pop();
-      if (S2.tabs.some((d) => d.path === t.path))
+      if (S2.tabs.some((d2) => d2.path === t.path))
         continue;
       await openFile(t.path, { line: t.cur });
       if (doc_()?.path !== t.path)
         return;
-      vp.scrollTop = t.scrollTop;
+      const d = doc_();
+      if (isImage(d)) {
+        const v = $("#imgview");
+        if (v)
+          v.scrollTop = t.scrollTop || 0;
+        d.imgScroll = t.scrollTop || 0;
+      } else
+        vp.scrollTop = t.scrollTop;
       render();
       updateStatus();
       return;
@@ -3210,8 +3347,9 @@
     clearLink();
     const prev = doc_();
     if (prev)
-      prev.scrollTop = vp.scrollTop;
+      saveScroll(prev);
     S2.active = i;
+    syncImage();
     syncPreview();
     syncDiffView();
     clearFind();
@@ -3220,14 +3358,20 @@
     S2.lsp.state = S2.tabs[i].lsp && S2.tabs[i].lsp.state || "off";
     S2.lsp.server = S2.tabs[i].lsp && S2.tabs[i].lsp.server || "";
     S2.lsp.missing = S2.tabs[i].lsp && S2.tabs[i].lsp.missing || "";
-    warmLSP(S2.tabs[i]);
+    if (!isImage(S2.tabs[i]))
+      warmLSP(S2.tabs[i]);
     drawTabs();
     drawCrumbs();
     layout();
-    vp.scrollTop = S2.tabs[i].scrollTop;
+    if (isImage(S2.tabs[i])) {
+      const v = $("#imgview");
+      if (v)
+        v.scrollTop = S2.tabs[i].imgScroll || 0;
+    } else
+      vp.scrollTop = S2.tabs[i].scrollTop;
     render();
     updateStatus();
-    if ($("#panel-outline")?.classList.contains("active"))
+    if (!isImage(S2.tabs[i]) && $("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);
   }
@@ -3235,19 +3379,6 @@
     const el = $("#crumbs");
     if (el)
       el.innerHTML = "";
-  }
-  function showImage(path) {
-    hideImage();
-    const box = document.createElement("div");
-    box.id = "imgview";
-    box.innerHTML = '<img src="/api/raw?path=' + encodeURIComponent(path) + '" alt="">';
-    editor.appendChild(box);
-    $("#empty").hidden = true;
-  }
-  function hideImage() {
-    const b = $("#imgview");
-    if (b)
-      b.remove();
   }
   function initTabs() {
     $("#tabs").addEventListener("click", (e) => {
@@ -3611,6 +3742,8 @@
       const d = doc_();
       if (!d)
         return;
+      if (d.image)
+        return;
       if (previewing(d)) {
         if (previewKey(e))
           e.preventDefault();
@@ -3783,13 +3916,13 @@
     if (mode === "line") {
       const d = doc_();
       const n = parseInt(q, 10);
-      pal.items = d && n > 0 ? [{ kind: "line", n: Math.min(n, d.total), label: "Line " + Math.min(n, d.total), sub: d.path }] : [];
+      pal.items = d && !isImage(d) && n > 0 ? [{ kind: "line", n: Math.min(n, d.total), label: "Line " + Math.min(n, d.total), sub: d.path }] : [];
     } else if (mode === "command") {
       const lq = q.toLowerCase();
       pal.items = COMMANDS.filter((c) => c.name.toLowerCase().includes(lq)).map((c) => ({ kind: "cmd", cmd: c, label: c.name, sub: "" }));
     } else if (mode === "symbol") {
       const d = doc_();
-      if (d && !d.outline) {
+      if (d && !isImage(d) && !d.outline) {
         try {
           d.outline = (await api("/api/outline", { path: d.path })).symbols || [];
         } catch {
@@ -3872,7 +4005,7 @@
       openFile(it.path);
     else if (it.kind === "sym" || it.kind === "line") {
       const d = doc_();
-      if (!d)
+      if (!d || isImage(d))
         return;
       d.cur = it.n;
       centerLine(it.n);
