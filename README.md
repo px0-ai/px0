@@ -282,6 +282,7 @@ px0 --update
 | `Cmd/Ctrl+D`                                           | Toggle git diff of the active file (split or unified, whichever you used last)             |
 | `F12`, `Cmd/Ctrl+Click`                                | Go to definition                                                                           |
 | `Shift+F12`                                            | Find all references                                                                        |
+| `Cmd/Ctrl+F12`                                         | Go to implementation (jump to the concrete types that implement an interface / interface method) |
 | `Left` / `Right`, `Home` / `End` (`Cmd+Left` / `Cmd+Right` on macOS) | Move the caret along the line; click places it                                             |
 | `Ctrl+Home` / `Ctrl+End` (`Cmd+Up` / `Cmd+Down` on macOS)            | Top / bottom of file                                                                       |
 | `Alt+Z` / `Alt+L`                                      | Toggle word wrap / line numbers                                                            |
