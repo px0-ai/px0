@@ -5,8 +5,11 @@ import { paint, render, rowFor, placeCaret } from './renderer.js';
 import { updateStatus } from './status.js';
 import { gotoDefinition } from './lsp.js';
 import { pushHistory } from './history.js';
+import { WORD, forwardWordCol, backwardWordCol } from './vim-word.js';
+import { canEdit, focusEdit, positionEditInput, isTyping } from './edit.js';
+import { vimEnabled } from './vim.js';
 
-export const WORD = /[A-Za-z0-9_$]/;
+export { WORD, forwardWordCol, backwardWordCol };
 
 /* Returns {word, line, col} where col counts UTF-16 units from the start of the
    line, which is both what JS string indexes give us and what the server needs
@@ -96,12 +99,74 @@ export function moveCol(delta) {
   }
   d.col = col;
   revealCaretX(placeCaret());
+  if (isTyping()) positionEditInput();
 }
 
 export function caretToEdge(end) {
   const d = doc_(); if (!d) return;
   d.col = end ? Infinity : 0;
   revealCaretX(placeCaret());
+  if (isTyping()) positionEditInput();
+}
+
+function textAt(d, line) {
+  const raw = d.raw?.[line - 1];
+  if (raw !== undefined) return raw;
+  const t = d.lines[line - 1];
+  if (t !== undefined) {
+    const row = rowFor(line);
+    if (row) return $('.c', row).textContent;
+  }
+  const row = rowFor(line);
+  return row ? $('.c', row).textContent : '';
+}
+
+function revealLine(d) {
+  const y = (d.cur - 1) * LH;
+  if (y < vp.scrollTop) vp.scrollTop = y - LH;
+  else if (y > vp.scrollTop + vp.clientHeight - LH * 2) vp.scrollTop = y - vp.clientHeight + LH * 3;
+}
+
+export function moveWordForward() {
+  const d = doc_(); if (!d) return;
+  let text = textAt(d, d.cur);
+  let col = Math.min(d.col || 0, text.length);
+  let r = forwardWordCol(text, col);
+  if (r.pastEnd && r.col >= text.length && d.cur < d.total) {
+    d.cur++;
+    text = textAt(d, d.cur);
+    r = forwardWordCol(text, 0);
+    if (r.pastEnd) {
+      let i = 0;
+      while (i < text.length && !WORD.test(text[i])) i++;
+      d.col = i < text.length ? i : text.length;
+    } else {
+      d.col = r.col;
+    }
+  } else {
+    d.col = r.col;
+  }
+  revealLine(d);
+  render(); updateStatus();
+  revealCaretX(placeCaret());
+  if (isTyping()) positionEditInput();
+}
+
+export function moveWordBackward() {
+  const d = doc_(); if (!d) return;
+  let text = textAt(d, d.cur);
+  let col = Math.min(d.col || 0, text.length);
+  if (col === 0) {
+    if (d.cur <= 1) return;
+    d.cur--;
+    text = textAt(d, d.cur);
+    col = text.length;
+  }
+  d.col = backwardWordCol(text, col).col;
+  revealLine(d);
+  render(); updateStatus();
+  revealCaretX(placeCaret());
+  if (isTyping()) positionEditInput();
 }
 
 export function moveCursor(delta) {
@@ -111,6 +176,7 @@ export function moveCursor(delta) {
   if (y < vp.scrollTop) vp.scrollTop = y - LH;
   else if (y > vp.scrollTop + vp.clientHeight - LH * 2) vp.scrollTop = y - vp.clientHeight + LH * 3;
   render(); updateStatus();
+  if (isTyping()) positionEditInput();
 }
 
 export function initCursor() {
@@ -135,6 +201,7 @@ export function initCursor() {
       return;
     }
     for (const r of rowsEl.children) r.classList.toggle('cur', +r.dataset.l === d.cur);
+    if (canEdit(d) && !vimEnabled()) focusEdit();
   });
 
   vp.addEventListener('dblclick', e => {

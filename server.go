@@ -58,6 +58,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/tree", s.handleTree)
 	s.mux.HandleFunc("/api/find", s.handleFind)
 	s.mux.HandleFunc("/api/file", s.handleFile)
+	s.mux.HandleFunc("/api/file/save", s.handleFileSave)
 	s.mux.HandleFunc("/api/close", s.handleClose)
 	s.mux.HandleFunc("/api/raw", s.handleRaw)
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
@@ -484,14 +485,92 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		start = d.Total
 	}
 	lines, exact := d.Lines(start, start+count)
+	raw := make([]string, len(lines))
+	for i := range lines {
+		raw[i] = d.Raw(start + i + 1)
+	}
 	_, coming := d.Exact()
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
-		"start": start, "lines": lines, "size": st.Size(),
+		"start": start, "lines": lines, "raw": raw, "size": st.Size(),
 		"exact": exact, "refine": !exact && coming,
 		"markdown": isMarkdown(rel),
 		"lsp":      s.lspBrief(rel),
 	})
+}
+
+func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, 400, "bad json")
+		return
+	}
+	if req.Path == "" {
+		fail(w, 400, "bad path")
+		return
+	}
+	abs, rel, ok := s.resolvePath(req.Path)
+	if !ok {
+		fail(w, 400, "bad path")
+		return
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	if st.IsDir() {
+		fail(w, 400, "is a directory")
+		return
+	}
+	if imageExt[strings.ToLower(filepath.Ext(rel))] {
+		fail(w, 415, "cannot save image")
+		return
+	}
+	if len(req.Content) > maxFileBytes {
+		fail(w, 413, "file too large")
+		return
+	}
+	if isBinary([]byte(req.Content)) {
+		fail(w, 415, "binary file")
+		return
+	}
+	dir := filepath.Dir(abs)
+	tmp, err := os.CreateTemp(dir, ".px0-save-*")
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	tmpPath := tmp.Name()
+	okWrite := false
+	defer func() {
+		tmp.Close()
+		if !okWrite {
+			os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.WriteString(req.Content); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	if err := os.Rename(tmpPath, abs); err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	okWrite = true
+	Evict(abs)
+	s.lsp.CloseDoc(abs, rel)
+	writeJSON(w, map[string]any{"ok": true, "path": rel})
 }
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {

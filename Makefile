@@ -37,6 +37,9 @@ build: web
 
 test: web
 	go test -v ./...
+	node ./scripts/vim-test.js
+	node ./scripts/edit-test.js
+	node ./scripts/undo-test.js
 
 dist: web
 	@./build.sh

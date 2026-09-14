@@ -13,6 +13,7 @@ import { showCalls, openLspSetup } from './calls.js';
 import { showHelp } from './shortcuts.js';
 import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
 import { togglePreview } from './markdown.js';
+import { toggleVim } from './vim.js';
 
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
@@ -37,6 +38,7 @@ export const COMMANDS = [
   { name: 'Reveal Active File in Explorer', run: () => { const d = doc_(); if (d) { showPanel('files'); revealFile(d.path); } } },
   { name: withKeys('Toggle Word Wrap ({Alt+Z})'), run: () => toggleWordWrap() },
   { name: withKeys('Toggle Line Numbers ({Alt+L})'), run: () => toggleLineNumbers() },
+  { name: 'Toggle Vim Keybindings', run: () => toggleVim() },
   { name: withKeys('Toggle Markdown Preview ({Alt+M})'), run: () => togglePreview() },
   { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => document.body.classList.toggle('side-hidden') },
   { name: 'Select Theme…', run: () => openPalette('theme') },

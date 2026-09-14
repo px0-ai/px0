@@ -14,6 +14,16 @@ const request = async (method, path, params) => {
 export const api = (path, params) => request('GET', path, params);
 // For requests that change the machine; the server only accepts these as POST from this page.
 export const apiPost = (path, params) => request('POST', path, params);
+export const apiPostJSON = async (path, body) => {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j;
+};
 
 export const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 // navigator.platform is deprecated but is still the only signal some browsers give.
@@ -74,6 +84,10 @@ export const S = {
   wrap: true,        // word wrap (default ON)
   lineNumbers: true, // line numbers gutter (default ON)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
+  vim: false,        // Vim-style navigation (opt-in)
+  vimMode: 'normal', // 'normal' | 'insert' | 'visual' | 'command'
+  vimCmd: '',        // text after ':' in command mode
+  vimVisual: null,   // { anchor:{line,col}, kind:'char'|'line' } in visual mode
 };
 
 export const doc_ = () => (S.active >= 0 ? S.tabs[S.active] : null);

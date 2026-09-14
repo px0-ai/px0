@@ -68,7 +68,7 @@
     <div id="editor">
       <!-- #viewport handles scrolling; #sizer sets full document scroll height; #rows renders only visible DOM rows -->
       <div id="viewport">
-        <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
+        <div id="sizer"><div id="rows"></div><div id="caret" hidden></div><textarea id="edit-input" autocapitalize="off" autocomplete="off" spellcheck="false" aria-hidden="true" hidden></textarea></div>
       </div>
       <!-- Markdown preview: covers the code view for a Markdown tab (Alt+M toggles) -->
       <div id="mdview" hidden><article id="md" class="md"></article></div>
@@ -115,6 +115,14 @@
     <!-- Floating Copy Toast Notification -->
     <div id="toast" hidden></div>
 
+    <!-- Vim status: mode + command line (shown when Vim is enabled) -->
+    <div id="vim-bar" hidden>
+      <span id="vim-mode">-- NORMAL --</span>
+      <span id="vim-cmd" hidden></span>
+      <span class="grow"></span>
+      <span id="vim-pos"></span>
+    </div>
+
     <!-- Bottom Status Bar -->
     <footer id="status">
       <!-- Selection actions: replace the buttons and size below while code is selected -->
@@ -135,6 +143,7 @@
         <button class="footer-btn" data-action="md-preview" title="Toggle Markdown Preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
         <button class="footer-btn" data-action="line-numbers" title="Toggle Line Numbers ({Alt+L})"><span class="footer-btn-label">Lines</span><kbd class="footer-kbd" data-keys="Alt+L"></kbd></button>
+        <button class="footer-btn" data-action="vim" title="Toggle Vim mode (hjkl, :w :q :wq, visual)"><span class="footer-btn-label">Vim</span></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>
       </div>
       <span class="status-sep"></span>

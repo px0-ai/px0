@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -598,6 +599,78 @@ func TestListenPortFallback(t *testing.T) {
 
 	if addr2 == addr1 {
 		t.Fatalf("second listener got the same address %s", addr2)
+	}
+}
+
+func postJSON(t *testing.T, s *Server, url string, body any, host, origin string) (int, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = host
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	s.ServeHTTP(rec, req)
+	var m map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &m)
+	return rec.Code, m
+}
+
+func TestFileIncludesRawLines(t *testing.T) {
+	s, _ := newTestServer(t)
+	code, body := get(t, s, "/api/file?path=greet.go")
+	if code != http.StatusOK {
+		t.Fatalf("file: %d %v", code, body)
+	}
+	raw, ok := body["raw"].([]any)
+	if !ok || len(raw) == 0 {
+		t.Fatalf("raw lines missing: %v", body["raw"])
+	}
+	if raw[0].(string) != "package main" {
+		t.Errorf("raw[0] = %q, want package main", raw[0])
+	}
+}
+
+func TestFileSave(t *testing.T) {
+	s, root := newTestServer(t)
+	host := "127.0.0.1:7777"
+	origin := "http://" + host
+	code, body := postJSON(t, s, "/api/file/save", map[string]string{
+		"path":    "greet.go",
+		"content": "package main\n\nfunc greet() {}\n",
+	}, host, origin)
+	if code != http.StatusOK || body["ok"] != true {
+		t.Fatalf("save: %d %v", code, body)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "greet.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "package main\n\nfunc greet() {}\n" {
+		t.Errorf("on disk: %q", string(data))
+	}
+}
+
+func TestFileSaveRejectsBadOrigin(t *testing.T) {
+	s, _ := newTestServer(t)
+	code, _ := postJSON(t, s, "/api/file/save", map[string]string{
+		"path": "greet.go", "content": "x",
+	}, "127.0.0.1:7777", "https://evil.example")
+	if code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", code)
+	}
+}
+
+func TestFileSaveRejectsTraversal(t *testing.T) {
+	s, _ := newTestServer(t)
+	host := "127.0.0.1:7777"
+	code, _ := postJSON(t, s, "/api/file/save", map[string]string{
+		"path": "../../../etc/passwd", "content": "hacked",
+	}, host, "http://"+host)
+	if code == http.StatusOK {
+		t.Fatal("traversal allowed")
 	}
 }
 

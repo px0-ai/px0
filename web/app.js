@@ -16,6 +16,17 @@
   };
   var api = (path, params) => request("GET", path, params);
   var apiPost = (path, params) => request("POST", path, params);
+  var apiPostJSON = async (path, body) => {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (j.error)
+      throw new Error(j.error);
+    return j;
+  };
   var debounce = (fn, ms) => {
     let t;
     return (...a) => {
@@ -70,9 +81,178 @@
     chW: 7.8,
     wrap: true,
     lineNumbers: true,
-    mdPreview: true
+    mdPreview: true,
+    vim: false,
+    vimMode: "normal",
+    vimCmd: "",
+    vimVisual: null
   };
   var doc_ = () => S2.active >= 0 ? S2.tabs[S2.active] : null;
+
+  // web/src/edit-buffer.js
+  function ensureRawLine(doc, line) {
+    const i = line - 1;
+    if (doc.raw[i] === undefined)
+      doc.raw[i] = "";
+  }
+  function lineText(doc, line) {
+    ensureRawLine(doc, line);
+    return doc.raw[line - 1];
+  }
+  function markDirty(doc, line) {
+    doc.dirty = true;
+    if (!doc.dirtyLines)
+      doc.dirtyLines = new Set;
+    doc.dirtyLines.add(line);
+  }
+  function spliceLine(doc, at, text) {
+    doc.raw.splice(at, 0, text);
+    doc.lines.splice(at, 0, undefined);
+    doc.total++;
+  }
+  function insertText(doc, text) {
+    if (!text)
+      return;
+    ensureRawLine(doc, doc.cur);
+    const i = doc.cur - 1;
+    const line = doc.raw[i];
+    const col = Math.min(doc.col || 0, line.length);
+    doc.raw[i] = line.slice(0, col) + text + line.slice(col);
+    doc.col = col + text.length;
+    markDirty(doc, doc.cur);
+  }
+  function insertNewline(doc) {
+    ensureRawLine(doc, doc.cur);
+    const i = doc.cur - 1;
+    const line = doc.raw[i];
+    const col = Math.min(doc.col || 0, line.length);
+    const rest = line.slice(col);
+    doc.raw[i] = line.slice(0, col);
+    spliceLine(doc, i + 1, rest);
+    doc.cur++;
+    doc.col = 0;
+    markDirty(doc, doc.cur - 1);
+    markDirty(doc, doc.cur);
+  }
+  function deleteChar(doc, forward) {
+    ensureRawLine(doc, doc.cur);
+    const i = doc.cur - 1;
+    const line = doc.raw[i];
+    const col = Math.min(doc.col || 0, line.length);
+    if (forward) {
+      if (col >= line.length) {
+        if (doc.cur >= doc.total)
+          return false;
+        const next = doc.raw[doc.cur] ?? "";
+        doc.raw[i] = line + next;
+        doc.raw.splice(doc.cur, 1);
+        doc.lines.splice(doc.cur, 1);
+        doc.total--;
+        markDirty(doc, doc.cur);
+        return true;
+      }
+      doc.raw[i] = line.slice(0, col) + line.slice(col + 1);
+      markDirty(doc, doc.cur);
+      return true;
+    }
+    if (col > 0) {
+      doc.raw[i] = line.slice(0, col - 1) + line.slice(col);
+      doc.col = col - 1;
+      markDirty(doc, doc.cur);
+      return true;
+    }
+    if (doc.cur <= 1)
+      return false;
+    const prev = doc.raw[doc.cur - 2] ?? "";
+    doc.raw[doc.cur - 2] = prev + line;
+    doc.raw.splice(i, 1);
+    doc.lines.splice(i, 1);
+    doc.total--;
+    doc.cur--;
+    doc.col = prev.length;
+    markDirty(doc, doc.cur);
+    return true;
+  }
+  function deleteLine(doc) {
+    if (doc.total <= 1) {
+      doc.raw[0] = "";
+      doc.col = 0;
+      markDirty(doc, 1);
+      return;
+    }
+    const i = doc.cur - 1;
+    doc.raw.splice(i, 1);
+    doc.lines.splice(i, 1);
+    doc.total--;
+    if (doc.cur > doc.total)
+      doc.cur = doc.total;
+    doc.col = 0;
+    markDirty(doc, doc.cur);
+  }
+  function deleteToEOL(doc) {
+    ensureRawLine(doc, doc.cur);
+    const i = doc.cur - 1;
+    const line = doc.raw[i];
+    const col = Math.min(doc.col || 0, line.length);
+    doc.raw[i] = line.slice(0, col);
+    markDirty(doc, doc.cur);
+  }
+  function openLine(doc, below) {
+    const at = below ? doc.cur : doc.cur - 1;
+    spliceLine(doc, at, "");
+    doc.cur = at + 1;
+    doc.col = 0;
+    markDirty(doc, doc.cur);
+  }
+  function assembleContent(doc) {
+    const lines = [];
+    for (let i = 0;i < doc.total; i++)
+      lines.push(doc.raw[i] ?? "");
+    return lines.join(`
+`);
+  }
+  function rawComplete(doc) {
+    for (let i = 0;i < doc.total; i++) {
+      if (doc.raw[i] === undefined)
+        return false;
+    }
+    return true;
+  }
+  function applyChunk(d, j) {
+    if (!d.raw)
+      d.raw = new Array(d.total);
+    for (let i = 0;i < j.lines.length; i++) {
+      const idx = j.start + i;
+      d.lines[idx] = j.lines[i];
+      if (j.raw)
+        d.raw[idx] = j.raw[i];
+    }
+    d.chunks.add(Math.floor(j.start / CHUNK));
+    if (rawComplete(d))
+      d.rawComplete = true;
+  }
+
+  // web/src/vim-visual.js
+  function visualRangeFor(d, visual) {
+    if (!visual || !d)
+      return null;
+    const a = visual.anchor;
+    const b = { line: d.cur, col: d.col || 0 };
+    if (visual.kind === "line") {
+      const l1 = Math.min(a.line, b.line);
+      const l2 = Math.max(a.line, b.line);
+      return { l1, l2, kind: "line" };
+    }
+    if (a.line === b.line) {
+      const c1 = Math.min(a.col, b.col);
+      const c2 = Math.max(a.col, b.col);
+      return { l1: a.line, l2: a.line, c1, c2, kind: "char" };
+    }
+    const forward = a.line < b.line || a.line === b.line && a.col <= b.col;
+    const start = forward ? a : b;
+    const end = forward ? b : a;
+    return { l1: start.line, l2: end.line, c1: start.col, c2: end.col, kind: "char", multiline: true };
+  }
 
   // web/src/ui.js
   var vp = $("#viewport");
@@ -184,10 +364,31 @@
     const gut = d.gutter || null;
     for (let i = first;i < last; i++) {
       const n = i + 1;
-      const body = d.lines[i];
+      let body;
+      if (d.dirtyLines?.has(n) && d.raw?.[i] !== undefined)
+        body = esc(d.raw[i]);
+      else
+        body = d.lines[i];
+      const vr = S2.vimVisual ? visualRangeFor(d, S2.vimVisual) : null;
+      let vis = "";
+      if (vr) {
+        if (vr.kind === "line" && n >= vr.l1 && n <= vr.l2)
+          vis = " vim-sel";
+        else if (vr.kind === "char" && n >= vr.l1 && n <= vr.l2)
+          vis = " vim-sel";
+      }
+      if (vr?.kind === "char" && vr.l1 === vr.l2 && vr.l1 === n && body && !d.dirtyLines?.has(n)) {
+        const plain = d.raw?.[i] ?? "";
+        const { c1: a, c2: b } = vr;
+        if (a < b && plain) {
+          body = esc(plain.slice(0, a)) + '<span class="vim-sel">' + esc(plain.slice(a, b)) + "</span>" + esc(plain.slice(b));
+        }
+      }
       let rc = "row", gc = "g";
       if (n === d.cur)
         rc += " cur";
+      if (vis)
+        rc += vis;
       if (gut) {
         const m = gut.marks.get(n);
         if (m)
@@ -218,7 +419,9 @@
       return null;
     }
     const code = $(".c", row);
-    const col = Math.max(0, Math.min(d.col || 0, code.textContent.length));
+    const rawLen = d.raw?.[d.cur - 1];
+    const maxCol = rawLen !== undefined ? rawLen.length : code.textContent.length;
+    const col = Math.max(0, Math.min(d.col || 0, maxCol));
     const [node, off] = toPoint({ line: d.cur, col });
     const base = sizer.getBoundingClientRect();
     let x, y;
@@ -267,11 +470,11 @@
   }
   function toPos(node, off) {
     if (node === rowsEl) {
-      const row2 = rowsEl.children[off] || rowsEl.lastElementChild;
-      if (!row2)
+      const row = rowsEl.children[off] || rowsEl.lastElementChild;
+      if (!row)
         return null;
       const atEnd = !rowsEl.children[off];
-      return { line: +row2.dataset.l, col: atEnd ? $(".c", row2).textContent.length : 0 };
+      return { line: +row.dataset.l, col: atEnd ? $(".c", row).textContent.length : 0 };
     }
     const el = node.nodeType === 1 ? node : node.parentElement;
     const row = el && el.closest(".row");
@@ -408,9 +611,7 @@
       api("/api/file", { path: d.path, start: c * CHUNK, count: CHUNK }).then((j) => {
         if (gen !== d.gen)
           return;
-        for (let i = 0;i < j.lines.length; i++)
-          d.lines[j.start + i] = j.lines[i];
-        d.chunks.add(c);
+        applyChunk(d, j);
         d.pending.delete(c);
         if (doc_() === d)
           render();
@@ -448,10 +649,15 @@
       d.refining.delete(c);
       let changed = false;
       for (let i = 0;i < j.lines.length; i++) {
+        const n = j.start + i + 1;
+        if (d.dirtyLines?.has(n))
+          continue;
         if (d.lines[j.start + i] !== j.lines[i]) {
           d.lines[j.start + i] = j.lines[i];
           changed = true;
         }
+        if (j.raw && d.raw[j.start + i] === undefined)
+          d.raw[j.start + i] = j.raw[i];
       }
       if (changed && doc_() === d)
         render();
@@ -1324,8 +1530,840 @@
     setTimeout(paint, 0);
   }
 
-  // web/src/cursor.js
+  // web/src/vim-word.js
   var WORD = /[A-Za-z0-9_$]/;
+  function forwardWordCol(text, col) {
+    const len = text.length;
+    col = Math.min(Math.max(0, col), len);
+    if (col >= len)
+      return { col: len, pastEnd: true };
+    let i = col;
+    if (WORD.test(text[i]))
+      while (i < len && WORD.test(text[i]))
+        i++;
+    while (i < len && !WORD.test(text[i]))
+      i++;
+    return { col: Math.min(i, len), pastEnd: i >= len };
+  }
+  function backwardWordCol(text, col) {
+    const len = text.length;
+    col = Math.min(Math.max(0, col), len);
+    if (col === 0)
+      return { col: 0, beforeStart: true };
+    let i = col - 1;
+    while (i > 0 && !WORD.test(text[i]))
+      i--;
+    while (i > 0 && WORD.test(text[i - 1]))
+      i--;
+    return { col: i, beforeStart: i === 0 };
+  }
+
+  // web/src/edit-undo.js
+  var MAX_UNDO = 100;
+  function snapshotDoc(doc) {
+    return {
+      raw: doc.raw.slice(),
+      lines: doc.lines.slice(),
+      total: doc.total,
+      cur: doc.cur,
+      col: doc.col || 0,
+      dirty: doc.dirty,
+      dirtyLines: new Set(doc.dirtyLines || [])
+    };
+  }
+  function restoreDoc(doc, snap) {
+    doc.raw = snap.raw.slice();
+    doc.lines = snap.lines.slice();
+    doc.total = snap.total;
+    doc.cur = snap.cur;
+    doc.col = snap.col;
+    doc.dirty = snap.dirty;
+    doc.dirtyLines = new Set(snap.dirtyLines);
+  }
+  function initUndo(doc) {
+    if (!doc.undo)
+      doc.undo = [];
+    if (!doc.redo)
+      doc.redo = [];
+  }
+  function pushUndo(doc) {
+    initUndo(doc);
+    doc.undo.push(snapshotDoc(doc));
+    if (doc.undo.length > MAX_UNDO)
+      doc.undo.shift();
+    doc.redo.length = 0;
+  }
+  function canUndo(doc) {
+    return !!doc?.undo?.length;
+  }
+  function canRedo(doc) {
+    return !!doc?.redo?.length;
+  }
+  function undo(doc) {
+    if (!canUndo(doc))
+      return false;
+    initUndo(doc);
+    doc.redo.push(snapshotDoc(doc));
+    restoreDoc(doc, doc.undo.pop());
+    return true;
+  }
+  function redo(doc) {
+    if (!canRedo(doc))
+      return false;
+    initUndo(doc);
+    doc.undo.push(snapshotDoc(doc));
+    restoreDoc(doc, doc.redo.pop());
+    return true;
+  }
+
+  // web/src/vim-cmd.js
+  function runExCommand(line) {
+    const cmd = line.trim();
+    if (!cmd)
+      return;
+    const bang = cmd.endsWith("!");
+    const base = bang ? cmd.slice(0, -1) : cmd;
+    if (base === "w") {
+      saveFile(doc_());
+      return;
+    }
+    if (base === "wa") {
+      saveAllFiles();
+      return;
+    }
+    if (base === "q") {
+      quitTab(bang);
+      return;
+    }
+    if (base === "qa") {
+      quitAll(bang);
+      return;
+    }
+    if (base === "wq" || base === "x") {
+      const d = doc_();
+      if (d?.dirty)
+        saveFile(d).then(() => quitTab(true));
+      else
+        quitTab(true);
+      return;
+    }
+    if (base === "help") {
+      showToast("", ":w :wa :q :q! :qa :qa! :wq :x");
+      return;
+    }
+    showToast("!", "Unknown command: " + cmd);
+  }
+
+  // web/src/vim-status.js
+  var bar = $("#vim-bar");
+  var modeEl = $("#vim-mode");
+  var cmdEl = $("#vim-cmd");
+  var posEl = $("#vim-pos");
+  var MODE_LABEL = {
+    normal: "NORMAL",
+    insert: "INSERT",
+    visual: "VISUAL",
+    command: "COMMAND"
+  };
+  function updateVimStatus() {
+    if (!bar)
+      return;
+    const on = !!S2.vim;
+    bar.hidden = !on;
+    document.body.classList.toggle("vim-on", on);
+    if (!on)
+      return;
+    const mode = S2.vimMode;
+    if (modeEl) {
+      modeEl.textContent = "-- " + (MODE_LABEL[mode] || mode.toUpperCase()) + " --";
+      modeEl.dataset.mode = mode;
+    }
+    if (cmdEl) {
+      if (mode === "command") {
+        cmdEl.textContent = ":" + (S2.vimCmd || "");
+        cmdEl.hidden = false;
+      } else {
+        cmdEl.textContent = "";
+        cmdEl.hidden = true;
+      }
+    }
+    const d = doc_();
+    if (posEl && d) {
+      const col = (d.col || 0) + 1;
+      posEl.textContent = d.name + (d.dirty ? " [+]" : "") + "  " + d.cur + ":" + col;
+    } else if (posEl) {
+      posEl.textContent = "";
+    }
+  }
+
+  // web/src/vim.js
+  var VIM_KEY = "px0.vim";
+  var pendingKey = "";
+  var pendingTimer = 0;
+  function clearPending() {
+    pendingKey = "";
+    clearTimeout(pendingTimer);
+  }
+  function vimEnabled() {
+    return !!S2.vim;
+  }
+  function vimMode() {
+    return S2.vimMode;
+  }
+  function applyVimClasses() {
+    document.body.classList.toggle("vim-on", S2.vim);
+    document.body.classList.toggle("vim-normal", S2.vim && S2.vimMode === "normal");
+    document.body.classList.toggle("vim-insert", S2.vim && S2.vimMode === "insert");
+    document.body.classList.toggle("vim-visual", S2.vim && S2.vimMode === "visual");
+    document.body.classList.toggle("vim-command", S2.vim && S2.vimMode === "command");
+    updateVimStatus();
+  }
+  function updateVimControl() {
+    const btn = $('[data-action="vim"]');
+    if (btn)
+      btn.classList.toggle("active", !!S2.vim);
+  }
+  function toggleVim(forced) {
+    S2.vim = typeof forced === "boolean" ? forced : !S2.vim;
+    if (S2.vim) {
+      S2.vimMode = "normal";
+      S2.vimVisual = null;
+      S2.vimCmd = "";
+    } else {
+      blurEditInput();
+      S2.vimMode = "normal";
+      S2.vimVisual = null;
+      S2.vimCmd = "";
+    }
+    applyVimClasses();
+    updateVimControl();
+    try {
+      localStorage.setItem(VIM_KEY, S2.vim ? "true" : "false");
+    } catch {}
+  }
+  function setVimMode(mode) {
+    if (!S2.vim)
+      return;
+    if (mode !== "visual")
+      S2.vimVisual = null;
+    if (mode !== "command")
+      S2.vimCmd = "";
+    S2.vimMode = mode;
+    applyVimClasses();
+  }
+  function clearVisual() {
+    S2.vimVisual = null;
+    if (S2.vimMode === "visual")
+      S2.vimMode = "normal";
+    applyVimClasses();
+  }
+  function enterVisual(kind) {
+    const d = doc_();
+    if (!d || !S2.vim)
+      return;
+    S2.vimVisual = { anchor: { line: d.cur, col: d.col || 0 }, kind };
+    setVimMode("visual");
+    render();
+  }
+  function visualRange(d) {
+    return visualRangeFor(d, S2.vimVisual);
+  }
+  function yankVisual(d) {
+    const r = visualRange(d);
+    if (!r)
+      return;
+    let text = "";
+    if (r.kind === "line") {
+      for (let l = r.l1;l <= r.l2; l++)
+        text += lineText(d, l) + (l < r.l2 ? `
+` : "");
+    } else if (r.l1 === r.l2) {
+      text = lineText(d, r.l1).slice(r.c1, r.c2);
+    } else {
+      for (let l = r.l1;l <= r.l2; l++) {
+        const line = lineText(d, l);
+        if (l === r.l1)
+          text += line.slice(r.c1) + `
+`;
+        else if (l === r.l2)
+          text += line.slice(0, r.c2);
+        else
+          text += line + `
+`;
+      }
+    }
+    copyToClipboard(text, "Yanked");
+  }
+  function deleteVisual(d) {
+    const r = visualRange(d);
+    if (!r)
+      return;
+    if (r.kind === "line") {
+      for (let n = r.l2;n >= r.l1; n--) {
+        d.cur = n;
+        deleteLine(d);
+      }
+      d.cur = Math.min(r.l1, d.total);
+      d.col = 0;
+      return;
+    }
+    if (r.l1 === r.l2) {
+      d.cur = r.l1;
+      d.col = r.c1;
+      const len = r.c2 - r.c1;
+      for (let i = 0;i < len; i++)
+        deleteChar(d, true);
+      return;
+    }
+    for (let l = r.l2;l >= r.l1; l--) {
+      d.cur = l;
+      if (l === r.l1) {
+        d.col = r.c1;
+        deleteToEOL(d);
+      } else if (l === r.l2) {
+        d.col = r.c2;
+        while (d.col > 0)
+          deleteChar(d, false);
+        if (l > r.l1)
+          deleteLine(d);
+      } else {
+        deleteLine(d);
+      }
+    }
+    d.cur = r.l1;
+    d.col = r.c1;
+  }
+  function handleVisualKey(e) {
+    const d = doc_();
+    if (!d)
+      return false;
+    if (e.key === "h") {
+      moveCol(-1);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "j") {
+      moveCursor(1);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "k") {
+      moveCursor(-1);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "l") {
+      moveCol(1);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "0") {
+      caretToEdge(false);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "$") {
+      caretToEdge(true);
+      render();
+      updateVimStatus();
+      return true;
+    }
+    if (e.key === "y") {
+      yankVisual(d);
+      clearVisual();
+      render();
+      return true;
+    }
+    if (e.key === "d" || e.key === "x") {
+      pushUndo(d);
+      deleteVisual(d);
+      clearVisual();
+      render();
+      updateStatus();
+      drawTabs();
+      return true;
+    }
+    if (e.key === "Escape") {
+      clearVisual();
+      render();
+      return true;
+    }
+    return false;
+  }
+  function handleCommandKey(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      S2.vimCmd = "";
+      setVimMode("normal");
+      return true;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const line = S2.vimCmd || "";
+      S2.vimCmd = "";
+      setVimMode("normal");
+      runExCommand(line);
+      return true;
+    }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      S2.vimCmd = (S2.vimCmd || "").slice(0, -1);
+      updateVimStatus();
+      return true;
+    }
+    if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      S2.vimCmd = (S2.vimCmd || "") + e.key;
+      updateVimStatus();
+      return true;
+    }
+    return false;
+  }
+  function enterCommandMode() {
+    if (!S2.vim)
+      return;
+    S2.vimCmd = "";
+    setVimMode("command");
+  }
+  function handleVimKey(e) {
+    if (!S2.vim)
+      return false;
+    if (S2.vimMode === "command")
+      return handleCommandKey(e);
+    if (S2.vimMode === "visual") {
+      if (e[MOD] || e.altKey || e.ctrlKey)
+        return false;
+      return handleVisualKey(e);
+    }
+    if (S2.vimMode !== "normal")
+      return false;
+    if (e[MOD] || e.altKey || e.ctrlKey)
+      return false;
+    if (e.key === ":") {
+      e.preventDefault();
+      enterCommandMode();
+      return true;
+    }
+    if (pendingKey === "d" && e.key === "d") {
+      clearPending();
+      runNormalEdit((d) => deleteLine(d));
+      return true;
+    }
+    clearPending();
+    const d = doc_();
+    switch (e.key) {
+      case "h":
+        moveCol(-1);
+        return true;
+      case "j":
+        moveCursor(1);
+        return true;
+      case "k":
+        moveCursor(-1);
+        return true;
+      case "l":
+        moveCol(1);
+        return true;
+      case "w":
+        moveWordForward();
+        return true;
+      case "b":
+        moveWordBackward();
+        return true;
+      case "0":
+        caretToEdge(false);
+        return true;
+      case "$":
+        caretToEdge(true);
+        return true;
+      case "i":
+        enterInsert("i");
+        return true;
+      case "a":
+        enterInsert("a");
+        return true;
+      case "A":
+        enterInsert("A");
+        return true;
+      case "o":
+        enterInsert("o");
+        return true;
+      case "O":
+        enterInsert("O");
+        return true;
+      case "v":
+        enterVisual("char");
+        return true;
+      case "V":
+        enterVisual("line");
+        return true;
+      case "u":
+        if (d && undo(d)) {
+          render();
+          updateStatus();
+          drawTabs();
+        }
+        return true;
+      case "x":
+        runNormalEdit((doc) => deleteChar(doc, true));
+        return true;
+      case "D":
+        runNormalEdit((doc) => deleteToEOL(doc));
+        return true;
+      case "d":
+        pendingKey = "d";
+        pendingTimer = setTimeout(clearPending, 500);
+        return true;
+      default:
+        return false;
+    }
+  }
+  function handleVimRedo(e) {
+    if (!S2.vim || S2.vimMode !== "normal")
+      return false;
+    if (!e.ctrlKey || e[MOD] || e.altKey || e.shiftKey)
+      return false;
+    if (e.key !== "r" && e.key !== "R")
+      return false;
+    const d = doc_();
+    if (d && redo(d)) {
+      render();
+      updateStatus();
+      drawTabs();
+    }
+    return true;
+  }
+  function initVim() {
+    try {
+      const pref = localStorage.getItem(VIM_KEY);
+      if (pref !== null)
+        S2.vim = pref === "true";
+    } catch {}
+    S2.vimMode = "normal";
+    S2.vimCmd = "";
+    S2.vimVisual = null;
+    applyVimClasses();
+    updateVimControl();
+  }
+
+  // web/src/edit.js
+  var editInput = $("#edit-input");
+  function canEdit(d = doc_()) {
+    return !!(d && !previewing(d) && !$("#imgview"));
+  }
+  function isTyping() {
+    if (!editInput || editInput.hidden)
+      return false;
+    if (vimEnabled())
+      return vimMode() === "insert";
+    return document.activeElement === editInput;
+  }
+  async function ensureRawComplete(d) {
+    if (!d || d.rawComplete)
+      return;
+    for (let c = 0;c * CHUNK < d.total; c++) {
+      const start = c * CHUNK;
+      let have = true;
+      for (let i = start;i < Math.min(start + CHUNK, d.total); i++) {
+        if (d.raw[i] === undefined) {
+          have = false;
+          break;
+        }
+      }
+      if (have)
+        continue;
+      const j = await api("/api/file", { path: d.path, start, count: CHUNK });
+      if (!S2.tabs.includes(d))
+        return;
+      applyChunk(d, j);
+    }
+    d.rawComplete = rawComplete(d);
+  }
+  function positionEditInput(force = false) {
+    if (!editInput)
+      return;
+    const d = doc_();
+    const typing = vimEnabled() ? vimMode() === "insert" : force || document.activeElement === editInput;
+    if (!d || !canEdit(d) || !typing) {
+      editInput.hidden = true;
+      return;
+    }
+    const x = placeCaret();
+    if (x == null) {
+      editInput.hidden = true;
+      return;
+    }
+    const row = rowFor(d.cur);
+    if (!row) {
+      editInput.hidden = true;
+      return;
+    }
+    const base = sizer.getBoundingClientRect();
+    const rowTop = row.getBoundingClientRect().top - base.top;
+    editInput.style.left = x + "px";
+    editInput.style.top = rowTop + "px";
+    editInput.style.height = "var(--lh)";
+    editInput.hidden = false;
+  }
+  function blurEditInput() {
+    if (!editInput)
+      return;
+    editInput.blur();
+    editInput.value = "";
+    editInput.hidden = true;
+  }
+  function exitInsertMode() {
+    blurEditInput();
+    if (vimEnabled())
+      setVimMode("normal");
+  }
+  function focusEdit() {
+    const d = doc_();
+    if (!canEdit(d) || !editInput)
+      return;
+    ensureRawLine(d, d.cur);
+    editInput.value = "";
+    editInput.hidden = false;
+    positionEditInput(true);
+    editInput.focus();
+    positionEditInput();
+  }
+  function handlePlainType(e) {
+    if (vimEnabled() || !canEdit())
+      return false;
+    if (e.metaKey || e.ctrlKey || e.altKey)
+      return false;
+    const d = doc_();
+    if (!d)
+      return false;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      focusEdit();
+      pushUndo(d);
+      insertNewline(d);
+      editInput.value = "";
+      render();
+      updateStatus();
+      drawTabs();
+      positionEditInput();
+      return true;
+    }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      focusEdit();
+      pushUndo(d);
+      deleteChar(d, false);
+      render();
+      updateStatus();
+      drawTabs();
+      positionEditInput();
+      return true;
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      focusEdit();
+      pushUndo(d);
+      deleteChar(d, true);
+      render();
+      updateStatus();
+      drawTabs();
+      positionEditInput();
+      return true;
+    }
+    if (e.key.length === 1) {
+      e.preventDefault();
+      focusEdit();
+      pushUndo(d);
+      insertText(d, e.key);
+      editInput.value = "";
+      render();
+      updateStatus();
+      drawTabs();
+      positionEditInput();
+      return true;
+    }
+    return false;
+  }
+  function editWithUndo(d, fn) {
+    if (!d)
+      return false;
+    pushUndo(d);
+    fn(d);
+    render();
+    updateStatus();
+    drawTabs();
+    updateVimStatus();
+    return true;
+  }
+  function enterInsert(mode = "i") {
+    const d = doc_();
+    if (!canEdit(d))
+      return;
+    if (mode === "o" || mode === "O")
+      pushUndo(d);
+    ensureRawLine(d, d.cur);
+    if (mode === "a") {
+      d.col = Math.min((d.col || 0) + 1, lineText(d, d.cur).length);
+    } else if (mode === "A") {
+      d.col = lineText(d, d.cur).length;
+    } else if (mode === "o") {
+      openLine(d, true);
+      drawTabs();
+    } else if (mode === "O") {
+      openLine(d, false);
+      drawTabs();
+    }
+    if (!vimEnabled()) {
+      focusEdit();
+      return;
+    }
+    setVimMode("insert");
+    if (mode === "o" || mode === "O") {
+      render();
+      updateStatus();
+    }
+    focusEdit();
+  }
+  function runNormalEdit(fn) {
+    const d = doc_();
+    if (!canEdit(d) || !vimEnabled() || vimMode() !== "normal")
+      return false;
+    return editWithUndo(d, fn);
+  }
+  async function reloadHighlights(d) {
+    d.lines = new Array(d.total);
+    d.chunks = new Set;
+    d.pending = new Set;
+    d.refining = new Set;
+    d.dirtyLines = new Set;
+    d.dirty = false;
+    d.rawComplete = rawComplete(d);
+    d.gen++;
+    layout();
+    render();
+    updateStatus();
+    drawTabs();
+    updateVimStatus();
+  }
+  async function saveFile(d = doc_()) {
+    if (!d)
+      return false;
+    if (!d.dirty) {
+      showToast("", "No changes");
+      return true;
+    }
+    try {
+      await ensureRawComplete(d);
+      if (!rawComplete(d))
+        throw new Error("file not fully loaded");
+      await apiPostJSON("/api/file/save", { path: d.path, content: assembleContent(d) });
+      await reloadHighlights(d);
+      showToast("✓", "Saved " + d.name);
+      return true;
+    } catch (e) {
+      showToast("!", e.message || "Save failed");
+      return false;
+    }
+  }
+  async function saveAllFiles() {
+    const dirty = S2.tabs.filter((t) => t.dirty);
+    if (!dirty.length) {
+      showToast("", "No changes");
+      return;
+    }
+    let ok = 0;
+    for (const d of dirty) {
+      if (await saveFile(d))
+        ok++;
+    }
+    if (ok)
+      showToast("✓", "Saved " + ok + " file(s)");
+  }
+  function quitTab(force = false) {
+    if (S2.active < 0)
+      return;
+    closeTab(S2.active, force);
+    updateVimStatus();
+  }
+  function quitAll(force = false) {
+    closeAllTabs(force);
+    updateVimStatus();
+  }
+  function initEdit() {
+    if (!editInput)
+      return;
+    editInput.addEventListener("input", () => {
+      const d = doc_();
+      if (!d || !canEdit(d) || !isTyping())
+        return;
+      const v = editInput.value;
+      if (!v)
+        return;
+      pushUndo(d);
+      insertText(d, v);
+      editInput.value = "";
+      render();
+      updateStatus();
+      drawTabs();
+      updateVimStatus();
+      positionEditInput();
+    });
+    editInput.addEventListener("keydown", (e) => {
+      const d = doc_();
+      if (!d || !canEdit(d) || !isTyping())
+        return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        pushUndo(d);
+        insertNewline(d);
+        editInput.value = "";
+        render();
+        updateStatus();
+        drawTabs();
+        updateVimStatus();
+        positionEditInput();
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        pushUndo(d);
+        deleteChar(d, false);
+        render();
+        updateStatus();
+        drawTabs();
+        updateVimStatus();
+        positionEditInput();
+        return;
+      }
+      if (e.key === "Delete") {
+        e.preventDefault();
+        pushUndo(d);
+        deleteChar(d, true);
+        render();
+        updateStatus();
+        drawTabs();
+        updateVimStatus();
+        positionEditInput();
+      }
+    });
+    vp.addEventListener("scroll", () => {
+      if (isTyping())
+        positionEditInput();
+    });
+    window.addEventListener("beforeunload", (e) => {
+      if (S2.tabs.some((t) => t.dirty)) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+  }
+
+  // web/src/cursor.js
   function wordAtPoint(x, y) {
     let node, off;
     if (document.caretPositionFromPoint) {
@@ -1377,11 +2415,11 @@
       node = p.offsetNode;
       off = p.offset;
     } else if (document.caretRangeFromPoint) {
-      const r2 = document.caretRangeFromPoint(x, y);
-      if (!r2)
+      const r = document.caretRangeFromPoint(x, y);
+      if (!r)
         return null;
-      node = r2.startContainer;
-      off = r2.startOffset;
+      node = r.startContainer;
+      off = r.startOffset;
     } else
       return null;
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
@@ -1431,6 +2469,8 @@
     }
     d.col = col;
     revealCaretX(placeCaret());
+    if (isTyping())
+      positionEditInput();
   }
   function caretToEdge(end) {
     const d = doc_();
@@ -1438,6 +2478,78 @@
       return;
     d.col = end ? Infinity : 0;
     revealCaretX(placeCaret());
+    if (isTyping())
+      positionEditInput();
+  }
+  function textAt(d, line) {
+    const raw = d.raw?.[line - 1];
+    if (raw !== undefined)
+      return raw;
+    const t = d.lines[line - 1];
+    if (t !== undefined) {
+      const row = rowFor(line);
+      if (row)
+        return $(".c", row).textContent;
+    }
+    const row = rowFor(line);
+    return row ? $(".c", row).textContent : "";
+  }
+  function revealLine(d) {
+    const y = (d.cur - 1) * LH;
+    if (y < vp.scrollTop)
+      vp.scrollTop = y - LH;
+    else if (y > vp.scrollTop + vp.clientHeight - LH * 2)
+      vp.scrollTop = y - vp.clientHeight + LH * 3;
+  }
+  function moveWordForward() {
+    const d = doc_();
+    if (!d)
+      return;
+    let text = textAt(d, d.cur);
+    let col = Math.min(d.col || 0, text.length);
+    let r = forwardWordCol(text, col);
+    if (r.pastEnd && r.col >= text.length && d.cur < d.total) {
+      d.cur++;
+      text = textAt(d, d.cur);
+      r = forwardWordCol(text, 0);
+      if (r.pastEnd) {
+        let i = 0;
+        while (i < text.length && !WORD.test(text[i]))
+          i++;
+        d.col = i < text.length ? i : text.length;
+      } else {
+        d.col = r.col;
+      }
+    } else {
+      d.col = r.col;
+    }
+    revealLine(d);
+    render();
+    updateStatus();
+    revealCaretX(placeCaret());
+    if (isTyping())
+      positionEditInput();
+  }
+  function moveWordBackward() {
+    const d = doc_();
+    if (!d)
+      return;
+    let text = textAt(d, d.cur);
+    let col = Math.min(d.col || 0, text.length);
+    if (col === 0) {
+      if (d.cur <= 1)
+        return;
+      d.cur--;
+      text = textAt(d, d.cur);
+      col = text.length;
+    }
+    d.col = backwardWordCol(text, col).col;
+    revealLine(d);
+    render();
+    updateStatus();
+    revealCaretX(placeCaret());
+    if (isTyping())
+      positionEditInput();
   }
   function moveCursor(delta) {
     const d = doc_();
@@ -1451,6 +2563,8 @@
       vp.scrollTop = y - vp.clientHeight + LH * 3;
     render();
     updateStatus();
+    if (isTyping())
+      positionEditInput();
   }
   function initCursor() {
     vp.addEventListener("mousedown", (e) => {
@@ -1479,6 +2593,8 @@
       }
       for (const r of rowsEl.children)
         r.classList.toggle("cur", +r.dataset.l === d.cur);
+      if (canEdit(d) && !vimEnabled())
+        focusEdit();
     });
     vp.addEventListener("dblclick", (e) => {
       const w = wordAtPoint(e.clientX, e.clientY);
@@ -1865,14 +2981,14 @@
     const d = doc_();
     if (!d || at.path !== d.path)
       return;
-    const seq2 = ++hoverSeq;
+    const seq = ++hoverSeq;
     let j;
     try {
       j = await api("/api/lsp/hover", { path: d.path, line: at.line, col: at.col, wait: 4000 });
     } catch {
       return;
     }
-    if (seq2 !== hoverSeq || doc_() !== d)
+    if (seq !== hoverSeq || doc_() !== d)
       return;
     setLspState(j);
     if (!j || j.empty || !j.signature && !j.doc)
@@ -2031,9 +3147,9 @@
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
     mdDrawn = d;
-    const target2 = d.mdAnchor && mdFindAnchor(d.mdAnchor);
-    if (target2)
-      mdScrollTo(target2);
+    const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
+    if (target)
+      mdScrollTo(target);
     else if (d.mdLine)
       previewLine(d.mdLine);
     else
@@ -2085,7 +3201,7 @@
   function mdSanitize(html, docPath) {
     const body = new DOMParser().parseFromString(html, "text/html").body;
     const dir = docPath.slice(0, docPath.lastIndexOf("/") + 1);
-    const base2 = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
+    const base = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
     for (const el of [...body.querySelectorAll("*")]) {
       if (!body.contains(el))
         continue;
@@ -2117,19 +3233,19 @@
       if (tag === "input")
         el.disabled = true;
       if (tag === "img")
-        mdSetImage(el, mdURL(attrs.src || ""), base2);
+        mdSetImage(el, mdURL(attrs.src || ""), base);
       if (tag === "a" && attrs.href)
-        mdSetLink(el, mdURL(attrs.href), base2);
+        mdSetLink(el, mdURL(attrs.href), base);
     }
     const frag = document.createDocumentFragment();
     while (body.firstChild)
       frag.appendChild(document.adoptNode(body.firstChild));
     return frag;
   }
-  function mdLocal(ref, base2) {
+  function mdLocal(ref, base) {
     let u;
     try {
-      u = new URL(ref, base2);
+      u = new URL(ref, base);
     } catch {
       return null;
     }
@@ -2141,7 +3257,7 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img, src, base) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
@@ -2149,12 +3265,12 @@
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
     } else if (src) {
-      const t = mdLocal(src, base2);
+      const t = mdLocal(src, base);
       if (t)
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
-  function mdSetLink(a, href, base2) {
+  function mdSetLink(a, href, base) {
     if (href.startsWith("#")) {
       a.setAttribute("href", href);
       a.dataset.anchor = href.slice(1);
@@ -2169,7 +3285,7 @@
       a.rel = "noopener noreferrer";
       return;
     }
-    const t = mdLocal(href, base2);
+    const t = mdLocal(href, base);
     if (!t)
       return;
     a.setAttribute("href", "/api/raw?path=" + encodeURIComponent(t.path));
@@ -2182,17 +3298,17 @@
     for (const q of $$("blockquote", mdArticle))
       mdAlert(q);
     for (const pre of $$("pre", mdArticle)) {
-      const wrap2 = document.createElement("div");
-      wrap2.className = "md-pre";
+      const wrap = document.createElement("div");
+      wrap.className = "md-pre";
       if (pre.dataset.lang)
-        wrap2.dataset.lang = pre.dataset.lang;
-      pre.replaceWith(wrap2);
+        wrap.dataset.lang = pre.dataset.lang;
+      pre.replaceWith(wrap);
       const copy = document.createElement("button");
       copy.className = "md-copy";
       copy.title = "Copy code";
       copy.setAttribute("aria-label", "Copy code");
       copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
-      wrap2.append(pre, copy);
+      wrap.append(pre, copy);
     }
   }
   function mdAlert(q) {
@@ -2371,7 +3487,7 @@
   }
   function showPreviewHit(i) {
     const marks = $$("mark.md-hit", mdArticle);
-    marks.forEach((m2, k) => m2.classList.toggle("on", k === i));
+    marks.forEach((m, k) => m.classList.toggle("on", k === i));
     const m = marks[i];
     if (!m)
       return;
@@ -2913,9 +4029,9 @@
     let idx = S2.tabs.findIndex((t) => t.path === path);
     if (idx < 0) {
       let j;
-      const start2 = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
+      const start = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
       try {
-        j = await api("/api/file", { path, start: start2, count: CHUNK });
+        j = await api("/api/file", { path, start, count: CHUNK });
       } catch (e) {
         setStatusNote(path + ": " + e.message);
         return;
@@ -2924,7 +4040,7 @@
         showImage(path);
         return;
       }
-      const d2 = {
+      const d = {
         path,
         name: path.split("/").pop(),
         lang: j.lang,
@@ -2932,26 +4048,34 @@
         maxCols: j.maxCols,
         size: j.size,
         lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        raw: new Array(j.total),
+        chunks: new Set([start / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
         cur: line || 1,
+        col: col || 0,
         outline: null,
         gen: 0,
         markdown: !!j.markdown,
+        dirty: false,
+        dirtyLines: new Set,
+        rawComplete: false,
         gutter: null,
         diffMode: null,
         diffAvailable: false
       };
-      for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
+      for (let i = 0;i < j.lines.length; i++) {
+        d.lines[j.start + i] = j.lines[i];
+        if (j.raw)
+          d.raw[j.start + i] = j.raw[i];
+      }
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs.push(d);
       idx = S2.tabs.length - 1;
       if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, start / CHUNK);
+      loadGutter(d);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -2980,6 +4104,7 @@
       vp.scrollTop = d.scrollTop;
     render();
     updateStatus();
+    updateVimStatus();
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     if (push)
@@ -3012,7 +4137,10 @@
     const y = (n - 1) * LH - Math.max(0, vp.clientHeight / 2 - LH * 2);
     vp.scrollTop = Math.max(0, y);
   }
-  function closeTab(i) {
+  function closeTab(i, force = false) {
+    const tab = S2.tabs[i];
+    if (!force && tab?.dirty && !confirm("Discard unsaved changes to " + tab.name + "?"))
+      return;
     clearSelectAll();
     const [closed] = S2.tabs.splice(i, 1);
     if (closed) {
@@ -3052,6 +4180,16 @@
     render();
     updateStatus();
   }
+  function closeAllTabs(force = false) {
+    while (S2.tabs.length) {
+      if (!force && S2.tabs[0]?.dirty) {
+        if (!confirm("Discard unsaved changes?"))
+          return;
+        force = true;
+      }
+      closeTab(0, true);
+    }
+  }
   async function reopenClosedTab() {
     while (closedTabs.length) {
       const t = closedTabs.pop();
@@ -3067,7 +4205,7 @@
     }
   }
   function drawTabs() {
-    $("#tabs").innerHTML = S2.tabs.map((t, i) => '<div class="tab' + (i === S2.active ? " active" : "") + '" data-i="' + i + '" title="' + esc(t.path) + '">' + '<span class="tn">' + esc(t.name) + '</span><span class="x" data-close="' + i + '" title="' + withKeys("Close tab ({Alt+W})") + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join("");
+    $("#tabs").innerHTML = S2.tabs.map((t, i) => '<div class="tab' + (i === S2.active ? " active" : "") + '" data-i="' + i + '" title="' + esc(t.path) + '">' + '<span class="tn">' + (t.dirty ? "• " : "") + esc(t.name) + '</span><span class="x" data-close="' + i + '" title="' + withKeys("Close tab ({Alt+W})") + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join("");
     const act = $("#tabs .tab.active");
     if (act)
       act.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -3290,6 +4428,8 @@
         toggleWordWrap();
       else if (act === "line-numbers")
         toggleLineNumbers();
+      else if (act === "vim")
+        toggleVim();
       else if (act === "md-preview")
         togglePreview();
       else if (act === "palette")
@@ -3327,6 +4467,20 @@
         if (S2.occ) {
           S2.occ = null;
           paint();
+          return;
+        }
+        if (vimEnabled() && vimMode() === "command") {
+          S2.vimCmd = "";
+          setVimMode("normal");
+          return;
+        }
+        if (vimEnabled() && vimMode() === "visual") {
+          clearVisual();
+          render();
+          return;
+        }
+        if (vimEnabled() && vimMode() === "insert") {
+          exitInsertMode();
           return;
         }
         if (inField(document.activeElement))
@@ -3456,9 +4610,14 @@
         togglePreview();
         return;
       }
-      if (inField(document.activeElement))
+      if (inField(document.activeElement) && document.activeElement.id !== "edit-input")
         return;
       const plainMod = mod && !e.shiftKey && !e.altKey;
+      if (plainMod && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        saveFile(doc_());
+        return;
+      }
       if (plainMod && (e.key === "a" || e.key === "A")) {
         e.preventDefault();
         if (previewing())
@@ -3482,6 +4641,20 @@
       if (previewing(d)) {
         if (previewKey(e))
           e.preventDefault();
+        return;
+      }
+      if (handleVimRedo(e)) {
+        e.preventDefault();
+        return;
+      }
+      if (handleVimKey(e)) {
+        e.preventDefault();
+        return;
+      }
+      if (!vimEnabled() && document.activeElement?.id !== "edit-input" && handlePlainType(e))
+        return;
+      if (!vimEnabled() && e.key === "Escape") {
+        exitInsertMode();
         return;
       }
       const toTop = () => {
@@ -3521,12 +4694,12 @@
         caretToEdge(e.key === "ArrowRight");
         return;
       }
-      if (e.key === "ArrowDown" || e.key === "j") {
+      if (e.key === "ArrowDown" || (!vimEnabled() || vimMode() === "insert") && e.key === "j") {
         e.preventDefault();
         moveCursor(1);
         return;
       }
-      if (e.key === "ArrowUp" || e.key === "k") {
+      if (e.key === "ArrowUp" || (!vimEnabled() || vimMode() === "insert") && e.key === "k") {
         e.preventDefault();
         moveCursor(-1);
         return;
@@ -3590,6 +4763,7 @@
     } },
     { name: withKeys("Toggle Word Wrap ({Alt+Z})"), run: () => toggleWordWrap() },
     { name: withKeys("Toggle Line Numbers ({Alt+L})"), run: () => toggleLineNumbers() },
+    { name: "Toggle Vim Keybindings", run: () => toggleVim() },
     { name: withKeys("Toggle Markdown Preview ({Alt+M})"), run: () => togglePreview() },
     { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => document.body.classList.toggle("side-hidden") },
     { name: "Select Theme…", run: () => openPalette("theme") },
@@ -3800,6 +4974,8 @@
   initFind();
   initPalette();
   initShortcuts();
+  initVim();
+  initEdit();
   initMarkdown();
   initDiff();
   initMetrics();

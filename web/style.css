@@ -279,6 +279,13 @@ body.md-tab.diff-tab #tabs { padding-right: 304px; }
 #caret.blink { animation: caret-blink 1.06s steps(1) infinite; }
 @keyframes caret-blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #caret.blink { animation: none; } }
+/* Hidden input captures keystrokes in Vim insert mode. */
+#edit-input {
+  position: absolute; top: 0; left: 0; z-index: 2; margin: 0; padding: 0; border: 0;
+  width: 1px; min-width: 1px; resize: none; overflow: hidden;
+  font: var(--fs)/var(--lh) var(--mono); color: transparent; background: transparent;
+  caret-color: var(--accent); outline: none;
+}
 
 .row {
   display: flex; height: var(--lh);
@@ -553,6 +560,22 @@ kbd {
 #findbar button:hover { background: var(--bg4); color: var(--fg); }
 
 /* ---------- status ---------- */
+/* Vim status row: mode label and :command line */
+#vim-bar {
+  height: 22px; flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 0 10px; background: var(--bg3); border-top: 1px solid var(--line);
+  font: 11px var(--mono); color: var(--dim); user-select: none; white-space: nowrap; overflow: hidden;
+}
+#vim-bar .grow { flex: 1; }
+#vim-mode { font-weight: 600; letter-spacing: .04em; color: var(--accent-fg); flex: none; }
+#vim-mode[data-mode="insert"] { color: var(--k); }
+#vim-mode[data-mode="visual"] { color: var(--s); }
+#vim-mode[data-mode="command"] { color: var(--m); }
+#vim-cmd { flex: 1; min-width: 0; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+#vim-pos { flex: none; color: var(--faint); font-size: 10.5px; }
+.row.vim-sel, .row.vim-sel .g { background: var(--sel); }
+.c .vim-sel { background: var(--mark); border-radius: 2px; }
+
 #status { height: 24px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--bg2); border-top: 1px solid var(--line); font: 11px var(--mono); color: var(--faint); user-select: none; white-space: nowrap; overflow: hidden; }
 /* Nothing shrinks or wraps: an overflowing bar is what tells fitStatus() to shed detail. */
 #status > * { flex: none; }

@@ -1,5 +1,7 @@
 // web/src/renderer.js
-import { $, S, doc_, api, LH, CHUNK, OVERSCAN } from './state.js';
+import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
+import { applyChunk } from './edit-buffer.js';
+import { visualRangeFor as computeVisualRange } from './vim-visual.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 
 export function measure() {
@@ -64,9 +66,25 @@ export function paint() {
   const gut = d.gutter || null;
   for (let i = first; i < last; i++) {
     const n = i + 1;
-    const body = d.lines[i];
+    let body;
+    if (d.dirtyLines?.has(n) && d.raw?.[i] !== undefined) body = esc(d.raw[i]);
+    else body = d.lines[i];
+    const vr = S.vimVisual ? computeVisualRange(d, S.vimVisual) : null;
+    let vis = '';
+    if (vr) {
+      if (vr.kind === 'line' && n >= vr.l1 && n <= vr.l2) vis = ' vim-sel';
+      else if (vr.kind === 'char' && n >= vr.l1 && n <= vr.l2) vis = ' vim-sel';
+    }
+    if (vr?.kind === 'char' && vr.l1 === vr.l2 && vr.l1 === n && body && !d.dirtyLines?.has(n)) {
+      const plain = d.raw?.[i] ?? '';
+      const a = vr.c1, b = vr.c2;
+      if (a < b && plain) {
+        body = esc(plain.slice(0, a)) + '<span class="vim-sel">' + esc(plain.slice(a, b)) + '</span>' + esc(plain.slice(b));
+      }
+    }
     let rc = 'row', gc = 'g';
     if (n === d.cur) rc += ' cur';
+    if (vis) rc += vis;
     if (gut) {
       const m = gut.marks.get(n);
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';
@@ -97,7 +115,9 @@ export function placeCaret() {
   const row = d && rowFor(d.cur);
   if (!row) { el.hidden = true; return null; }
   const code = $('.c', row);
-  const col = Math.max(0, Math.min(d.col || 0, code.textContent.length));
+  const rawLen = d.raw?.[d.cur - 1];
+  const maxCol = rawLen !== undefined ? rawLen.length : code.textContent.length;
+  const col = Math.max(0, Math.min(d.col || 0, maxCol));
   const [node, off] = toPoint({ line: d.cur, col });
   const base = sizer.getBoundingClientRect();
   let x, y;
@@ -282,8 +302,8 @@ export function ensureChunks(d, first, last) {
     api('/api/file', { path: d.path, start: c * CHUNK, count: CHUNK })
       .then(j => {
         if (gen !== d.gen) return; // superseded by a background highlight swap
-        for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
-        d.chunks.add(c); d.pending.delete(c);
+        applyChunk(d, j);
+        d.pending.delete(c);
         if (doc_() === d) render();
         if (j.refine) refineChunk(d, c);
       })
@@ -309,7 +329,10 @@ export function refineChunk(d, c, delay = 800, tries = 0) {
     d.refining.delete(c);
     let changed = false;
     for (let i = 0; i < j.lines.length; i++) {
+      const n = j.start + i + 1;
+      if (d.dirtyLines?.has(n)) continue;
       if (d.lines[j.start + i] !== j.lines[i]) { d.lines[j.start + i] = j.lines[i]; changed = true; }
+      if (j.raw && d.raw[j.start + i] === undefined) d.raw[j.start + i] = j.raw[i];
     }
     if (changed && doc_() === d) render();
   }, delay);

@@ -17,6 +17,8 @@ import { SEL_KEYS, runSelectionAction, selectAll, clearSelectAll, copySelectAll 
 
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
+import { vimEnabled, vimMode, handleVimKey, handleVimRedo, toggleVim, clearVisual, setVimMode } from './vim.js';
+import { exitInsertMode, saveFile, handlePlainType } from './edit.js';
 import { toggleDiff } from './diff.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
@@ -73,6 +75,7 @@ export function initShortcuts() {
     else if (act === 'goto') openPalette('line');
     else if (act === 'wrap') toggleWordWrap();
     else if (act === 'line-numbers') toggleLineNumbers();
+    else if (act === 'vim') toggleVim();
     else if (act === 'md-preview') togglePreview();
     else if (act === 'palette') openPalette('command');
     else if (act === 'help') showHelp();
@@ -89,6 +92,9 @@ export function initShortcuts() {
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
+      if (vimEnabled() && vimMode() === 'command') { S.vimCmd = ''; setVimMode('normal'); return; }
+      if (vimEnabled() && vimMode() === 'visual') { clearVisual(); render(); return; }
+      if (vimEnabled() && vimMode() === 'insert') { exitInsertMode(); return; }
       if (inField(document.activeElement)) document.activeElement.blur();
       return;
     }
@@ -158,10 +164,16 @@ export function initShortcuts() {
       return;
     }
 
-    if (inField(document.activeElement)) return;
+    if (inField(document.activeElement) && document.activeElement.id !== 'edit-input') return;
+
+    const plainMod = mod && !e.shiftKey && !e.altKey;
+    if (plainMod && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveFile(doc_());
+      return;
+    }
 
     // Select all takes the open file only, never the sidebar or status bar around it.
-    const plainMod = mod && !e.shiftKey && !e.altKey;
     if (plainMod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); if (previewing()) selectPreview(); else selectAll(); return; }
     if (plainMod && (e.key === 'c' || e.key === 'C') && copySelectAll()) { e.preventDefault(); return; }
 
@@ -169,6 +181,10 @@ export function initShortcuts() {
     const d = doc_();
     if (!d) return;
     if (previewing(d)) { if (previewKey(e)) e.preventDefault(); return; }
+    if (handleVimRedo(e)) { e.preventDefault(); return; }
+    if (handleVimKey(e)) { e.preventDefault(); return; }
+    if (!vimEnabled() && document.activeElement?.id !== 'edit-input' && handlePlainType(e)) return;
+    if (!vimEnabled() && e.key === 'Escape') { exitInsertMode(); return; }
     const toTop = () => { vp.scrollTop = 0; d.cur = 1; render(); updateStatus(); };
     const toBottom = () => { vp.scrollTop = sizer.offsetHeight; d.cur = d.total; render(); updateStatus(); };
     if (mod && e.key === 'Home') { e.preventDefault(); toTop(); return; }
@@ -177,8 +193,8 @@ export function initShortcuts() {
     if (isMac && mod && e.key === 'ArrowUp') { e.preventDefault(); toTop(); return; }
     if (isMac && mod && e.key === 'ArrowDown') { e.preventDefault(); toBottom(); return; }
     if (isMac && mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); caretToEdge(e.key === 'ArrowRight'); return; }
-    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); moveCursor(1); return; }
-    if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); moveCursor(-1); return; }
+    if (e.key === 'ArrowDown' || (!vimEnabled() || vimMode() === 'insert') && e.key === 'j') { e.preventDefault(); moveCursor(1); return; }
+    if (e.key === 'ArrowUp' || (!vimEnabled() || vimMode() === 'insert') && e.key === 'k') { e.preventDefault(); moveCursor(-1); return; }
     if (!mod && !e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); moveCol(-1); return; }
     if (!mod && !e.altKey && e.key === 'ArrowRight') { e.preventDefault(); moveCol(1); return; }
     if (!mod && (e.key === 'Home' || e.key === 'End')) { e.preventDefault(); caretToEdge(e.key === 'End'); return; }
