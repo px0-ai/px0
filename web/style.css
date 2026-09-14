@@ -19,6 +19,10 @@
   --na: var(--nf); --nt: var(--k); --nd: var(--k); --np: var(--fg); --o: var(--fg);
   --p: var(--dim); --cp: var(--k);
   --gi: var(--s); --gd: var(--err); --gi-bg: transparent; --gd-bg: transparent;
+  /* Word-diff emphasis: one step above the line tint, so a row and the changed
+     range inside it stay apart. A theme written before these existed falls back
+     to its own line tint and keeps working. */
+  --gi-em: var(--gi-bg); --gd-em: var(--gd-bg);
 }
 
 * { box-sizing: border-box; }
@@ -374,6 +378,11 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
 body.word-wrap .row { height: auto; min-height: var(--lh); }
 body.word-wrap .g { align-self: flex-start; height: var(--lh); }
 body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+/* El toggle de wrap apunta a la celda de codigo (.c), pero highlight.go tambien
+   emite <i class=c> para los tokens de comentario. Dentro de un diff esos envolverian
+   contra una fila de altura fija --lh y la fila se solaparia con la siguiente, que es
+   justo lo que la rejilla de una linea por fila existe para impedir. */
+body.word-wrap :is(.diff-code, .rv-code) .c { white-space: inherit; word-break: normal; overflow-wrap: normal; }
 
 
 /* Git gutter (normal file view): a thin bar on the line-number cell, VS Code
@@ -501,48 +510,167 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 }
 
 
-/* token colours: the code view, and fenced code in the Markdown preview */
-.c .k, .md-code .k{color:var(--k)} .c .kt, .md-code .kt{color:var(--kt)}
-.c .nf, .md-code .nf{color:var(--nf)} .c .nc, .md-code .nc{color:var(--nc)}
-.c .nb, .md-code .nb{color:var(--nb)} .c .nv, .md-code .nv{color:var(--nv)}
-.c .no, .md-code .no{color:var(--no)} .c .na, .md-code .na{color:var(--na)}
-.c .nt, .md-code .nt{color:var(--nt)} .c .nd, .md-code .nd{color:var(--nd)}
-.c .np, .md-code .np{color:var(--np)} .c .s, .md-code .s{color:var(--s)}
-.c .m, .md-code .m{color:var(--m)} .c .o, .md-code .o{color:var(--o)} .c .p, .md-code .p{color:var(--p)}
-.c .c, .md-code .c{color:var(--c);font-style:italic} .c .cp, .md-code .cp{color:var(--cp)}
-.c .gi, .md-code .gi{color:var(--gi);background:var(--gi-bg)} .c .gd, .md-code .gd{color:var(--gd);background:var(--gd-bg)}
-.c .gh, .md-code .gh{color:var(--accent-fg);font-weight:600} .c .ge, .md-code .ge{font-style:italic} .c .gs, .md-code .gs{font-weight:600}
-.c .err, .md-code .err{color:var(--err);text-decoration:underline wavy}
+/* token colours: the code view, fenced code in the Markdown preview, and the
+   diff rows -- which now arrive tokenised from the server like any other line,
+   so they read through the same tokens instead of one flat colour per row. */
+:is(.c, .md-code, .diff-code) .k{color:var(--k)} :is(.c, .md-code, .diff-code) .kt{color:var(--kt)}
+:is(.c, .md-code, .diff-code) .nf{color:var(--nf)} :is(.c, .md-code, .diff-code) .nc{color:var(--nc)}
+:is(.c, .md-code, .diff-code) .nb{color:var(--nb)} :is(.c, .md-code, .diff-code) .nv{color:var(--nv)}
+:is(.c, .md-code, .diff-code) .no{color:var(--no)} :is(.c, .md-code, .diff-code) .na{color:var(--na)}
+:is(.c, .md-code, .diff-code) .nt{color:var(--nt)} :is(.c, .md-code, .diff-code) .nd{color:var(--nd)}
+:is(.c, .md-code, .diff-code) .np{color:var(--np)} :is(.c, .md-code, .diff-code) .s{color:var(--s)}
+:is(.c, .md-code, .diff-code) .m{color:var(--m)} :is(.c, .md-code, .diff-code) .o{color:var(--o)} :is(.c, .md-code, .diff-code) .p{color:var(--p)}
+:is(.c, .md-code, .diff-code) .c{color:var(--c);font-style:italic} :is(.c, .md-code, .diff-code) .cp{color:var(--cp)}
+:is(.c, .md-code, .diff-code) .gi{color:var(--gi);background:var(--gi-bg)} :is(.c, .md-code, .diff-code) .gd{color:var(--gd);background:var(--gd-bg)}
+:is(.c, .md-code, .diff-code) .gh{color:var(--accent-fg);font-weight:600} :is(.c, .md-code, .diff-code) .ge{font-style:italic} :is(.c, .md-code, .diff-code) .gs{font-weight:600}
+:is(.c, .md-code, .diff-code) .err{color:var(--err);text-decoration:underline wavy}
 
 /* ---------- diff view (Mod+D): split (default) or unified render of a
    modified file's git diff against HEAD, in its own overlay like the
    Markdown preview -- not virtualized, since a single file's diff is small. */
+/* Every row is exactly one line tall, hunk headers included: a uniform grid is
+   what lets long files scroll fast and what a virtualized render would need.
+   So the code cell does not wrap -- a long line runs past the right edge and
+   the whole surface scrolls sideways, the same bargain the code viewport
+   makes. The table is max-content wide so the row tints reach the end of the
+   longest line instead of stopping at the viewport edge. */
 #diffview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
 #diffcontent { font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
 .diff-empty { padding: 24px 16px; color: var(--faint); font: 12px/1.4 var(--ui); }
 .diff-hunk-head {
-  position: sticky; top: 0; z-index: 1; padding: 4px 12px;
+  position: sticky; top: 0; z-index: 1; height: var(--lh); line-height: var(--lh); padding: 0 12px;
   color: var(--accent-fg); background: var(--bg3);
-  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-  font-size: 12px; white-space: pre;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; white-space: pre; min-width: 100%;
 }
-.diff-hunk-head:first-child { border-top: none; }
+.diff-table { width: max-content; min-width: 100%; }
 .diff-ln {
   flex: none; width: 48px; padding: 0 10px 0 6px; text-align: right;
   color: var(--faint); user-select: none; font-variant-numeric: tabular-nums;
 }
 .diff-mk { flex: none; width: 14px; text-align: center; color: var(--faint); user-select: none; }
-.diff-code { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; padding-right: 12px; }
-.diff-row, .diff-side { display: flex; }
+.diff-code { flex: 1 0 auto; min-width: 0; white-space: pre; tab-size: 4; -moz-tab-size: 4; padding-right: 40px; }
+.diff-code i { font-style: normal; }
+.diff-row, .diff-side { display: flex; height: var(--lh); }
 .diff-row.diff-add, .diff-side.diff-add { background: var(--gi-bg); }
-.diff-row.diff-add .diff-code, .diff-side.diff-add .diff-mk { color: var(--gi); }
+.diff-row.diff-add .diff-mk, .diff-side.diff-add .diff-mk { color: var(--gi); }
 .diff-row.diff-del, .diff-side.diff-del { background: var(--gd-bg); }
-.diff-row.diff-del .diff-code, .diff-side.diff-del .diff-mk { color: var(--gd); }
+.diff-row.diff-del .diff-mk, .diff-side.diff-del .diff-mk { color: var(--gd); }
 .diff-side.diff-blank { background: var(--bg2); }
-/* Split: deletions and additions paired side by side, each half its own mini-row. */
-.diff-row-pair { display: flex; }
-.diff-side { flex: 1 1 50%; min-width: 0; }
+/* The word ranges the server computed, marked a step above the row's own tint.
+   No padding: the emphasis must not move a glyph off the grid. */
+.diff-w { font-style: normal; border-radius: 3px; }
+.diff-add .diff-w { background: var(--gi-em); }
+.diff-del .diff-w { background: var(--gd-em); }
+/* Split: deletions and additions paired side by side. The pair is a grid of two
+   equal tracks rather than two 50% flex halves, so both columns are as wide as
+   the widest line on either side and the divider lands in the same place on
+   every row -- alignment is what makes a split diff readable. */
+.diff-row-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.diff-side { min-width: 0; }
 .diff-side-left { border-right: 1px solid var(--line); }
+
+/* ---------- review mode (Mod+Shift+D) ----------
+   The whole changeset, walked by symbol: the rail on the left is the index of
+   what the change touched, the pane on the right serves one entry's hunks and
+   the strip under it names the callers that entry reaches. Same grid as the
+   diff view -- every row is one --lh line -- and the same tokens; the file is
+   only how rows are grouped, so a file heading is a label, not a container,
+   and nothing gets a box that proximity already groups. */
+#reviewview { position: absolute; inset: 0; background: var(--bg); }
+.rv-body { display: flex; height: 100%; }
+/* The view-mode switches float over the tab bar and act on the tab underneath,
+   which is not what review mode is showing. */
+body.review-on #view-switches { display: none; }
+
+.rv-rail {
+  width: 264px; flex: none; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg2); border-right: 1px solid var(--line);
+}
+.rv-phead {
+  flex: none; height: 28px; display: flex; align-items: center; padding: 0 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; color: var(--dim);
+}
+.rv-esc {
+  margin-left: auto; padding: 0 4px; border-radius: 3px; cursor: pointer;
+  font: 10.5px/16px var(--ui); letter-spacing: 0; color: var(--faint);
+  transition: background .12s ease, color .12s ease;
+}
+.rv-esc:hover { background: var(--bg4); color: var(--fg); }
+.rv-list { flex: 1; overflow: auto; }
+
+.rv-row {
+  display: flex; align-items: center; gap: 8px; height: var(--lh); padding: 0 12px;
+  white-space: nowrap; overflow: hidden;
+  font: 12px/var(--lh) var(--mono);
+}
+/* A file heading sticks while its symbols scroll under it: the rail can be
+   long, and a symbol name means little without the file it came from. */
+.rv-grp {
+  position: sticky; top: 0; z-index: 1; background: var(--bg2);
+  color: var(--faint); font-size: 11px; text-overflow: ellipsis;
+}
+.rv-sym, .rv-file {
+  cursor: pointer; color: var(--dim);
+  transition: background .12s ease, color .12s ease;
+}
+/* Depth, not iconography, is what says "symbol inside that file". */
+.rv-sym { padding-left: 24px; }
+.rv-sym:hover, .rv-file:hover { background: var(--bg3); color: var(--fg); }
+.rv-on, .rv-on:hover { background: var(--sel); color: var(--fg); box-shadow: inset 2px 0 0 var(--accent); }
+/* Already opened: still listed, no longer asking for attention. */
+.rv-seen { color: var(--faint); }
+.rv-dim { color: var(--faint); }
+.rv-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rv-cnt { flex: none; color: var(--faint); font: 10.5px var(--ui); font-variant-numeric: tabular-nums; }
+.rv-foot {
+  flex: none; border-top: 1px solid var(--line);
+  color: var(--faint); font: 10.5px/var(--lh) var(--ui);
+}
+
+.rv-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rv-head {
+  flex: none; height: 28px; display: flex; align-items: baseline; gap: 8px; padding: 0 12px;
+  background: var(--bg2); border-bottom: 1px solid var(--line); overflow: hidden;
+}
+.rv-h-nm { flex: none; font: 600 12px/28px var(--mono); color: var(--fg); }
+.rv-h-sub {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 10.5px var(--ui); color: var(--dim);
+}
+.rv-content { flex: 1; overflow: auto; font: var(--fs)/var(--lh) var(--mono); }
+.rv-rows { padding-bottom: 24px; }
+
+/* Waiting, empty and unavailable all land here: one sentence of what happened
+   and, when there is one, the way out of it. */
+.rv-center { display: flex; flex-direction: column; gap: 4px; padding: 24px 16px; }
+.rv-big { font: 12px var(--ui); color: var(--fg); }
+.rv-sm { font: 11px/1.5 var(--ui); color: var(--dim); }
+
+/* The arrival screen: an inventory of the changeset, on the same 21px grid. */
+.rv-job { padding: 20px 16px 8px; font: 12px var(--ui); color: var(--fg); }
+.rv-ovr { display: flex; align-items: center; gap: 12px; height: var(--lh); padding: 0 16px; }
+.rv-ovr-hd { color: var(--faint); font: 10.5px var(--ui); letter-spacing: .07em; text-transform: uppercase; }
+.rv-f { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.rv-d, .rv-s { flex: none; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--dim); }
+.rv-d { width: 88px; }
+.rv-s { width: 56px; }
+.rv-ovr-hd .rv-f, .rv-ovr-hd .rv-d, .rv-ovr-hd .rv-s { font: inherit; }
+.rv-i { color: var(--gi); }
+.rv-x { color: var(--gd); }
+
+/* Callers: a strip of the inventory pinned under what it refers to, never a
+   banner. It is capped so it can never take the pane over. */
+.rv-callers {
+  flex: none; max-height: calc(var(--lh) * 10); overflow: auto;
+  background: var(--bg2); border-top: 1px solid var(--line);
+}
+.rv-lbl { color: var(--faint); font: 10.5px/var(--lh) var(--ui); letter-spacing: .07em; text-transform: uppercase; }
+.rv-cl { cursor: pointer; color: var(--dim); transition: background .12s ease, color .12s ease; }
+.rv-cl:hover { background: var(--bg3); color: var(--fg); }
+.rv-at { flex: none; color: var(--faint); font: 10.5px var(--ui); }
+.rv-quiet, .rv-quiet:hover { cursor: default; background: none; color: var(--faint); }
+.rv-quiet .rv-nm { flex: none; color: var(--dim); }
 
 /* ---------- markdown preview ---------- */
 #mdview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
