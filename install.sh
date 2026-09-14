@@ -204,8 +204,10 @@ fi
 # An older px0 we could not update (e.g. a root-owned /usr/local/bin/px0) may shadow the new one
 if [ -n "$EXISTING_BIN" ] && [ "$EXISTING_BIN" != "$TARGET_BIN" ]; then
   log_warn "Another px0 is installed at ${EXISTING_BIN} and may take precedence on your PATH."
+  RM_CMD="rm"
+  [ -w "$EXISTING_DIR" ] || RM_CMD="sudo rm"
   printf "   Remove it with:\n"
-  printf "     sudo rm %s\n\n" "$EXISTING_BIN"
+  printf "     %s %s\n\n" "$RM_CMD" "$EXISTING_BIN"
 fi
 
 # Check if TARGET_DIR is in PATH
