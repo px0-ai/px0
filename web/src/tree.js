@@ -69,8 +69,8 @@ export async function revealDir(dir) {
 }
 
 export async function revealFile(path) {
-  const dir = path.slice(0, path.lastIndexOf('/'));
-  if (dir) await revealDir(dir);
+  const idx = path.lastIndexOf('/');
+  if (idx > 0) await revealDir(path.slice(0, idx));
   const row = treeEl.querySelector('[data-file="' + CSS.escape(path) + '"]');
   if (row) {
     $$('.tr.sel', treeEl).forEach(x => x.classList.remove('sel'));

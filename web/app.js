@@ -720,9 +720,9 @@
       last.scrollIntoView({ block: "center" });
   }
   async function revealFile(path) {
-    const dir = path.slice(0, path.lastIndexOf("/"));
-    if (dir)
-      await revealDir(dir);
+    const idx = path.lastIndexOf("/");
+    if (idx > 0)
+      await revealDir(path.slice(0, idx));
     const row = treeEl.querySelector('[data-file="' + CSS.escape(path) + '"]');
     if (row) {
       $$(".tr.sel", treeEl).forEach((x) => x.classList.remove("sel"));
@@ -3837,9 +3837,21 @@
     }
     updateStatus();
     await drawTree("", treeEl, 0);
-    const initialPath = new URLSearchParams(window.location.search).get("path");
-    if (initialPath)
-      await openFile(initialPath);
+    const params = new URLSearchParams(window.location.search);
+    const initialPath = params.get("path");
+    const initialLine = parseInt(params.get("line"), 10) || undefined;
+    if (initialPath) {
+      await openFile(initialPath, { line: initialLine });
+      await revealFile(initialPath);
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.delete("path");
+        u.searchParams.delete("line");
+        const cleanSearch = u.searchParams.toString();
+        const cleanUrl = u.pathname + (cleanSearch ? "?" + cleanSearch : "") + u.hash;
+        window.history.replaceState({}, "", cleanUrl);
+      } catch {}
+    }
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
         measure();

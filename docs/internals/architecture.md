@@ -14,7 +14,7 @@ px0 is engineered as an ultra-fast, zero-overhead code exploration console. Its 
 
 ## 2. Startup Pipeline (<1 ms Critical Path)
 
-When `px0` is executed in a terminal (e.g., `px0 .` or `px0 main.go`), the initialization flow executes as follows. A file target uses its parent directory as the workspace and is passed to the browser as an encoded startup path.
+When `px0` is executed in a terminal (e.g., `px0 .` or `px0 main.go:42`), the initialization flow executes as follows. A file target detects its enclosing project repository (or working directory) as the workspace and is passed to the browser with its relative path and optional line number.
 
 ```mermaid
 sequenceDiagram
@@ -41,7 +41,7 @@ sequenceDiagram
 
 ### Key Stages in [`main.go`](../../main.go)
 
-1. Target Resolution: Directories become workspace roots. For a file target, its parent becomes the root and its base name is retained for the initial browser tab.
+1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab.
 1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
 1. Non-Blocking Browser Launch: `go openBrowser(url)` spawns the platform-specific browser opener (`xdg-open` on Linux, `open` on macOS, `rundll32` on Windows) in a separate goroutine.
