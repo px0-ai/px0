@@ -25,7 +25,9 @@ curl -fsSL https://px0.ai/install.sh | sh
 
 ### Option 2: Build from Source
 
-Requires Go 1.24 or newer. No npm, no node, no CGO, and no system libraries required:
+Requires Go 1.24 or newer, plus Node.js or Bun to bundle the web UI (`make build`
+runs `make web` first). No CGO and no system libraries. The resulting binary is
+still fully self-contained — the toolchain need only be present at build time:
 
 ```bash
 git clone https://github.com/px0-ai/px0.git

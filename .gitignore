@@ -19,6 +19,10 @@ Thumbs.db
 # Build artifacts
 build/
 
+# Generated web bundle — rebuilt from web/src/*.js by scripts/build-web.js
+# (make web / make build). Not tracked so it can never cause merge conflicts.
+web/app.js
+
 # Logs
 *.log
 px0
