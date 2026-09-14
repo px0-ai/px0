@@ -68,7 +68,7 @@ The frontend is modularized into clean ES modules under `web/src/` and bundled i
 
 | Module                 | Primary Responsibilities & Key Exports                                                                                                                                                       |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web/src/state.js`     | Core state object `S`, `doc_()`, `api()`, `apiPost()`, `esc()`, `$`, `$$`, constants (`LH`, `CHUNK`, `OVERSCAN`, `MOD`, `isMac`). Per-OS shortcut labels: `keyLabel()`, `keyCaps()`, `withKeys()`, `applyKeyLabels()`. |
+| `web/src/state.js`     | Core state object `S`, `doc_()`, `api()`, `apiPost()`, `esc()`, `$`, `$$`, constants (`LH`, `CHUNK`, `OVERSCAN`, `RECENT_SHOWN`, `MOD`, `isMac`). Per-OS shortcut labels: `keyLabel()`, `keyCaps()`, `withKeys()`, `applyKeyLabels()`. |
 | `web/src/ui.js`        | DOM references (`vp`, `sizer`, `rowsEl`, `editor`, `toastEl`), `showToast()`, `copyToClipboard()`.                                                                                         |
 | `web/src/renderer.js`  | `measure()`, `layout()`, `render()`, `paint()`, `toggleWordWrap()`, `toggleLineNumbers()`, on-demand chunk fetching.                                                                        |
 | `web/src/tabs.js`      | `openFile()`, `closeTab()`, `switchTab()`, `drawTabs()`, `drawCrumbs()`, `showImage()`, `reloadOpenTabs()` (in-place tab refresh on reindex), `reopenClosedTab()` (Alt+Shift+T).          |

@@ -1,5 +1,5 @@
 // web/src/palette.js
-import { $, esc, S, doc_, api, debounce, withKeys } from './state.js';
+import { $, esc, S, doc_, api, debounce, withKeys, RECENT_SHOWN } from './state.js';
 import { render, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
 import { updateStatus } from './status.js';
@@ -123,8 +123,6 @@ export const refreshPalette = debounce(async () => {
     : 0;
   drawPalette();
 }, 40);
-
-const RECENT_SHOWN = 5;
 
 // The active file, then up to count others from the recently opened list.
 function pinnedFiles(count) {

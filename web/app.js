@@ -51,6 +51,7 @@
   var LH = 20;
   var CHUNK = 1000;
   var OVERSCAN = 24;
+  var RECENT_SHOWN = 5;
   var S2 = {
     meta: null,
     tabs: [],
@@ -482,7 +483,7 @@
     if (i >= 0)
       S2.recent.splice(i, 1);
     S2.recent.unshift(path);
-    if (S2.recent.length > 20)
+    if (S2.recent.length > RECENT_SHOWN + 1)
       S2.recent.pop();
   }
   function go(delta) {
@@ -3829,7 +3830,6 @@
     pal.sel = mode === "theme" ? Math.max(0, pal.items.findIndex((it) => it.id === currentTheme())) : mode === "file" && q ? Math.max(0, pal.items.findIndex((it) => it.right !== "current")) : 0;
     drawPalette();
   }, 40);
-  var RECENT_SHOWN = 5;
   function pinnedFiles(count) {
     const cur = doc_()?.path;
     const paths = S2.recent.filter((p) => p !== cur).slice(0, count);

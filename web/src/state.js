@@ -54,6 +54,7 @@ export function applyKeyLabels(root = document) {
 }
 
 export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
+export const RECENT_SHOWN = 5;
 
 export const S = {
   meta: null,
