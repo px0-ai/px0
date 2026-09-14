@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,6 +159,70 @@ func fetchLatestRelease(repo string) (*githubRelease, error) {
 	return &rel, nil
 }
 
+func downloadAsset(client *http.Client, url string, dst io.Writer) error {
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	_, err = io.Copy(dst, resp.Body)
+	return err
+}
+
+func checksumFor(data []byte, assetName string) (string, error) {
+	var checksum string
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(fields[1], "*"), "./")
+		if name != assetName {
+			continue
+		}
+		if checksum != "" {
+			return "", fmt.Errorf("multiple checksums found for %s", assetName)
+		}
+		raw, err := hex.DecodeString(fields[0])
+		if err != nil || len(raw) != sha256.Size {
+			return "", fmt.Errorf("invalid checksum for %s", assetName)
+		}
+		checksum = strings.ToLower(fields[0])
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	if checksum == "" {
+		return "", fmt.Errorf("checksum not found for %s", assetName)
+	}
+	return checksum, nil
+}
+
+func downloadVerifiedAsset(client *http.Client, assetURL, checksumURL, assetName string, dst io.Writer) error {
+	var checksums bytes.Buffer
+	if err := downloadAsset(client, checksumURL, &checksums); err != nil {
+		return fmt.Errorf("download checksums: %w", err)
+	}
+	expected, err := checksumFor(checksums.Bytes(), assetName)
+	if err != nil {
+		return err
+	}
+
+	hash := sha256.New()
+	if err := downloadAsset(client, assetURL, io.MultiWriter(dst, hash)); err != nil {
+		return fmt.Errorf("download binary: %w", err)
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch for %s", assetName)
+	}
+	return nil
+}
+
 // checkDailyUpdate runs in a background goroutine on CLI startup.
 // It ensures that checking for updates never blocks px0 startup (<1ms).
 func checkDailyUpdate(currentVersion string) {
@@ -218,16 +286,21 @@ func runSelfUpdate(currentVer string) error {
 	}
 	expectedAsset := fmt.Sprintf("px0-%s-%s-%s%s", latestVer, runtime.GOOS, runtime.GOARCH, ext)
 
-	var downloadURL string
+	var downloadURL, checksumURL string
 	for _, asset := range rel.Assets {
-		if asset.Name == expectedAsset {
+		switch asset.Name {
+		case expectedAsset:
 			downloadURL = asset.BrowserDownloadURL
-			break
+		case "checksums.txt":
+			checksumURL = asset.BrowserDownloadURL
 		}
 	}
 	if downloadURL == "" {
 		// Fallback to standard github release download link pattern
 		downloadURL = fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, rel.TagName, expectedAsset)
+	}
+	if checksumURL == "" {
+		return fmt.Errorf("release %s does not include checksums.txt", rel.TagName)
 	}
 
 	execPath, err := os.Executable()
@@ -259,21 +332,11 @@ func runSelfUpdate(currentVer string) error {
 	defer os.Remove(tmpPath)
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(downloadURL)
-	if err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("download failed: %w", err)
+	if err := downloadVerifiedAsset(client, downloadURL, checksumURL, expectedAsset, tmpFile); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("verify downloaded update: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		tmpFile.Close()
-		return fmt.Errorf("HTTP error %d downloading binary from %s", resp.StatusCode, downloadURL)
-	}
-
-	_, err = io.Copy(tmpFile, resp.Body)
-	tmpFile.Close()
-	if err != nil {
+	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed saving downloaded binary: %w", err)
 	}
 

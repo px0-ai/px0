@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,5 +102,63 @@ func TestUpdateStatePersistence(t *testing.T) {
 	}
 	if readState.LastChecked.Unix() != now.Unix() {
 		t.Errorf("read LastChecked = %v, want %v", readState.LastChecked, now)
+	}
+}
+
+func TestDownloadVerifiedAsset(t *testing.T) {
+	assetName := "px0-0.2.0-linux-amd64"
+	binary := []byte("test binary")
+	digest := fmt.Sprintf("%x", sha256.Sum256(binary))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/" + assetName:
+			_, _ = w.Write(binary)
+		case "/checksums.txt":
+			_, _ = fmt.Fprintf(w, "%s  %s\n", digest, assetName)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var got bytes.Buffer
+	err := downloadVerifiedAsset(server.Client(), server.URL+"/"+assetName, server.URL+"/checksums.txt", assetName, &got)
+	if err != nil {
+		t.Fatalf("downloadVerifiedAsset failed: %v", err)
+	}
+	if !bytes.Equal(got.Bytes(), binary) {
+		t.Fatalf("downloaded %q, want %q", got.Bytes(), binary)
+	}
+}
+
+func TestDownloadVerifiedAssetRejectsMismatch(t *testing.T) {
+	assetName := "px0-0.2.0-linux-amd64"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/checksums.txt" {
+			_, _ = fmt.Fprintf(w, "%064x  %s\n", 0, assetName)
+			return
+		}
+		_, _ = w.Write([]byte("tampered binary"))
+	}))
+	defer server.Close()
+
+	err := downloadVerifiedAsset(server.Client(), server.URL+"/"+assetName, server.URL+"/checksums.txt", assetName, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("got %v, want checksum mismatch", err)
+	}
+}
+
+func TestChecksumForRejectsMissingAndMalformedEntries(t *testing.T) {
+	assetName := "px0-0.2.0-linux-amd64"
+	for name, checksums := range map[string]string{
+		"missing":   fmt.Sprintf("%064x  other-asset\n", 0),
+		"malformed": "not-a-sha256  " + assetName + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := checksumFor([]byte(checksums), assetName); err == nil {
+				t.Fatal("expected checksum validation to fail")
+			}
+		})
 	}
 }

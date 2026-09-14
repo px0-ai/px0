@@ -79,7 +79,7 @@ git push origin v0.2.0
 ## 4. Post-Release Verification
 
 1. Verify GitHub Actions workflow completion on the Actions tab.
-1. Confirm artifacts on the [Releases](https://github.com/px0-ai/px0/releases) page (cross-platform binaries and `checksums.txt`).
+1. Confirm artifacts on the [Releases](https://github.com/px0-ai/px0/releases) page (cross-platform binaries and `checksums.txt`). The self-updater requires this file and verifies the selected binary against it before execution.
 1. Verify the installer script:
   ```bash
   curl -fsSL https://raw.githubusercontent.com/px0-ai/px0/master/install.sh | bash
