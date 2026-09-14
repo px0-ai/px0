@@ -91,7 +91,16 @@ sequenceDiagram
 - Target paths returned by the server are normalized and admitted into `extAllowed`.
 - External files can be inspected in read-only mode, but cannot be enumerated, searched, or listed in the sidebar explorer tree.
 
-## 5. Stateless Call Hierarchy Trails ([`calls.go`](../../calls.go))
+## 5. Code Navigation Requests
+
+px0 supports four LSP navigation request types, all reusing the same `locate` helper in [`lspnav.go`](../../lspnav.go) to resolve server responses into display-ready hits:
+
+- **Go to Definition** (`/api/lsp/def` → `textDocument/definition`) resolves a symbol to its primary definition. Falls back to regex index search when no language server is available.
+- **Find References** (`/api/lsp/refs` → `textDocument/references`) finds all usages and declarations of a symbol. List-only (no fallback); the regex index does not differentiate references.
+- **Go to Implementation** (`/api/lsp/impl` → `textDocument/implementation`) resolves an interface (or interface method) to the concrete types that implement it. No regex fallback — implementer lookup is semantic-only, so unavailable without a language server.
+- **Call Hierarchy** (`/api/lsp/calls` → `callHierarchy/incoming` and `callHierarchy/outgoing`) builds incoming/outgoing call trails. Returned items are opaque tokens round-tripped through the browser to expand further levels (see §5 below).
+
+## 6. Stateless Call Hierarchy Trails ([`calls.go`](../../calls.go))
 
 px0 provides full incoming and outgoing call hierarchy navigation (`Calls` tab in the right inspector) without holding complex graph state in server memory.
 
@@ -103,7 +112,7 @@ px0 provides full incoming and outgoing call hierarchy navigation (`Calls` tab i
 - Zero Server State: px0 maintains no in-memory graph trees; cost scales strictly with the nodes the user expands.
 - Client-Side Cycle Detection: Recursive call loops are detected in JavaScript by checking ancestor node identifiers in the tree path.
 
-## 6. In-App Setup & One-Click Installers
+## 7. In-App Setup & One-Click Installers
 
 When reading a codebase without an installed language server, the status bar displays `LSP: set up`. Clicking it opens the interactive setup panel (`web/src/lspsetup.js`).
 

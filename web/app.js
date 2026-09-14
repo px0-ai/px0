@@ -267,11 +267,11 @@
   }
   function toPos(node, off) {
     if (node === rowsEl) {
-      const row2 = rowsEl.children[off] || rowsEl.lastElementChild;
-      if (!row2)
+      const row = rowsEl.children[off] || rowsEl.lastElementChild;
+      if (!row)
         return null;
       const atEnd = !rowsEl.children[off];
-      return { line: +row2.dataset.l, col: atEnd ? $(".c", row2).textContent.length : 0 };
+      return { line: +row.dataset.l, col: atEnd ? $(".c", row).textContent.length : 0 };
     }
     const el = node.nodeType === 1 ? node : node.parentElement;
     const row = el && el.closest(".row");
@@ -1052,20 +1052,23 @@
       $("#right-symbols-filter")?.focus();
     }
   }
-  function renderRightResults(word, hits, server, isExact) {
+  function renderRightResults(word, hits, server, isExact, noun = "reference") {
     const targetEl = $("#right-ref-target");
     const badgeEl = $("#right-ref-badge");
     const listEl = $("#right-refs-list");
     if (!targetEl || !badgeEl || !listEl)
       return;
+    const tabBtn = $('.inspector-tab[data-itab="refs"]');
+    if (tabBtn)
+      tabBtn.textContent = noun === "implementation" ? "Implementations" : "References";
     targetEl.textContent = word;
     badgeEl.textContent = hits.length;
     if (!hits.length) {
-      listEl.innerHTML = '<div class="hint">No references found for "<b>' + esc(word) + '</b>".</div>';
+      listEl.innerHTML = '<div class="hint">No ' + noun + 's found for "<b>' + esc(word) + '</b>".</div>';
       return;
     }
     const grouped = groupHits(hits);
-    const head = hits.length + " reference" + (hits.length === 1 ? "" : "s") + (server ? " · " + esc(server) : " · text search");
+    const head = hits.length + " " + noun + (hits.length === 1 ? "" : "s") + (server ? " · " + esc(server) : " · text search");
     let html = '<div class="hint">' + head + "</div>";
     for (const f of grouped) {
       html += '<div class="rfile" data-toggle="r-' + esc(f.path) + '" title="' + esc(f.path) + '">' + '<span class="ar">&#9660;</span>' + '<span class="fp">' + esc(displayPath(f.path)) + "</span>" + '<span class="cnt">' + f.matches.length + "</span></div>" + '<div data-group="r-' + esc(f.path) + '">';
@@ -1288,6 +1291,31 @@
       return;
     inspectReferences(at);
   }
+  async function gotoImplementation(arg) {
+    const d = doc_();
+    const at = arg && arg.word ? arg : positionNow(typeof arg === "string" ? arg : S2.lastWord);
+    if (!d || !at)
+      return;
+    if (!canAskServer(at)) {
+      setStatusNote("Go to Implementation needs a language server for this file.");
+      return;
+    }
+    setStatusNote("implementations of " + at.word + "…");
+    const j = await lspCall("impl", at, S2.lsp.state === "ready" ? 5000 : 20000);
+    updateStatus();
+    if (!j || !j.hits || !j.hits.length) {
+      setStatusNote("No implementations found for " + at.word + ".");
+      return;
+    }
+    if (j.hits.length === 1) {
+      const h = j.hits[0];
+      openFile(h.path, { line: h.line });
+      flashFind(h.mid || at.word);
+      return;
+    }
+    showRightInspector("refs");
+    renderRightResults(at.word, j.hits, j.server, true, "implementation");
+  }
   function acceptHits(word, hits, server, noun, refCount) {
     if (hits.length === 1) {
       const h = hits[0];
@@ -1377,11 +1405,11 @@
       node = p.offsetNode;
       off = p.offset;
     } else if (document.caretRangeFromPoint) {
-      const r2 = document.caretRangeFromPoint(x, y);
-      if (!r2)
+      const r = document.caretRangeFromPoint(x, y);
+      if (!r)
         return null;
-      node = r2.startContainer;
-      off = r2.startOffset;
+      node = r.startContainer;
+      off = r.startOffset;
     } else
       return null;
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
@@ -1865,14 +1893,14 @@
     const d = doc_();
     if (!d || at.path !== d.path)
       return;
-    const seq2 = ++hoverSeq;
+    const seq = ++hoverSeq;
     let j;
     try {
       j = await api("/api/lsp/hover", { path: d.path, line: at.line, col: at.col, wait: 4000 });
     } catch {
       return;
     }
-    if (seq2 !== hoverSeq || doc_() !== d)
+    if (seq !== hoverSeq || doc_() !== d)
       return;
     setLspState(j);
     if (!j || j.empty || !j.signature && !j.doc)
@@ -2031,9 +2059,9 @@
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
     mdDrawn = d;
-    const target2 = d.mdAnchor && mdFindAnchor(d.mdAnchor);
-    if (target2)
-      mdScrollTo(target2);
+    const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
+    if (target)
+      mdScrollTo(target);
     else if (d.mdLine)
       previewLine(d.mdLine);
     else
@@ -2085,7 +2113,7 @@
   function mdSanitize(html, docPath) {
     const body = new DOMParser().parseFromString(html, "text/html").body;
     const dir = docPath.slice(0, docPath.lastIndexOf("/") + 1);
-    const base2 = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
+    const base = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
     for (const el of [...body.querySelectorAll("*")]) {
       if (!body.contains(el))
         continue;
@@ -2117,19 +2145,19 @@
       if (tag === "input")
         el.disabled = true;
       if (tag === "img")
-        mdSetImage(el, mdURL(attrs.src || ""), base2);
+        mdSetImage(el, mdURL(attrs.src || ""), base);
       if (tag === "a" && attrs.href)
-        mdSetLink(el, mdURL(attrs.href), base2);
+        mdSetLink(el, mdURL(attrs.href), base);
     }
     const frag = document.createDocumentFragment();
     while (body.firstChild)
       frag.appendChild(document.adoptNode(body.firstChild));
     return frag;
   }
-  function mdLocal(ref, base2) {
+  function mdLocal(ref, base) {
     let u;
     try {
-      u = new URL(ref, base2);
+      u = new URL(ref, base);
     } catch {
       return null;
     }
@@ -2141,7 +2169,7 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img, src, base) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
@@ -2149,12 +2177,12 @@
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
     } else if (src) {
-      const t = mdLocal(src, base2);
+      const t = mdLocal(src, base);
       if (t)
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
-  function mdSetLink(a, href, base2) {
+  function mdSetLink(a, href, base) {
     if (href.startsWith("#")) {
       a.setAttribute("href", href);
       a.dataset.anchor = href.slice(1);
@@ -2169,7 +2197,7 @@
       a.rel = "noopener noreferrer";
       return;
     }
-    const t = mdLocal(href, base2);
+    const t = mdLocal(href, base);
     if (!t)
       return;
     a.setAttribute("href", "/api/raw?path=" + encodeURIComponent(t.path));
@@ -2182,17 +2210,17 @@
     for (const q of $$("blockquote", mdArticle))
       mdAlert(q);
     for (const pre of $$("pre", mdArticle)) {
-      const wrap2 = document.createElement("div");
-      wrap2.className = "md-pre";
+      const wrap = document.createElement("div");
+      wrap.className = "md-pre";
       if (pre.dataset.lang)
-        wrap2.dataset.lang = pre.dataset.lang;
-      pre.replaceWith(wrap2);
+        wrap.dataset.lang = pre.dataset.lang;
+      pre.replaceWith(wrap);
       const copy = document.createElement("button");
       copy.className = "md-copy";
       copy.title = "Copy code";
       copy.setAttribute("aria-label", "Copy code");
       copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
-      wrap2.append(pre, copy);
+      wrap.append(pre, copy);
     }
   }
   function mdAlert(q) {
@@ -2371,7 +2399,7 @@
   }
   function showPreviewHit(i) {
     const marks = $$("mark.md-hit", mdArticle);
-    marks.forEach((m2, k) => m2.classList.toggle("on", k === i));
+    marks.forEach((m, k) => m.classList.toggle("on", k === i));
     const m = marks[i];
     if (!m)
       return;
@@ -2913,9 +2941,9 @@
     let idx = S2.tabs.findIndex((t) => t.path === path);
     if (idx < 0) {
       let j;
-      const start2 = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
+      const start = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
       try {
-        j = await api("/api/file", { path, start: start2, count: CHUNK });
+        j = await api("/api/file", { path, start, count: CHUNK });
       } catch (e) {
         setStatusNote(path + ": " + e.message);
         return;
@@ -2924,7 +2952,7 @@
         showImage(path);
         return;
       }
-      const d2 = {
+      const d = {
         path,
         name: path.split("/").pop(),
         lang: j.lang,
@@ -2932,7 +2960,7 @@
         maxCols: j.maxCols,
         size: j.size,
         lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        chunks: new Set([start / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
@@ -2945,13 +2973,13 @@
         diffAvailable: false
       };
       for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
+        d.lines[j.start + i] = j.lines[i];
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs.push(d);
       idx = S2.tabs.length - 1;
       if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, start / CHUNK);
+      loadGutter(d);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -3239,6 +3267,7 @@
     [["Enter", "Shift+Enter"], "Next / previous match"],
     [["F12", "Mod+Click"], "Go to definition"],
     [["Shift+F12"], "Find all references"],
+    [["Mod+F12"], "Go to implementation"],
     [["Alt+Shift+H"], "Call trail (callers / callees)"],
     [["Mod+J"], "Toggle right inspector (Symbols/Refs)"],
     [["Alt+Left", "Alt+Right"], "Navigate back / forward"],
@@ -3405,7 +3434,9 @@
       }
       if (e.key === "F12") {
         e.preventDefault();
-        if (e.shiftKey)
+        if (mod)
+          gotoImplementation();
+        else if (e.shiftKey)
           findReferences();
         else
           gotoDefinition();
@@ -3571,6 +3602,7 @@
     { name: "Search in Files", run: () => showPanel("search") },
     { name: "Find in Current File", run: () => openFind(S2.lastWord) },
     { name: "Go to Definition", run: () => gotoDefinition() },
+    { name: withKeys("Go to Implementation ({Mod+F12})"), run: () => gotoImplementation() },
     { name: "Find All References (Right Panel)", run: () => findReferences() },
     { name: withKeys("Show Call Trail: Callers / Callees ({Alt+Shift+H})"), run: () => showCalls() },
     { name: "Set Up Language Server…", run: () => openLspSetup() },

@@ -7,7 +7,7 @@ import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
 import { openFind, clearFind, findbar } from './find.js';
-import { gotoDefinition, findReferences } from './lsp.js';
+import { gotoDefinition, findReferences, gotoImplementation } from './lsp.js';
 import { showPanel } from './panels.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { overlay, openPalette, closePalette } from './palette.js';
@@ -30,6 +30,7 @@ export const SHORTCUTS = [
   [['Alt+L'], 'Toggle line numbers'], [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
+  [['Mod+F12'], 'Go to implementation'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
   [['Mod+J'], 'Toggle right inspector (Symbols/Refs)'],
   [['Alt+Left', 'Alt+Right'], 'Navigate back / forward'], [['Mod+B'], 'Toggle sidebar'],
@@ -126,7 +127,9 @@ export function initShortcuts() {
     if (e.altKey && e.shiftKey && !mod && e.code === 'KeyT') { e.preventDefault(); reopenClosedTab(); return; }
     if (e.key === 'F12') {
       e.preventDefault();
-      if (e.shiftKey) findReferences(); else gotoDefinition();
+      if (mod) gotoImplementation();        // Mod+F12, matches VS Code
+      else if (e.shiftKey) findReferences(); // Shift+F12
+      else gotoDefinition();                 // F12
       return;
     }
     if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); go(-1); return; }

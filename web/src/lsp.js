@@ -5,7 +5,7 @@ import { updateStatus, setStatusNote, setLspState } from './status.js';
 import { openFile } from './tabs.js';
 import { showPanel } from './panels.js';
 import { renderResults, runSearch } from './search.js';
-import { inspectReferences } from './inspector.js';
+import { inspectReferences, renderRightResults, showRightInspector } from './inspector.js';
 
 /* Language servers answer precisely but can take a long time to wake up, while
    the regex index answers in milliseconds and is always there. So: use the
@@ -93,6 +93,34 @@ export async function findReferences(arg) {
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   if (!d || !at) return;
   inspectReferences(at);
+}
+
+export async function gotoImplementation(arg) {
+  const d = doc_();
+  const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
+  if (!d || !at) return;
+
+  // Implementers can only be found semantically — no regex fallback like def.
+  if (!canAskServer(at)) {
+    setStatusNote('Go to Implementation needs a language server for this file.');
+    return;
+  }
+  setStatusNote('implementations of ' + at.word + '…');
+  const j = await lspCall('impl', at, S.lsp.state === 'ready' ? 5000 : 20000);
+  updateStatus();
+  if (!j || !j.hits || !j.hits.length) {
+    setStatusNote('No implementations found for ' + at.word + '.');
+    return;
+  }
+  // One implementer: jump straight there. Several: list them in the right inspector.
+  if (j.hits.length === 1) {
+    const h = j.hits[0];
+    openFile(h.path, { line: h.line });
+    flashFind(h.mid || at.word);
+    return;
+  }
+  showRightInspector('refs');
+  renderRightResults(at.word, j.hits, j.server, true, 'implementation');
 }
 
 export function acceptHits(word, hits, server, noun, refCount) {
