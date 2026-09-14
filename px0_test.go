@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -621,5 +623,179 @@ func TestMetaIncludesVersion(t *testing.T) {
 	v, ok := body["version"].(string)
 	if !ok || v != version {
 		t.Fatalf("expected version %q in /api/meta, got %v", version, body["version"])
+	}
+}
+
+// reviewRepo commits a two-function Go file plus a text file, then dirties the
+// tree so the changeset has one symbol-bearing edit, one untracked file and one
+// file no outline rule knows how to read.
+func reviewRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write("app.go", "package main\n\nfunc alpha() int {\n\treturn 1\n}\n\nfunc beta() int {\n\treturn 2\n}\n")
+	write("notes.txt", "one\n")
+	run("init")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "T")
+	run("config", "commit.gpgsign", "false")
+	run("add", "-A")
+	run("commit", "-qm", "init")
+	// Line 8 is beta's body: the edit must be credited to beta, not to alpha.
+	write("app.go", "package main\n\nfunc alpha() int {\n\treturn 1\n}\n\nfunc beta() int {\n\treturn 22\n}\n")
+	write("notes.txt", "one\ntwo\n")
+	write("new.go", "package main\n\nfunc gamma() int { return 3 }\n")
+	return root
+}
+
+func reviewServer(t *testing.T, root string) *Server {
+	t.Helper()
+	ix := NewIndex(root)
+	ix.Build()
+	return NewServer(ix, nil)
+}
+
+// reviewFiles indexes an /api/review body by path.
+func reviewFiles(t *testing.T, body map[string]any) map[string]map[string]any {
+	t.Helper()
+	raw, ok := body["files"].([]any)
+	if !ok {
+		t.Fatalf("body has no files: %v", body)
+	}
+	out := map[string]map[string]any{}
+	for _, f := range raw {
+		m := f.(map[string]any)
+		out[m["path"].(string)] = m
+	}
+	return out
+}
+
+func symbolNames(t *testing.T, file map[string]any) []string {
+	t.Helper()
+	raw, ok := file["symbols"].([]any)
+	if !ok {
+		t.Fatalf("file %v has no symbols array; the client cannot degrade on null", file)
+	}
+	var out []string
+	for _, s := range raw {
+		out = append(out, s.(map[string]any)["name"].(string))
+	}
+	return out
+}
+
+func TestReviewEndpoint(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := reviewRepo(t)
+	s := reviewServer(t, root)
+
+	code, body := get(t, s, "/api/review")
+	if code != 200 {
+		t.Fatalf("review status %d", code)
+	}
+	if body["available"] != true {
+		t.Fatalf("available = %v, want true (%v)", body["available"], body)
+	}
+	files := reviewFiles(t, body)
+	if len(files) != 3 {
+		t.Fatalf("files = %v, want app.go, new.go and notes.txt", files)
+	}
+
+	app := files["app.go"]
+	if app["status"] != "M" || app["added"] != 1.0 || app["deleted"] != 1.0 {
+		t.Errorf("app.go = %v, want M +1 -1", app)
+	}
+	// The rail is an index of which symbols the change landed in: a body edit
+	// belongs to the function that encloses it and to no other.
+	if got := symbolNames(t, app); !reflect.DeepEqual(got, []string{"beta"}) {
+		t.Errorf("app.go symbols = %v, want [beta]", got)
+	}
+	if n := app["symbols"].([]any)[0].(map[string]any)["changed"]; n != 1.0 {
+		t.Errorf("beta changed = %v, want 1", n)
+	}
+
+	// An untracked file is served as a whole-file addition, so every symbol in
+	// it is a changed symbol -- otherwise a brand new file reviews as empty.
+	nw := files["new.go"]
+	if nw["status"] != "U" || nw["added"] != 3.0 {
+		t.Errorf("new.go = %v, want U +3", nw)
+	}
+	if got := symbolNames(t, nw); !reflect.DeepEqual(got, []string{"gamma"}) {
+		t.Errorf("new.go symbols = %v, want [gamma]", got)
+	}
+
+	// No outline rule for .txt: the entry still comes back, with an empty
+	// symbol list, and the client falls back to files and hunks. Review must
+	// not need a language server to exist.
+	if got := symbolNames(t, files["notes.txt"]); len(got) != 0 {
+		t.Errorf("notes.txt symbols = %v, want none", got)
+	}
+
+	// Without git the endpoint says so instead of failing.
+	gitDisabled = true
+	defer func() { gitDisabled = false }()
+	code, body = get(t, reviewServer(t, root), "/api/review")
+	if code != 200 || body["available"] != false || len(body["files"].([]any)) != 0 {
+		t.Errorf("with -no-git: status=%d available=%v files=%v, want 200/false/empty",
+			code, body["available"], body["files"])
+	}
+}
+
+// /api/diff and /api/gutter read the same change. The rows are new; the gutter
+// is not, and it has to keep answering exactly what it answered before.
+func TestDiffAndGutterAgreeOnTheSameChange(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	s := reviewServer(t, reviewRepo(t))
+
+	code, body := get(t, s, "/api/diff?path=app.go")
+	if code != 200 || body["path"] != "app.go" || body["available"] != true {
+		t.Fatalf("diff = %d %v, want 200 and available", code, body)
+	}
+	rows := diffRowsOf(t, body)
+	// The default three lines of context on each side, around the one-line edit.
+	want := []string{"ctx:5:5", "ctx:6:6", "ctx:7:7", "del:8:-", "add:-:8", "ctx:9:9"}
+	if got := rowKeys(rows); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	// Rows arrive tokenised: the client lays out what it is given.
+	if html := rows[4]["html"].(string); !strings.Contains(html, "<i class=k>return</i>") {
+		t.Errorf("row html = %q, want the return keyword tokenised by the server", html)
+	}
+
+	_, body = get(t, s, "/api/gutter?path=app.go")
+	if body["available"] != true {
+		t.Fatalf("gutter available = %v, want true", body["available"])
+	}
+	var modified []int
+	for _, v := range body["modified"].([]any) {
+		modified = append(modified, int(v.(float64)))
+	}
+	if !reflect.DeepEqual(modified, []int{8}) {
+		t.Errorf("gutter modified = %v, want [8] (the same line the rows report)", modified)
+	}
+	for _, key := range []string{"added", "deleted"} {
+		if got := body[key].([]any); len(got) != 0 {
+			t.Errorf("gutter %s = %v, want empty", key, got)
+		}
 	}
 }

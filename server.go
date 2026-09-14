@@ -62,6 +62,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/raw", s.handleRaw)
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
+	s.mux.HandleFunc("/api/review", s.handleReview)
 	s.mux.HandleFunc("/api/gutter", s.handleGutter)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
@@ -519,16 +520,129 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, abs)
 }
 
-// handleDiff returns the unified diff of a file against HEAD. available is false
-// (with an empty diff and 200) when git is off/absent or the file is unchanged.
+// handleDiff returns a file's diff against HEAD as tokenised rows: every row
+// carries the highlighted HTML of its line and the intra-line ranges that
+// changed, so the client lays out what it is given instead of re-deriving it.
+// available is false (200, no hunks) when git is off/absent or the file is
+// unchanged.
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
-	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
+	abs, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
 	if !ok {
 		fail(w, 400, "bad path")
 		return
 	}
-	diff := gitDiff(s.ix.Root(), rel)
-	writeJSON(w, map[string]any{"path": rel, "diff": diff, "available": diff != ""})
+	root := s.ix.Root()
+	newSrc := ""
+	if d, err := Open(abs, rel); err == nil {
+		newSrc = d.src // shares the highlighter's cache: the file is usually already read
+	}
+	oldSrc, inHead := gitShowHead(root, rel)
+
+	var hunks []DiffHunk
+	switch {
+	case !gitAvailable(root) || newSrc == "":
+		// no git, or the file is unreadable: nothing to render
+	case inHead:
+		if diff := gitDiff(root, rel); diff != "" {
+			hunks = diffRows(rel, oldSrc, newSrc, diff)
+		}
+	default:
+		// Absent from HEAD: an untracked file, a tracked addition, or the new name
+		// of a rename -- indistinguishable from the path alone. git diff HEAD is
+		// NOT silent on a rename, it reports the whole file as added, so asking
+		// has to come first or /api/diff contradicts the rename /api/review found.
+		if src := gitRenameSource(root, rel); src != "" {
+			oldSrc, _ = gitShowHead(root, src)
+			hunks = diffRows(rel, oldSrc, newSrc, gitDiffRenamed(root, src, rel))
+		} else if diff := gitDiff(root, rel); diff != "" {
+			hunks = diffRows(rel, oldSrc, newSrc, diff)
+		} else {
+			hunks = addedFileHunks(rel, newSrc) // untracked: git diff HEAD is silent here
+		}
+	}
+	if hunks == nil {
+		hunks = []DiffHunk{}
+	}
+	writeJSON(w, map[string]any{"path": rel, "available": len(hunks) > 0, "hunks": hunks})
+}
+
+// ChangedSymbol is an outline entry the changeset touched, plus how many of its
+// lines changed.
+type ChangedSymbol struct {
+	Symbol
+	Changed int `json:"changed"`
+}
+
+type reviewFile struct {
+	ChangedFile
+	Symbols []ChangedSymbol `json:"symbols"`
+}
+
+// handleReview returns the whole changeset against HEAD: one entry per changed
+// file with its status, line counts and the symbols the change lands in.
+//
+// The symbols are crossed with the outline here rather than in the browser
+// because the alternative is one request per file, and a dense changeset is
+// dozens of files. A file with no outline (no rule for its language, or deleted
+// from disk) comes back with an empty symbol list and the client falls back to
+// files and hunks -- review must not need a language server to exist.
+func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
+	root := s.ix.Root()
+	files := gitChangeset(root)
+	changed := gitChangedLines(root)
+	out := make([]reviewFile, 0, len(files))
+	for _, f := range files {
+		rf := reviewFile{ChangedFile: f, Symbols: []ChangedSymbol{}}
+		lines := changed[f.Path]
+		if f.Status == "U" {
+			lines = lineRange(f.Added) // untracked: the whole file is the change
+		}
+		if abs, rel, ok := s.safePath(f.Path); ok {
+			rf.Symbols = changedSymbols(abs, rel, lines)
+		}
+		out = append(out, rf)
+	}
+	writeJSON(w, map[string]any{"available": gitAvailable(root), "files": out})
+}
+
+func lineRange(n int) []int {
+	lines := make([]int, n)
+	for i := range lines {
+		lines[i] = i + 1
+	}
+	return lines
+}
+
+// changedSymbols attributes changed line numbers to the outline symbols that
+// contain them.
+//
+// The outline carries no end line, so a line belongs to the last symbol
+// declared at or before it. That is exact for the declaration-per-line shape
+// the outline recognises and approximate elsewhere -- the outline never claimed
+// to be a parser, and a rail that is right often enough to navigate by is the
+// whole point.
+func changedSymbols(abs, rel string, lines []int) []ChangedSymbol {
+	out := []ChangedSymbol{}
+	if len(lines) == 0 {
+		return out
+	}
+	syms, err := Outline(abs, rel)
+	if err != nil || len(syms) == 0 {
+		return out
+	}
+	counts := make([]int, len(syms))
+	for _, ln := range lines {
+		// Outline emits symbols in line order, so this is a plain bisect.
+		if i := sort.Search(len(syms), func(k int) bool { return syms[k].Line > ln }) - 1; i >= 0 {
+			counts[i]++
+		}
+	}
+	for i, n := range counts {
+		if n > 0 {
+			out = append(out, ChangedSymbol{Symbol: syms[i], Changed: n})
+		}
+	}
+	return out
 }
 
 // handleGutter returns per-file changed-line ranges (new-file line numbers) for
