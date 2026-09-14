@@ -11,6 +11,14 @@ export function pushHistory(path, line) {
   S.histIdx = S.hist.length - 1;
 }
 
+// Moves path to the front of the recently opened list Quick Open leads with.
+export function touchRecent(path) {
+  const i = S.recent.indexOf(path);
+  if (i >= 0) S.recent.splice(i, 1);
+  S.recent.unshift(path);
+  if (S.recent.length > 20) S.recent.pop();
+}
+
 export function go(delta) {
   const i = S.histIdx + delta;
   if (i < 0 || i >= S.hist.length) return;

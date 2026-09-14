@@ -3,7 +3,7 @@ import { $, esc, S, doc_, api, LH, CHUNK, withKeys } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 import { render, layout, refineChunk } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
-import { pushHistory } from './history.js';
+import { pushHistory, touchRecent } from './history.js';
 import { warmLSP } from './lsp.js';
 import { loadOutline } from './outline.js';
 import { showPanel } from './panels.js';
@@ -56,6 +56,7 @@ export async function openFile(path, opts = {}) {
   if (prev !== S.tabs[idx]) clearSelectAll();
   S.active = idx;
   const d = S.tabs[idx];
+  touchRecent(d.path);
 
   $('#empty').hidden = true;
   hideImage();
@@ -294,6 +295,7 @@ export function switchTab(i) {
   vp.scrollTop = S.tabs[i].scrollTop;
   render(); updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+  touchRecent(S.tabs[i].path);
   pushHistory(S.tabs[i].path, S.tabs[i].cur);
 }
 
