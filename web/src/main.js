@@ -17,6 +17,7 @@ import { initShortcuts } from './shortcuts.js';
 import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
+import { initReview } from './review.js';
 import { updateStatus, initMetrics, initStatusFit, updateMetricsDisplay } from './status.js';
 
 // Initialize all subsystems
@@ -36,6 +37,7 @@ initPalette();
 initShortcuts();
 initMarkdown();
 initDiff();
+initReview();
 initMetrics();
 initStatusFit();
 
