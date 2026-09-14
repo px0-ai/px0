@@ -46,7 +46,7 @@ export function onMove({ x, y, mod }) {
     else return; // still on the same word: nothing to do
   }
 
-  if (S.blame) {
+  if (S.blame && S.meta?.git) {
     clearTimeout(hoverTimer);
     hoverTimer = setTimeout(() => blameHoverAt(x, y), HOVER_DELAY);
     return;
