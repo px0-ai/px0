@@ -6,7 +6,8 @@
 #
 # Environment variables:
 #   VERSION      - target version to install (e.g. "0.1.0" or "latest", default: "latest")
-#   INSTALL_DIR  - target directory for binary (default: /usr/local/bin or ~/.local/bin)
+#   INSTALL_DIR  - target directory for binary (default: ~/.local/bin, no sudo needed;
+#                  an existing px0 in a writable directory on PATH is updated in place)
 #   PX0_REPO     - GitHub repository (default: px0-ai/px0)
 
 set -eu
@@ -113,17 +114,24 @@ BINARY_EXT=""
 [ "$OS" = "windows" ] && BINARY_EXT=".exe"
 
 # 5. Determine installation target directory
+# Install at user level by default so no sudo is needed.
+EXISTING_BIN="$(command -v px0 2>/dev/null || true)"
+case "$EXISTING_BIN" in
+  /*) EXISTING_DIR="$(dirname "$EXISTING_BIN")" ;;
+  *)  EXISTING_BIN=""; EXISTING_DIR="" ;;
+esac
+
 if [ -n "${INSTALL_DIR:-}" ]; then
   TARGET_DIR="$INSTALL_DIR"
-elif [ -w "/usr/local/bin" ]; then
-  TARGET_DIR="/usr/local/bin"
-elif command -v sudo >/dev/null 2>&1 && [ -d "/usr/local/bin" ]; then
-  USE_SUDO=1
-  TARGET_DIR="/usr/local/bin"
+  # sudo is only used when the user explicitly chose a directory they cannot write to
+  if [ -d "$TARGET_DIR" ] && [ ! -w "$TARGET_DIR" ] && command -v sudo >/dev/null 2>&1; then
+    USE_SUDO=1
+  fi
+elif [ -n "$EXISTING_DIR" ] && [ -w "$EXISTING_DIR" ]; then
+  # Update an existing install in place instead of leaving a second copy on PATH
+  TARGET_DIR="$EXISTING_DIR"
 else
-  # Fallback to ~/.local/bin or ~/bin
   TARGET_DIR="${HOME}/.local/bin"
-  mkdir -p "$TARGET_DIR"
 fi
 
 TARGET_BIN="${TARGET_DIR}/px0${BINARY_EXT}"
@@ -191,6 +199,13 @@ if [ "$ACTION" = "Updated" ]; then
   log_info "px0 successfully updated (v${CURRENT_VER} -> v${VERSION})!"
 else
   log_info "px0 v${VERSION} installed successfully!"
+fi
+
+# An older px0 we could not update (e.g. a root-owned /usr/local/bin/px0) may shadow the new one
+if [ -n "$EXISTING_BIN" ] && [ "$EXISTING_BIN" != "$TARGET_BIN" ]; then
+  log_warn "Another px0 is installed at ${EXISTING_BIN} and may take precedence on your PATH."
+  printf "   Remove it with:\n"
+  printf "     sudo rm %s\n\n" "$EXISTING_BIN"
 fi
 
 # Check if TARGET_DIR is in PATH

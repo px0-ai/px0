@@ -23,6 +23,8 @@ Install or upgrade to the latest release with a single command:
 curl -fsSL https://px0.ai/install.sh | bash
 ```
 
+The binary is installed to `~/.local/bin` without sudo, and that directory is added to your `PATH` if needed. To install somewhere else, set `INSTALL_DIR`, for example `curl -fsSL https://px0.ai/install.sh | INSTALL_DIR=/usr/local/bin bash`. sudo is only used if you choose a directory you cannot write to.
+
 ### Option 2: Build from Source
 
 Requires Go 1.24 or newer. No npm, no node, no CGO, and no system libraries required:
@@ -31,7 +33,8 @@ Requires Go 1.24 or newer. No npm, no node, no CGO, and no system libraries requ
 git clone https://github.com/px0-ai/px0.git
 cd px0
 make build
-sudo install px0 /usr/local/bin/
+mkdir -p ~/.local/bin && install -m 755 px0 ~/.local/bin/
+# or system-wide: sudo install px0 /usr/local/bin/
 ```
 
 To cross-compile binaries for all 15 supported OS and architecture combinations:
