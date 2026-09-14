@@ -18,6 +18,7 @@ import { SEL_KEYS, runSelectionAction, selectAll, clearSelectAll, copySelectAll 
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
 import { toggleDiff } from './diff.js';
+import { toggleReview, closeReview, reviewing } from './review.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
    they show as ⌘/⌥/⇧ on a Mac and Ctrl/Alt/Shift elsewhere. Browsers keep
@@ -26,7 +27,8 @@ export const SHORTCUTS = [
   [['Mod+K'], 'Quick search / palette'], [['Mod+P'], 'Go to file'],
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
   [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
-  [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
+  [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'],
+  [['Mod+Shift+D'], 'Review the changeset by symbol (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+L'], 'Toggle line numbers'], [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
@@ -74,6 +76,7 @@ export function initShortcuts() {
     else if (act === 'wrap') toggleWordWrap();
     else if (act === 'line-numbers') toggleLineNumbers();
     else if (act === 'md-preview') togglePreview();
+    else if (act === 'review') { toggleReview(); updateStatus(); }
     else if (act === 'palette') openPalette('command');
     else if (act === 'help') showHelp();
   });
@@ -86,6 +89,9 @@ export function initShortcuts() {
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
       if (!hovercard.hidden) { clearLink(); return; }
       if (!findbar.hidden) { clearFind(); return; }
+      // Review covers the editor, so Esc leaves the mode before it starts
+      // undoing the chrome behind it. Transient overlays above still win.
+      if (reviewing()) { closeReview(); return; }
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
@@ -110,6 +116,13 @@ export function initShortcuts() {
     if (mod && e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); openPalette('command'); return; }
     if (mod && e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); showRightInspector('symbols'); return; }
     if (mod && e.shiftKey && (e.key === 'F' || e.key === 'f')) { e.preventDefault(); showPanel('search'); $('#q')?.select(); return; }
+    // Review mode: the whole changeset against HEAD, walked by symbol. Mod+D
+    // keeps its meaning -- the diff of the file in front of you -- and this is
+    // the shift of it: the diff of everything. Git only, like Mod+D.
+    if (mod && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+      if (S.meta?.git) { e.preventDefault(); toggleReview(); updateStatus(); }
+      return;
+    }
     if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); openPalette('file'); return; }
     if (mod && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); openPalette('line'); return; }
     if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(S.lastWord); return; }
@@ -160,12 +173,19 @@ export function initShortcuts() {
 
     if (inField(document.activeElement)) return;
 
+    // Review covers the editor, and this listener is on the window in the
+    // capture phase -- it sees every key before review's own handler does. So
+    // it has to stand down here: '?' still explains the app, but the keys that
+    // act on the file behind review (select-all, copy, caret movement) do not
+    // run. The Mod commands above are unaffected, Mod+Shift+D included.
+    if (e.key === '?') { e.preventDefault(); showHelp(); return; }
+    if (reviewing()) return;
+
     // Select all takes the open file only, never the sidebar or status bar around it.
     const plainMod = mod && !e.shiftKey && !e.altKey;
     if (plainMod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); if (previewing()) selectPreview(); else selectAll(); return; }
     if (plainMod && (e.key === 'c' || e.key === 'C') && copySelectAll()) { e.preventDefault(); return; }
 
-    if (e.key === '?') { e.preventDefault(); showHelp(); return; }
     const d = doc_();
     if (!d) return;
     if (previewing(d)) { if (previewKey(e)) e.preventDefault(); return; }

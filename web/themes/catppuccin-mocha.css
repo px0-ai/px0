@@ -23,4 +23,5 @@
   /* diffs and status */
   --gi: #a6e3a1; --gd: #f38ba8;
   --gi-bg: rgba(166, 227, 161, 0.15); --gd-bg: rgba(243, 139, 168, 0.15);
+  --gi-em: rgba(166, 227, 161, 0.30); --gd-em: rgba(243, 139, 168, 0.30);
 }
