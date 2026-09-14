@@ -289,6 +289,19 @@ func TestFileAndSearchAndDef(t *testing.T) {
 	}
 }
 
+func TestSearchPanelAssets(t *testing.T) {
+	html, err := embedded.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	for _, id := range []string{"panel-files", "panel-search", "q", "glob", "results"} {
+		if !strings.Contains(page, `id="`+id+`"`) {
+			t.Errorf("web/index.html is missing search UI element %q", id)
+		}
+	}
+}
+
 func TestChunkedReadsCoverWholeFile(t *testing.T) {
 	root := t.TempDir()
 	var sb strings.Builder

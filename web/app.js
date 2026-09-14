@@ -764,10 +764,12 @@
   // web/src/panels.js
   function showPanel(name) {
     document.body.classList.remove("side-hidden");
+    $$(".panel", $("#side")).forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
     layout();
     render();
   }
   function initPanels() {
+    $("#btn-close-search")?.addEventListener("click", () => showPanel("files"));
     $("#btn-reindex").addEventListener("click", async () => {
       $("#st-index").textContent = "reindexing…";
       const j = await api("/api/reindex");
@@ -3314,6 +3316,10 @@
         }
         if (!findbar.hidden) {
           clearFind();
+          return;
+        }
+        if ($("#panel-search")?.classList.contains("active")) {
+          showPanel("files");
           return;
         }
         if (S2.selAll) {

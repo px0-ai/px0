@@ -16,10 +16,27 @@
 </head>
 <body class="right-hidden">
 <div id="app">
-  <!-- SECTION: Sidebar (File explorer tree) -->
+  <!-- SECTION: Sidebar (File explorer tree and search-in-files) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index">&#8635;</button></span></header>
-    <div class="panel-body" id="tree"></div>
+    <section class="panel active" id="panel-files">
+      <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index">&#8635;</button></span></header>
+      <div class="panel-body" id="tree"></div>
+    </section>
+
+    <section class="panel" id="panel-search">
+      <header class="panel-head"><span>Search</span><button id="btn-close-search" class="mini" title="Back to file explorer (Esc)">&#10005;</button></header>
+      <div class="search-form">
+        <input id="q" type="text" spellcheck="false" placeholder="Search in files" autocomplete="off">
+        <div class="opts">
+          <button class="opt" id="o-case" title="Match case">Aa</button>
+          <button class="opt" id="o-word" title="Whole word">|ab|</button>
+          <button class="opt" id="o-re" title="Regular expression">.*</button>
+        </div>
+        <input id="glob" type="text" spellcheck="false" placeholder="Files to include, e.g. *.go" autocomplete="off">
+      </div>
+      <div class="panel-body" id="results"></div>
+    </section>
+
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
         <img class="logo-dark" src="https://px0.ai/logo/px0-logo-dark.png" alt="px0" width="35" height="13">
