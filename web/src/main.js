@@ -5,7 +5,7 @@ import { initTabs, openFile } from './tabs.js';
 import { initCursor } from './cursor.js';
 import { initHover } from './hover.js';
 import { initSelectionBar } from './selbar.js';
-import { drawTree, treeEl, initTree, revealFile } from './tree.js';
+import { drawTree, treeEl, initTree, revealFile, loadUnpushed } from './tree.js';
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
 import { initPanels } from './panels.js';
@@ -76,6 +76,7 @@ initStatusFit();
   }
   updateStatus();
   await drawTree('', treeEl, 0);
+  loadUnpushed(); // fire-and-forget: nothing in boot depends on this resolving
 
   const params = new URLSearchParams(window.location.search);
   const initialPath = params.get('path');

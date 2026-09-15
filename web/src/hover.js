@@ -37,8 +37,21 @@ export function onMove({ x, y, mod }) {
   // Dismiss an open card once the pointer has clearly left what it described.
   if (S.hoverAnchor) {
     if (!hovercard.hidden) {
+      // Safe zone while the card is open: the card's own rect, UNIONED with
+      // the straight line from the anchor (hovered token) to the card — i.e.
+      // their combined bounding box. placeHover always puts the card offset
+      // from the anchor by more than HOVER_KEEP (20px+), so checking only
+      // "near the anchor" (old behavior) or only "inside the card" closes
+      // the card mid-transit on any direct path toward it. A straight line
+      // between two points always stays inside the box containing both, so
+      // this covers every path shape without hardcoding the card's offset.
       const rect = hovercard.getBoundingClientRect();
-      if (x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4) return;
+      const pad = 4;
+      const left = Math.min(rect.left, S.hoverAnchor.x) - pad;
+      const right = Math.max(rect.right, S.hoverAnchor.x) + pad;
+      const top = Math.min(rect.top, S.hoverAnchor.y) - pad;
+      const bottom = Math.max(rect.bottom, S.hoverAnchor.y) + pad;
+      if (x >= left && x <= right && y >= top && y <= bottom) return;
     }
     const dx = x - S.hoverAnchor.x, dy = y - S.hoverAnchor.y;
     if (dx * dx + dy * dy > HOVER_KEEP * HOVER_KEEP) hideHover();
@@ -158,7 +171,20 @@ export function initHover() {
     });
   });
 
-  vp.addEventListener('mouseleave', () => { pointerAt = null; clearLink(); });
+  vp.addEventListener('mouseleave', e => {
+    pointerAt = null;
+    // The card is a sibling of vp, rendered on top of it — moving onto the
+    // card fires vp's mouseleave same as moving off-window would. Leaving it
+    // open here is correct; hovercard's own mouseleave (below) closes it once
+    // the pointer actually leaves the card too.
+    if (!hovercard.hidden && e.relatedTarget && hovercard.contains(e.relatedTarget)) return;
+    clearLink();
+  });
+  hovercard.addEventListener('mouseleave', e => {
+    // Moving back onto vp is handled by onMove's own drift/anchor check.
+    if (e.relatedTarget && vp.contains(e.relatedTarget)) return;
+    hideHover();
+  });
   vp.addEventListener('scroll', () => { clearTimeout(hoverTimer); hideHover(); }, { passive: true });
   vp.addEventListener('mousedown', (e) => {
     if (e.target.closest('#hovercard')) return;

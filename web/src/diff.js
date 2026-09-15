@@ -40,9 +40,25 @@ export function syncDiffView() {
     diffview.hidden = !want;
     if (want) drawDiff(want);
     else diffContent.replaceChildren();
-  } else if (want && want.diffHunks !== undefined) {
-    renderDiff(want);
+  } else if (want) {
+    // Same doc still showing: redraw from cache, or refetch if a caller (e.g.
+    // switching which commit ref a tab is scoped to) invalidated the cache.
+    if (want.diffText === undefined) drawDiff(want);
+    else renderDiff(want);
   }
+}
+
+// Points a doc's diff view at a different ref (commit hash, or '' for the
+// working tree) and drops any cached diff so the next draw refetches instead
+// of showing the previous ref's diff.
+export function setDiffRef(d, ref) {
+  if (!d || d.diffRef === ref) return;
+  d.diffRef = ref;
+  d.diffText = undefined;
+  d.diffHunks = undefined;
+  // ponytail: request ID bumped on each ref change so drawDiff can discard stale fetches
+  d.diffReqId = (d.diffReqId || 0) + 1;
+  d.diffReq = null;
 }
 
 export async function toggleDiff() {
@@ -74,11 +90,15 @@ async function drawDiff(d) {
   if (d.diffText === undefined) {
     diffContent.replaceChildren();
     try {
-      d.diffReq = d.diffReq || api('/api/diff', { path: d.path });
+      const ref = d.diffRef || '';
+      const reqId = d.diffReqId || 0;
+      d.diffReq = d.diffReq || api('/api/diff', { path: d.path, ref });
       const j = await d.diffReq;
+      if (d.diffReqId !== reqId) return; // stale response from an earlier ref
       d.diffText = j.diff || '';
       d.diffHunks = parseDiff(d.diffText);
     } catch (e) {
+      if (d.diffReqId !== reqId) return; // stale response from an earlier ref
       d.diffText = '';
       d.diffHunks = [];
       setStatusNote('No diff: ' + e.message);
@@ -95,7 +115,7 @@ function renderDiff(d) {
   if (!d.diffHunks || !d.diffHunks.length) {
     const p = document.createElement('div');
     p.className = 'diff-empty';
-    p.textContent = 'No changes against HEAD.';
+    p.textContent = d.diffRef ? 'No changes in this commit.' : 'No changes against HEAD.';
     diffContent.append(p);
     return;
   }

@@ -20,6 +20,18 @@
   <aside id="side">
     <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index">&#8635;</button></span></header>
     <div class="panel-body" id="tree"></div>
+    <section id="unpushed" hidden>
+      <div id="unpushed-resizer" title="Drag to resize"></div>
+      <div class="unpushed-header">
+        <span class="unpushed-title">Unpushed</span>
+        <span class="unpushed-branch" hidden>
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+          <span class="unpushed-branch-name"></span>
+        </span>
+        <span class="unpushed-count"></span>
+      </div>
+      <div class="unpushed-list"></div>
+    </section>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
         <img class="logo-dark" src="https://px0.ai/logo/px0-logo-dark.png" alt="px0" width="35" height="13">
@@ -239,6 +251,9 @@
     </section>
   </aside>
 </div>
+
+<!-- Unpushed-commit hover card: author, time, full message, file stats -->
+<div id="commit-hovercard" hidden></div>
 
 <!-- SECTION: Command / File / Symbol Palette Modal (Cmd+K / Ctrl+P) -->
 <div id="overlay" hidden>

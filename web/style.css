@@ -123,6 +123,87 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
 #tree.changed-only .tr.file:not(.dirty) { display: none; }
 #tree.changed-only .tw:not(:has(.dirty)) { display: none; }
 
+/* ---------- unpushed commits sidebar section ---------- */
+#unpushed {
+  display: flex; flex-direction: column; flex: none; height: 200px; min-height: 0;
+  border-top: 1px solid var(--line); padding: 0; overflow: hidden; position: relative;
+}
+#unpushed-resizer {
+  position: absolute; top: -2px; left: 0; right: 0; height: 4px; flex: none;
+  cursor: row-resize; z-index: 5;
+}
+#unpushed-resizer:hover, #unpushed-resizer.drag { background: var(--accent); }
+.unpushed-header {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px 7px;
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--dim); flex: none; border-bottom: 1px solid var(--line);
+}
+.unpushed-title { flex: 1; }
+.unpushed-count {
+  font: 10px var(--mono); color: var(--faint); background: var(--bg3);
+  border-radius: 8px; padding: 1px 4px; flex: none;
+}
+.unpushed-branch {
+  display: flex; align-items: center; gap: 4px; flex: none;
+  font: 10.5px var(--mono); text-transform: none; letter-spacing: normal;
+  color: var(--faint); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.unpushed-branch svg { flex: none; display: block; }
+.unpushed-list {
+  flex: 1; overflow: auto; padding: 0; display: flex; flex-direction: column;
+}
+.unpushed-commit {
+  display: flex; flex-direction: column; flex: none;
+  border-bottom: 1px solid var(--line); cursor: pointer; user-select: none;
+}
+.unpushed-commit:hover { background: var(--bg3); }
+.unpushed-commit.expanded { background: var(--bg3); }
+.unpushed-commit-header {
+  display: flex; align-items: center; gap: 5px; padding: 6px 8px;
+  font-size: 12px; min-height: 22px;
+}
+.unpushed-commit-hash {
+  font: 600 11px var(--mono); color: var(--accent-fg); flex: none; min-width: 44px;
+}
+.unpushed-commit-subject {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-size: 12.5px;
+}
+.unpushed-commit-meta {
+  flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto;
+  font-size: 11px; color: var(--faint);
+}
+.unpushed-commit-author { overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
+.unpushed-commit-files {
+  display: none; flex-direction: column; background: var(--bg2); flex: 1; overflow: auto;
+  max-height: 180px; border-top: 1px solid var(--line);
+}
+.unpushed-commit.expanded .unpushed-commit-files { display: flex; }
+.unpushed-file {
+  display: flex; align-items: center; gap: 5px; padding: 4px 16px; cursor: pointer;
+  font-size: 12px; height: 22px; color: var(--dim);
+}
+.unpushed-file:hover { background: var(--bg3); color: var(--fg); }
+.unpushed-file .ic {
+  width: 7px; height: 7px; flex: none; border-radius: 2px; background: var(--faint); opacity: .75;
+}
+.unpushed-file .ic[data-t="code"] { background: var(--nf); }
+.unpushed-file .ic[data-t="data"] { background: var(--kt); }
+.unpushed-file .ic[data-t="doc"]  { background: var(--dim); }
+.unpushed-file .ic[data-t="web"]  { background: var(--nt); }
+.unpushed-file .ic[data-t="img"]  { background: var(--nc); }
+.unpushed-file .nm { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.unpushed-file .gs {
+  margin-left: auto; flex: none; font: 600 10px/1 var(--mono);
+  padding: 0 4px; margin-right: 0;
+}
+.unpushed-file.git-M .nm, .unpushed-file.git-M .gs,
+.unpushed-file.git-R .nm, .unpushed-file.git-R .gs { color: var(--accent-fg); }
+.unpushed-file.git-A .nm, .unpushed-file.git-A .gs,
+.unpushed-file.git-untracked .nm, .unpushed-file.git-untracked .gs { color: var(--gi); }
+.unpushed-file.git-D .nm, .unpushed-file.git-D .gs { color: var(--gd); }
+.unpushed-file-more { padding: 4px 16px; font-size: 11px; color: var(--faint); }
+
 /* ---------- search panel ---------- */
 .search-form { padding: 2px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
 .search-form input, #outline-filter, #right-symbols-filter {
@@ -440,6 +521,32 @@ body.hide-lines .c { padding-left: 16px; }
   border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: center;
 }
 #hovercard .foot b { color: var(--dim); font-weight: 600; }
+
+/* ---------- unpushed commit hover card (sidebar) ---------- */
+#commit-hovercard {
+  position: fixed; z-index: 30; max-width: 360px;
+  background: var(--bg3); border: 1px solid var(--line); border-radius: 7px;
+  box-shadow: var(--shadow); padding: 10px 12px; overflow: hidden;
+  animation: hcin .09s ease-out;
+  font-size: 12px; line-height: 1.55;
+}
+.chc-author { font-weight: 600; color: var(--fg); text-decoration: none; }
+a.chc-author:hover { color: var(--accent-fg); text-decoration: underline; }
+.chc-time { color: var(--faint); margin-left: 6px; }
+.chc-subject { margin-top: 6px; font-weight: 500; color: var(--fg); white-space: pre-wrap; }
+.chc-body { margin-top: 4px; color: var(--dim); white-space: pre-wrap; max-height: 160px; overflow: hidden; }
+.chc-foot {
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.chc-stats { color: var(--faint); font: 11px var(--mono); }
+.chc-ins { color: var(--gi); }
+.chc-del { color: var(--gd); }
+.chc-copy {
+  flex: none; font: 11px var(--mono); color: var(--dim); background: var(--bg4);
+  border-radius: 4px; padding: 2px 6px; cursor: pointer;
+}
+.chc-copy:hover { color: var(--fg); background: var(--bg2); }
 
 /* ---------- toast notification ---------- */
 #toast {

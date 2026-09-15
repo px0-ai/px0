@@ -81,9 +81,13 @@ export async function openFile(path, opts = {}) {
 // Fetches on any open in a git repo rather than threading per-file status
 // through every open path — the backend returns available:false for
 // clean/untracked files, so the extra request is cheap and self-limiting.
-function loadGutter(d) {
+export function loadGutter(d, ref = '') {
   if (!S.meta?.git) return;
-  api('/api/gutter', { path: d.path }).then(j => {
+  // ponytail: request ID to discard stale concurrent fetches (commit file click after openFile)
+  d.gutterReqId = (d.gutterReqId || 0) + 1;
+  const reqId = d.gutterReqId;
+  api('/api/gutter', { path: d.path, ref }).then(j => {
+    if (d.gutterReqId !== reqId) return; // stale response from an earlier ref
     d.diffAvailable = !!j.available;
     if (j.available && d.diffMode === null && !d.diffDismissed) {
       d.diffMode = layoutPref() || 'split';

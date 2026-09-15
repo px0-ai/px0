@@ -63,6 +63,9 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
 	s.mux.HandleFunc("/api/gutter", s.handleGutter)
+	s.mux.HandleFunc("/api/unpushed", s.handleUnpushed)
+	s.mux.HandleFunc("/api/commitfiles", s.handleCommitFiles)
+	s.mux.HandleFunc("/api/commitdetail", s.handleCommitDetail)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
 	s.mux.HandleFunc("/api/def", s.handleDef)
@@ -487,7 +490,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	_, coming := d.Exact()
 	diffAvail := false
 	if gitAvailable(s.ix.Root()) {
-		diffAvail = gitDiff(s.ix.Root(), rel) != ""
+		diffAvail = gitDiff(s.ix.Root(), "", rel) != ""
 	}
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
@@ -524,15 +527,17 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, abs)
 }
 
-// handleDiff returns the unified diff of a file against HEAD. available is false
-// (with an empty diff and 200) when git is off/absent or the file is unchanged.
+// handleDiff returns the unified diff of a file against HEAD (or against a specific
+// commit if ref is provided). available is false (with an empty diff and 200) when
+// git is off/absent or the file is unchanged.
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
 	if !ok {
 		fail(w, 400, "bad path")
 		return
 	}
-	diff := gitDiff(s.ix.Root(), rel)
+	ref := r.URL.Query().Get("ref")
+	diff := gitDiff(s.ix.Root(), ref, rel)
 	writeJSON(w, map[string]any{"path": rel, "diff": diff, "available": diff != ""})
 }
 
@@ -545,7 +550,8 @@ func (s *Server) handleGutter(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad path")
 		return
 	}
-	added, modified, deleted := gitHunks(s.ix.Root(), rel)
+	ref := r.URL.Query().Get("ref")
+	added, modified, deleted := gitHunks(s.ix.Root(), ref, rel)
 	nz := func(v []int) []int { // marshal as [] not null
 		if v == nil {
 			return []int{}
@@ -558,6 +564,55 @@ func (s *Server) handleGutter(w http.ResponseWriter, r *http.Request) {
 		"added":     nz(added),
 		"modified":  nz(modified),
 		"deleted":   nz(deleted),
+	})
+}
+
+// handleUnpushed returns the list of commits ahead of the upstream branch.
+func (s *Server) handleUnpushed(w http.ResponseWriter, r *http.Request) {
+	commits, upstream, hasUpstream := gitUpstreamLog(s.ix.Root(), 50)
+	if commits == nil {
+		commits = []gitCommit{}
+	}
+	writeJSON(w, map[string]any{
+		"available":   gitAvailable(s.ix.Root()),
+		"hasUpstream": hasUpstream,
+		"upstream":    upstream,
+		"commits":     commits,
+	})
+}
+
+// handleCommitFiles returns the files changed in a specific commit.
+func (s *Server) handleCommitFiles(w http.ResponseWriter, r *http.Request) {
+	hash := r.URL.Query().Get("hash")
+	if hash == "" {
+		fail(w, 400, "missing hash")
+		return
+	}
+	files := gitCommitFiles(s.ix.Root(), hash)
+	if files == nil {
+		files = map[string]string{}
+	}
+	writeJSON(w, map[string]any{
+		"available": gitAvailable(s.ix.Root()),
+		"files":     files,
+	})
+}
+
+// handleCommitDetail returns a commit's full message body and shortstat
+// summary. Fetched lazily, per hover.
+func (s *Server) handleCommitDetail(w http.ResponseWriter, r *http.Request) {
+	hash := r.URL.Query().Get("hash")
+	if hash == "" {
+		fail(w, 400, "missing hash")
+		return
+	}
+	body, files, ins, del, ok := gitCommitDetail(s.ix.Root(), hash)
+	writeJSON(w, map[string]any{
+		"available":  ok,
+		"body":       body,
+		"files":      files,
+		"insertions": ins,
+		"deletions":  del,
 	})
 }
 
