@@ -95,11 +95,13 @@ type lspClient struct {
 	out  *bufio.Reader
 	logf func(string, ...any)
 
-	mu      sync.Mutex
-	nextID  int64
-	pending map[int64]chan rpcMessage
-	opened  map[string]int // uri -> document version
-	dead    error
+	mu          sync.Mutex
+	nextID      int64
+	pending     map[int64]chan rpcMessage
+	opened      map[string]lspOpenDocument
+	diagnostics map[string]lspDiagnosticSnapshot
+	dead        error
+	docMu       sync.Mutex // serialises didOpen, didChange and didClose
 
 	// encoding is how the server counts Character offsets: "utf-8", "utf-16"
 	// (the spec default) or "utf-32".
@@ -117,11 +119,12 @@ type lspClient struct {
 func newLSPClient(def lspServerDef, root string) *lspClient {
 	return &lspClient{
 		def: def, root: root,
-		pending:  map[int64]chan rpcMessage{},
-		opened:   map[string]int{},
-		encoding: "utf-16",
-		readyCh:  make(chan struct{}),
-		logf:     func(string, ...any) {},
+		pending:     map[int64]chan rpcMessage{},
+		opened:      map[string]lspOpenDocument{},
+		diagnostics: map[string]lspDiagnosticSnapshot{},
+		encoding:    "utf-16",
+		readyCh:     make(chan struct{}),
+		logf:        func(string, ...any) {},
 	}
 }
 
@@ -218,6 +221,10 @@ func (c *lspClient) reply(id json.RawMessage, method string) {
 }
 
 func (c *lspClient) onNotification(msg rpcMessage) {
+	if msg.Method == "textDocument/publishDiagnostics" {
+		c.onDiagnostics(msg.Params)
+		return
+	}
 	if msg.Method != "$/progress" {
 		return
 	}
@@ -421,36 +428,76 @@ func (c *lspClient) shutdown() {
 // ensureOpen tells the server about a file. Most servers refuse to answer
 // questions about a document they were never handed.
 func (c *lspClient) ensureOpen(abs, rel string) error {
+	c.docMu.Lock()
+	defer c.docMu.Unlock()
+
 	uri := pathToURI(abs)
+	st, err := os.Stat(abs)
+	if err != nil {
+		return err
+	}
+	modTime, size := st.ModTime().UnixNano(), st.Size()
+
 	c.mu.Lock()
-	_, already := c.opened[uri]
+	old, already := c.opened[uri]
 	c.mu.Unlock()
-	if already {
+	if already && old.modTime == modTime && old.size == size {
 		return nil
 	}
+
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		return err
 	}
-	if err := c.notify("textDocument/didOpen", map[string]any{
+
+	next := lspOpenDocument{version: 1, modTime: modTime, size: size}
+	method := "textDocument/didOpen"
+	params := map[string]any{
 		"textDocument": map[string]any{
-			"uri":        uri,
-			"languageId": c.def.LanguageID(rel),
-			"version":    1,
-			"text":       string(data),
+			"uri": uri, "languageId": c.def.LanguageID(rel),
+			"version": next.version, "text": string(data),
 		},
-	}); err != nil {
+	}
+	if already {
+		next.version = old.version + 1
+		method = "textDocument/didChange"
+		params = map[string]any{
+			"textDocument":   map[string]any{"uri": uri, "version": next.version},
+			"contentChanges": []any{map[string]any{"text": string(data)}},
+		}
+	}
+
+	c.mu.Lock()
+	previousDiagnostics, hadDiagnostics := c.diagnostics[uri]
+	c.opened[uri] = next
+	delete(c.diagnostics, uri)
+	c.mu.Unlock()
+	if err := c.notify(method, params); err != nil {
+		c.mu.Lock()
+		if current, ok := c.opened[uri]; ok && current == next {
+			if already {
+				c.opened[uri] = old
+			} else {
+				delete(c.opened, uri)
+			}
+			if hadDiagnostics {
+				c.diagnostics[uri] = previousDiagnostics
+			} else {
+				delete(c.diagnostics, uri)
+			}
+		}
+		c.mu.Unlock()
 		return err
 	}
-	c.mu.Lock()
-	c.opened[uri] = 1
-	c.mu.Unlock()
 	return nil
 }
 
 // closeDoc notifies the server that the file was closed, allowing the server
 // to free ASTs and file memory.
 func (c *lspClient) closeDoc(abs string) {
+	c.docMu.Lock()
+	defer c.docMu.Unlock()
+
 	uri := pathToURI(abs)
 	c.mu.Lock()
 	_, already := c.opened[uri]
@@ -459,6 +506,7 @@ func (c *lspClient) closeDoc(abs string) {
 		return
 	}
 	delete(c.opened, uri)
+	delete(c.diagnostics, uri)
 	c.mu.Unlock()
 	c.notify("textDocument/didClose", map[string]any{
 		"textDocument": map[string]any{

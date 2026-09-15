@@ -24,6 +24,7 @@ export const COMMANDS = [
   { name: 'Go to Symbol in File…', run: () => openPalette('symbol') },
   { name: 'Go to Line…', run: () => openPalette('line') },
   { name: 'Search in Files', run: () => showRightInspector('search') },
+  { name: withKeys('Show Problems ({Mod+Shift+M})'), run: () => showRightInspector('problems') },
   { name: 'Find in Current File', run: () => openFind(S.lastWord) },
   { name: 'Go to Definition', run: () => gotoDefinition() },
   { name: 'Find All References (Right Panel)', run: () => findReferences() },

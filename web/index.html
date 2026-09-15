@@ -182,6 +182,7 @@
         <button class="inspector-tab active" data-itab="refs" title="View references across workspace">References</button>
         <button class="inspector-tab" data-itab="symbols" title="View file symbols outline">Symbols</button>
         <button class="inspector-tab" data-itab="calls" title="Trace callers and callees ({Alt+Shift+H})">Calls</button>
+        <button class="inspector-tab" data-itab="problems" title="View language server problems in this file ({Mod+Shift+M})">Problems</button>
         <button class="inspector-tab" data-itab="search" title="Search text across workspace ({Mod+Shift+F})">Search</button>
       </div>
       <div class="inspector-head-actions">
@@ -222,7 +223,18 @@
       </div>
     </section>
 
-    <!-- Right Pane 4: Full-text search across the workspace -->
+    <!-- Right Pane 4: Language server diagnostics for the active file -->
+    <section class="inspector-pane" id="pane-right-problems">
+      <div class="inspector-bar">
+        <span class="inspector-sym-title" id="right-problems-target">-</span>
+        <span class="inspector-badge" id="right-problems-badge">0</span>
+      </div>
+      <div class="panel-body" id="right-problems-list">
+        <div class="hint">Open a file to see its problems.</div>
+      </div>
+    </section>
+
+    <!-- Right Pane 5: Full-text search across the workspace -->
     <section class="inspector-pane" id="pane-right-search">
       <div class="search-form">
         <input id="q" type="text" spellcheck="false" placeholder="Search in files" autocomplete="off">

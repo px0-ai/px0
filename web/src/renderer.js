@@ -62,6 +62,7 @@ export function paint() {
 
   let html = '';
   const gut = d.gutter || null;
+  const diagnostics = d.diagnostics?.byLine;
   for (let i = first; i < last; i++) {
     const n = i + 1;
     const body = d.lines[i];
@@ -72,6 +73,8 @@ export function paint() {
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';
       if (gut.dels.has(n)) rc += ' gut-del';
     }
+    const severity = diagnostics?.get(n);
+    if (severity) gc += ' diag-' + severity;
     html += '<div class="' + rc + '" data-l="' + n + '">' +
       '<div class="' + gc + '">' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
   }

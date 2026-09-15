@@ -150,17 +150,20 @@ func TestLanguageIDMapping(t *testing.T) {
 
 func TestLSPCloseDoc(t *testing.T) {
 	cl := newLSPClient(lspServerDef{Name: "test", Cmd: []string{"echo"}}, t.TempDir())
-	cl.opened["file:///test.go"] = 1
+	cl.opened["file:///test.go"] = lspOpenDocument{version: 1}
+	cl.diagnostics["file:///test.go"] = lspDiagnosticSnapshot{items: []lspDiagnostic{}}
 
-	// closeDoc removes from opened map
 	cl.closeDoc("/test.go")
 	cl.mu.Lock()
 	_, exists := cl.opened["file:///test.go"]
+	_, hasDiagnostics := cl.diagnostics["file:///test.go"]
 	cl.mu.Unlock()
 	if exists {
 		t.Fatal("expected uri to be removed from opened map")
 	}
+	if hasDiagnostics {
+		t.Fatal("expected uri to be removed from diagnostics map")
+	}
 
-	// Repeated closeDoc does not panic
 	cl.closeDoc("/test.go")
 }
