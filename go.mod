@@ -7,4 +7,7 @@ require (
 	github.com/yuin/goldmark v1.8.6
 )
 
-require github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+require (
+	github.com/anukool23/secretcheck v1.0.8 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+)
