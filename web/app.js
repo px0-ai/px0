@@ -704,31 +704,82 @@
     const i = name.lastIndexOf(".");
     return i > 0 && FILE_KIND[name.slice(i + 1).toLowerCase()] || "other";
   }
-  async function revealDir(dir) {
+  async function expandDir(dir) {
+    const row = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
+    const kids = treeEl.querySelector('[data-kids="' + CSS.escape(dir) + '"]');
+    if (!row || !kids)
+      return false;
+    row.classList.add("open");
+    kids.classList.add("open");
+    openDirs.add(dir);
+    if (!kids.dataset.loaded) {
+      kids.dataset.loaded = "1";
+      await drawTree(dir, kids, dir.split("/").length);
+    }
+    return true;
+  }
+  async function expandPath(dir) {
     const parts = dir.split("/");
     for (let i = 0;i < parts.length; i++) {
-      const p = parts.slice(0, i + 1).join("/");
-      const row = treeEl.querySelector('[data-dir="' + CSS.escape(p) + '"]');
-      if (!row)
-        break;
-      if (!row.classList.contains("open"))
-        row.click();
-      await new Promise((r) => setTimeout(r, 30));
+      if (!await expandDir(parts.slice(0, i + 1).join("/")))
+        return false;
     }
+    return true;
+  }
+  function rowVisible(row) {
+    const r = row.getBoundingClientRect(), t = treeEl.getBoundingClientRect();
+    return r.bottom > t.top && r.top < t.bottom;
+  }
+  async function revealDir(dir) {
+    await expandPath(dir);
     const last = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
     if (last)
       last.scrollIntoView({ block: "center" });
   }
-  async function revealFile(path) {
+  async function revealFile(path, opts = {}) {
     const idx = path.lastIndexOf("/");
     if (idx > 0)
-      await revealDir(path.slice(0, idx));
+      await expandPath(path.slice(0, idx));
     const row = treeEl.querySelector('[data-file="' + CSS.escape(path) + '"]');
-    if (row) {
-      $$(".tr.sel", treeEl).forEach((x) => x.classList.remove("sel"));
-      row.classList.add("sel");
+    if (!row)
+      return;
+    $$(".tr.sel", treeEl).forEach((x) => x.classList.remove("sel"));
+    row.classList.add("sel");
+    if (!(opts.ifNeeded && rowVisible(row)))
       row.scrollIntoView({ block: "center" });
+  }
+  var AUTOREVEAL_KEY = "px0.autoReveal";
+  var autoReveal = true;
+  try {
+    autoReveal = localStorage.getItem(AUTOREVEAL_KEY) !== "false";
+  } catch {}
+  function autoRevealOn() {
+    return autoReveal;
+  }
+  function setAutoReveal(on) {
+    autoReveal = !!on;
+    try {
+      localStorage.setItem(AUTOREVEAL_KEY, autoReveal ? "true" : "false");
+    } catch {}
+    if (autoReveal)
+      syncTreeSelection(doc_()?.path);
+  }
+  var pendingReveal = null;
+  function syncTreeSelection(path) {
+    if (!autoReveal || !path)
+      return;
+    if (document.body.classList.contains("side-hidden")) {
+      pendingReveal = path;
+      return;
     }
+    pendingReveal = null;
+    revealFile(path, { ifNeeded: true });
+  }
+  function flushPendingReveal() {
+    const path = pendingReveal;
+    pendingReveal = null;
+    if (path)
+      revealFile(path, { ifNeeded: true });
   }
   function initTree() {
     $("#btn-changed")?.addEventListener("click", (e) => {
@@ -739,17 +790,12 @@
       const dirRow = e.target.closest("[data-dir]");
       if (dirRow) {
         const path = dirRow.dataset.dir;
-        const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
-        const open = dirRow.classList.toggle("open");
-        kids.classList.toggle("open", open);
-        if (open) {
-          openDirs.add(path);
-          if (!kids.dataset.loaded) {
-            kids.dataset.loaded = "1";
-            await drawTree(path, kids, path.split("/").length);
-          }
-        } else
+        if (dirRow.classList.contains("open")) {
+          dirRow.classList.remove("open");
+          treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]')?.classList.remove("open");
           openDirs.delete(path);
+        } else
+          await expandDir(path);
         return;
       }
       const f = e.target.closest("[data-file]");
@@ -762,10 +808,16 @@
   }
 
   // web/src/panels.js
-  function showPanel(name) {
-    document.body.classList.remove("side-hidden");
+  function toggleSidebar(show) {
+    const hide = show === undefined ? !document.body.classList.contains("side-hidden") : !show;
+    document.body.classList.toggle("side-hidden", hide);
+    if (!hide)
+      flushPendingReveal();
     layout();
     render();
+  }
+  function showPanel(name) {
+    toggleSidebar(true);
   }
   function initPanels() {
     $("#btn-reindex").addEventListener("click", async () => {
@@ -778,6 +830,7 @@
       await drawTree("", treeEl, 0);
       await reloadOpenTabs();
       updateStatus();
+      syncTreeSelection(doc_()?.path);
     });
     (() => {
       const rz = $("#resizer");
@@ -3017,6 +3070,7 @@
       loadOutline();
     if (push)
       pushHistory(path, line || d.cur, col);
+    syncTreeSelection(d.path);
   }
   function loadGutter(d) {
     if (!S2.meta?.git)
@@ -3188,6 +3242,7 @@
     vp.scrollTop = d.scrollTop;
     render();
     updateStatus();
+    syncTreeSelection(d.path);
   }
   async function reopenClosedTab() {
     while (closedTabs.length) {
@@ -3235,6 +3290,7 @@
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);
+    syncTreeSelection(S2.tabs[i].path);
   }
   function drawCrumbs() {
     const el = $("#crumbs");
@@ -3516,9 +3572,7 @@
       }
       if (mod && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
-        document.body.classList.toggle("side-hidden");
-        layout();
-        render();
+        toggleSidebar();
         return;
       }
       if (mod && !e.shiftKey && (e.key === "d" || e.key === "D")) {
@@ -3725,10 +3779,15 @@
         revealFile(d.path);
       }
     } },
+    { name: "Toggle Auto-Reveal Active File in Explorer", run: () => {
+      const on = !autoRevealOn();
+      setAutoReveal(on);
+      showToast("Auto-reveal", on ? "on: the explorer follows the active file" : "off: the explorer stays put");
+    } },
     { name: withKeys("Toggle Word Wrap ({Alt+Z})"), run: () => toggleWordWrap() },
     { name: withKeys("Toggle Line Numbers ({Alt+L})"), run: () => toggleLineNumbers() },
     { name: withKeys("Toggle Markdown Preview ({Alt+M})"), run: () => togglePreview() },
-    { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => document.body.classList.toggle("side-hidden") },
+    { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => toggleSidebar() },
     { name: "Select Theme…", run: () => openPalette("theme") },
     { name: "Next Theme", run: cycleTheme },
     { name: "Re-index Workspace", run: () => $("#btn-reindex").click() },

@@ -82,7 +82,54 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/api/lsp/install`    | `POST` | Executes user-level installer in background                             | JSON (`{ok: true}`)                        |
 | `/api/lsp/start`      | `POST` | Rescans and starts language server after installation                   | JSON (`{ok: true}`)                        |
 
-## 4. Memory Management & Proactive Scavenging
+## 4. Explorer Auto-Reveal & the Ancestor Walk
+
+The sidebar tree tracks the active document: every path that changes which file
+is in front of the user — `openFile()`, `switchTab()`, `closeTab()` promoting a
+neighbour, and the tree redraw after a re-index — ends by calling
+`syncTreeSelection(path)` in [`web/src/tree.js`](../../web/src/tree.js). Quick
+open, search hits, go-to-definition and jump history all route through
+`openFile()`, so they are covered by that one call rather than each wiring up
+its own reveal.
+
+Three rules keep it from costing anything the user can feel:
+
+1. **Never awaited.** `openFile()` fires the sync as its last statement and does
+   not wait for it. Painting the file never blocks on the tree catching up.
+2. **Deferred while hidden.** With the sidebar collapsed (`body.side-hidden`)
+   the path is parked in `pendingReveal` and no DOM work happens at all.
+   `toggleSidebar()` in [`web/src/panels.js`](../../web/src/panels.js) is the
+   single entry point for sidebar visibility and replays the pending reveal, so
+   reopening the sidebar never lands on a stale file.
+3. **Scroll only when needed.** `revealFile(path, { ifNeeded: true })` compares
+   the row's bounding box against the tree's own and skips `scrollIntoView()`
+   while the row is already on screen. Without this the sidebar would jump on
+   every tab switch. The manual `Reveal Active File in Explorer` command still
+   centres unconditionally, because there the scroll is the point.
+
+Expanding the ancestors is `expandPath()`, which awaits `expandDir()` per level.
+`expandDir()` sets the `open` classes directly and awaits `drawTree()` only when
+that level's children have not been fetched yet (`kids.dataset.loaded`), so a
+warm level costs a class toggle and a cold one costs exactly one `/api/tree`
+request. The explorer's own folder click handler calls the same `expandDir()`,
+so there is one code path for opening a folder.
+
+This replaced a walk that synthesised `row.click()` per level and slept a fixed
+30 ms between them, which put a floor of `30 ms x depth` on every reveal
+regardless of how fast the requests actually were. Measured on a six-level path
+(`a/b/c/d/e/f/deep1.go`), from the first tree mutation to the file being
+selected:
+
+| Tree state | Old (click + 30 ms sleep) | New (await each level) |
+| ---------- | ------------------------- | ---------------------- |
+| Cold (every level fetched) | ~192-197 ms | ~3.5-5.5 ms |
+| Warm (children cached)     | ~190-194 ms | ~0.2-0.3 ms |
+
+Auto-reveal is on by default and remembered per browser under the
+`px0.autoReveal` localStorage key, toggled from the command palette. It is a
+browser preference, not a file: px0 still writes nothing to disk.
+
+## 5. Memory Management & Proactive Scavenging
 
 Even though Go's garbage collector frees unreferenced heap objects rapidly, the Go runtime does not immediately release physical memory pages back to the host operating system. In high-churn CLI sessions (such as searching a 50,000-file repository), the process resident set size (RSS) could appear inflated long after the search completes.
 
@@ -126,7 +173,7 @@ var gzipPool = sync.Pool{New: func() any {
 }}
 ```
 
-## 5. Security Model & Path Sandboxing
+## 6. Security Model & Path Sandboxing
 
 Because px0 exposes a local HTTP server that can display source files and interact with local tools, strict boundary constraints are enforced.
 

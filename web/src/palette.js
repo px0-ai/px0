@@ -4,10 +4,11 @@ import { render, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
 import { updateStatus } from './status.js';
 import { pushHistory } from './history.js';
-import { showPanel } from './panels.js';
+import { showPanel, toggleSidebar } from './panels.js';
 import { openFind } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
-import { revealFile } from './tree.js';
+import { revealFile, autoRevealOn, setAutoReveal } from './tree.js';
+import { showToast } from './ui.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { showCalls, openLspSetup } from './calls.js';
 import { showHelp } from './shortcuts.js';
@@ -35,10 +36,15 @@ export const COMMANDS = [
   } },
   { name: 'Show File Symbols (Right Panel)', run: () => showRightInspector('symbols') },
   { name: 'Reveal Active File in Explorer', run: () => { const d = doc_(); if (d) { showPanel('files'); revealFile(d.path); } } },
+  { name: 'Toggle Auto-Reveal Active File in Explorer', run: () => {
+    const on = !autoRevealOn();
+    setAutoReveal(on);
+    showToast('Auto-reveal', on ? 'on: the explorer follows the active file' : 'off: the explorer stays put');
+  } },
   { name: withKeys('Toggle Word Wrap ({Alt+Z})'), run: () => toggleWordWrap() },
   { name: withKeys('Toggle Line Numbers ({Alt+L})'), run: () => toggleLineNumbers() },
   { name: withKeys('Toggle Markdown Preview ({Alt+M})'), run: () => togglePreview() },
-  { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => document.body.classList.toggle('side-hidden') },
+  { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => toggleSidebar() },
   { name: 'Select Theme…', run: () => openPalette('theme') },
   { name: 'Next Theme', run: cycleTheme },
   { name: 'Re-index Workspace', run: () => $('#btn-reindex').click() },
