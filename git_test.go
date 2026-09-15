@@ -42,6 +42,7 @@ func gitRepo(tb testing.TB) string {
 	write("keep.go", "keep\n")
 	write("sub/mod.go", "line one\n")
 	write("del.go", "del\n")
+	write("gone/only.go", "gone\n")
 	write("sub/ren.go", "old\n")
 	run("init")
 	run("config", "user.email", "t@example.com")
@@ -55,6 +56,8 @@ func gitRepo(tb testing.TB) string {
 	run("add", "add.go")
 	write("untr.go", "untracked\n")
 	os.Remove(filepath.Join(root, "del.go"))
+	os.Remove(filepath.Join(root, "gone", "only.go"))
+	os.Remove(filepath.Join(root, "gone"))
 	run("mv", "sub/ren.go", "sub/ren2.go")
 	return root
 }
@@ -70,11 +73,12 @@ func TestGitStatus(t *testing.T) {
 	}
 	st := gitStatus(root)
 	want := map[string]string{
-		"sub/mod.go":  "M",
-		"add.go":      "A",
-		"untr.go":     "U",
-		"del.go":      "D",
-		"sub/ren2.go": "R",
+		"sub/mod.go":   "M",
+		"add.go":       "A",
+		"untr.go":      "U",
+		"del.go":       "D",
+		"gone/only.go": "D",
+		"sub/ren2.go":  "R",
 	}
 	for path, code := range want {
 		if st[path] != code {
@@ -85,7 +89,7 @@ func TestGitStatus(t *testing.T) {
 		t.Errorf("keep.go should have no status, got %q", st["keep.go"])
 	}
 
-	// Overlay onto tree nodes. Deleted/old-rename paths have no node on disk.
+	// Overlay onto tree nodes. Deleted paths have no node on disk.
 	ix := NewIndex(root)
 	ix.Build()
 	byName := map[string]Node{}
@@ -101,6 +105,7 @@ func TestGitStatus(t *testing.T) {
 		"mod.go":  "M",
 		"add.go":  "A",
 		"untr.go": "U",
+		"del.go":  "D",
 		"ren2.go": "R",
 		"keep.go": "",
 	}
@@ -112,6 +117,77 @@ func TestGitStatus(t *testing.T) {
 	// The sub/ dir holds changed files, so its (collapsed) folder node is dirty.
 	if !byName["sub"].Dir || !byName["sub"].Dirty {
 		t.Errorf("sub node = %+v, want dir with Dirty=true", byName["sub"])
+	}
+	if !byName["gone"].Dir || !byName["gone"].Dirty {
+		t.Errorf("gone node = %+v, want synthetic dirty dir", byName["gone"])
+	}
+	gone, _ := ix.Children("gone")
+	if len(gone) != 1 || gone[0].Name != "only.go" || gone[0].Status != "D" {
+		t.Errorf("gone children = %+v, want only.go with D status", gone)
+	}
+}
+
+func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write("keep.txt", "keep\n")
+	write("deleted.txt", "delete\n")
+	write("gone/only.txt", "delete\n")
+	run("init")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "T")
+	run("config", "commit.gpgsign", "false")
+	run("add", "-A")
+	run("commit", "-qm", "init")
+
+	ix := NewIndex(root)
+	ix.Build()
+	s := NewServer(ix, nil)
+
+	os.Remove(filepath.Join(root, "deleted.txt"))
+	os.Remove(filepath.Join(root, "gone", "only.txt"))
+	os.Remove(filepath.Join(root, "gone"))
+
+	_, topBody := get(t, s, "/api/tree?dir=")
+	top := map[string]map[string]any{}
+	for _, child := range topBody["children"].([]any) {
+		node := child.(map[string]any)
+		top[node["name"].(string)] = node
+	}
+	if top["keep.txt"]["status"] != nil {
+		t.Errorf("keep.txt status = %v, want clean", top["keep.txt"]["status"])
+	}
+	if top["deleted.txt"]["status"] != "D" {
+		t.Errorf("deleted.txt status = %v, want D", top["deleted.txt"]["status"])
+	}
+	if top["gone"]["dirty"] != true {
+		t.Errorf("gone dirty = %v, want true", top["gone"]["dirty"])
+	}
+
+	_, goneBody := get(t, s, "/api/tree?dir=gone")
+	gone := goneBody["children"].([]any)
+	if len(gone) != 1 || gone[0].(map[string]any)["status"] != "D" {
+		t.Errorf("gone children = %v, want only deleted child", gone)
 	}
 }
 

@@ -429,7 +429,31 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not indexed: "+dir)
 		return
 	}
-	writeJSON(w, map[string]any{"dir": dir, "children": kids})
+	writeJSON(w, map[string]any{"dir": dir, "children": s.gitTreeChildren(kids)})
+}
+
+func (s *Server) gitTreeChildren(kids []Node) []Node {
+	gs := gitStatus(s.ix.Root())
+	if gs == nil {
+		return kids
+	}
+	out := make([]Node, len(kids))
+	copy(out, kids)
+	for i := range out {
+		if out[i].Dir {
+			out[i].Dirty = false
+			prefix := out[i].Path + "/"
+			for p := range gs {
+				if strings.HasPrefix(p, prefix) {
+					out[i].Dirty = true
+					break
+				}
+			}
+			continue
+		}
+		out[i].Status = gs[out[i].Path]
+	}
+	return out
 }
 
 func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
