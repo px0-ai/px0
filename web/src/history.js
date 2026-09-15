@@ -1,5 +1,5 @@
 // web/src/history.js
-import { S } from './state.js';
+import { S, RECENT_SHOWN } from './state.js';
 import { openFile } from './tabs.js';
 
 export function pushHistory(path, line) {
@@ -9,6 +9,14 @@ export function pushHistory(path, line) {
   S.hist.push({ path, line });
   if (S.hist.length > 120) S.hist.shift();
   S.histIdx = S.hist.length - 1;
+}
+
+// Moves path to the front of the recently opened list Quick Open leads with.
+export function touchRecent(path) {
+  const i = S.recent.indexOf(path);
+  if (i >= 0) S.recent.splice(i, 1);
+  S.recent.unshift(path);
+  if (S.recent.length > RECENT_SHOWN + 1) S.recent.pop();
 }
 
 export function go(delta) {
