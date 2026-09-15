@@ -63,7 +63,7 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/api/metrics`        | `GET`  | Runtime memory and GC stats (`Alloc`, `Sys`, `NumGC`, etc.)             | JSON                                       |
 | `/api/tree`           | `GET`  | Directory contents for the sidebar file explorer (`?dir=path`)          | JSON array of `Node` objects               |
 | `/api/file`           | `GET`  | Windowed, highlighted source file lines (`?path=...&start=0&count=500`) | JSON (`{lines, total, refine, markdown}`)  |
-| `/api/raw`            | `GET`  | Raw, unhighlighted file content for whole-file copies and preview assets| `text/plain` or binary                     |
+| `/api/raw`            | `GET`  | Raw file bytes for `<img>`, select-all copy, and downloads. Never a navigable document: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `application/octet-stream` except real `image/*` types. | bytes |
 | `/api/markdown`       | `GET`  | Converted HTML preview of `.md` / `.markdown` files via goldmark        | JSON (`{path, html}`)                      |
 | `/api/find`           | `GET`  | Fast fuzzy match against all indexed workspace paths (`?q=...`)         | JSON array of `FuzzyResult` objects        |
 | `/api/search`         | `GET`  | Full-text project grep with snippet elision (`?q=...&case=...&regex=...`)| JSON array of file hits and matches        |
@@ -146,6 +146,19 @@ When navigating code via LSP Go-to-Definition, targets often reside outside the 
 - Rather than opening up arbitrary filesystem reads, targets returned by the trusted LSP server are admitted into an in-memory allowlist: `extAllowed[canonicalPath] = true`.
 - `/api/file` and `/api/raw` permit reading external files only if the exact path exists in `extAllowed`.
 - External paths can never be enumerated via `/api/tree` or searched via `/api/search`.
+
+### Raw file bytes are not documents
+
+`/api/raw` exists so the UI can load image bytes and `fetch()` a file for copy. A Markdown Ctrl-click, middle-click, or typed URL would otherwise open that path as a page on px0's origin. Workspace HTML or SVG would then run with same-origin access to the rest of the API.
+
+`setRawHeaders` therefore:
+
+1. Sets `X-Content-Type-Options: nosniff` so the browser cannot invent `text/html` from content.
+1. Sets `Content-Disposition: attachment` so a top-level navigation downloads instead of rendering.
+1. Sends `application/octet-stream` for every non-image path (`.html`, `.js`, `.md`, source, …).
+1. Keeps real image types for the image viewer and Markdown `<img>` tags, including `image/svg+xml`. SVG script does not run inside `<img>`; attachment still stops a navigation from executing it as a document.
+
+`<img src>` and `fetch()` still receive the bytes. They do not honor `Content-Disposition` as a download.
 
 ### Origin Verification for Installers
 

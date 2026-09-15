@@ -512,16 +512,44 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "path": rel})
 }
 
+// handleRaw serves file bytes for <img>, fetch() (select-all copy), and similar.
+// It must never be a document the browser will execute: a Markdown Ctrl-click or a
+// typed URL would otherwise run workspace HTML/SVG on px0's origin.
 func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	abs, rel, ok := s.safePath(r.URL.Query().Get("path"))
 	if !ok {
 		fail(w, 400, "bad path")
 		return
 	}
-	if ct := mime.TypeByExtension(filepath.Ext(rel)); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
+	setRawHeaders(w, rel)
 	http.ServeFile(w, r, abs)
+}
+
+// setRawHeaders labels /api/raw so a top-level navigation downloads instead of
+// rendering, while <img> and fetch() still receive the bytes. Images keep their
+// image types (SVG included, so README images paint); everything else is an
+// opaque download. nosniff stops the browser inventing text/html from content.
+func setRawHeaders(w http.ResponseWriter, rel string) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	name := filepath.Base(rel)
+	if name == "" || name == "." {
+		name = "download"
+	}
+	name = strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, name)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	ext := strings.ToLower(filepath.Ext(rel))
+	if imageExt[ext] {
+		if ct := mime.TypeByExtension(ext); ct != "" {
+			w.Header().Set("Content-Type", ct)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
 }
 
 // handleDiff returns the unified diff of a file against HEAD. available is false

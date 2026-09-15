@@ -703,6 +703,62 @@ func TestViewerURL(t *testing.T) {
 	}
 }
 
+func TestRawDoesNotRenderAsDocument(t *testing.T) {
+	s, root := newTestServer(t)
+	htmlPath := filepath.Join(root, "pwn.html")
+	if err := os.WriteFile(htmlPath, []byte(`<html><script>document.cookie</script></html>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svgPath := filepath.Join(root, "icon.svg")
+	if err := os.WriteFile(svgPath, []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pngPath := filepath.Join(root, "dot.png")
+	if err := os.WriteFile(pngPath, []byte{0x89, 'P', 'N', 'G'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/raw?path="+url.QueryEscape(path), nil))
+		return rec
+	}
+
+	html := raw("pwn.html")
+	if html.Code != http.StatusOK {
+		t.Fatalf("html status %d", html.Code)
+	}
+	if ct := html.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/octet-stream") {
+		t.Errorf("html Content-Type = %q, want application/octet-stream", ct)
+	}
+	if html.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("html missing nosniff, got %q", html.Header().Get("X-Content-Type-Options"))
+	}
+	if disp := html.Header().Get("Content-Disposition"); !strings.HasPrefix(disp, "attachment;") || !strings.Contains(disp, "pwn.html") {
+		t.Errorf("html Content-Disposition = %q", disp)
+	}
+
+	svg := raw("icon.svg")
+	if ct := svg.Header().Get("Content-Type"); !strings.Contains(ct, "svg") {
+		t.Errorf("svg Content-Type = %q, want an image/svg type so <img> still paints", ct)
+	}
+	if svg.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("svg missing nosniff")
+	}
+	if disp := svg.Header().Get("Content-Disposition"); !strings.HasPrefix(disp, "attachment;") {
+		t.Errorf("svg Content-Disposition = %q, want attachment so navigation does not execute script", disp)
+	}
+
+	png := raw("dot.png")
+	if ct := png.Header().Get("Content-Type"); !strings.Contains(ct, "image/png") {
+		t.Errorf("png Content-Type = %q", ct)
+	}
+	if png.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("png missing nosniff")
+	}
+}
+
 func TestVersionDrivenFromVERSIONFile(t *testing.T) {
 	data, err := os.ReadFile("VERSION")
 	if err != nil {

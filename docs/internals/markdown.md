@@ -201,7 +201,7 @@ If the HTML has not arrived yet, the line waits in `d.mdLine` and `drawPreview` 
 
 ## 7. Links and History
 
-A click handler on `#md` routes plain left clicks. Modified clicks fall through to the browser, which opens the `/api/raw` href in a new tab.
+A click handler on `#md` routes plain left clicks. Modified clicks fall through to the browser, which follows the `/api/raw` href. That endpoint is an attachment (`Content-Disposition: attachment`, `nosniff`, and `application/octet-stream` except images), so the browser downloads the file instead of executing workspace HTML or SVG on px0's origin. See [architecture.md](architecture.md#raw-file-bytes-are-not-documents).
 
 - `data-anchor` without `data-path` calls `mdJump`. It pushes the current position to history, scrolls to `md-<anchor>`, and pushes the target block's line, so Alt+Left and Alt+Right move between the two.
 - `data-path` calls `mdFollow`, which handles four cases:
