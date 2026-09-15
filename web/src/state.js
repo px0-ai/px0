@@ -69,6 +69,7 @@ export const S = {
   hover: null,        // identifier the hover card is describing
   hoverAnchor: null,  // where the card was opened, to cheaply detect leaving
   lsp: { servers: [], state: 'off', server: '' },
+  checkpoint: null,   // review checkpoint from the server: {active, at, added, modified, removed}
   gen: 0,
   chW: 7.8,
   wrap: true,        // word wrap (default ON)

@@ -21,16 +21,19 @@ export async function drawTree(dir, container, depth) {
     const ig = c.ignored ? ' ignored' : '';
     const note = c.ignored ? ' (ignored by .gitignore, not searched)' : '';
     if (c.dir) {
-      const dc = c.dirty ? ' dirty' : ''; // backend marks any ancestor of a change
+      // The backend marks any ancestor of a change: git's, or the review checkpoint's.
+      const dc = (c.dirty || c.sinceDirty ? ' dirty' : '') + (c.sinceDirty ? ' ck-dirty' : '');
       return '<div class="tw"><div class="tr dir' + ig + dc + '" data-dir="' + esc(c.path) + '" style="padding-left:' + pad + 'px" title="Folder: ' + esc(c.path) + note + '">' +
         '<span class="ar"></span><span class="nm">' + esc(c.name) + '</span></div>' +
         '<div class="kids" data-kids="' + esc(c.path) + '"></div></div>';
     }
     const g = GIT_STATUS[c.status];
-    const gc = g ? ' dirty ' + g[0] : '';
+    // Changed since the review checkpoint: a dot, plus "dirty" so the filter keeps it.
+    const ck = c.since ? '<span class="ck" title="' + (c.since === 'A' ? 'Added' : 'Changed') + ' since your review checkpoint"></span>' : '';
+    const gc = (g ? ' dirty ' + g[0] : '') + (c.since ? ' dirty ck-' + c.since : '');
     const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc(c.status) + '</span>' : '';
     return '<div class="tr file' + ig + gc + '" data-file="' + esc(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc(c.path) + note + '">' +
-      '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + '</span>' + badge + '</div>';
+      '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + '</span>' + ck + badge + '</div>';
   }).join('');
 }
 

@@ -4,7 +4,7 @@ import { render, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
 import { updateStatus } from './status.js';
 import { pushHistory } from './history.js';
-import { showPanel } from './panels.js';
+import { showPanel, setCheckpoint, clearCheckpoint } from './panels.js';
 import { openFind } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { revealFile } from './tree.js';
@@ -42,6 +42,8 @@ export const COMMANDS = [
   { name: 'Select Theme…', run: () => openPalette('theme') },
   { name: 'Next Theme', run: cycleTheme },
   { name: 'Re-index Workspace', run: () => $('#btn-reindex').click() },
+  { name: withKeys('Set Review Checkpoint: badge what changes from now ({Alt+K})'), run: () => setCheckpoint() },
+  { name: 'Clear Review Checkpoint', run: () => clearCheckpoint() },
   { name: 'Close Tab', run: () => { if (S.active >= 0) closeTab(S.active); } },
   { name: 'Close All Tabs', run: () => { while (S.tabs.length) closeTab(0); } },
   { name: withKeys('Reopen Closed Tab ({Alt+Shift+T})'), run: () => reopenClosedTab() },

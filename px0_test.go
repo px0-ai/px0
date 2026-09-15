@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIgnorePatterns(t *testing.T) {
@@ -120,6 +121,102 @@ func get(t *testing.T, s *Server, url string) (int, map[string]any) {
 	var m map[string]any
 	json.Unmarshal(rec.Body.Bytes(), &m)
 	return rec.Code, m
+}
+
+// A review checkpoint badges what changed since the reader marked "now",
+// whether or not git knows about it, moves when set again, and clears cleanly.
+func TestReviewCheckpoint(t *testing.T) {
+	s, root := newTestServer(t)
+
+	post := func(url string) (int, map[string]any) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, url, nil))
+		var m map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &m)
+		return rec.Code, m
+	}
+	ck := func(m map[string]any) map[string]any {
+		c, _ := m["checkpoint"].(map[string]any)
+		return c
+	}
+	tree := func(dir string) map[string]map[string]any {
+		t.Helper()
+		_, body := get(t, s, "/api/tree?dir="+dir)
+		out := map[string]map[string]any{}
+		kids, _ := body["children"].([]any)
+		for _, k := range kids {
+			n := k.(map[string]any)
+			out[n["name"].(string)] = n
+		}
+		return out
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if code, _ := get(t, s, "/api/checkpoint"); code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /api/checkpoint = %d, want 405", code)
+	}
+	if _, m := get(t, s, "/api/meta"); ck(m)["active"] != false {
+		t.Fatalf("checkpoint active before one was set: %v", m["checkpoint"])
+	}
+
+	code, m := post("/api/checkpoint")
+	if code != http.StatusOK || ck(m)["active"] != true || ck(m)["modified"] != float64(0) || ck(m)["added"] != float64(0) {
+		t.Fatalf("set checkpoint = %d %v", code, m)
+	}
+
+	// A rewrite that changes the size, a touch that changes only the mtime, and a new file.
+	write("main.go", "package main\n\nfunc main() {\n\tgreet(\"hello again\")\n}\n")
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "sub", "deep.py"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	write("sub/new.py", "x = 1\n")
+
+	_, m = get(t, s, "/api/reindex")
+	if c := ck(m); c["added"] != float64(1) || c["modified"] != float64(2) || c["removed"] != float64(0) {
+		t.Fatalf("after edits: %v", c)
+	}
+	top := tree("")
+	if top["main.go"]["since"] != "M" {
+		t.Errorf("main.go since = %v, want M", top["main.go"]["since"])
+	}
+	if top["greet.go"]["since"] != nil {
+		t.Errorf("greet.go is untouched but marked %v", top["greet.go"]["since"])
+	}
+	if top["sub"]["sinceDirty"] != true {
+		t.Errorf("sub/ holds changed files but is not marked: %v", top["sub"])
+	}
+	in := tree("sub")
+	if in["deep.py"]["since"] != "M" || in["new.py"]["since"] != "A" {
+		t.Errorf("sub/: deep.py %v, new.py %v; want M and A", in["deep.py"]["since"], in["new.py"]["since"])
+	}
+
+	// Setting again moves the checkpoint to now: nothing has changed since.
+	if _, m := post("/api/checkpoint"); ck(m)["modified"] != float64(0) || ck(m)["added"] != float64(0) {
+		t.Errorf("moved checkpoint still reports changes: %v", ck(m))
+	}
+	if top := tree(""); top["main.go"]["since"] != nil || top["sub"]["sinceDirty"] != nil {
+		t.Errorf("marks survived moving the checkpoint: %v %v", top["main.go"], top["sub"])
+	}
+
+	// A file that disappears is counted; clearing forgets everything.
+	os.Remove(filepath.Join(root, "sub", "new.py"))
+	if _, m := get(t, s, "/api/reindex"); ck(m)["removed"] != float64(1) {
+		t.Errorf("a deleted file is not counted as removed: %v", ck(m))
+	}
+	if _, m := post("/api/checkpoint?clear=1"); ck(m)["active"] != false {
+		t.Errorf("clear left the checkpoint active: %v", ck(m))
+	}
+	if _, m := get(t, s, "/api/meta"); ck(m)["active"] != false {
+		t.Errorf("meta still reports a checkpoint after clearing: %v", ck(m))
+	}
 }
 
 func TestThemesStylesheetJoinsEveryThemeFile(t *testing.T) {

@@ -123,6 +123,16 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
 #tree.changed-only .tr.file:not(.dirty) { display: none; }
 #tree.changed-only .tw:not(:has(.dirty)) { display: none; }
 
+/* ---------- review checkpoint (tree) ---------- */
+/* A dot on files changed (amber) or added (green) since the reader marked "now"
+   with Alt+K, beside the git letter when both apply; folders holding one go amber. */
+.tr .ck { margin-left: auto; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--mark-active); }
+.tr.ck-A .ck { background: var(--gi); }
+.tr .ck + .gs { margin-left: 4px; }
+.tr.file.ck-M .nm, .tr.file.ck-A .nm { color: var(--fg); }
+.tr.dir.ck-dirty > .nm::after { background: var(--mark-active); }
+#btn-checkpoint.active { color: var(--mark-active); background: var(--bg3); }
+
 /* ---------- search panel ---------- */
 .search-form { padding: 2px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
 .search-form input, #outline-filter, #right-symbols-filter {

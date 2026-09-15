@@ -8,7 +8,7 @@ import { initSelectionBar } from './selbar.js';
 import { drawTree, treeEl, initTree, revealFile } from './tree.js';
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
-import { initPanels } from './panels.js';
+import { initPanels, updateCheckpointUI } from './panels.js';
 import { initInspector } from './inspector.js';
 import { initCalls } from './calls.js';
 import { initFind } from './find.js';
@@ -67,6 +67,9 @@ initStatusFit();
   S.meta = await api('/api/meta');
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
   if (S.meta.git) { const b = $('#btn-changed'); if (b) b.hidden = false; }
+  // A checkpoint set before this reload is still held by the server.
+  S.checkpoint = S.meta.checkpoint || null;
+  updateCheckpointUI();
   document.title = S.meta.name + ' - px0';
   $('#root-name').textContent = S.meta.name;
   $('#root-name').title = S.meta.root;

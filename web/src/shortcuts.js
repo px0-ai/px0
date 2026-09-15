@@ -13,6 +13,7 @@ import { overlay, openPalette, closePalette } from './palette.js';
 import { moveCursor, moveCol, caretToEdge } from './cursor.js';
 import { showCalls } from './calls.js';
 import { SEL_KEYS, runSelectionAction, selectAll, clearSelectAll, copySelectAll } from './selbar.js';
+import { setCheckpoint } from './panels.js';
 
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
@@ -27,6 +28,7 @@ export const SHORTCUTS = [
   [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+L'], 'Toggle line numbers'], [['Alt+M'], 'Toggle Markdown preview'],
+  [['Alt+K'], 'Set review checkpoint (badge what changes from now)'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
@@ -154,6 +156,13 @@ export function initShortcuts() {
     if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyM') {
       e.preventDefault();
       togglePreview();
+      return;
+    }
+
+    // Review checkpoint: mark now, badge what changes after.
+    if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyK') {
+      e.preventDefault();
+      setCheckpoint();
       return;
     }
 

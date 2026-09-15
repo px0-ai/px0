@@ -17,6 +17,7 @@ type FileEntry struct {
 	Size      int64  `json:"size"`
 	lower     string // cached lowercase Path for matching
 	nameStart int    // index in Path where the basename begins
+	mod       int64  // modification time in unix nanoseconds, for review checkpoints
 }
 
 type Node struct {
@@ -27,6 +28,10 @@ type Node struct {
 	Ignored bool   `json:"ignored,omitempty"` // matched by .gitignore: listed, never indexed
 	Status  string `json:"status,omitempty"`  // git working-tree status: M/A/D/?/R/C/U
 	Dirty   bool   `json:"dirty,omitempty"`   // folder: contains a git-changed descendant
+	// Review checkpoint (see SetCheckpoint): A added or M modified since it was
+	// set; SinceDirty marks a folder holding such a file.
+	Since      string `json:"since,omitempty"`
+	SinceDirty bool   `json:"sinceDirty,omitempty"`
 }
 
 // vcsDirs are version control internals. Unlike other ignored entries they are
@@ -42,6 +47,9 @@ type Index struct {
 	builtAt  time.Time
 	buildMS  int64
 	readyCh  chan struct{}
+
+	ck       *checkpoint // review checkpoint, nil while none is set
+	ckStatus Checkpoint  // what the last rebuild found against it
 }
 
 func NewIndex(root string) *Index {
@@ -224,6 +232,7 @@ func (ix *Index) Build() {
 			files = append(files, FileEntry{
 				Path: childRel, Name: name, Size: info.Size(),
 				lower: strings.ToLower(childRel), nameStart: len(childRel) - len(name),
+				mod: info.ModTime().UnixNano(),
 			})
 			mu.Unlock()
 		}
@@ -290,6 +299,7 @@ func (ix *Index) Build() {
 		}
 	}
 	ix.files, ix.children = files, children
+	ix.applyCheckpointLocked()
 	ix.builtAt, ix.buildMS = time.Now(), time.Since(start).Milliseconds()
 	select {
 	case <-ix.readyCh:
@@ -297,4 +307,109 @@ func (ix *Index) Build() {
 		close(ix.readyCh)
 	}
 	ix.mu.Unlock()
+}
+
+// ---------------------------------------------------------------- checkpoint
+
+// A review checkpoint is a snapshot of the index (path, size, mtime) taken when
+// the reader marks "now". Every rebuild compares against it so the tree can
+// badge what changed since then, with or without git. In memory only.
+type checkpoint struct {
+	at    time.Time
+	files map[string]stamp
+}
+
+type stamp struct {
+	size int64
+	mod  int64
+}
+
+// Checkpoint is what the API reports about the review checkpoint: whether one
+// is set, when, and what the last rebuild found changed against it.
+type Checkpoint struct {
+	Active   bool   `json:"active"`
+	At       string `json:"at,omitempty"` // RFC 3339
+	Added    int    `json:"added"`        // files that did not exist at the checkpoint
+	Modified int    `json:"modified"`     // files whose size or mtime changed
+	Removed  int    `json:"removed"`      // files that existed at the checkpoint and are gone
+}
+
+// SetCheckpoint rebuilds first, so the snapshot reflects the disk right now,
+// then records it. Setting again moves the checkpoint to now.
+func (ix *Index) SetCheckpoint() Checkpoint {
+	ix.Build()
+	ix.mu.Lock()
+	ck := &checkpoint{at: time.Now(), files: make(map[string]stamp, len(ix.files))}
+	for _, f := range ix.files {
+		ck.files[f.Path] = stamp{f.Size, f.mod}
+	}
+	ix.ck = ck
+	ix.applyCheckpointLocked()
+	ix.mu.Unlock()
+	return ix.Checkpoint()
+}
+
+// ClearCheckpoint forgets the snapshot and removes every since-mark.
+func (ix *Index) ClearCheckpoint() Checkpoint {
+	ix.mu.Lock()
+	ix.ck = nil
+	ix.applyCheckpointLocked()
+	ix.mu.Unlock()
+	return ix.Checkpoint()
+}
+
+// Checkpoint reports the checkpoint and the counts from the last rebuild.
+func (ix *Index) Checkpoint() Checkpoint {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return ix.ckStatus
+}
+
+// applyCheckpointLocked marks files the snapshot does not account for, and
+// their ancestor directories, mirroring the git overlay in Build. Listings are
+// replaced, not edited: a handler may still be encoding one. Caller holds ix.mu.
+func (ix *Index) applyCheckpointLocked() {
+	since := map[string]string{}
+	st := Checkpoint{}
+	if ix.ck != nil {
+		st.Active, st.At = true, ix.ck.at.Format(time.RFC3339)
+		seen := make(map[string]bool, len(ix.files))
+		for _, f := range ix.files {
+			seen[f.Path] = true
+			old, ok := ix.ck.files[f.Path]
+			switch {
+			case !ok:
+				since[f.Path] = "A"
+				st.Added++
+			case old.size != f.Size || old.mod != f.mod:
+				since[f.Path] = "M"
+				st.Modified++
+			}
+		}
+		for p := range ix.ck.files {
+			if !seen[p] {
+				st.Removed++
+			}
+		}
+	}
+	dirty := map[string]bool{}
+	for p := range since {
+		for i := strings.LastIndexByte(p, '/'); i >= 0; i = strings.LastIndexByte(p, '/') {
+			p = p[:i]
+			dirty[p] = true
+		}
+	}
+	for dir, kids := range ix.children {
+		out := make([]Node, len(kids))
+		copy(out, kids)
+		for i := range out {
+			if out[i].Dir {
+				out[i].SinceDirty = dirty[out[i].Path]
+			} else {
+				out[i].Since = since[out[i].Path]
+			}
+		}
+		ix.children[dir] = out
+	}
+	ix.ckStatus = st
 }

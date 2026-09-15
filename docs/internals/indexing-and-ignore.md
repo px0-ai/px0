@@ -94,6 +94,7 @@ type FileEntry struct {
     Size      int64  `json:"size"`      // File size in bytes
     lower     string // Precomputed lowercase Path for instant matching
     nameStart int    // Index in Path where the basename begins
+    mod       int64  // Modification time (unix ns), compared against a review checkpoint
 }
 ```
 
@@ -111,6 +112,8 @@ type Node struct {
     Ignored bool   `json:"ignored,omitempty"` // Matched by .gitignore: listed, never indexed
     Status  string `json:"status,omitempty"`  // Git status: M, A, D, U, etc.
     Dirty   bool   `json:"dirty,omitempty"`   // Contains git-modified descendants
+    Since      string `json:"since,omitempty"`      // Review checkpoint: A added or M modified since it was set
+    SinceDirty bool   `json:"sinceDirty,omitempty"` // Folder holding a file changed since the checkpoint
 }
 ```
 
@@ -161,3 +164,21 @@ px0 implements a clear distinction between ignored entries and version control i
 1. Version Control Internals (`.git`, `.hg`, `.svn`): Dropped completely. They are neither indexed nor listed in `/api/tree`.
 1. Ignored Directories (`node_modules/`, `target/`, etc.): Added to the parent node listing with `Ignored: true`. Never descended into during `Index.Build()`. Never entered into the flat `files` slice used by fuzzy find and workspace search. The file explorer displays them with dimmed opacity.
 1. On-Demand Expansion (`Index.Children` & `listIgnored`): If the user clicks to expand an ignored folder in the explorer sidebar, `Children()` detects that the directory was ignored and reads only that single directory from disk on demand (`os.ReadDir`). Every child inside it is marked `Ignored: true`, adhering to git semantics: nothing beneath an excluded directory can be re-included. Traversal protection (`underIgnoredLocked`) ensures that crafted paths with `.` or `..` segments are rejected before accessing the filesystem.
+
+## 5. Review Checkpoints (Changes Since "Now")
+
+Git awareness answers "what is dirty against `HEAD`". A review checkpoint answers a different question: "what moved since I last looked". Agents edit in bursts and commit whenever they like, so between two commits the git view can go quiet while files keep changing. The checkpoint is independent of git and works in a plain directory.
+
+### Mechanics
+
+1. Setting (`Index.SetCheckpoint`, `POST /api/checkpoint`): the index is rebuilt first so the snapshot reflects the disk at this instant rather than at the last walk, then every indexed file's path, size and modification time (`FileEntry.mod`, captured for free from the `DirEntry.Info()` the walk already calls) is copied into an in-memory `checkpoint`. Setting again moves the checkpoint to now.
+1. Comparing (`applyCheckpointLocked`): every `Index.Build()` ends by comparing the fresh file list against the snapshot. A path absent from the snapshot is marked `Since: "A"`; a path whose size or mtime differs is `Since: "M"`; a snapshot path no longer on disk is counted as removed. Ancestor directories of a marked file get `SinceDirty: true`, the same propagation the git overlay uses, so a collapsed folder can badge without the frontend fetching its subtree.
+1. Reporting (`Index.Checkpoint`): `/api/meta`, `/api/reindex` and `/api/checkpoint` all carry `{active, at, added, modified, removed}`, so the UI restores the state after a browser reload and can show counts on the header button.
+1. Clearing (`Index.ClearCheckpoint`, `POST /api/checkpoint?clear=1`): drops the snapshot and every mark.
+
+### Constraints Held
+
+- Zero disk state: the snapshot is a map in the `Index`; it lives exactly as long as the process.
+- Cost: one `map[string]stamp` of the file list (tens of bytes per file) and one pass over the file list per rebuild, which is already O(files).
+- Concurrency: marks are applied by replacing each directory's listing rather than editing it in place, because a handler may still be encoding the slice it fetched a moment earlier.
+- Not yet covered: removed files are counted but not listed in the tree, since the walk only produces nodes for what exists on disk. Listing them is a natural follow-up once the tree can carry entries that no longer exist.

@@ -59,7 +59,7 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/`                   | `GET`  | Serves `web/index.html` (embedded or `-dev` disk copy)                  | `text/html; charset=utf-8`                 |
 | `/static/*`           | `GET`  | Serves bundled JavaScript, CSS, and static assets                       | Asset MIME type                            |
 | `/static/themes.css`  | `GET`  | Concatenates all `web/themes/*.css` files in alphanumeric order         | `text/css; charset=utf-8`                  |
-| `/api/meta`           | `GET`  | Workspace metadata (root path, file count, index duration, git status)  | JSON (`{root, name, files, build_ms, git}`)|
+| `/api/meta`           | `GET`  | Workspace metadata (root path, file count, index duration, git status, review checkpoint) | JSON (`{root, name, files, indexMs, git, checkpoint}`)|
 | `/api/metrics`        | `GET`  | Runtime memory and GC stats (`Alloc`, `Sys`, `NumGC`, etc.)             | JSON                                       |
 | `/api/tree`           | `GET`  | Directory contents for the sidebar file explorer (`?dir=path`)          | JSON array of `Node` objects               |
 | `/api/file`           | `GET`  | Windowed, highlighted source file lines (`?path=...&start=0&count=500`) | JSON (`{lines, total, refine, markdown}`)  |
@@ -71,7 +71,8 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/api/def`            | `GET`  | Quick definition lookup fallback                                        | JSON array of matching definition locations|
 | `/api/diff`           | `GET`  | Unified diff of working tree vs. `HEAD` (`?path=...`)                   | JSON (`{path, diff, available}`)           |
 | `/api/gutter`         | `GET`  | Per-line change markers for code view gutter                            | JSON (`{added, modified, deleted}`)        |
-| `/api/reindex`        | `POST` | Re-runs index walk and git status on demand (triggers frontend tab reload; see [`file-reload-and-updates.md`](file-reload-and-updates.md)) | JSON (`{files, indexMs}`)                  |
+| `/api/reindex`        | `POST` | Re-runs index walk and git status on demand (triggers frontend tab reload; see [`file-reload-and-updates.md`](file-reload-and-updates.md)) | JSON (`{files, indexMs, checkpoint}`)      |
+| `/api/checkpoint`     | `POST` | Sets a review checkpoint (in-memory snapshot of every indexed file's path, size and mtime) or clears it with `?clear=1`; the tree then badges files added or changed since (see [`indexing-and-ignore.md`](indexing-and-ignore.md)) | JSON (`{checkpoint, files, indexMs}`)      |
 | `/api/lsp/def`        | `GET`  | Go-to-Definition via LSP (`?path=...&line=...&col=...`)                 | JSON array of target locations             |
 | `/api/lsp/refs`       | `GET`  | Find References via LSP                                                 | JSON array of reference locations          |
 | `/api/lsp/calls`      | `POST` | Incoming/outgoing call hierarchy tree expansion                         | JSON array of `CallNode` objects           |

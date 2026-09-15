@@ -67,6 +67,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
 	s.mux.HandleFunc("/api/def", s.handleDef)
 	s.mux.HandleFunc("/api/reindex", s.handleReindex)
+	s.mux.HandleFunc("/api/checkpoint", s.handleCheckpoint)
 	s.mux.HandleFunc("/api/lsp/def", s.handleLSPDef)
 	s.mux.HandleFunc("/api/lsp/refs", s.handleLSPRefs)
 	s.mux.HandleFunc("/api/lsp/calls", s.handleLSPCalls)
@@ -229,6 +230,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"lspServers": s.lsp.Available(),
 		"metrics":    getProcessMetrics(),
 		"version":    version,
+		"checkpoint": s.ix.Checkpoint(),
 	})
 }
 
@@ -660,5 +662,23 @@ func (s *Server) handleDef(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	s.ix.Build()
 	n, _, ms := s.ix.Stats()
-	writeJSON(w, map[string]any{"files": n, "indexMs": ms})
+	writeJSON(w, map[string]any{"files": n, "indexMs": ms, "checkpoint": s.ix.Checkpoint()})
+}
+
+// handleCheckpoint sets a review checkpoint, or clears it with clear=1, and
+// answers like a reindex. POST only, but no origin check: it is in-memory
+// state, and must keep working when px0 is reached by hostname, not IP.
+func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		fail(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var ck Checkpoint
+	if r.URL.Query().Get("clear") == "1" {
+		ck = s.ix.ClearCheckpoint()
+	} else {
+		ck = s.ix.SetCheckpoint()
+	}
+	n, _, ms := s.ix.Stats()
+	writeJSON(w, map[string]any{"checkpoint": ck, "files": n, "indexMs": ms})
 }

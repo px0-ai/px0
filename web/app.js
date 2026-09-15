@@ -66,6 +66,7 @@
     hover: null,
     hoverAnchor: null,
     lsp: { servers: [], state: "off", server: "" },
+    checkpoint: null,
     gen: 0,
     chW: 7.8,
     wrap: true,
@@ -630,13 +631,14 @@
       const ig = c.ignored ? " ignored" : "";
       const note = c.ignored ? " (ignored by .gitignore, not searched)" : "";
       if (c.dir) {
-        const dc = c.dirty ? " dirty" : "";
+        const dc = (c.dirty || c.sinceDirty ? " dirty" : "") + (c.sinceDirty ? " ck-dirty" : "");
         return '<div class="tw"><div class="tr dir' + ig + dc + '" data-dir="' + esc(c.path) + '" style="padding-left:' + pad + 'px" title="Folder: ' + esc(c.path) + note + '">' + '<span class="ar"></span><span class="nm">' + esc(c.name) + "</span></div>" + '<div class="kids" data-kids="' + esc(c.path) + '"></div></div>';
       }
       const g = GIT_STATUS[c.status];
-      const gc = g ? " dirty " + g[0] : "";
+      const ck = c.since ? '<span class="ck" title="' + (c.since === "A" ? "Added" : "Changed") + ' since your review checkpoint"></span>' : "";
+      const gc = (g ? " dirty " + g[0] : "") + (c.since ? " dirty ck-" + c.since : "");
       const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc(c.status) + "</span>" : "";
-      return '<div class="tr file' + ig + gc + '" data-file="' + esc(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc(c.path) + note + '">' + '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + "</span>" + badge + "</div>";
+      return '<div class="tr file' + ig + gc + '" data-file="' + esc(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc(c.path) + note + '">' + '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + "</span>" + ck + badge + "</div>";
     }).join("");
   }
   var FILE_KIND = {
@@ -767,18 +769,67 @@
     layout();
     render();
   }
-  function initPanels() {
-    $("#btn-reindex").addEventListener("click", async () => {
+  async function refreshWorkspace(j) {
+    if (!j) {
       $("#st-index").textContent = "reindexing…";
-      const j = await api("/api/reindex");
-      S2.meta.files = j.files;
-      S2.meta.indexMs = j.indexMs;
-      treeEl.innerHTML = "";
-      openDirs.clear();
-      await drawTree("", treeEl, 0);
-      await reloadOpenTabs();
-      updateStatus();
-    });
+      j = await api("/api/reindex");
+    }
+    S2.meta.files = j.files;
+    S2.meta.indexMs = j.indexMs;
+    if (j.checkpoint)
+      S2.checkpoint = j.checkpoint;
+    treeEl.innerHTML = "";
+    openDirs.clear();
+    await drawTree("", treeEl, 0);
+    await reloadOpenTabs();
+    updateCheckpointUI();
+    updateStatus();
+  }
+  async function setCheckpoint() {
+    let j;
+    try {
+      j = await apiPost("/api/checkpoint");
+    } catch (e) {
+      showToast("!", "Could not set checkpoint: " + e.message);
+      return;
+    }
+    await refreshWorkspace(j);
+    showToast("Checkpoint set", "files that change from now on are badged");
+  }
+  async function clearCheckpoint() {
+    let j;
+    try {
+      j = await apiPost("/api/checkpoint", { clear: 1 });
+    } catch (e) {
+      showToast("!", "Could not clear checkpoint: " + e.message);
+      return;
+    }
+    await refreshWorkspace(j);
+    showToast("Checkpoint cleared", "tree badges follow git again");
+  }
+  function updateCheckpointUI() {
+    const ck = S2.checkpoint;
+    const on = !!(ck && ck.active);
+    const b = $("#btn-checkpoint");
+    if (b) {
+      b.classList.toggle("active", on);
+      b.title = on ? withKeys("Review checkpoint set " + ago(ck.at) + ": " + ck.added + " added, " + ck.modified + " changed, " + ck.removed + " removed since. Click to move it to now ({Alt+K}). Clear it from the command palette.") : withKeys("Set review checkpoint: badge what changes from now on ({Alt+K})");
+    }
+    const f = $("#btn-changed");
+    if (f && (S2.meta?.git || on))
+      f.hidden = false;
+  }
+  function ago(iso) {
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60)
+      return s + "s ago";
+    if (s < 3600)
+      return Math.round(s / 60) + "m ago";
+    return Math.round(s / 3600) + "h ago";
+  }
+  function initPanels() {
+    $("#btn-reindex").addEventListener("click", () => refreshWorkspace());
+    $("#btn-checkpoint")?.addEventListener("click", () => setCheckpoint());
     (() => {
       const rz = $("#resizer");
       let dragging = false;
@@ -3373,6 +3424,7 @@
     [["Alt+Z"], "Toggle word wrap"],
     [["Alt+L"], "Toggle line numbers"],
     [["Alt+M"], "Toggle Markdown preview"],
+    [["Alt+K"], "Set review checkpoint (badge what changes from now)"],
     [["Enter", "Shift+Enter"], "Next / previous match"],
     [["F12", "Mod+Click"], "Go to definition"],
     [["Shift+F12"], "Find all references"],
@@ -3593,6 +3645,11 @@
         togglePreview();
         return;
       }
+      if (e.altKey && !mod && !e.shiftKey && e.code === "KeyK") {
+        e.preventDefault();
+        setCheckpoint();
+        return;
+      }
       if (inField(document.activeElement))
         return;
       const plainMod = mod && !e.shiftKey && !e.altKey;
@@ -3732,6 +3789,8 @@
     { name: "Select Theme…", run: () => openPalette("theme") },
     { name: "Next Theme", run: cycleTheme },
     { name: "Re-index Workspace", run: () => $("#btn-reindex").click() },
+    { name: withKeys("Set Review Checkpoint: badge what changes from now ({Alt+K})"), run: () => setCheckpoint() },
+    { name: "Clear Review Checkpoint", run: () => clearCheckpoint() },
     { name: "Close Tab", run: () => {
       if (S2.active >= 0)
         closeTab(S2.active);
@@ -3964,6 +4023,8 @@
       if (b)
         b.hidden = false;
     }
+    S2.checkpoint = S2.meta.checkpoint || null;
+    updateCheckpointUI();
     document.title = S2.meta.name + " - px0";
     $("#root-name").textContent = S2.meta.name;
     $("#root-name").title = S2.meta.root;

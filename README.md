@@ -46,6 +46,7 @@ make dist
 - **Remote-First, Zero SSH Hassle**: Spin up on any remote server, cloud instance, or runner in < 1 ms. Inspect remote code in your local browser over a single port (Tailscale, WireGuard, reverse proxy, or tunnel) without SSH key setups, port forwarding churn, or remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
 - **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
+- **Review Checkpoint**: Press `Alt+K` to mark "now". From then on the tree badges every file added or changed since, with or without git, so an agent's edits between commits are never invisible. The snapshot lives in memory; nothing is written to disk.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (Tokyo Night, Catppuccin, Dracula, GitHub Dark, Gruvbox, Nord, Solarized, and more).
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
@@ -190,6 +191,7 @@ px0 --update
 | `Left` / `Right`, `Home` / `End` (`Cmd+Left` / `Cmd+Right` on macOS) | Move the (read-only) caret along the line; click places it                                 |
 | `Ctrl+Home` / `Ctrl+End` (`Cmd+Up` / `Cmd+Down` on macOS)            | Top / bottom of file                                                                       |
 | `Alt+Z` / `Alt+L`                                      | Toggle word wrap / line numbers                                                            |
+| `Alt+K`                                                | Set review checkpoint: badge files that change from now on (clear it from the palette)     |
 | `Alt+C` / `Alt+A` / `Alt+U`                            | With code selected: copy reference / copy for agent / find usages                          |
 | `Alt+Shift+H`                                          | Call trail: callers and callees of the function under the cursor, expandable level by level|
 | `Hover`                                                | Type signature & doc hover                                                                 |
