@@ -28,6 +28,7 @@ func main() {
 	var (
 		port         = flag.Int("port", 7777, "port to listen on (0 picks a free one)")
 		host         = flag.String("host", "127.0.0.1", "address to bind")
+		portless     = flag.Bool("portless", false, "serve at http://<workspace>.localhost (uses port 80)")
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
@@ -83,7 +84,22 @@ func main() {
 		fatal(err)
 	}
 
-	ln, addr, err := listen(*host, *port)
+	listenPort := *port
+	urlHost := ""
+	if *portless {
+		if listenPort == 7777 {
+			listenPort = 80
+		}
+		urlHost = localhostName(filepath.Base(root))
+	}
+
+	var ln net.Listener
+	var addr string
+	if *portless {
+		ln, addr, err = listenExact(*host, listenPort)
+	} else {
+		ln, addr, err = listen(*host, listenPort)
+	}
 	if err != nil {
 		fatal(err)
 	}
@@ -96,6 +112,12 @@ func main() {
 	srv := &http.Server{Handler: NewServer(ix, lsp)}
 
 	url := viewerURL(addr, initialFile, initialLine)
+	if urlHost != "" {
+		url = viewerURL(net.JoinHostPort(urlHost+".localhost", strconv.Itoa(listenPort)), initialFile, initialLine)
+		if listenPort == 80 {
+			url = viewerURL(urlHost+".localhost", initialFile, initialLine)
+		}
+	}
 	uiHeading("px0 "+version, nil, os.Stdout)
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
@@ -157,6 +179,27 @@ func main() {
 	if err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
+}
+
+func localhostName(base string) string {
+	base = strings.ToLower(base)
+	var b strings.Builder
+	separator := false
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if separator && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			separator = false
+		} else if b.Len() > 0 {
+			separator = true
+		}
+	}
+	if b.Len() == 0 {
+		return "px0"
+	}
+	return b.String()
 }
 
 // resolveTarget turns a directory or file into a workspace root, along with an optional
@@ -281,6 +324,15 @@ func listen(host string, port int) (net.Listener, string, error) {
 		return ln, ln.Addr().String(), nil
 	}
 	return nil, "", fmt.Errorf("no free port available starting from %d", port)
+}
+
+func listenExact(host string, port int) (net.Listener, string, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot serve portless URL on %s: %w", addr, err)
+	}
+	return ln, addr, nil
 }
 
 func openBrowser(url string) {
