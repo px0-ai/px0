@@ -466,6 +466,10 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"path": rel, "image": true, "size": st.Size()})
 		return
 	}
+	if strings.ToLower(filepath.Ext(rel)) == ".pdf" {
+		writeJSON(w, map[string]any{"path": rel, "pdf": true, "size": st.Size()})
+		return
+	}
 
 	d, err := Open(abs, rel)
 	if err != nil {

@@ -575,6 +575,9 @@ body.hide-lines .c { padding-left: 16px; }
 #imgview { position: absolute; inset: 0; display: grid; place-items: center; overflow: auto; padding: 32px; }
 #imgview img { max-width: 100%; image-rendering: pixelated; box-shadow: var(--shadow); background: repeating-conic-gradient(var(--bg3) 0 25%, transparent 0 50%) 0 0/16px 16px; }
 
+#pdfview { position: absolute; inset: 0; background: var(--bg3); }
+#pdfview iframe { width: 100%; height: 100%; border: 0; }
+
 #empty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); }
 .empty-inner { text-align: center; color: var(--faint); }
 .empty-logo { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin-bottom: 28px; }

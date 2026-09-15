@@ -2950,6 +2950,10 @@
         showImage(path);
         return;
       }
+      if (j.pdf) {
+        showPdf(path);
+        return;
+      }
       const hasDiff = !!j.diffAvailable;
       const d2 = {
         path,
@@ -2990,6 +2994,7 @@
     const d = S2.tabs[idx];
     $("#empty").hidden = true;
     hideImage();
+    hidePdf();
     syncPreview();
     syncDiffView();
     if (!S2.at || S2.at.path !== d.path)
@@ -3071,7 +3076,7 @@
         continue;
       }
       const j = res.value;
-      if (j.image)
+      if (j.image || j.pdf)
         continue;
       const keep = tgt.oldDoc;
       const hasDiff = !!j.diffAvailable;
@@ -3246,6 +3251,19 @@
   }
   function hideImage() {
     const b = $("#imgview");
+    if (b)
+      b.remove();
+  }
+  function showPdf(path) {
+    hidePdf();
+    const box = document.createElement("div");
+    box.id = "pdfview";
+    box.innerHTML = '<iframe src="/api/raw?path=' + encodeURIComponent(path) + '" title="PDF preview"></iframe>';
+    editor.appendChild(box);
+    $("#empty").hidden = true;
+  }
+  function hidePdf() {
+    const b = $("#pdfview");
     if (b)
       b.remove();
   }
