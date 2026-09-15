@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -99,6 +100,11 @@ func main() {
 	uiHeading("px0 "+version, nil, os.Stdout)
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
+	if *host == "0.0.0.0" {
+		for _, networkURL := range networkURLs(addr, initialFile, initialLine) {
+			uiKV("network", uiAccent(networkURL, os.Stdout), 11, os.Stdout)
+		}
+	}
 	uiHint("ctrl-c to stop", os.Stdout)
 
 	// Launch browser immediately without blocking startup.
@@ -257,6 +263,53 @@ func viewerURL(addr, initialFile string, initialLine int) string {
 		u.RawQuery = q.Encode()
 	}
 	return u.String()
+}
+
+// networkURLs returns URLs for the machine's non-loopback IPv4 addresses.
+// The supplied address contributes the bound port; its host is intentionally
+// ignored because a bind address is not necessarily a usable destination.
+func networkURLs(addr, initialFile string, initialLine int) []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	return networkURLsFromAddrs(addr, initialFile, initialLine, addrs)
+}
+
+func networkURLsFromAddrs(addr, initialFile string, initialLine int, addrs []net.Addr) []string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	urls := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		var ip net.IP
+		switch a := addr.(type) {
+		case *net.IPNet:
+			ip = a.IP
+		case *net.IPAddr:
+			ip = a.IP
+		default:
+			continue
+		}
+
+		ip = ip.To4()
+		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+			continue
+		}
+
+		host := ip.String()
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		urls = append(urls, viewerURL(net.JoinHostPort(host, port), initialFile, initialLine))
+	}
+
+	sort.Strings(urls)
+	return urls
 }
 
 // listen binds the requested port, walking forward if it is already taken so a

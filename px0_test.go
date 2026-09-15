@@ -703,6 +703,25 @@ func TestViewerURL(t *testing.T) {
 	}
 }
 
+func TestNetworkURLs(t *testing.T) {
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("192.168.1.20"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+		&net.IPNet{IP: net.ParseIP("10.0.0.4"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("192.168.1.20"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},
+	}
+
+	got := networkURLsFromAddrs("0.0.0.0:7777", "main.go", 42, addrs)
+	want := []string{
+		"http://10.0.0.4:7777?line=42&path=main.go",
+		"http://192.168.1.20:7777?line=42&path=main.go",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("networkURLsFromAddrs = %v, want %v", got, want)
+	}
+}
+
 func TestVersionDrivenFromVERSIONFile(t *testing.T) {
 	data, err := os.ReadFile("VERSION")
 	if err != nil {
