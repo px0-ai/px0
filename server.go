@@ -104,9 +104,18 @@ func (s *Server) scavenge() {
 	}
 }
 
+// contentSecurityPolicy is sent on every response. script-src 'self' is the load-bearing
+// rule: the shell only has /static/app.js, so injected inline script (a workspace HTML
+// document, a sanitizer miss) does not run. style-src allows the UI's inline style
+// attributes (tree indent, minimap) and Google Fonts; img-src allows Markdown https
+// images, data: URLs, and px0.ai logos. form-action and object-src stay closed: px0
+// has no forms and no plugins.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: http:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.lastReq.Store(time.Now().UnixNano())
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		s.mux.ServeHTTP(w, r)
 		return

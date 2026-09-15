@@ -122,6 +122,31 @@ func get(t *testing.T, s *Server, url string) (int, map[string]any) {
 	return rec.Code, m
 }
 
+func TestContentSecurityPolicy(t *testing.T) {
+	s, _ := newTestServer(t)
+	for _, path := range []string{"/", "/api/meta", "/static/style.css"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		csp := rec.Header().Get("Content-Security-Policy")
+		if csp != contentSecurityPolicy {
+			t.Errorf("%s: Content-Security-Policy = %q", path, csp)
+		}
+		for _, need := range []string{
+			"script-src 'self'",
+			"object-src 'none'",
+			"base-uri 'none'",
+			"frame-ancestors 'none'",
+		} {
+			if !strings.Contains(csp, need) {
+				t.Errorf("%s: CSP missing %q", path, need)
+			}
+		}
+		if strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'unsafe-inline'") {
+			t.Errorf("%s: CSP allows inline or eval script: %q", path, csp)
+		}
+	}
+}
+
 func TestThemesStylesheetJoinsEveryThemeFile(t *testing.T) {
 	s, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
