@@ -411,7 +411,8 @@ export function initMarkdown() {
     const copy = e.target.closest('.md-copy');
     if (copy) { copyToClipboard($('pre', copy.parentElement).textContent, 'Copied code block'); return; }
     const a = e.target.closest('a');
-    // Modified clicks keep the browser's behaviour: the href opens the raw file.
+    // Modified clicks keep the browser's behaviour: the href hits /api/raw, which
+    // is an attachment, so the file downloads instead of rendering as a document.
     if (!a || e.button !== 0 || e[MOD] || e.shiftKey) return;
     if ('path' in a.dataset) { e.preventDefault(); mdFollow(a.dataset.path, a.dataset.anchor || ''); }
     else if ('anchor' in a.dataset) { e.preventDefault(); mdJump(a.dataset.anchor); }
