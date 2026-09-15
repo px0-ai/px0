@@ -269,6 +269,11 @@ Contributions that keep px0 fast, minimal, and dependable are welcome. Please re
   ```bash
   go run . -dev . .
   ```
+   For a stable named local URL, use px0's built-in portless mode:
+   ```bash
+   px0 --portless .
+   ```
+   This serves the workspace at `http://<workspace>.localhost` without HTTPS. The mode uses port 80, so the first launch may require permission to bind that port. Use normal `px0` when you want the default high-port behavior.
 1. Verify CLI formatting and builds:
   ```bash
   go vet ./...
