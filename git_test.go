@@ -276,6 +276,92 @@ func TestGitGutter(t *testing.T) {
 	}
 }
 
+func TestGitBlame(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Two commits so the parser has to dedupe across more than one hash, then
+	// an uncommitted edit so a line comes back as "Not Committed Yet". Line
+	// numbers must match the file as written to disk -- no remapping needed.
+	write("f.go", "alpha\nbravo\ncharlie\n")
+	write("untr.go", "new\n")
+	run("init")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "T")
+	run("config", "commit.gpgsign", "false")
+	run("add", "f.go")
+	run("commit", "-qm", "first")
+	write("f.go", "alpha\nBRAVO\ncharlie\n")
+	run("add", "f.go")
+	run("commit", "-qm", "second")
+	write("f.go", "alpha\nBRAVO\ncharlie-dirty\n")
+
+	ix := NewIndex(root)
+	ix.Build()
+	s := NewServer(ix, nil)
+
+	code, body := get(t, s, "/api/blame?path=f.go")
+	if code != 200 {
+		t.Fatalf("blame status %d", code)
+	}
+	if body["available"] != true {
+		t.Fatalf("available = %v, want true (%v)", body["available"], body)
+	}
+	commits := body["commits"].([]any)
+	lines := body["lines"].([]any)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %v, want 3 entries", lines)
+	}
+	if len(commits) != 3 {
+		t.Fatalf("commits = %v, want 3 distinct entries (first, second, uncommitted)", commits)
+	}
+	commitAt := func(i int) map[string]any {
+		return commits[int(lines[i].(float64))].(map[string]any)
+	}
+	if commitAt(0)["author"] != "T" || commitAt(0)["summary"] != "first" {
+		t.Errorf("line 1 = %v, want author T / summary %q", commitAt(0), "first")
+	}
+	if commitAt(1)["author"] != "T" || commitAt(1)["summary"] != "second" {
+		t.Errorf("line 2 = %v, want author T / summary %q", commitAt(1), "second")
+	}
+	if commitAt(2)["author"] != "Not Committed Yet" || commitAt(2)["hash"] != zeroBlameHash {
+		t.Errorf("line 3 (dirty) = %v, want author %q / hash %q", commitAt(2), "Not Committed Yet", zeroBlameHash)
+	}
+
+	// An untracked file has no blame -> available:false, never 500.
+	code, body = get(t, s, "/api/blame?path=untr.go")
+	if code != 200 || body["available"] != false {
+		t.Errorf("untracked: status=%d available=%v, want 200/false", code, body["available"])
+	}
+
+	// git disabled -> available:false, no shell-out.
+	gitDisabled = true
+	_, body = get(t, s, "/api/blame?path=f.go")
+	gitDisabled = false
+	if body["available"] != false {
+		t.Errorf("blame available = %v with -no-git, want false", body["available"])
+	}
+}
+
 func BenchmarkGitStatus(b *testing.B) {
 	if !gitInstalled() {
 		b.Skip("git not installed")
