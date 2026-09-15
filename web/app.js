@@ -3626,6 +3626,7 @@
     [["Mod+Shift+P"], "Command palette"],
     [["Mod+Shift+O"], "Go to symbol"],
     [["Mod+Shift+F"], "Search in files"],
+    [["Mod+Shift+M"], "Show problems"],
     [["Mod+F"], "Find in file"],
     [["Mod+G"], "Go to line"],
     [["Mod+D"], "Toggle diff view (git)"],
@@ -3756,6 +3757,11 @@
         e.preventDefault();
         showRightInspector("search");
         $("#q")?.select();
+        return;
+      }
+      if (mod && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        e.preventDefault();
+        showRightInspector("problems");
         return;
       }
       if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
@@ -3965,6 +3971,7 @@
     { name: "Go to Symbol in File…", run: () => openPalette("symbol") },
     { name: "Go to Line…", run: () => openPalette("line") },
     { name: "Search in Files", run: () => showRightInspector("search") },
+    { name: withKeys("Show Problems ({Mod+Shift+M})"), run: () => showRightInspector("problems") },
     { name: "Find in Current File", run: () => openFind(S2.lastWord) },
     { name: "Go to Definition", run: () => gotoDefinition() },
     { name: "Find All References (Right Panel)", run: () => findReferences() },
