@@ -267,18 +267,22 @@ func (ix *Index) Build() {
 	// the walk above); nil when git is unavailable or off.
 	gs := <-gsCh
 
-	// Every ancestor directory of a changed file is dirty, so a collapsed folder
-	// can badge without the frontend fetching its subtree.
-	dirtyDirs := map[string]bool{}
-	for p := range gs {
-		for i := strings.LastIndexByte(p, '/'); i >= 0; i = strings.LastIndexByte(p, '/') {
-			p = p[:i]
-			dirtyDirs[p] = true
-		}
-	}
-
 	ix.mu.Lock()
 	if gs != nil {
+		for p, code := range gs {
+			if code == "D" {
+				addDeletedNode(children, p)
+			}
+		}
+		// Every ancestor directory of a changed file is dirty, so a collapsed folder
+		// can badge without the frontend fetching its subtree.
+		dirtyDirs := map[string]bool{}
+		for p := range gs {
+			for i := strings.LastIndexByte(p, '/'); i >= 0; i = strings.LastIndexByte(p, '/') {
+				p = p[:i]
+				dirtyDirs[p] = true
+			}
+		}
 		for _, kids := range children {
 			for i := range kids {
 				if kids[i].Dir {
@@ -287,6 +291,7 @@ func (ix *Index) Build() {
 					kids[i].Status = code
 				}
 			}
+			sortNodes(kids)
 		}
 	}
 	ix.files, ix.children = files, children
@@ -297,4 +302,41 @@ func (ix *Index) Build() {
 		close(ix.readyCh)
 	}
 	ix.mu.Unlock()
+}
+
+func addDeletedNode(children map[string][]Node, path string) {
+	if path == "" || strings.ContainsRune(path, '\\') {
+		return
+	}
+	parts := strings.Split(path, "/")
+	dir := ""
+	for i := 0; i < len(parts)-1; i++ {
+		name := parts[i]
+		if name == "" || name == "." || name == ".." {
+			return
+		}
+		child := name
+		if dir != "" {
+			child = dir + "/" + name
+		}
+		ensureChildNode(children, dir, Node{Name: name, Path: child, Dir: true})
+		if _, ok := children[child]; !ok {
+			children[child] = nil
+		}
+		dir = child
+	}
+	name := parts[len(parts)-1]
+	if name == "" || name == "." || name == ".." {
+		return
+	}
+	ensureChildNode(children, dir, Node{Name: name, Path: path, Status: "D"})
+}
+
+func ensureChildNode(children map[string][]Node, dir string, node Node) {
+	for i := range children[dir] {
+		if children[dir][i].Name == node.Name {
+			return
+		}
+	}
+	children[dir] = append(children[dir], node)
 }
