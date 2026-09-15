@@ -1,15 +1,24 @@
 // web/src/panels.js
-import { $, $$, S, api } from './state.js';
+import { $, $$, S, api, doc_ } from './state.js';
 import { layout, render } from './renderer.js';
 import { updateStatus } from './status.js';
 import { loadOutline } from './outline.js';
-import { treeEl, openDirs, drawTree } from './tree.js';
+import { treeEl, openDirs, drawTree, flushPendingReveal, syncTreeSelection } from './tree.js';
 import { reloadOpenTabs } from './tabs.js';
 
-export function showPanel(name) {
-  document.body.classList.remove('side-hidden');
+/* Single entry point for sidebar visibility. Everything that shows the
+   sidebar goes through here so a reveal deferred while it was hidden gets
+   replayed, and so the editor is always re-laid out for the new width. */
+export function toggleSidebar(show) {
+  const hide = show === undefined ? !document.body.classList.contains('side-hidden') : !show;
+  document.body.classList.toggle('side-hidden', hide);
+  if (!hide) flushPendingReveal();
   layout();
   render();
+}
+
+export function showPanel(name) {
+  toggleSidebar(true);
 }
 
 export function initPanels() {
@@ -22,6 +31,9 @@ export function initPanels() {
     // Reindex is a refresh: re-fetch open tabs quietly in place without tab switching.
     await reloadOpenTabs();
     updateStatus();
+    // The tree was rebuilt from scratch above, so put the selection back on
+    // the file the user is actually looking at.
+    syncTreeSelection(doc_()?.path);
   });
 
   /* sidebar resize */
