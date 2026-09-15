@@ -13,6 +13,7 @@ import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
 import { syncDiffView, layoutPref } from './diff.js';
+import { clearDiagnostics, drawDiagnostics, emptyDiagnostics } from './diagnostics.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
@@ -40,6 +41,7 @@ export async function openFile(path, opts = {}) {
       size: j.size, lines: new Array(j.total), chunks: new Set([start / CHUNK]),
       pending: new Set(), refining: new Set(), scrollTop: 0, cur: line || 1,
       outline: null, gen: 0, markdown: !!j.markdown, gutter: null,
+      diagnostics: emptyDiagnostics(), fileError: '',
       diffMode: hasDiff ? (layoutPref() || 'split') : null,
       diffAvailable: hasDiff,
       diffDismissed: false,
@@ -65,6 +67,7 @@ export async function openFile(path, opts = {}) {
   S.lsp.state = (d.lsp && d.lsp.state) || 'off';
   S.lsp.server = (d.lsp && d.lsp.server) || '';
   S.lsp.missing = (d.lsp && d.lsp.missing) || '';
+  drawDiagnostics(d);
   warmLSP(d);
   drawTabs(); drawCrumbs(); layout();
 
@@ -98,7 +101,7 @@ function loadGutter(d) {
     for (const n of j.modified) marks.set(n, 'mod');
     for (const n of j.added) marks.set(n, 'add');
     d.gutter = { marks, dels: new Set(j.deleted) };
-    if (doc_() === d) render();
+    if (doc_() === d) { drawDiagnostics(d); render(); }
   }).catch(() => {});
 }
 
@@ -134,8 +137,19 @@ export async function reloadOpenTabs() {
     if (idx < 0) continue; // tab closed while reloading
 
     if (res.status !== 'fulfilled') {
+      const message = res.reason?.message || 'failed to load';
+      const state = tgt.oldDoc.diagnostics;
+      clearDiagnostics(tgt.oldDoc);
+      if (state) {
+        state.loading = false;
+        state.pending = false;
+        state.loaded = true;
+        state.timedOut = false;
+        state.error = '';
+      }
+      tgt.oldDoc.fileError = message;
       if (idx === S.active) {
-        setStatusNote(tgt.path + ': ' + (res.reason?.message || 'failed to load'));
+        setStatusNote(tgt.path + ': ' + message);
       }
       continue;
     }
@@ -177,6 +191,8 @@ export async function reloadOpenTabs() {
       markdown: !!j.markdown,
       mdScroll: keep.mdScroll || 0,
       gutter: null,
+      diagnostics: emptyDiagnostics(),
+      fileError: '',
       diffMode,
       diffAvailable: hasDiff,
       diffDismissed: !!keep.diffDismissed,
@@ -187,6 +203,7 @@ export async function reloadOpenTabs() {
     }
     d.lsp = j.lsp || { state: 'off', server: '' };
 
+    clearDiagnostics(keep);
     S.tabs[idx] = d;
     if (j.refine) refineChunk(d, tgt.start / CHUNK);
     loadGutter(d);
@@ -197,6 +214,7 @@ export async function reloadOpenTabs() {
     S.lsp.state = (d.lsp && d.lsp.state) || 'off';
     S.lsp.server = (d.lsp && d.lsp.server) || '';
     S.lsp.missing = (d.lsp && d.lsp.missing) || '';
+    drawDiagnostics(d);
     warmLSP(d);
     syncPreview();
     syncDiffView();
@@ -236,6 +254,7 @@ export function closeTab(i) {
     closed.pending?.clear?.();
     closed.refining?.clear?.();
     closed.outline = null;
+    clearDiagnostics(closed);
   }
   if (S.tabs.length === 0) {
     S.active = -1;
@@ -243,14 +262,14 @@ export function closeTab(i) {
     syncDiffView();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
     $('#empty').hidden = false; drawCrumbs();
-    drawTabs(); updateStatus();
+    drawTabs(); drawDiagnostics(); updateStatus();
     return;
   }
   S.active = Math.min(i, S.tabs.length - 1);
   const d = doc_();
   syncPreview();
   syncDiffView();
-  drawTabs(); drawCrumbs(); layout();
+  drawTabs(); drawCrumbs(); drawDiagnostics(d); layout();
   vp.scrollTop = d.scrollTop; render(); updateStatus();
 }
 
@@ -289,6 +308,7 @@ export function switchTab(i) {
   S.lsp.state = (S.tabs[i].lsp && S.tabs[i].lsp.state) || 'off';
   S.lsp.server = (S.tabs[i].lsp && S.tabs[i].lsp.server) || '';
   S.lsp.missing = (S.tabs[i].lsp && S.tabs[i].lsp.missing) || '';
+  drawDiagnostics(S.tabs[i]);
   warmLSP(S.tabs[i]);
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = S.tabs[i].scrollTop;

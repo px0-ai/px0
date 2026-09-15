@@ -1,6 +1,6 @@
 # Language Server Protocol (LSP) Architecture & Intelligence
 
-This document details the architecture, lifecycle management, and security boundaries of px0's Language Server Protocol subsystem ([`lsp.go`](../../lsp.go), [`lspnav.go`](../../lspnav.go), [`lspservers.go`](../../lspservers.go), [`lspsetup.go`](../../lspsetup.go), and [`calls.go`](../../calls.go)).
+This document details the architecture, lifecycle management, and security boundaries of px0's Language Server Protocol subsystem ([`lsp.go`](../../lsp.go), [`lspnav.go`](../../lspnav.go), [`diagnostics.go`](../../diagnostics.go), [`lspservers.go`](../../lspservers.go), [`lspsetup.go`](../../lspsetup.go), and [`calls.go`](../../calls.go)).
 
 ## 1. Zero-Cost Lazy Architecture
 
@@ -15,7 +15,7 @@ stateDiagram-v2
     Discovery --> Registered: Servers detected (No processes spawned)
     Registered --> Spawning: First file request (e.g. open main.go)
     Spawning --> Ready: JSON-RPC Initialize & Initialized handshake (<=30s)
-    Ready --> Serving: Handle textDocument/definition, hover, refs
+    Ready --> Serving: Handle definitions, hover, refs, diagnostics
     Serving --> Serving: Subsequent requests reuse existing process
     Serving --> Stopped: Application Shutdown (Clean exit)
 ```
@@ -103,7 +103,17 @@ px0 provides full incoming and outgoing call hierarchy navigation (`Calls` tab i
 - Zero Server State: px0 maintains no in-memory graph trees; cost scales strictly with the nodes the user expands.
 - Client-Side Cycle Detection: Recursive call loops are detected in JavaScript by checking ancestor node identifiers in the tree path.
 
-## 6. In-App Setup & One-Click Installers
+## 6. Active-File Diagnostics ([`diagnostics.go`](../../diagnostics.go))
+
+Language servers publish diagnostics after px0 opens a document. px0 keeps one in-memory snapshot for each open URI and replaces it on every `textDocument/publishDiagnostics` notification, including an empty publication. Notifications for unopened documents or an old document version are ignored. Closing a document removes its snapshot.
+
+`/api/lsp/diagnostics` calls `ensureOpen()` before reading the snapshot. The first request sends `textDocument/didOpen`. After an external edit or re-index, a changed modification time or size sends a full-text `textDocument/didChange`, increments the document version, and clears the old snapshot.
+
+The browser retries for a bounded period while the language server publishes. It stores diagnostics on the tab and displays only the active file. Diagnostics on Git-changed lines appear first in the Problems inspector. The editor keeps a per-line severity map, so each visible row adds one map lookup during paint.
+
+There is no workspace scan, file watcher, or on-disk diagnostics cache.
+
+## 7. In-App Setup & One-Click Installers
 
 When reading a codebase without an installed language server, the status bar displays `LSP: set up`. Clicking it opens the interactive setup panel (`web/src/lspsetup.js`).
 

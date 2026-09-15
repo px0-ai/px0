@@ -70,6 +70,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/lsp/def", s.handleLSPDef)
 	s.mux.HandleFunc("/api/lsp/refs", s.handleLSPRefs)
 	s.mux.HandleFunc("/api/lsp/calls", s.handleLSPCalls)
+	s.mux.HandleFunc("/api/lsp/diagnostics", s.handleLSPDiagnostics)
 	s.mux.HandleFunc("/api/lsp/symbols", s.handleLSPSymbols)
 	s.mux.HandleFunc("/api/lsp/hover", s.handleLSPHover)
 	s.mux.HandleFunc("/api/lsp/warm", s.handleLSPWarm)
@@ -306,6 +307,29 @@ func (s *Server) handleLSPRefs(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	hits, err := s.lsp.References(ctx, abs, rel, line, col)
 	s.lspRespond(w, rel, hits, err)
+}
+
+func (s *Server) handleLSPDiagnostics(w http.ResponseWriter, r *http.Request) {
+	abs, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
+	if !ok {
+		fail(w, 400, "bad path")
+		return
+	}
+	ctx, cancel := lspCtx(r)
+	defer cancel()
+	diagnostics, pending, err := s.lsp.Diagnostics(ctx, abs, rel)
+	if diagnostics == nil {
+		diagnostics = []Diagnostic{}
+	}
+	state, server := s.lsp.State(rel)
+	resp := map[string]any{
+		"diagnostics": diagnostics, "pending": pending,
+		"state": string(state), "server": server,
+	}
+	if err != nil {
+		resp["error"] = err.Error()
+	}
+	writeJSON(w, resp)
 }
 
 // handleLSPCalls serves call trails. Without item it resolves the function at
