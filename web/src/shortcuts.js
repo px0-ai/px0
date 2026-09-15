@@ -85,6 +85,7 @@ export function initShortcuts() {
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
       if (!hovercard.hidden) { clearLink(); return; }
       if (!findbar.hidden) { clearFind(); return; }
+      if ($('#panel-search')?.classList.contains('active')) { showPanel('files'); return; }
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
