@@ -39,6 +39,15 @@ export function updateStatus() {
     }
   }
 
+  // Review mode is a git-only surface, so its button only exists in a git
+  // workspace. The mode itself is read off the body class review.js owns:
+  // status is below review in the stack and must not import back up into it.
+  const rvBtn = $('[data-action="review"]');
+  if (rvBtn) {
+    rvBtn.hidden = !S.meta?.git;
+    rvBtn.classList.toggle('active', document.body.classList.contains('review-on'));
+  }
+
   const verEl = $('#st-ver');
   if (verEl && S.meta?.version) {
     verEl.textContent = 'v' + S.meta.version;
