@@ -365,11 +365,11 @@ export function clearPreviewMarks() {
   if (marks.length) mdArticle.normalize();
 }
 
-/* Marks every case-insensitive match of q in the rendered text; returns the count. */
-export function findInPreview(q) {
+/* Marks every match of q in the rendered text; returns the count. */
+export function findInPreview(q, caseSensitive) {
   clearPreviewMarks();
   if (!q) return 0;
-  const marks = markNodes(mdArticle, q, false, 'mark');
+  const marks = markNodes(mdArticle, q, caseSensitive, 'mark');
   for (const m of marks) m.classList.add('md-hit');
   return marks.length;
 }

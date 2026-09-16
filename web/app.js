@@ -806,6 +806,7 @@
   // web/src/find.js
   var findbar = $("#findbar");
   var findInput = $("#find-input");
+  var findCase = $("#find-case");
   function editorSelection() {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount)
@@ -843,9 +844,10 @@
     if (!d)
       return;
     const q = findInput.value;
+    const cs = findCase.classList.contains("on");
     if (previewing(d)) {
-      const n = findInPreview(q);
-      S2.find = q ? { q, ci: false, hits: new Array(n).fill(null), byLine: new Set, active: n ? 0 : -1, preview: true } : null;
+      const n = findInPreview(q, cs);
+      S2.find = q ? { q, ci: cs, hits: new Array(n).fill(null), byLine: new Set, active: n ? 0 : -1, preview: true } : null;
       $("#find-count").textContent = !q ? "0" : n ? "1 / " + n : "no results";
       $("#minimap-hits").innerHTML = previewHitOffsets().map((p) => '<i style="top:' + p + '%"></i>').join("");
       if (n)
@@ -861,7 +863,7 @@
     }
     let j;
     try {
-      j = await api("/api/search", { q, glob: d.path });
+      j = await api("/api/search", { q, glob: d.path, case: cs ? 1 : "" });
     } catch {
       return;
     }
@@ -875,7 +877,7 @@
         hits.push({ line: m.line, n });
       }
     }
-    S2.find = { q, ci: false, hits, byLine: new Set(hits.map((h) => h.line)), active: hits.length ? 0 : -1 };
+    S2.find = { q, ci: cs, hits, byLine: new Set(hits.map((h) => h.line)), active: hits.length ? 0 : -1 };
     $("#find-count").textContent = hits.length ? "1 / " + hits.length : "no results";
     drawMinimap(hits, d.total);
     if (hits.length)
@@ -923,6 +925,10 @@
         clearFind();
         vp.focus();
       }
+    });
+    findCase.addEventListener("click", () => {
+      findCase.classList.toggle("on");
+      runFind();
     });
     $("#find-next").addEventListener("click", () => jumpToHit(S2.find ? S2.find.active + 1 : 0));
     $("#find-prev").addEventListener("click", () => jumpToHit(S2.find ? S2.find.active - 1 : 0));
@@ -2475,11 +2481,11 @@
     if (marks.length)
       mdArticle.normalize();
   }
-  function findInPreview(q) {
+  function findInPreview(q, caseSensitive) {
     clearPreviewMarks();
     if (!q)
       return 0;
-    const marks = markNodes(mdArticle, q, false, "mark");
+    const marks = markNodes(mdArticle, q, caseSensitive, "mark");
     for (const m of marks)
       m.classList.add("md-hit");
     return marks.length;
