@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,52 +15,89 @@ func gitInstalled() bool {
 	return err == nil
 }
 
-// gitRepo builds a real repository under a fresh temp dir: keep/mod/del/ren are
-// committed, then the tree is dirtied (modify, stage-new, untrack, delete,
-// rename) so every status code is exercised. Returns the served root.
-func gitRepo(tb testing.TB) string {
+type gitTestRepo struct {
+	tb   testing.TB
+	root string
+}
+
+func newGitTestRepo(tb testing.TB) *gitTestRepo {
 	tb.Helper()
 	root := tb.TempDir()
 	// macOS TempDir lives under /var -> /private/var; git reports the real path.
 	if r, err := filepath.EvalSymlinks(root); err == nil {
 		root = r
 	}
-	write := func(rel, body string) {
-		p := filepath.Join(root, filepath.FromSlash(rel))
-		os.MkdirAll(filepath.Dir(p), 0o755)
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			tb.Fatal(err)
-		}
+	return &gitTestRepo{tb: tb, root: root}
+}
+
+func (r *gitTestRepo) write(rel, body string) {
+	r.tb.Helper()
+	p := filepath.Join(r.root, filepath.FromSlash(rel))
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		r.tb.Fatal(err)
 	}
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			tb.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+
+}
+
+func (r *gitTestRepo) remove(rel string) {
+	r.tb.Helper()
+	if err := os.Remove(filepath.Join(r.root, filepath.FromSlash(rel))); err != nil {
+		r.tb.Fatal(err)
 	}
-	write("keep.go", "keep\n")
-	write("sub/mod.go", "line one\n")
-	write("del.go", "del\n")
-	write("gone/only.go", "gone\n")
-	write("sub/ren.go", "old\n")
-	run("init")
-	run("config", "user.email", "t@example.com")
-	run("config", "user.name", "T")
-	run("config", "commit.gpgsign", "false")
-	run("add", "-A")
-	run("commit", "-qm", "init")
+}
+
+func (r *gitTestRepo) run(args ...string) {
+	r.tb.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.tb.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func (r *gitTestRepo) commitAll(message string) {
+	r.tb.Helper()
+	r.run("add", "-A")
+	r.run("commit", "-qm", message)
+}
+
+func (r *gitTestRepo) init() {
+	r.tb.Helper()
+	r.run("init")
+	r.run("config", "user.email", "t@example.com")
+	r.run("config", "user.name", "T")
+	r.run("config", "commit.gpgsign", "false")
+}
+
+// gitRepo builds a real repository under a fresh temp dir and dirties it.
+func gitRepo(tb testing.TB) string {
+	tb.Helper()
+	repo := newGitTestRepo(tb)
+	repo.write("keep.go", "keep\n")
+	repo.write("sub/mod.go", "line one\n")
+	repo.write("del.go", "del\n")
+	repo.write("gone/only.go", "gone\n")
+	if runtime.GOOS != "windows" {
+		repo.write(`weird\name.txt`, "weird\n")
+	}
+	repo.write("sub/ren.go", "old\n")
+	repo.init()
+	repo.commitAll("init")
 	// Dirty it: modify, stage a new file, leave one untracked, delete, rename.
-	write("sub/mod.go", "line two\n")
-	write("add.go", "added\n")
-	run("add", "add.go")
-	write("untr.go", "untracked\n")
-	os.Remove(filepath.Join(root, "del.go"))
-	os.Remove(filepath.Join(root, "gone", "only.go"))
-	os.Remove(filepath.Join(root, "gone"))
-	run("mv", "sub/ren.go", "sub/ren2.go")
-	return root
+	repo.write("sub/mod.go", "line two\n")
+	repo.write("add.go", "added\n")
+	repo.run("add", "add.go")
+	repo.write("untr.go", "untracked\n")
+	repo.remove("del.go")
+	repo.remove("gone/only.go")
+	repo.remove("gone")
+	if runtime.GOOS != "windows" {
+		repo.remove(`weird\name.txt`)
+	}
+	repo.run("mv", "sub/ren.go", "sub/ren2.go")
+	return repo.root
 }
 
 func TestGitStatus(t *testing.T) {
@@ -87,6 +125,9 @@ func TestGitStatus(t *testing.T) {
 	}
 	if _, ok := st["keep.go"]; ok {
 		t.Errorf("keep.go should have no status, got %q", st["keep.go"])
+	}
+	if runtime.GOOS != "windows" && st[`weird\name.txt`] != "D" {
+		t.Errorf("status[%q] = %q, want D (full: %v)", `weird\name.txt`, st[`weird\name.txt`], st)
 	}
 
 	// Overlay onto tree nodes. Deleted paths have no node on disk.
@@ -121,6 +162,9 @@ func TestGitStatus(t *testing.T) {
 	if !byName["gone"].Dir || !byName["gone"].Dirty {
 		t.Errorf("gone node = %+v, want synthetic dirty dir", byName["gone"])
 	}
+	if runtime.GOOS != "windows" && byName[`weird\name.txt`].Status != "D" {
+		t.Errorf("node %q status = %q, want D", `weird\name.txt`, byName[`weird\name.txt`].Status)
+	}
 	gone, _ := ix.Children("gone")
 	if len(gone) != 1 || gone[0].Name != "only.go" || gone[0].Status != "D" {
 		t.Errorf("gone children = %+v, want only.go with D status", gone)
@@ -131,42 +175,20 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
-	root := t.TempDir()
-	if r, err := filepath.EvalSymlinks(root); err == nil {
-		root = r
-	}
-	write := func(rel, body string) {
-		p := filepath.Join(root, filepath.FromSlash(rel))
-		os.MkdirAll(filepath.Dir(p), 0o755)
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	write("keep.txt", "keep\n")
-	write("deleted.txt", "delete\n")
-	write("gone/only.txt", "delete\n")
-	run("init")
-	run("config", "user.email", "t@example.com")
-	run("config", "user.name", "T")
-	run("config", "commit.gpgsign", "false")
-	run("add", "-A")
-	run("commit", "-qm", "init")
+	repo := newGitTestRepo(t)
+	repo.write("keep.txt", "keep\n")
+	repo.write("deleted.txt", "delete\n")
+	repo.write("gone/only.txt", "delete\n")
+	repo.init()
+	repo.commitAll("init")
 
-	ix := NewIndex(root)
+	ix := NewIndex(repo.root)
 	ix.Build()
 	s := NewServer(ix, nil)
 
-	os.Remove(filepath.Join(root, "deleted.txt"))
-	os.Remove(filepath.Join(root, "gone", "only.txt"))
-	os.Remove(filepath.Join(root, "gone"))
+	repo.remove("deleted.txt")
+	repo.remove("gone/only.txt")
+	repo.remove("gone")
 
 	_, topBody := get(t, s, "/api/tree?dir=")
 	top := map[string]map[string]any{}
@@ -188,6 +210,17 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	gone := goneBody["children"].([]any)
 	if len(gone) != 1 || gone[0].(map[string]any)["status"] != "D" {
 		t.Errorf("gone children = %v, want only deleted child", gone)
+	}
+
+	repo.commitAll("delete files")
+	_, cleanBody := get(t, s, "/api/tree?dir=")
+	clean := map[string]map[string]any{}
+	for _, child := range cleanBody["children"].([]any) {
+		node := child.(map[string]any)
+		clean[node["name"].(string)] = node
+	}
+	if clean["deleted.txt"] != nil || clean["gone"] != nil {
+		t.Errorf("clean tree contains stale missing nodes: %v", clean)
 	}
 }
 

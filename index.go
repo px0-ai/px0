@@ -274,23 +274,9 @@ func (ix *Index) Build() {
 				addDeletedNode(children, p)
 			}
 		}
-		// Every ancestor directory of a changed file is dirty, so a collapsed folder
-		// can badge without the frontend fetching its subtree.
-		dirtyDirs := map[string]bool{}
-		for p := range gs {
-			for i := strings.LastIndexByte(p, '/'); i >= 0; i = strings.LastIndexByte(p, '/') {
-				p = p[:i]
-				dirtyDirs[p] = true
-			}
-		}
+		dirtyDirs := gitDirtyDirs(gs)
 		for _, kids := range children {
-			for i := range kids {
-				if kids[i].Dir {
-					kids[i].Dirty = dirtyDirs[kids[i].Path]
-				} else if code, ok := gs[kids[i].Path]; ok {
-					kids[i].Status = code
-				}
-			}
+			applyGitStatus(kids, gs, dirtyDirs)
 			sortNodes(kids)
 		}
 	}
@@ -305,7 +291,7 @@ func (ix *Index) Build() {
 }
 
 func addDeletedNode(children map[string][]Node, path string) {
-	if path == "" || strings.ContainsRune(path, '\\') {
+	if path == "" {
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -339,4 +325,30 @@ func ensureChildNode(children map[string][]Node, dir string, node Node) {
 		}
 	}
 	children[dir] = append(children[dir], node)
+}
+
+// gitDirtyDirs marks ancestors so collapsed folders can badge changed children.
+func gitDirtyDirs(gs map[string]string) map[string]bool {
+	dirtyDirs := map[string]bool{}
+	for path := range gs {
+		for i := strings.LastIndexByte(path, '/'); i >= 0; i = strings.LastIndexByte(path, '/') {
+			path = path[:i]
+			dirtyDirs[path] = true
+		}
+	}
+	return dirtyDirs
+}
+
+func applyGitStatus(kids []Node, gs map[string]string, dirtyDirs map[string]bool) {
+	for i := range kids {
+		applyGitStatusToNode(&kids[i], gs, dirtyDirs)
+	}
+}
+
+func applyGitStatusToNode(node *Node, gs map[string]string, dirtyDirs map[string]bool) {
+	if node.Dir {
+		node.Dirty = dirtyDirs[node.Path]
+		return
+	}
+	node.Status = gs[node.Path]
 }
