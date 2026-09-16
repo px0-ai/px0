@@ -6,7 +6,7 @@ This document details the end-to-end architecture, performance optimizations, an
 
 ## 1. Problem Statement & Motivation
 
-Because px0 is a read-only browser-based code viewer, file mutations (such as `git checkout`, `git pull`, branch switching, code generation, or edits from an external IDE) occur on the host filesystem outside of px0's process boundary.
+Most file mutations (such as `git checkout`, `git pull`, branch switching, code generation, or edits from an external IDE) occur on the host filesystem outside of px0's process boundary. Edits px0 dispatches to a coding harness, and their undo, reuse the same reload path once they finish (see [Harness Editing & Agent Dispatch](agent-editing.md)).
 
 Users trigger a workspace re-index by clicking the **Re-index** button (`#btn-reindex` in the sidebar header) or via the Command Palette (`Mod+K` &rarr; `Re-index Workspace`).
 
@@ -252,21 +252,17 @@ updateStatus();
 
 ### 4. Diff View Preference & Dismissal Persistence
 - **Problem**: A file with uncommitted Git changes might have diff mode active or dismissed by the user. On reload, Git diff availability may appear or disappear.
-- **Solution**: A 3-tier diff mode state machine:
+- **Solution**: A reload keeps each tab in the view it was in:
   ```javascript
-  let diffMode = null;
-  if (hasDiff) {
-    if (keep.diffDismissed) {
-      diffMode = null; // User explicitly dismissed diff for this tab
-    } else if (keep.diffMode) {
-      diffMode = keep.diffMode; // Preserve existing split or unified view
-    } else {
-      diffMode = layoutPref() || 'split'; // Default to user preference
-    }
-  }
+  const diffMode = hasDiff ? (keep.diffMode || null) : null;
+  // ...
+  diffDismissed: !!keep.diffDismissed || !keep.diffMode,
+  diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0,
   ```
-  - If the user explicitly dismissed the diff view (`diffDismissed: true`), it remains closed even if git changes persist.
+  - A tab in source view stays in source, even when the reload finds new changes (for example after an agent edit). It is marked `diffDismissed`, so `loadGutter()` does not switch it to the diff either. The Diff button is one click away.
+  - A tab in the diff view keeps its split or unified layout, and the active tab's diff scroll offset is restored once the new diff renders.
   - If changes were committed externally, `hasDiff` evaluates to `false`, and `diffMode` cleanly resets to `null`.
+  - Opening a file fresh is unaffected: a modified file still opens in the diff view.
 
 ### 5. Markdown Preview Scroll Offset Preservation
 - **Problem**: In Markdown preview mode (`#mdview`), the preview is rendered inside an independent HTML container rather than the virtualized line scroller (`#viewport`). Re-rendering resets scroll containers to `0`.

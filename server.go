@@ -37,9 +37,10 @@ func useDiskAssets(dir string) error {
 }
 
 type Server struct {
-	ix  *Index
-	lsp *lspManager
-	mux *http.ServeMux
+	ix    *Index
+	lsp   *lspManager
+	agent *agentManager // nil unless main wires editing for this session
+	mux   *http.ServeMux
 
 	lastReq atomic.Int64 // unix nanos of the most recent request
 }
@@ -77,6 +78,12 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/lsp/setup", s.handleLSPSetup)
 	s.mux.HandleFunc("/api/lsp/install", s.handleLSPInstall)
 	s.mux.HandleFunc("/api/lsp/start", s.handleLSPStart)
+	s.mux.HandleFunc("/api/agent/harnesses", s.handleAgentHarnesses)
+	s.mux.HandleFunc("/api/agent/select", s.handleAgentSelect)
+	s.mux.HandleFunc("/api/agent/edit", s.handleAgentEdit)
+	s.mux.HandleFunc("/api/agent/job", s.handleAgentJob)
+	s.mux.HandleFunc("/api/agent/cancel", s.handleAgentCancel)
+	s.mux.HandleFunc("/api/agent/undo", s.handleAgentUndo)
 	s.lastReq.Store(time.Now().UnixNano())
 	go s.scavenge()
 	return s
@@ -180,6 +187,19 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// SetAgent makes editing through a coding harness available. Unavailable
+// unless main wires it; available still means nothing runs until a harness is
+// picked, in the UI or with -agent.
+func (s *Server) SetAgent(a *agentManager) { s.agent = a }
+
+// agentHarnesses is the picker's list, empty when editing is unavailable.
+func (s *Server) agentHarnesses() []agentHarness {
+	if s.agent == nil {
+		return []agentHarness{}
+	}
+	return s.agent.Detect()
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -220,16 +240,19 @@ func (s *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	n, at, ms := s.ix.Stats()
 	writeJSON(w, map[string]any{
-		"root":       s.ix.Root(),
-		"name":       filepath.Base(s.ix.Root()),
-		"files":      n,
-		"indexMs":    ms,
-		"builtAt":    at,
-		"ready":      s.ix.Ready(),
-		"git":        gitAvailable(s.ix.Root()),
-		"lspServers": s.lsp.Available(),
-		"metrics":    getProcessMetrics(),
-		"version":    version,
+		"root":        s.ix.Root(),
+		"name":        filepath.Base(s.ix.Root()),
+		"files":       n,
+		"indexMs":     ms,
+		"builtAt":     at,
+		"ready":       s.ix.Ready(),
+		"git":         gitAvailable(s.ix.Root()),
+		"lspServers":  s.lsp.Available(),
+		"metrics":     getProcessMetrics(),
+		"version":     version,
+		"agent":       s.agent.Name(),
+		"agentPinned": s.agent.Pinned(),
+		"agents":      s.agentHarnesses(),
 	})
 }
 

@@ -8,7 +8,8 @@ const request = async (method, path, params) => {
   for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== '') u.searchParams.set(k, v);
   const r = await fetch(u, { method });
   const j = await r.json();
-  if (j.error) throw new Error(j.error);
+  // The body rides along: some replies, like a failed agent job, carry detail beyond the message.
+  if (j.error) throw Object.assign(new Error(j.error), { body: j });
   return j;
 };
 export const api = (path, params) => request('GET', path, params);
