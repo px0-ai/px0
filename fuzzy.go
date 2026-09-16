@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"runtime"
 	"sort"
 	"strings"
@@ -91,7 +92,43 @@ func min(a, b int) int {
 	return b
 }
 
+// fuzzyHeap keeps the best K matches seen so far with the worst of them at
+// the root, so each candidate costs one comparison against it (and a Pos copy
+// only when it survives). Its order mirrors the final rank: higher score
+// wins, ties break toward the smaller path.
+type fuzzyHeap []FuzzyResult
+
+func (h fuzzyHeap) Len() int { return len(h) }
+func (h fuzzyHeap) Less(i, j int) bool {
+	if h[i].score != h[j].score {
+		return h[i].score < h[j].score
+	}
+	return h[i].Path > h[j].Path
+}
+func (h fuzzyHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *fuzzyHeap) Push(x any)   { *h = append(*h, x.(FuzzyResult)) }
+func (h *fuzzyHeap) Pop() any {
+	old := *h
+	n := len(old)
+	v := old[n-1]
+	*h = old[:n-1]
+	return v
+}
+
+// beats reports whether score/path outranks the heap's current worst (root).
+// The heap must be non-empty: callers only ask once it holds K entries.
+func (h fuzzyHeap) beats(score int, path string) bool {
+	w := h[0]
+	if score != w.score {
+		return score > w.score
+	}
+	return path < w.Path
+}
+
 // FuzzyFind ranks every indexed path against query and returns the best limit.
+// Scoring still touches every file, but only K results are ever retained and
+// sorted: O(N log K) instead of O(N log N), and non-survivors skip the Pos
+// copy entirely. The returned order matches the full sort exactly.
 func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 	q := strings.ToLower(strings.TrimSpace(query))
 	q = strings.ReplaceAll(q, " ", "")
@@ -106,13 +143,16 @@ func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 		}
 		return out
 	}
+	if limit <= 0 {
+		return nil
+	}
 
 	workers := runtime.NumCPU()
 	chunk := (len(files) + workers - 1) / workers
 	if chunk == 0 {
 		chunk = 1
 	}
-	parts := make([][]FuzzyResult, workers)
+	parts := make([]fuzzyHeap, workers)
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
 		lo := w * chunk
@@ -123,22 +163,33 @@ func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 		wg.Add(1)
 		go func(w, lo, hi int) {
 			defer wg.Done()
-			local := make([]FuzzyResult, 0, 64)
+			local := &fuzzyHeap{}
 			scratch := make([]int, 0, 64)
 			for i := lo; i < hi; i++ {
 				s, pos, ok := fuzzyScore(q, &files[i], scratch)
 				if !ok {
 					continue
 				}
+				if local.Len() >= limit {
+					if !local.beats(s, files[i].Path) {
+						continue
+					}
+					cp := make([]int, len(pos))
+					copy(cp, pos)
+					(*local)[0] = FuzzyResult{Path: files[i].Path, Name: files[i].Name, Pos: cp, score: s}
+					heap.Fix(local, 0)
+					continue
+				}
 				cp := make([]int, len(pos))
 				copy(cp, pos)
-				local = append(local, FuzzyResult{Path: files[i].Path, Name: files[i].Name, Pos: cp, score: s})
+				heap.Push(local, FuzzyResult{Path: files[i].Path, Name: files[i].Name, Pos: cp, score: s})
 			}
-			parts[w] = local
+			parts[w] = *local
 		}(w, lo, hi)
 	}
 	wg.Wait()
 
+	// At most workers*limit candidates (8*500 worst case): one small sort.
 	var all []FuzzyResult
 	for _, p := range parts {
 		all = append(all, p...)

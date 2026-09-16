@@ -227,31 +227,42 @@ func (s *searcher) scan(data []byte, ext string, max int, w *workBuf) []Match {
 		}
 		line, hLine := data[start:lineEnd], hay[start:lineEnd]
 
-		var locs [][]int
 		if s.re != nil {
-			locs = s.re.FindAllIndex(line, max)
+			locs := s.re.FindAllIndex(line, max)
+			if len(locs) > 0 {
+				isDef := defRe != nil && defRe.Match(line)
+				for _, l := range locs {
+					m := snip(line, l[0], l[1])
+					m.Line, m.Def = lineNo, isDef
+					out = append(out, m)
+					if len(out) >= max {
+						return out
+					}
+				}
+			}
 		} else {
+			// Literal path: snip matches inline instead of collecting a
+			// per-match [][]int first (one heap alloc per hit before).
+			// defRe runs once per matched line, as before.
+			matched := false
+			isDef := false
 			for off := 0; ; {
 				i := bytes.Index(hLine[off:], s.lit)
 				if i < 0 {
 					break
 				}
-				locs = append(locs, []int{off + i, off + i + len(s.lit)})
-				off += i + len(s.lit)
-				if len(locs) >= max {
-					break
+				from, to := off+i, off+i+len(s.lit)
+				if !matched {
+					matched = true
+					isDef = defRe != nil && defRe.Match(line)
 				}
-			}
-		}
-		if len(locs) > 0 {
-			isDef := defRe != nil && defRe.Match(line)
-			for _, l := range locs {
-				m := snip(line, l[0], l[1])
+				m := snip(line, from, to)
 				m.Line, m.Def = lineNo, isDef
 				out = append(out, m)
 				if len(out) >= max {
 					return out
 				}
+				off = to
 			}
 		}
 		if end < 0 {

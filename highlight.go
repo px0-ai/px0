@@ -532,6 +532,12 @@ func Open(abs, rel string) (*Doc, error) {
 	if err != nil {
 		return nil, err
 	}
+	return openWithStat(abs, rel, st)
+}
+
+// openWithStat is Open for callers that already stated the file (the /api/file
+// handler does), saving one syscall per open.
+func openWithStat(abs, rel string, st os.FileInfo) (*Doc, error) {
 	if st.IsDir() {
 		return nil, fmt.Errorf("is a directory")
 	}
