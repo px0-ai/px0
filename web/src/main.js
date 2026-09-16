@@ -18,6 +18,7 @@ import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
 import { initAgent, applyAgentMeta, loadAgentAsync } from './agent.js';
+import { setBlame } from './blame.js';
 import { updateStatus, initMetrics, initStatusFit, updateMetricsDisplay } from './status.js';
 
 // Initialize all subsystems
@@ -59,6 +60,9 @@ initStatusFit();
     const mdPref = localStorage.getItem('px0.mdPreview');
     S.mdPreview = mdPref !== null ? mdPref === 'true' : true;
 
+    // Restore git blame on hover (default OFF)
+    setBlame(localStorage.getItem('px0.blame') === 'true');
+
     updateEditorOptionControls();
   } catch {}
 
@@ -67,7 +71,10 @@ initStatusFit();
   measure();
   S.meta = await api('/api/meta');
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
-  if (S.meta.git) { const b = $('#btn-changed'); if (b) b.hidden = false; }
+  if (S.meta.git) {
+    const b = $('#btn-changed'); if (b) b.hidden = false;
+    const bl = $('[data-action="blame"]'); if (bl) bl.hidden = false;
+  }
   applyAgentMeta();
   document.title = S.meta.name + ' - px0';
   $('#root-name').textContent = S.meta.name;

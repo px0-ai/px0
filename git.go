@@ -3,6 +3,7 @@ package main
 import (
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -224,4 +225,94 @@ func parseNewStart(hdr string) int {
 		return n
 	}
 	return 1
+}
+
+// blameCommit is one distinct commit referenced by a file's blame, sent once
+// per commit (not per line) to keep the payload small on large files.
+type blameCommit struct {
+	Hash    string `json:"hash"`
+	Short   string `json:"short"`
+	Author  string `json:"author"`
+	Time    int64  `json:"time"` // author-time, unix seconds; 0 for uncommitted lines
+	Summary string `json:"summary"`
+}
+
+const zeroBlameHash = "0000000000000000000000000000000000000000"
+
+// gitBlame runs `git blame --porcelain` on relpath. With no revision given,
+// git blames the working tree, so uncommitted edits are attributed to "Not
+// Committed Yet" and line numbers line up exactly with the file as displayed
+// -- no remapping against the diff/gutter needed. Fails quiet: nil/nil when
+// git is off/absent or the path has no blame (untracked, doesn't exist).
+func gitBlame(root, relpath string) (commits []blameCommit, lineCommit []int) {
+	if !gitAvailable(root) {
+		return nil, nil
+	}
+	out, err := exec.Command("git", "-C", root, "blame", "--porcelain", "--", relpath).Output()
+	if err != nil {
+		return nil, nil
+	}
+	return parseBlame(string(out))
+}
+
+// blameHeaderRE matches a porcelain blame line-record header: "<sha> <origline>
+// <finalline>[ <numlines>]". numlines (present only on a hunk's first line) is
+// not needed -- every output line gets its own header regardless, so a plain
+// per-line scan is enough.
+var blameHeaderRE = regexp.MustCompile(`^([0-9a-f]{40}) \d+ (\d+)`)
+
+// parseBlame turns `git blame --porcelain` output into deduplicated commits
+// (full metadata appears only the first time a hash is seen; later lines from
+// the same commit repeat just the header) plus a same-length-as-the-file
+// commit index per line.
+func parseBlame(out string) (commits []blameCommit, lineCommit []int) {
+	idx := map[string]int{} // hash -> index into commits
+	lines := strings.Split(out, "\n")
+	for i := 0; i < len(lines); {
+		m := blameHeaderRE.FindStringSubmatch(lines[i])
+		if m == nil {
+			i++
+			continue
+		}
+		hash, final := m[1], atoiOr0(m[2])
+		i++
+		meta := map[string]string{}
+		for i < len(lines) && !strings.HasPrefix(lines[i], "\t") {
+			if sp := strings.IndexByte(lines[i], ' '); sp > 0 {
+				meta[lines[i][:sp]] = lines[i][sp+1:]
+			}
+			i++
+		}
+		if i < len(lines) {
+			i++ // consume the tab-prefixed content line
+		}
+		ci, ok := idx[hash]
+		if !ok {
+			ci = len(commits)
+			idx[hash] = ci
+			author := meta["author"]
+			if hash == zeroBlameHash {
+				author = "Not Committed Yet"
+			}
+			commits = append(commits, blameCommit{
+				Hash: hash, Short: hash[:7], Author: author,
+				Time: atoi64Or0(meta["author-time"]), Summary: meta["summary"],
+			})
+		}
+		for len(lineCommit) < final {
+			lineCommit = append(lineCommit, -1)
+		}
+		lineCommit[final-1] = ci
+	}
+	return commits, lineCommit
+}
+
+func atoiOr0(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+func atoi64Or0(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }

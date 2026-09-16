@@ -66,6 +66,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
 	s.mux.HandleFunc("/api/gutter", s.handleGutter)
+	s.mux.HandleFunc("/api/blame", s.handleBlame)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
 	s.mux.HandleFunc("/api/def", s.handleDef)
@@ -629,6 +630,31 @@ func (s *Server) handleGutter(w http.ResponseWriter, r *http.Request) {
 		"added":     nz(added),
 		"modified":  nz(modified),
 		"deleted":   nz(deleted),
+	})
+}
+
+// handleBlame returns per-line git attribution for relpath: each distinct
+// commit once (author/date/summary) plus a commit index per line, so the
+// payload doesn't repeat metadata on every line. available is false (200,
+// empty) when git is off/absent or the path isn't tracked; never 500.
+func (s *Server) handleBlame(w http.ResponseWriter, r *http.Request) {
+	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
+	if !ok {
+		fail(w, 400, "bad path")
+		return
+	}
+	commits, lines := gitBlame(s.ix.Root(), rel)
+	if commits == nil {
+		commits = []blameCommit{}
+	}
+	if lines == nil {
+		lines = []int{}
+	}
+	writeJSON(w, map[string]any{
+		"path":      rel,
+		"available": len(commits) > 0,
+		"commits":   commits,
+		"lines":     lines,
 	})
 }
 

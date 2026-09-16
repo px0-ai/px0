@@ -71,7 +71,8 @@
     wrap: true,
     lineNumbers: true,
     mdPreview: true,
-    agentTargets: []
+    agentTargets: [],
+    blame: false
   };
   var doc_ = () => S2.active >= 0 ? S2.tabs[S2.active] : null;
 
@@ -1965,6 +1966,43 @@
     });
   }
 
+  // web/src/blame.js
+  async function ensureBlame(d) {
+    if (d.blame !== undefined)
+      return d.blame;
+    try {
+      d.blameReq = d.blameReq || api("/api/blame", { path: d.path });
+      const j = await d.blameReq;
+      d.blame = j.available ? { commits: j.commits, lines: j.lines } : null;
+    } catch {
+      d.blame = null;
+    } finally {
+      d.blameReq = null;
+    }
+    return d.blame;
+  }
+  var UNITS = [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]];
+  function relativeTime(unixSeconds) {
+    const secs = Math.max(0, Math.round(Date.now() / 1000 - unixSeconds));
+    for (const [name, span] of UNITS) {
+      const n = Math.floor(secs / span);
+      if (n >= 1)
+        return n + " " + name + (n === 1 ? "" : "s") + " ago";
+    }
+    return "just now";
+  }
+  function blameHTML(commit) {
+    const when = commit.time ? relativeTime(commit.time) : "uncommitted";
+    return '<div class="sig">' + esc(commit.author) + ", " + when + "</div>" + (commit.summary ? '<div class="doc">' + esc(commit.summary) + "</div>" : "") + '<div class="foot"><b>' + esc(commit.short || "blame") + "</b></div>";
+  }
+  function setBlame(on) {
+    S2.blame = on;
+    try {
+      localStorage.setItem("px0.blame", on ? "true" : "false");
+    } catch {}
+    $('[data-action="blame"]')?.classList.toggle("active", on);
+  }
+
   // web/src/hover.js
   var hovercard = $("#hovercard");
   var HOVER_DELAY = 380;
@@ -2004,6 +2042,11 @@
       else
         return;
     }
+    if (S2.blame && S2.meta?.git) {
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => blameHoverAt(x, y), HOVER_DELAY);
+      return;
+    }
     if (S2.lsp.state !== "ready" && S2.lsp.state !== "indexing")
       return;
     clearTimeout(hoverTimer);
@@ -2013,6 +2056,26 @@
     const at = doc_() ? wordAtPoint(x, y) : null;
     if (at && at.word)
       showHover(at, x, y);
+  }
+  async function blameHoverAt(x, y) {
+    const d = doc_();
+    const row = d && document.elementFromPoint(x, y)?.closest(".row");
+    const line = row && +row.dataset.l;
+    if (!line)
+      return;
+    const seq2 = ++hoverSeq;
+    const blame = await ensureBlame(d);
+    if (seq2 !== hoverSeq || doc_() !== d)
+      return;
+    const ci = blame ? blame.lines[line - 1] : -1;
+    const commit = ci >= 0 ? blame.commits[ci] : null;
+    if (!commit)
+      return;
+    S2.hover = { line };
+    S2.hoverAnchor = { x, y };
+    hovercard.innerHTML = blameHTML(commit);
+    hovercard.hidden = false;
+    placeHover(x, y);
   }
   async function showHover(at, x, y) {
     const d = doc_();
@@ -3753,6 +3816,7 @@
     [["Mod+D"], "Toggle diff view (git)"],
     [["Alt+Z"], "Toggle word wrap"],
     [["Alt+M"], "Toggle Markdown preview"],
+    [["Alt+B"], "Toggle git blame on hover"],
     [["Enter", "Shift+Enter"], "Next / previous match"],
     [["F12", "Mod+Click"], "Go to definition"],
     [["Shift+F12"], "Find all references"],
@@ -3809,7 +3873,13 @@
         toggleWordWrap();
       else if (act === "md-preview")
         togglePreview();
-      else if (act === "palette")
+      else if (act === "blame") {
+        if (S2.meta?.git) {
+          setBlame(!S2.blame);
+          if (!S2.blame)
+            hideHover();
+        }
+      } else if (act === "palette")
         openPalette("command");
       else if (act === "help")
         showHelp();
@@ -3905,6 +3975,15 @@
         if (S2.meta?.git) {
           e.preventDefault();
           toggleDiff();
+        }
+        return;
+      }
+      if (e.altKey && e.code === "KeyB") {
+        if (S2.meta?.git) {
+          e.preventDefault();
+          setBlame(!S2.blame);
+          if (!S2.blame)
+            hideHover();
         }
         return;
       }
@@ -4822,6 +4901,7 @@
       document.body.classList.remove("hide-lines");
       const mdPref = localStorage.getItem("px0.mdPreview");
       S2.mdPreview = mdPref !== null ? mdPref === "true" : true;
+      setBlame(localStorage.getItem("px0.blame") === "true");
       updateEditorOptionControls();
     } catch {}
     applyKeyLabels();
@@ -4833,6 +4913,9 @@
       const b = $("#btn-changed");
       if (b)
         b.hidden = false;
+      const bl = $('[data-action="blame"]');
+      if (bl)
+        bl.hidden = false;
     }
     applyAgentMeta();
     document.title = S2.meta.name + " - px0";

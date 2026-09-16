@@ -76,6 +76,7 @@ export const S = {
   lineNumbers: true, // line numbers gutter (default ON)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
   agentTargets: [],  // [{ id, path, l1, l2 }, ...] ranges of open compose/edit sessions
+  blame: false,      // git blame on hover (default OFF)
 };
 
 export const doc_ = () => (S.active >= 0 ? S.tabs[S.active] : null);

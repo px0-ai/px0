@@ -5,7 +5,8 @@ import { layout, render, paint, toggleWordWrap } from './renderer.js';
 import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
-import { clearLink, hovercard } from './hover.js';
+import { clearLink, hovercard, hideHover } from './hover.js';
+import { setBlame } from './blame.js';
 import { openFind, clearFind, findbar } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
@@ -27,6 +28,7 @@ export const SHORTCUTS = [
   [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+M'], 'Toggle Markdown preview'],
+  [['Alt+B'], 'Toggle git blame on hover'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
@@ -74,6 +76,7 @@ export function initShortcuts() {
     else if (act === 'goto') openPalette('line');
     else if (act === 'wrap') toggleWordWrap();
     else if (act === 'md-preview') togglePreview();
+    else if (act === 'blame') { if (S.meta?.git) { setBlame(!S.blame); if (!S.blame) hideHover(); } }
     else if (act === 'palette') openPalette('command');
     else if (act === 'help') showHelp();
   });
@@ -116,6 +119,11 @@ export function initShortcuts() {
     if (mod && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); document.body.classList.toggle('side-hidden'); layout(); render(); return; }
     // Diff view of the open file (git only; fails quiet when git is off).
     if (mod && !e.shiftKey && (e.key === 'd' || e.key === 'D')) { if (S.meta?.git) { e.preventDefault(); toggleDiff(); } return; }
+    // Blame on hover (git only; fails quiet when git is off).
+    if (e.altKey && e.code === 'KeyB') {
+      if (S.meta?.git) { e.preventDefault(); setBlame(!S.blame); if (!S.blame) hideHover(); }
+      return;
+    }
     // Alt shortcuts match e.code: on a Mac, Option+letter types a symbol, so e.key is not the letter.
     if ((mod && (e.key === 'w' || e.key === 'W')) || (e.altKey && e.code === 'KeyW')) {
       e.preventDefault();
