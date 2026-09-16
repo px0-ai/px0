@@ -177,6 +177,7 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	}
 	repo := newGitTestRepo(t)
 	repo.write("keep.txt", "keep\n")
+	repo.write("modified.txt", "old\n")
 	repo.write("deleted.txt", "delete\n")
 	repo.write("gone/only.txt", "delete\n")
 	repo.init()
@@ -187,6 +188,7 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	s := NewServer(ix, nil)
 
 	repo.remove("deleted.txt")
+	repo.write("modified.txt", "new\n")
 	repo.remove("gone/only.txt")
 	repo.remove("gone")
 
@@ -201,6 +203,9 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	}
 	if top["deleted.txt"]["status"] != "D" {
 		t.Errorf("deleted.txt status = %v, want D", top["deleted.txt"]["status"])
+	}
+	if top["modified.txt"]["status"] != "M" {
+		t.Errorf("modified.txt status = %v, want M", top["modified.txt"]["status"])
 	}
 	if top["gone"]["dirty"] != true {
 		t.Errorf("gone dirty = %v, want true", top["gone"]["dirty"])
@@ -221,6 +226,9 @@ func TestGitTreeReflectsDeletionAfterBuild(t *testing.T) {
 	}
 	if clean["deleted.txt"] != nil || clean["gone"] != nil {
 		t.Errorf("clean tree contains stale missing nodes: %v", clean)
+	}
+	if clean["modified.txt"]["status"] != nil {
+		t.Errorf("modified.txt status = %v, want clean", clean["modified.txt"]["status"])
 	}
 }
 

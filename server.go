@@ -434,20 +434,12 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) gitTreeChildren(dir string, kids []Node) []Node {
 	gs := gitStatus(s.ix.Root())
-	if gs == nil {
-		out := make([]Node, 0, len(kids))
-		for _, kid := range kids {
-			if s.nodeMissing(kid) {
-				continue
-			}
-			out = append(out, kid)
-		}
-		return out
-	}
 	children := map[string][]Node{dir: append([]Node(nil), kids...)}
-	for path, code := range gs {
-		if code == "D" {
-			addDeletedNode(children, path)
+	if gs != nil {
+		for path, code := range gs {
+			if code == "D" {
+				addDeletedNode(children, path)
+			}
 		}
 	}
 	out := children[dir]
