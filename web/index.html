@@ -95,6 +95,8 @@
         <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
       </div>
       <!-- Markdown preview: covers the code view for a Markdown tab (Alt+M toggles) -->
+      <!-- Minimap (Alt+K): canvas overview of the lines around the view, with a slider for the view itself -->
+      <div id="minimap" hidden><canvas></canvas><div id="minimap-slider"></div></div>
       <div id="mdview" hidden><article id="md" class="md"></article></div>
       <!-- Diff view: covers the code view while a diff layout is active (Mod+D toggles) -->
       <div id="diffview" hidden><div id="diffcontent"></div></div>
@@ -186,6 +188,7 @@
         <button class="footer-btn" data-action="md-preview" title="Toggle Markdown Preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
         <button class="footer-btn" data-action="line-numbers" title="Toggle Line Numbers ({Alt+L})"><span class="footer-btn-label">Lines</span><kbd class="footer-kbd" data-keys="Alt+L"></kbd></button>
+        <button class="footer-btn" data-action="minimap" title="Toggle Minimap ({Alt+K})"><span class="footer-btn-label">Map</span><kbd class="footer-kbd" data-keys="Alt+K"></kbd></button>
         <button class="footer-btn footer-undo" data-action="agent-undo" hidden><span class="footer-btn-label">Undo Edit</span></button>
         <button class="footer-btn" data-action="agent-harness" hidden><span class="footer-btn-label">Agent</span></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>

@@ -698,7 +698,7 @@ kbd {
 #status.fit-1 .footer-kbd,
 #status.fit-2 #st-index, #status.fit-2 #st-size,
 #status.fit-3 .metric-label,
-#status.fit-4 [data-action="wrap"], #status.fit-4 [data-action="line-numbers"], #status.fit-4 [data-action="help"], #status.fit-4 .sel-chip, #status.fit-4 #sel-stats,
+#status.fit-4 [data-action="wrap"], #status.fit-4 [data-action="line-numbers"], #status.fit-4 [data-action="minimap"], #status.fit-4 [data-action="help"], #status.fit-4 .sel-chip, #status.fit-4 #sel-stats,
 #status.fit-5 #st-metrics,
 #status.fit-6 #st-lsp { display: none; }
 #footer-actions { display: flex; align-items: center; gap: 3px; }
@@ -870,4 +870,14 @@ kbd {
 /* ---------- match minimap ---------- */
 #minimap-hits { position: absolute; top: 0; right: 0; bottom: 0; width: 12px; pointer-events: auto; z-index: 6; }
 #minimap-hits:empty { pointer-events: none; }
+#editor.mm-on #minimap-hits { right: var(--mm-w); }
+
+/* ---------- minimap (Alt+K): see web/src/minimap.js ---------- */
+#editor { --mm-w: 96px; }
+#editor.mm-on #viewport { right: var(--mm-w); }
+#minimap { position: absolute; top: 0; right: 0; bottom: 0; width: var(--mm-w); contain: strict; cursor: default; user-select: none; touch-action: none; background: var(--bg); }
+#minimap canvas { display: block; width: 100%; height: 100%; }
+#minimap-slider { position: absolute; top: 0; left: 0; right: 0; background: var(--bg4); opacity: .35; pointer-events: none; will-change: transform; transition: opacity .12s; }
+#minimap:hover #minimap-slider { opacity: .55; }
+#minimap.dragging #minimap-slider { opacity: .7; }
 #minimap-hits i { position: absolute; right: 2px; width: 8px; height: 2px; background: var(--mark-active); border-radius: 1px; opacity: .85; }

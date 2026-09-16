@@ -181,3 +181,40 @@ Pressing `Ctrl+A` / `Cmd+A` outside a text input does not use the browser's nati
 ### Selection Actions
 
 Any selection, native or whole-file, drives the footer selection bar (`#footer-sel`) and the right-click menu (`#sel-menu`) in [`web/src/selbar.js`](../../web/src/selbar.js): Copy Ref, Copy for Agent, Edit with Agent and Find Usages. The viewport's `mousedown` handler only moves the caret for the primary button, so a right click on a selection neither moves the caret nor collapses the selection. See [Harness Editing & Agent Dispatch](agent-editing.md).
+
+## 9. Minimap (`web/src/minimap.js`)
+
+`Alt+K`, the footer **Map** button or the command palette toggle a minimap beside the code. It is off by default and the choice is kept in `localStorage` (`px0.minimap`). Like the rows, its cost follows what is on screen, never the length of the file.
+
+### Placement
+
+- `#minimap` holds a `<canvas>` and `#minimap-slider`. While it shows, `#editor.mm-on` sets `#viewport { right: var(--mm-w) }` (96px), so wrap width and horizontal scroll, which already derive from `vp.clientWidth`, need no changes. `#minimap-hits` moves left by the same amount to stay over the scrollbar.
+- It shows only for the code view: not for a diff (`d.diffMode`), a Markdown preview, an image, with no tab open, or when `#editor` is narrower than 600px.
+- The renderer does not import it. `initMinimap()` registers `syncMinimap` through `setAfterPaint()`, and `paint()` calls that hook last, including the empty paint with no document.
+
+### Geometry
+
+Each source line is `ROW = 2` CSS px tall and each character 1px wide. The minimap's content is the viewport's scroll height scaled by `ROW / LH`:
+
+$$\text{contentH} = \text{scrollHeight} \times \frac{\text{ROW}}{\text{LH}} \qquad \text{sliderH} = \text{clientHeight} \times \frac{\text{ROW}}{\text{LH}}$$
+
+- If `contentH` fits, the minimap stands still and the slider moves at `ROW / LH` per scrolled pixel.
+- Otherwise the slider moves at $f = (h - \text{sliderH}) / (\text{scrollHeight} - \text{clientHeight})$ and the drawing scrolls by `scrollTop × ROW / LH − sliderTop`, so both reach the bottom together.
+- Dragging inverts that: `scrollTop = sliderTop / f`. Pressing outside the slider centres the pressed line, then drags. Wheel events over the minimap scroll the viewport.
+
+The minimap counts logical lines, as `paint()` does, so with word wrap on and many wrapped rows the slider drifts the same way the row window does.
+
+### Drawing
+
+1. `syncMinimap()` moves the slider (a CSS transform), then compares a key: document, drawing offset rounded to device pixels, canvas size, theme version, `d.linesVer`, `d.cur`, `S.find` and `d.gutter`. If nothing changed, it returns without touching the canvas.
+2. Otherwise `draw()` covers only the lines the minimap can show (about height / 2, ~400 on a typical screen). Each line's highlighted HTML is reduced by `runsOf()` to a `Uint16Array` of `[column, length, colour]` blocks. The format is flat `<i class=x>` tokens around escaped text, so this is a single scan with no DOM: spaces split blocks, tabs stop every 4 columns, an entity counts as one character, and the scan stops at the minimap's width. Blocks are cached per document against the line's HTML string, trimmed to the view's neighbourhood.
+3. Pixels are written straight into an `ImageData` buffer through a `Uint32Array` view (`TypedArray.fill` per row span) and handed over with one `putImageData`. Colours are resolved from the theme's CSS variables once per theme, by painting each into a 1x1 canvas so any CSS colour syntax works, and pre-blended over `--bg` (text at 70%, find bands at 45%), so no per-pixel blending happens. This measured about 12x faster than filling canvas paths.
+4. Layers: background, current line band (`--cur`), find match bands, text blocks, then 2px git change marks at the left edge.
+
+### Loading
+
+The minimap never asks for highlighting on its own while the view is moving. Lines not yet fetched stay blank; `d.linesVer`, bumped by `ensureChunks()` and `refineChunk()` whenever lines arrive or change, triggers a redraw when they do. Only after 150ms without a redraw does it call `ensureChunks()` for its own range, so a fling or slider drag through a 400,000-line file adds no `/api/file` requests.
+
+### Measured cost
+
+In Chrome on a 412,200-line (11 MB) Go file, with each frame timed including the layout it forces: a smooth scroll frame took a median of 2.1ms with the minimap off and 2.4ms with it on, including a full minimap redraw. `putImageData` accounted for 0.015ms; `runsOf()` parses a typical highlighted line in about 1µs. A 60-jump fling across the file made no minimap requests during the fling and one when it came to rest.

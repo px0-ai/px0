@@ -43,7 +43,14 @@ export function updateEditorOptionControls() {
   if (wrapBtn) wrapBtn.classList.toggle('active', !!S.wrap);
   const linesBtn = $('[data-action="line-numbers"]');
   if (linesBtn) linesBtn.classList.toggle('active', !!S.lineNumbers);
+  const mapBtn = $('[data-action="minimap"]');
+  if (mapBtn) mapBtn.classList.toggle('active', !!S.minimap);
 }
+
+/* Runs after every paint. The minimap registers here, so the renderer imports
+   nothing back from it (see initMinimap). */
+let afterPaint = () => {};
+export function setAfterPaint(fn) { afterPaint = fn; }
 
 let raf = 0;
 export function render() {
@@ -53,7 +60,7 @@ export function render() {
 
 export function paint() {
   const d = doc_();
-  if (!d) { const c = $('#caret'); if (c) c.hidden = true; return; }
+  if (!d) { const c = $('#caret'); if (c) c.hidden = true; afterPaint(); return; }
   const top = vp.scrollTop;
   const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
   const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
@@ -82,6 +89,7 @@ export function paint() {
   decorate(first, last);
   if (sel) restoreSelection(sel);
   placeCaret();
+  afterPaint();
 }
 
 let caretKey = '';
@@ -284,6 +292,7 @@ export function ensureChunks(d, first, last) {
         if (gen !== d.gen) return; // superseded by a background highlight swap
         for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
         d.chunks.add(c); d.pending.delete(c);
+        d.linesVer = (d.linesVer || 0) + 1; // tells the minimap these lines arrived
         if (doc_() === d) render();
         if (j.refine) refineChunk(d, c);
       })
@@ -311,6 +320,7 @@ export function refineChunk(d, c, delay = 800, tries = 0) {
     for (let i = 0; i < j.lines.length; i++) {
       if (d.lines[j.start + i] !== j.lines[i]) { d.lines[j.start + i] = j.lines[i]; changed = true; }
     }
+    if (changed) d.linesVer = (d.linesVer || 0) + 1;
     if (changed && doc_() === d) render();
   }, delay);
 }

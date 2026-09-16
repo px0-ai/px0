@@ -17,6 +17,7 @@ import { initShortcuts } from './shortcuts.js';
 import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
+import { initMinimap } from './minimap.js';
 import { initAgent, applyAgentMeta } from './agent.js';
 import { updateStatus, initMetrics, initStatusFit, updateMetricsDisplay } from './status.js';
 
@@ -37,6 +38,7 @@ initPalette();
 initShortcuts();
 initMarkdown();
 initDiff();
+initMinimap();
 initAgent();
 initMetrics();
 initStatusFit();
@@ -55,6 +57,9 @@ initStatusFit();
     const linesPref = localStorage.getItem('px0.lineNumbers');
     S.lineNumbers = linesPref !== null ? linesPref === 'true' : true;
     document.body.classList.toggle('hide-lines', !S.lineNumbers);
+
+    // Restore the minimap (default OFF)
+    S.minimap = localStorage.getItem('px0.minimap') === 'true';
 
     // Restore Markdown preview (default ON)
     const mdPref = localStorage.getItem('px0.mdPreview');

@@ -74,6 +74,7 @@ export const S = {
   chW: 7.8,
   wrap: true,        // word wrap (default ON)
   lineNumbers: true, // line numbers gutter (default ON)
+  minimap: false,    // minimap beside the code (default OFF)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
 };
 

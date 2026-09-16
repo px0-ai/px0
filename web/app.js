@@ -70,6 +70,7 @@
     chW: 7.8,
     wrap: true,
     lineNumbers: true,
+    minimap: false,
     mdPreview: true
   };
   var doc_ = () => S2.active >= 0 ? S2.tabs[S2.active] : null;
@@ -157,6 +158,13 @@
     const linesBtn = $('[data-action="line-numbers"]');
     if (linesBtn)
       linesBtn.classList.toggle("active", !!S2.lineNumbers);
+    const mapBtn = $('[data-action="minimap"]');
+    if (mapBtn)
+      mapBtn.classList.toggle("active", !!S2.minimap);
+  }
+  var afterPaint = () => {};
+  function setAfterPaint(fn) {
+    afterPaint = fn;
   }
   var raf = 0;
   function render() {
@@ -173,6 +181,7 @@
       const c = $("#caret");
       if (c)
         c.hidden = true;
+      afterPaint();
       return;
     }
     const top = vp.scrollTop;
@@ -205,6 +214,7 @@
     if (sel)
       restoreSelection(sel);
     placeCaret();
+    afterPaint();
   }
   var caretKey = "";
   function placeCaret() {
@@ -412,6 +422,7 @@
           d.lines[j.start + i] = j.lines[i];
         d.chunks.add(c);
         d.pending.delete(c);
+        d.linesVer = (d.linesVer || 0) + 1;
         if (doc_() === d)
           render();
         if (j.refine)
@@ -453,6 +464,8 @@
           changed = true;
         }
       }
+      if (changed)
+        d.linesVer = (d.linesVer || 0) + 1;
       if (changed && doc_() === d)
         render();
     }, delay);
@@ -2594,6 +2607,7 @@
     syncPreview();
     syncDiffView();
     updateStatus();
+    render();
   }
   async function drawDiff(d) {
     if (d.diffText === undefined) {
@@ -3409,6 +3423,7 @@
       drawCrumbs();
       drawTabs();
       updateStatus();
+      render();
       return;
     }
     S2.active = Math.min(i, S2.tabs.length - 1);
@@ -3517,6 +3532,268 @@
     }
   }
 
+  // web/src/minimap.js
+  var ROW = 2;
+  var PAD = 4;
+  var MIN_EDITOR = 600;
+  var FETCH_IDLE = 150;
+  var TEXT_ALPHA = 0.7;
+  var FIND_ALPHA = 0.45;
+  var TOKENS = ["k", "kt", "nf", "nc", "nb", "nv", "no", "na", "nt", "nd", "np", "s", "m", "o", "p", "c", "cp", "gi", "gd", "gh", "err"];
+  var TOKEN_VAR = { gh: "accent-fg" };
+  var CLASS_IDX = Object.fromEntries(TOKENS.map((t, i) => [t, i + 1]));
+  var box = $("#minimap");
+  var canvas = $("canvas", box);
+  var slider = $("#minimap-slider");
+  var ctx = canvas.getContext("2d", { alpha: false });
+  var LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+  var shown2 = false;
+  var colors = null;
+  var themeVer = 0;
+  var last = [];
+  var geo = null;
+  var drag = null;
+  var fetchTimer = 0;
+  var img = null;
+  var px = null;
+  var caches = new WeakMap;
+  function toggleMinimap(forced) {
+    S2.minimap = typeof forced === "boolean" ? forced : !S2.minimap;
+    try {
+      localStorage.setItem("px0.minimap", S2.minimap ? "true" : "false");
+    } catch {}
+    updateEditorOptionControls();
+    render();
+  }
+  function syncMinimap() {
+    const d = doc_();
+    const on = !!(S2.minimap && d && d.lines && !d.diffMode && !previewing(d) && editor.clientWidth >= MIN_EDITOR);
+    if (on !== shown2) {
+      shown2 = on;
+      box.hidden = !on;
+      editor.classList.toggle("mm-on", on);
+      last = [];
+      layout();
+      render();
+    }
+    if (!on)
+      return;
+    const { clientWidth: w, clientHeight: h } = box;
+    if (!w || !h)
+      return;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
+    if (!img || img.width !== cw || img.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+      img = ctx.createImageData(cw, ch);
+      px = new Uint32Array(img.data.buffer);
+      last = [];
+    }
+    const scrollable = Math.max(0, vp.scrollHeight - vp.clientHeight);
+    const contentH = vp.scrollHeight * ROW / LH;
+    const sliderH = Math.min(h, vp.clientHeight * ROW / LH);
+    const f = contentH <= h ? ROW / LH : scrollable ? (h - sliderH) / scrollable : 0;
+    const sliderTop = vp.scrollTop * f;
+    const mmTop = Math.max(0, vp.scrollTop * ROW / LH - sliderTop);
+    geo = { f, sliderTop, sliderH, mmTop };
+    slider.style.height = sliderH + "px";
+    slider.style.transform = "translateY(" + sliderTop + "px)";
+    const top = Math.round(mmTop * dpr);
+    const key = [d, top, cw, ch, themeVer, d.linesVer, d.cur, S2.find, d.gutter];
+    if (key.length === last.length && key.every((v, i) => v === last[i]))
+      return;
+    last = key;
+    draw2(d, top / dpr, dpr);
+  }
+  function draw2(d, mmTop, dpr) {
+    const c = colors || (colors = resolveColors());
+    const { width: W, height: H } = img;
+    const rowH = Math.max(1, Math.ceil(ROW * dpr));
+    const glyphH = Math.max(1, Math.floor(ROW * dpr * 0.75));
+    const lift = Math.floor((rowH - glyphH) / 2);
+    const left = Math.round(PAD * dpr);
+    const first = Math.max(0, Math.floor(mmTop / ROW));
+    const end = Math.min(d.total, Math.ceil((mmTop + H / dpr) / ROW));
+    const yOf = (i) => Math.round((i * ROW - mmTop) * dpr);
+    const fill = (x, y, w, h, v) => {
+      const x0 = Math.max(0, x), x1 = Math.min(W, x + w), y1 = Math.min(H, y + h);
+      if (x0 >= x1)
+        return;
+      for (let r = Math.max(0, y);r < y1; r++)
+        px.fill(v, r * W + x0, r * W + x1);
+    };
+    px.fill(c.bg);
+    if (d.cur > first && d.cur <= end)
+      fill(0, yOf(d.cur - 1), W, rowH, c.cur);
+    const hits = S2.find && !S2.find.preview ? S2.find.byLine : null;
+    if (hits && hits.size) {
+      for (let i = first;i < end; i++)
+        if (hits.has(i + 1))
+          fill(0, yOf(i), W, rowH, c.mark);
+    }
+    const cols = Math.max(1, Math.floor((W - left) / dpr));
+    let cache = caches.get(d);
+    if (!cache || cache.cols !== cols) {
+      cache = { cols, lines: new Map };
+      caches.set(d, cache);
+    }
+    let missing = false;
+    for (let i = first;i < end; i++) {
+      const html = d.lines[i];
+      if (html === undefined) {
+        missing = true;
+        continue;
+      }
+      let e = cache.lines.get(i);
+      if (!e || e.h !== html) {
+        e = { h: html, r: runsOf(html, cols) };
+        cache.lines.set(i, e);
+      }
+      const r = e.r, y = yOf(i) + lift;
+      for (let k = 0;k < r.length; k += 3) {
+        fill(left + Math.round(r[k] * dpr), y, Math.max(1, Math.round(r[k + 1] * dpr)), glyphH, c.tok[r[k + 2]]);
+      }
+    }
+    if (d.gutter) {
+      const markW = Math.max(1, Math.round(2 * dpr));
+      for (let i = first;i < end; i++) {
+        const m = d.gutter.marks.get(i + 1);
+        const v = m === "add" ? c.add : m === "mod" ? c.mod : d.gutter.dels.has(i + 1) ? c.del : 0;
+        if (v)
+          fill(0, yOf(i), markW, rowH, v);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    if (cache.lines.size > (end - first) * 4 + 2000) {
+      for (const k of cache.lines.keys())
+        if (k < first - 1000 || k > end + 1000)
+          cache.lines.delete(k);
+    }
+    if (missing) {
+      clearTimeout(fetchTimer);
+      fetchTimer = setTimeout(() => {
+        if (shown2 && doc_() === d && d.lines)
+          ensureChunks(d, first, end);
+      }, FETCH_IDLE);
+    }
+  }
+  function runsOf(html, maxCols) {
+    const out = [];
+    let col = 0, color = 0, start2 = -1, runColor = 0, i = 0;
+    const n = html.length;
+    const close = () => {
+      if (start2 >= 0) {
+        out.push(start2, col - start2, runColor);
+        start2 = -1;
+      }
+    };
+    while (i < n && col < maxCols) {
+      const ch = html.charCodeAt(i);
+      if (ch === 60) {
+        const gt = html.indexOf(">", i);
+        if (gt < 0)
+          break;
+        color = html.charCodeAt(i + 1) === 47 ? 0 : CLASS_IDX[html.slice(i + 9, gt)] || 0;
+        i = gt + 1;
+        continue;
+      }
+      if (ch === 32 || ch === 9 || ch === 13) {
+        close();
+        if (ch === 9)
+          col += 4 - col % 4;
+        else if (ch === 32)
+          col++;
+        i++;
+        continue;
+      }
+      if (ch === 38) {
+        const semi = html.indexOf(";", i);
+        i = semi < 0 ? i + 1 : semi + 1;
+      } else
+        i++;
+      if (start2 >= 0 && runColor !== color)
+        close();
+      if (start2 < 0) {
+        start2 = col;
+        runColor = color;
+      }
+      col++;
+    }
+    close();
+    return Uint16Array.from(out);
+  }
+  function resolveColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name) => cs.getPropertyValue("--" + name).trim();
+    const probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    probe.canvas.width = probe.canvas.height = 1;
+    const rgba = (css) => {
+      probe.clearRect(0, 0, 1, 1);
+      probe.fillStyle = "#888";
+      probe.fillStyle = css;
+      probe.fillRect(0, 0, 1, 1);
+      return probe.getImageData(0, 0, 1, 1).data;
+    };
+    const bg = rgba(v("bg") || "#000");
+    const mix = (css, alpha) => {
+      const f = rgba(css), k = alpha * f[3] / 255;
+      const [r, g, b] = [0, 1, 2].map((i) => Math.round(bg[i] + (f[i] - bg[i]) * k));
+      return (LITTLE_ENDIAN ? 255 << 24 | b << 16 | g << 8 | r : r << 24 | g << 16 | b << 8 | 255) >>> 0;
+    };
+    const fg = v("fg") || "#888";
+    return {
+      bg: mix(v("bg") || "#000", 1),
+      cur: mix(v("cur") || v("bg4") || fg, 1),
+      mark: mix(v("mark-active") || fg, FIND_ALPHA),
+      add: mix(v("gi") || fg, 1),
+      mod: mix(v("accent") || fg, 1),
+      del: mix(v("gd") || fg, 1),
+      tok: [fg, ...TOKENS.map((t) => v(TOKEN_VAR[t] || t) || fg)].map((css) => mix(css, TEXT_ALPHA))
+    };
+  }
+  function pointerY(e) {
+    return e.clientY - box.getBoundingClientRect().top;
+  }
+  function initMinimap() {
+    setAfterPaint(syncMinimap);
+    new MutationObserver(() => {
+      colors = null;
+      themeVer++;
+      render();
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    box.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !shown2 || !geo)
+        return;
+      e.preventDefault();
+      const y = pointerY(e);
+      const onSlider = y >= geo.sliderTop && y < geo.sliderTop + geo.sliderH;
+      if (!onSlider) {
+        const line = Math.floor((y + geo.mmTop) / ROW);
+        vp.scrollTop = Math.max(0, line * LH - vp.clientHeight / 2);
+      }
+      drag = { offset: onSlider ? y - geo.sliderTop : geo.sliderH / 2 };
+      box.setPointerCapture(e.pointerId);
+      box.classList.add("dragging");
+    });
+    box.addEventListener("pointermove", (e) => {
+      if (!drag || !geo || !geo.f)
+        return;
+      vp.scrollTop = (pointerY(e) - drag.offset) / geo.f;
+    });
+    const endDrag = () => {
+      drag = null;
+      box.classList.remove("dragging");
+    };
+    box.addEventListener("pointerup", endDrag);
+    box.addEventListener("pointercancel", endDrag);
+    box.addEventListener("lostpointercapture", endDrag);
+    box.addEventListener("wheel", (e) => {
+      const unit = e.deltaMode === 1 ? LH : e.deltaMode === 2 ? vp.clientHeight : 1;
+      vp.scrollTop += e.deltaY * unit;
+    }, { passive: true });
+  }
+
   // web/src/theme.js
   var KEY = "px0.theme";
   var THEME_SELECTOR = /^(?::root|html)?\[data-theme=["']?([\w-]+)["']?\]$/;
@@ -3605,6 +3882,7 @@
     [["Mod+D"], "Toggle diff view (git)"],
     [["Alt+Z"], "Toggle word wrap"],
     [["Alt+L"], "Toggle line numbers"],
+    [["Alt+K"], "Toggle minimap"],
     [["Alt+M"], "Toggle Markdown preview"],
     [["Enter", "Shift+Enter"], "Next / previous match"],
     [["F12", "Mod+Click"], "Go to definition"],
@@ -3662,6 +3940,8 @@
         toggleWordWrap();
       else if (act === "line-numbers")
         toggleLineNumbers();
+      else if (act === "minimap")
+        toggleMinimap();
       else if (act === "md-preview")
         togglePreview();
       else if (act === "palette")
@@ -3823,6 +4103,11 @@
         toggleLineNumbers();
         return;
       }
+      if (e.altKey && !mod && !e.shiftKey && e.code === "KeyK") {
+        e.preventDefault();
+        toggleMinimap();
+        return;
+      }
       if (e.altKey && !mod && !e.shiftKey && e.code === "KeyM") {
         e.preventDefault();
         togglePreview();
@@ -3979,6 +4264,7 @@
     } },
     { name: withKeys("Toggle Word Wrap ({Alt+Z})"), run: () => toggleWordWrap() },
     { name: withKeys("Toggle Line Numbers ({Alt+L})"), run: () => toggleLineNumbers() },
+    { name: withKeys("Toggle Minimap ({Alt+K})"), run: () => toggleMinimap() },
     { name: withKeys("Toggle Markdown Preview ({Alt+M})"), run: () => togglePreview() },
     { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => document.body.classList.toggle("side-hidden") },
     { name: "Select Theme…", run: () => openPalette("theme") },
@@ -4175,7 +4461,7 @@
   }
 
   // web/src/agent.js
-  var box = $("#agentbox");
+  var box2 = $("#agentbox");
   var input = $("#agent-input");
   var refEl = $("#agent-ref");
   var harnessBtn = $("#agent-harness");
@@ -4220,7 +4506,7 @@
     resetHint();
     clearErr();
     input.value = "";
-    box.hidden = false;
+    box2.hidden = false;
     if (chosen())
       showCompose();
     else
@@ -4229,7 +4515,7 @@
   function closeAgentEdit() {
     if (timer)
       return;
-    box.hidden = true;
+    box2.hidden = true;
     setBusy(false);
     clearErr();
     target2 = null;
@@ -4267,7 +4553,7 @@
     hintEl.textContent = target2?.fromDiff ? "Editing uncommitted changes · Enter to send" : "Enter to send, Esc to cancel";
   }
   function setBusy(busy, msg) {
-    box.classList.toggle("busy", busy);
+    box2.classList.toggle("busy", busy);
     input.disabled = busy;
     sendBtn.disabled = busy;
     harnessBtn.disabled = busy || !!(S2.meta && S2.meta.agentPinned);
@@ -4425,7 +4711,7 @@ Run the edit anyway?`)) {
       resetHint();
       setStatusNote("");
       showErr(e.message);
-      box.hidden = false;
+      box2.hidden = false;
       return;
     }
     if (j.running) {
@@ -4451,10 +4737,10 @@ Run the edit anyway?`)) {
       ]);
       if (j.changed?.length)
         reloadWorkspace(null);
-      box.hidden = false;
+      box2.hidden = false;
       return;
     }
-    box.hidden = true;
+    box2.hidden = true;
     setBusy(false);
     target2 = null;
     const changed = j.changed || [];
@@ -4533,7 +4819,7 @@ Undo anyway and lose those later changes?`)) {
     showToast("✓", undone.length === 1 ? "Reverted " + undone[0] : "Reverted " + undone.length + " files");
   }
   function initAgent() {
-    if (!box)
+    if (!box2)
       return;
     setAgentHandler(openAgentEdit);
     sendBtn.addEventListener("click", submit);
@@ -4565,7 +4851,7 @@ Undo anyway and lose those later changes?`)) {
       if (!harnessBtn.disabled)
         showPicker();
     });
-    box.addEventListener("keydown", (e) => {
+    box2.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Escape") {
         e.preventDefault();
@@ -4594,6 +4880,7 @@ Undo anyway and lose those later changes?`)) {
   initShortcuts();
   initMarkdown();
   initDiff();
+  initMinimap();
   initAgent();
   initMetrics();
   initStatusFit();
@@ -4606,6 +4893,7 @@ Undo anyway and lose those later changes?`)) {
       const linesPref = localStorage.getItem("px0.lineNumbers");
       S2.lineNumbers = linesPref !== null ? linesPref === "true" : true;
       document.body.classList.toggle("hide-lines", !S2.lineNumbers);
+      S2.minimap = localStorage.getItem("px0.minimap") === "true";
       const mdPref = localStorage.getItem("px0.mdPreview");
       S2.mdPreview = mdPref !== null ? mdPref === "true" : true;
       updateEditorOptionControls();

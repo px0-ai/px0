@@ -47,6 +47,7 @@ make dist
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
 - **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
 - **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, Gemini CLI, or Cursor Agent on it, reloads what changed, shows harness errors inline, and offers a one-click undo.
+- **Minimap**: A canvas overview beside the code (`Alt+K`, off by default) with syntax colours, git change marks and find matches. Drag or click it to move; it draws only the lines it can show, so a 400,000-line file costs the same as a short one.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (Tokyo Night, Catppuccin, Dracula, GitHub Dark, Gruvbox, Nord, Solarized, and more).
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
@@ -235,6 +236,7 @@ px0 --update
 | `Left` / `Right`, `Home` / `End` (`Cmd+Left` / `Cmd+Right` on macOS) | Move the caret along the line; click places it                                             |
 | `Ctrl+Home` / `Ctrl+End` (`Cmd+Up` / `Cmd+Down` on macOS)            | Top / bottom of file                                                                       |
 | `Alt+Z` / `Alt+L`                                      | Toggle word wrap / line numbers                                                            |
+| `Alt+K`                                                | Toggle minimap                                                                             |
 | `Alt+C` / `Alt+A` / `Alt+U`                            | With code selected: copy reference / copy for agent / find usages                          |
 | `Alt+E`                                                | With code selected: edit with your coding agent                                            |
 | `Right click`                                          | On a selection: the same actions in a menu at the pointer                                  |
