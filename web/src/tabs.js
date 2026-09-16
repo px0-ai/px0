@@ -12,7 +12,7 @@ import { clearLink } from './hover.js';
 import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
-import { syncDiffView, layoutPref } from './diff.js';
+import { syncDiffView, layoutPref, diffScrollTop } from './diff.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
@@ -147,16 +147,10 @@ export async function reloadOpenTabs() {
     const hasDiff = !!j.diffAvailable;
     const newCur = Math.max(1, Math.min(keep.cur || 1, j.total));
 
-    let diffMode = null;
-    if (hasDiff) {
-      if (keep.diffDismissed) {
-        diffMode = null;
-      } else if (keep.diffMode) {
-        diffMode = keep.diffMode;
-      } else {
-        diffMode = layoutPref() || 'split';
-      }
-    }
+    /* A reload keeps each tab in the view it was in. The file changing under
+       it, say from an agent edit, is no reason to swap source for a diff, so a
+       tab in source is marked dismissed and loadGutter leaves it there too. */
+    const diffMode = hasDiff ? (keep.diffMode || null) : null;
 
     const d = {
       path: tgt.path,
@@ -179,7 +173,8 @@ export async function reloadOpenTabs() {
       gutter: null,
       diffMode,
       diffAvailable: hasDiff,
-      diffDismissed: !!keep.diffDismissed,
+      diffDismissed: !!keep.diffDismissed || !keep.diffMode,
+      diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0,
     };
 
     for (let k = 0; k < j.lines.length; k++) {

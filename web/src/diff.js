@@ -45,6 +45,11 @@ export function syncDiffView() {
   }
 }
 
+// Read by a reload, which swaps the doc and so redraws the diff from the top.
+export function diffScrollTop() {
+  return diffview.hidden ? 0 : diffview.scrollTop;
+}
+
 export async function toggleDiff() {
   if (!S.meta?.git) return;
   const d = doc_();
@@ -88,6 +93,10 @@ async function drawDiff(d) {
     if (shown !== d) return;
   }
   renderDiff(d);
+  if (d.diffScroll) {
+    diffview.scrollTop = d.diffScroll;
+    d.diffScroll = 0;
+  }
 }
 
 function renderDiff(d) {
@@ -138,7 +147,8 @@ function parseDiff(text) {
     if (!cur || line === '' || line.startsWith('\\')) continue; // trailing split artifact, pre-hunk header, or "\ No newline..."
     const c = line[0], body = line.slice(1);
     if (c === '+') cur.rows.push({ type: 'add', newLine: newLine++, text: body });
-    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, text: body });
+    // A deletion has no line on disk; at is the working-tree line it sat before.
+    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, at: newLine, text: body });
     else cur.rows.push({ type: 'ctx', oldLine: oldLine++, newLine: newLine++, text: body });
   }
   return hunks;
@@ -152,6 +162,7 @@ function unifiedTable(hunk) {
   for (const row of hunk.rows) {
     const r = document.createElement('div');
     r.className = 'diff-row diff-' + row.type;
+    anchor(r, row);
     r.append(
       lineCell(row.type === 'add' ? '' : row.oldLine),
       lineCell(row.type === 'del' ? '' : row.newLine),
@@ -200,8 +211,18 @@ function splitSide(row, side) {
   el.className = 'diff-side diff-side-' + side + (row ? ' diff-' + row.type : ' diff-blank');
   if (!row) { el.append(lineCell(''), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
+  anchor(el, row);
   el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
   return el;
+}
+
+/* Stamps where a row points in the working tree, so a selection on it can be
+   edited. Context and added lines have a line on disk (data-l), which a context
+   line shares across both sides of the split. A deleted line has none, only the
+   place it used to be (data-at). */
+function anchor(el, row) {
+  if (row.newLine !== undefined) el.dataset.l = row.newLine;
+  else if (row.at !== undefined) el.dataset.at = row.at;
 }
 
 function lineCell(n) {
@@ -233,13 +254,15 @@ export function initDiff() {
   sw.addEventListener('mousedown', e => {
     if (!e.target.closest('button')) e.preventDefault();
   });
-  const btn = $('#diff-btn');
-  if (btn) {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      toggleDiff();
-    });
-  }
+  // Each half of the switch names a view, so a click shows that view rather than toggling.
+  $('#diff-source')?.addEventListener('click', e => {
+    e.stopPropagation();
+    setDiffMode('source');
+  });
+  $('#diff-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    setDiffMode(doc_()?.diffMode || layoutPref());
+  });
   const menu = $('#diff-menu');
   if (menu) {
     menu.addEventListener('click', e => {

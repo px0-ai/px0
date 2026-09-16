@@ -59,7 +59,9 @@
       </div>
       <!-- Modified files in a git repo only: view the file's diff against HEAD -->
       <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
-        <button id="diff-btn" title="Toggle diff ({Mod+D})">
+        <button id="diff-source" data-diff-opt="source" title="Show the file ({Mod+D})">Source</button>
+        <div class="diff-seg">
+        <button id="diff-btn" title="Show changes against HEAD ({Mod+D})">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="diff-btn-icon"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
           <span class="diff-btn-label">Diff</span>
           <svg viewBox="0 0 10 10" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="diff-caret"><path d="M2 3.5L5 6.5L8 3.5"/></svg>
@@ -81,6 +83,7 @@
               <span class="diff-item-desc">Inline unified</span>
             </div>
           </button>
+        </div>
         </div>
       </div>
     </div>
@@ -131,10 +134,36 @@
         <button id="find-next" title="Next ({Enter})">&#8595;</button>
         <button id="find-close" title="Close ({Esc})">&#10005;</button>
       </div>
+
+      <!-- Instruction composer: what the harness is asked to change, and where -->
+      <div id="agentbox" hidden>
+        <div class="agent-head">
+          <span class="sel-chip">Edit</span>
+          <span id="agent-ref"></span>
+          <span class="grow"></span>
+          <button id="agent-harness" title="Change the coding harness"></button>
+        </div>
+        <!-- Shown until a harness has been picked, and whenever one is changed -->
+        <div id="agent-pick" hidden></div>
+        <div id="agent-compose">
+          <textarea id="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="What should change here?"></textarea>
+          <div id="agent-err" class="agent-err" hidden></div>
+          <div class="agent-foot">
+            <span class="agent-hint">Enter to send, Esc to cancel</span>
+            <button id="agent-send">Send</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Floating Copy Toast Notification -->
     <div id="toast" hidden></div>
+
+    <!-- Selection context menu: the footer's selection actions, at the pointer -->
+    <div id="sel-menu" role="menu" hidden></div>
+
+    <!-- Harness menu, opened from the footer -->
+    <div id="agent-menu" hidden></div>
 
     <!-- Bottom Status Bar -->
     <footer id="status">
@@ -145,6 +174,7 @@
         <span class="status-sep"></span>
         <button class="footer-btn" data-sel="copy-ref" title="Copy file and line reference ({Alt+C})"><span class="footer-btn-label">Copy Ref</span><kbd class="footer-kbd" data-keys="Alt+C"></kbd></button>
         <button class="footer-btn" data-sel="copy-agent" title="Copy snippet with file path for an AI agent ({Alt+A})"><span class="footer-btn-label">Copy for Agent</span><kbd class="footer-kbd" data-keys="Alt+A"></kbd></button>
+        <button class="footer-btn" data-sel="agent-edit" title="Edit this selection with a coding harness ({Alt+E})" hidden><span class="footer-btn-label">Edit with Agent</span><kbd class="footer-kbd" data-keys="Alt+E"></kbd></button>
         <button class="footer-btn" data-sel="usages" title="Find usages across the workspace ({Alt+U})"><span class="footer-btn-label">Find Usages</span><kbd class="footer-kbd" data-keys="Alt+U"></kbd></button>
       </div>
       <div id="footer-actions">
@@ -156,10 +186,13 @@
         <button class="footer-btn" data-action="md-preview" title="Toggle Markdown Preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
         <button class="footer-btn" data-action="line-numbers" title="Toggle Line Numbers ({Alt+L})"><span class="footer-btn-label">Lines</span><kbd class="footer-kbd" data-keys="Alt+L"></kbd></button>
+        <button class="footer-btn footer-undo" data-action="agent-undo" hidden><span class="footer-btn-label">Undo Edit</span></button>
+        <button class="footer-btn" data-action="agent-harness" hidden><span class="footer-btn-label">Agent</span></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>
       </div>
       <span class="status-sep"></span>
       <span id="st-size"></span>
+      <span id="st-pos"></span>
       <span class="grow"></span>
       <span id="st-lsp"></span>
       <span id="st-index" title="Indexing latency: time taken to index all workspace files"></span>

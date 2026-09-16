@@ -245,7 +245,7 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 - The preview does not reload when the file changes on disk. Close and reopen the tab.
 - Images that load after a scroll position is restored can push content down.
 - Relative images in a Markdown file outside the workspace (opened through a language server) do not load, because `/api/raw` accepts only workspace paths.
-- The selection bar actions (Copy Ref, Copy for Agent, Find Usages) do not act on text selected in the preview.
+- The selection bar and right-click menu actions (Copy Ref, Copy for Agent, Edit with Agent, Find Usages) do not act on text selected in the preview. Switch to Source to edit.
 
 ## 11. Tests
 

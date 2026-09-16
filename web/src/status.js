@@ -30,10 +30,9 @@ export function updateStatus() {
     const btn = $('#diff-btn');
     if (btn) {
       btn.classList.toggle('on', hasDiff && isDiffOn);
-      btn.title = withKeys(isDiffOn
-        ? `Diff: active (${d.diffMode === 'unified' ? 'Unified' : 'Split'}) — click to show source ({Mod+D})`
-        : `Diff: off — click to show diff ({Mod+D})`);
+      btn.title = withKeys(`Show changes against HEAD, ${currentLayout === 'unified' ? 'unified' : 'split'} ({Mod+D})`);
     }
+    $('#diff-source')?.classList.toggle('on', hasDiff && !isDiffOn);
     const menuItems = dsw.querySelectorAll('.diff-menu-item');
     for (const item of menuItems) {
       item.classList.toggle('active', item.dataset.diffOpt === currentLayout);

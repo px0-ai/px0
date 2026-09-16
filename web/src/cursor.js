@@ -1,7 +1,7 @@
 // web/src/cursor.js
 import { $, S, doc_, MOD, LH } from './state.js';
 import { vp, rowsEl } from './ui.js';
-import { paint, render, rowFor, placeCaret } from './renderer.js';
+import { paint, render, rowFor, placeCaret, toPoint } from './renderer.js';
 import { updateStatus } from './status.js';
 import { gotoDefinition } from './lsp.js';
 import { pushHistory } from './history.js';
@@ -80,47 +80,153 @@ function revealCaretX(x) {
   else if (x > vp.scrollLeft + vp.clientWidth - 24) vp.scrollLeft = x - vp.clientWidth + 60;
 }
 
+export function updateDomSelection() {
+  const d = doc_();
+  if (!d) return;
+  const sel = window.getSelection();
+  if (!sel) return;
+  if (!d.selAnchor) {
+    if (sel.rangeCount && !sel.isCollapsed && vp.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      sel.removeAllRanges();
+    }
+    return;
+  }
+  const pa = toPoint(d.selAnchor);
+  const headCol = d.col === Infinity ? (rowFor(d.cur) ? $('.c', rowFor(d.cur)).textContent.length : 0) : (d.col || 0);
+  const pf = toPoint({ line: d.cur, col: headCol });
+  if (pa && pf) {
+    sel.setBaseAndExtent(pa[0], pa[1], pf[0], pf[1]);
+  }
+}
+
+function ensureAnchor(d) {
+  if (!d.selAnchor) {
+    const col = d.col === Infinity ? (rowFor(d.cur) ? $('.c', rowFor(d.cur)).textContent.length : 0) : (d.col || 0);
+    d.selAnchor = { line: d.cur, col };
+  }
+}
+
+export function clearSelection(d) {
+  if (d) d.selAnchor = null;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount && !sel.isCollapsed && vp.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    sel.removeAllRanges();
+  }
+}
+
 /* Left/Right along the line, wrapping onto the neighbouring line at either end. */
-export function moveCol(delta) {
+export function moveCol(delta, shift = false) {
   const d = doc_(); if (!d) return;
+  if (shift) ensureAnchor(d);
+  else d.selAnchor = null;
+
   const row = rowFor(d.cur);
   const len = row ? $('.c', row).textContent.length : 0;
   const col = Math.min(d.col || 0, len) + delta;
   if (col < 0) {
-    if (d.cur > 1) { d.col = Infinity; moveCursor(-1); } // clamped to the line end when placed
+    if (d.cur > 1) { d.col = Infinity; moveCursor(-1, shift); }
+    else updateDomSelection();
     return;
   }
   if (col > len) {
-    if (d.cur < d.total) { d.col = 0; moveCursor(1); }
+    if (d.cur < d.total) { d.col = 0; moveCursor(1, shift); }
+    else updateDomSelection();
     return;
   }
   d.col = col;
   revealCaretX(placeCaret());
+  updateDomSelection();
 }
 
-export function caretToEdge(end) {
+/* Jump by word boundary left/right */
+export function moveWord(delta, shift = false) {
   const d = doc_(); if (!d) return;
+  if (shift) ensureAnchor(d);
+  else d.selAnchor = null;
+
+  const row = rowFor(d.cur);
+  const text = row ? $('.c', row).textContent : '';
+  const len = text.length;
+  let col = Math.min(d.col === Infinity ? len : (d.col || 0), len);
+
+  if (delta < 0) {
+    if (col === 0) {
+      if (d.cur > 1) { d.col = Infinity; moveCursor(-1, shift); }
+      return;
+    }
+    col--;
+    while (col > 0 && /\s/.test(text[col])) col--;
+    if (WORD.test(text[col])) {
+      while (col > 0 && WORD.test(text[col - 1])) col--;
+    } else {
+      while (col > 0 && !WORD.test(text[col - 1]) && !/\s/.test(text[col - 1])) col--;
+    }
+  } else {
+    if (col >= len) {
+      if (d.cur < d.total) { d.col = 0; moveCursor(1, shift); }
+      return;
+    }
+    if (WORD.test(text[col])) {
+      while (col < len && WORD.test(text[col])) col++;
+    } else if (!/\s/.test(text[col])) {
+      while (col < len && !WORD.test(text[col]) && !/\s/.test(text[col])) col++;
+    }
+    while (col < len && /\s/.test(text[col])) col++;
+  }
+  d.col = col;
+  revealCaretX(placeCaret());
+  updateDomSelection();
+}
+
+export function caretToEdge(end, shift = false) {
+  const d = doc_(); if (!d) return;
+  if (shift) ensureAnchor(d);
+  else d.selAnchor = null;
+
   d.col = end ? Infinity : 0;
   revealCaretX(placeCaret());
+  updateDomSelection();
 }
 
-export function moveCursor(delta) {
+export function moveCursor(delta, shift = false) {
   const d = doc_(); if (!d) return;
+  if (shift) ensureAnchor(d);
+  else d.selAnchor = null;
+
   d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
   const y = (d.cur - 1) * LH;
   if (y < vp.scrollTop) vp.scrollTop = y - LH;
   else if (y > vp.scrollTop + vp.clientHeight - LH * 2) vp.scrollTop = y - vp.clientHeight + LH * 3;
   render(); updateStatus();
+  updateDomSelection();
 }
 
 export function initCursor() {
   vp.addEventListener('mousedown', e => {
+    // Only the primary button moves the caret: a right click opens a menu on
+    // what is already selected and must leave it where it is.
+    if (e.button !== 0) return;
     const row = e.target.closest('.row');
     if (!row) return;
     const d = doc_(); if (!d) return;
-    d.cur = +row.dataset.l;
+    const targetLine = +row.dataset.l;
     const p = colAtPoint(e.clientX, e.clientY);
-    d.col = p && p.line === d.cur ? p.col : 0;
+    const targetCol = p && p.line === targetLine ? p.col : 0;
+
+    if (e.shiftKey) {
+      ensureAnchor(d);
+      d.cur = targetLine;
+      d.col = targetCol;
+      placeCaret();
+      updateStatus();
+      updateDomSelection();
+      for (const r of rowsEl.children) r.classList.toggle('cur', +r.dataset.l === d.cur);
+      return;
+    }
+
+    d.selAnchor = null;
+    d.cur = targetLine;
+    d.col = targetCol;
     placeCaret(); // no repaint here: rewriting rows would break the drag that starts a selection
     updateStatus();
     const w = wordAtPoint(e.clientX, e.clientY);

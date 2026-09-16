@@ -148,7 +148,7 @@ function restoreSelection({ a, f }) {
 }
 
 /* DOM boundary point -> { line, col } with col counted in the line's text. */
-function toPos(node, off) {
+export function toPos(node, off) {
   if (node === rowsEl) {
     const row = rowsEl.children[off] || rowsEl.lastElementChild;
     if (!row) return null;
@@ -170,7 +170,7 @@ function toPos(node, off) {
 
 /* { line, col } -> DOM boundary point in the freshly painted rows, or null when
    that line has scrolled out of the rendered window. */
-function toPoint({ line, col }) {
+export function toPoint({ line, col }) {
   const row = rowFor(line);
   if (!row) return null;
   const code = $('.c', row);

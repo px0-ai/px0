@@ -10,7 +10,7 @@ General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are 
 - Their initialization latency takes hundreds of milliseconds.
 - Complex DOM representations degrade frame rates when scrolling large files.
 
-Because px0 is exclusively a read-only code inspection and navigation tool, it bypasses heavy third-party editor runtimes entirely. Instead, it implements a custom, high-performance virtualized surface with a fixed DOM footprint (~60 active nodes) and sub-millisecond paint budgets.
+Because px0 is a code inspection and navigation tool that never edits text in place (changes go through a coding harness), it bypasses heavy third-party editor runtimes entirely. Instead, it implements a custom, high-performance virtualized surface with a fixed DOM footprint (~60 active nodes) and sub-millisecond paint budgets.
 
 ## 2. DOM Surface Hierarchy
 
@@ -176,4 +176,8 @@ Pressing `Ctrl+A` / `Cmd+A` outside a text input does not use the browser's nati
 - `selectAll()` activates `S.selAll` mode for the active document.
 - `paint()` visually shades all currently rendered rows.
 - File contents are retrieved once from `/api/raw` so that `Ctrl+C` copies the entire file to the clipboard cleanly.
-- Esc, click, or tab switching clears whole-file selection mode.
+- Esc, a left click, or tab switching clears whole-file selection mode. A right click keeps it, so the selection menu can act on it.
+
+### Selection Actions
+
+Any selection, native or whole-file, drives the footer selection bar (`#footer-sel`) and the right-click menu (`#sel-menu`) in [`web/src/selbar.js`](../../web/src/selbar.js): Copy Ref, Copy for Agent, Edit with Agent and Find Usages. The viewport's `mousedown` handler only moves the caret for the primary button, so a right click on a selection neither moves the caret nor collapses the selection. See [Harness Editing & Agent Dispatch](agent-editing.md).

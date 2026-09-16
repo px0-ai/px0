@@ -38,6 +38,8 @@ func main() {
 		noColor      = flag.Bool("no-color", false, "disable colour output")
 		quiet        = flag.Bool("quiet", false, "suppress narration")
 		noTelemetry  = flag.Bool("no-telemetry", false, "disable anonymous usage telemetry")
+		agentCmd     = flag.String("agent", "", "pin the coding harness used for edits (claude, gemini, cursor-agent, or a command template containing {prompt}); detected and chosen in the UI when omitted")
+		noAgent      = flag.Bool("no-agent", false, "do not offer editing through a coding harness")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [file or directory]\n\nflags:\n", version)
@@ -93,12 +95,25 @@ func main() {
 	tel := NewTelemetryService(*noTelemetry)
 	defer tel.Close("normal")
 
-	srv := &http.Server{Handler: NewServer(ix, lsp)}
+	pxSrv := NewServer(ix, lsp)
+	var agent *agentManager
+	if !*noAgent {
+		agent, err = newAgentManager(root, *agentCmd, lsp)
+		if err != nil {
+			fatal(fmt.Errorf("-agent: %w", err))
+		}
+		pxSrv.SetAgent(agent)
+	}
+
+	srv := &http.Server{Handler: pxSrv}
 
 	url := viewerURL(addr, initialFile, initialLine)
 	uiHeading("px0 "+version, nil, os.Stdout)
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
+	if n := agent.Name(); n != "" {
+		uiKV("agent", n+" (edits this workspace)", 11, os.Stdout)
+	}
 	uiHint("ctrl-c to stop", os.Stdout)
 
 	// Launch browser immediately without blocking startup.
@@ -147,6 +162,7 @@ func main() {
 
 	err = srv.Serve(ln)
 	lsp.Close()
+	agent.Close()
 
 	if interrupted {
 		tel.Close("interrupted")

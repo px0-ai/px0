@@ -11,7 +11,7 @@
     const r = await fetch(u, { method });
     const j = await r.json();
     if (j.error)
-      throw new Error(j.error);
+      throw Object.assign(new Error(j.error), { body: j });
     return j;
   };
   var api = (path, params) => request("GET", path, params);
@@ -1432,41 +1432,135 @@
     else if (x > vp.scrollLeft + vp.clientWidth - 24)
       vp.scrollLeft = x - vp.clientWidth + 60;
   }
-  function moveCol(delta) {
+  function updateDomSelection() {
     const d = doc_();
     if (!d)
       return;
+    const sel = window.getSelection();
+    if (!sel)
+      return;
+    if (!d.selAnchor) {
+      if (sel.rangeCount && !sel.isCollapsed && vp.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+        sel.removeAllRanges();
+      }
+      return;
+    }
+    const pa = toPoint(d.selAnchor);
+    const headCol = d.col === Infinity ? rowFor(d.cur) ? $(".c", rowFor(d.cur)).textContent.length : 0 : d.col || 0;
+    const pf = toPoint({ line: d.cur, col: headCol });
+    if (pa && pf) {
+      sel.setBaseAndExtent(pa[0], pa[1], pf[0], pf[1]);
+    }
+  }
+  function ensureAnchor(d) {
+    if (!d.selAnchor) {
+      const col = d.col === Infinity ? rowFor(d.cur) ? $(".c", rowFor(d.cur)).textContent.length : 0 : d.col || 0;
+      d.selAnchor = { line: d.cur, col };
+    }
+  }
+  function moveCol(delta, shift = false) {
+    const d = doc_();
+    if (!d)
+      return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     const row = rowFor(d.cur);
     const len = row ? $(".c", row).textContent.length : 0;
     const col = Math.min(d.col || 0, len) + delta;
     if (col < 0) {
       if (d.cur > 1) {
         d.col = Infinity;
-        moveCursor(-1);
-      }
+        moveCursor(-1, shift);
+      } else
+        updateDomSelection();
       return;
     }
     if (col > len) {
       if (d.cur < d.total) {
         d.col = 0;
-        moveCursor(1);
-      }
+        moveCursor(1, shift);
+      } else
+        updateDomSelection();
       return;
     }
     d.col = col;
     revealCaretX(placeCaret());
+    updateDomSelection();
   }
-  function caretToEdge(end) {
+  function moveWord(delta, shift = false) {
     const d = doc_();
     if (!d)
       return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
+    const row = rowFor(d.cur);
+    const text = row ? $(".c", row).textContent : "";
+    const len = text.length;
+    let col = Math.min(d.col === Infinity ? len : d.col || 0, len);
+    if (delta < 0) {
+      if (col === 0) {
+        if (d.cur > 1) {
+          d.col = Infinity;
+          moveCursor(-1, shift);
+        }
+        return;
+      }
+      col--;
+      while (col > 0 && /\s/.test(text[col]))
+        col--;
+      if (WORD.test(text[col])) {
+        while (col > 0 && WORD.test(text[col - 1]))
+          col--;
+      } else {
+        while (col > 0 && !WORD.test(text[col - 1]) && !/\s/.test(text[col - 1]))
+          col--;
+      }
+    } else {
+      if (col >= len) {
+        if (d.cur < d.total) {
+          d.col = 0;
+          moveCursor(1, shift);
+        }
+        return;
+      }
+      if (WORD.test(text[col])) {
+        while (col < len && WORD.test(text[col]))
+          col++;
+      } else if (!/\s/.test(text[col])) {
+        while (col < len && !WORD.test(text[col]) && !/\s/.test(text[col]))
+          col++;
+      }
+      while (col < len && /\s/.test(text[col]))
+        col++;
+    }
+    d.col = col;
+    revealCaretX(placeCaret());
+    updateDomSelection();
+  }
+  function caretToEdge(end, shift = false) {
+    const d = doc_();
+    if (!d)
+      return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     d.col = end ? Infinity : 0;
     revealCaretX(placeCaret());
+    updateDomSelection();
   }
-  function moveCursor(delta) {
+  function moveCursor(delta, shift = false) {
     const d = doc_();
     if (!d)
       return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
     const y = (d.cur - 1) * LH;
     if (y < vp.scrollTop)
@@ -1475,18 +1569,35 @@
       vp.scrollTop = y - vp.clientHeight + LH * 3;
     render();
     updateStatus();
+    updateDomSelection();
   }
   function initCursor() {
     vp.addEventListener("mousedown", (e) => {
+      if (e.button !== 0)
+        return;
       const row = e.target.closest(".row");
       if (!row)
         return;
       const d = doc_();
       if (!d)
         return;
-      d.cur = +row.dataset.l;
+      const targetLine = +row.dataset.l;
       const p = colAtPoint(e.clientX, e.clientY);
-      d.col = p && p.line === d.cur ? p.col : 0;
+      const targetCol = p && p.line === targetLine ? p.col : 0;
+      if (e.shiftKey) {
+        ensureAnchor(d);
+        d.cur = targetLine;
+        d.col = targetCol;
+        placeCaret();
+        updateStatus();
+        updateDomSelection();
+        for (const r of rowsEl.children)
+          r.classList.toggle("cur", +r.dataset.l === d.cur);
+        return;
+      }
+      d.selAnchor = null;
+      d.cur = targetLine;
+      d.col = targetCol;
       placeCaret();
       updateStatus();
       const w = wordAtPoint(e.clientX, e.clientY);
@@ -2469,6 +2580,9 @@
       renderDiff(want);
     }
   }
+  function diffScrollTop() {
+    return diffview.hidden ? 0 : diffview.scrollTop;
+  }
   async function toggleDiff() {
     if (!S2.meta?.git)
       return;
@@ -2520,6 +2634,10 @@
         return;
     }
     renderDiff(d);
+    if (d.diffScroll) {
+      diffview.scrollTop = d.diffScroll;
+      d.diffScroll = 0;
+    }
   }
   function renderDiff(d) {
     diffContent.replaceChildren();
@@ -2565,7 +2683,7 @@
       if (c === "+")
         cur.rows.push({ type: "add", newLine: newLine++, text: body });
       else if (c === "-")
-        cur.rows.push({ type: "del", oldLine: oldLine++, text: body });
+        cur.rows.push({ type: "del", oldLine: oldLine++, at: newLine, text: body });
       else
         cur.rows.push({ type: "ctx", oldLine: oldLine++, newLine: newLine++, text: body });
     }
@@ -2577,6 +2695,7 @@
     for (const row of hunk.rows) {
       const r = document.createElement("div");
       r.className = "diff-row diff-" + row.type;
+      anchor(r, row);
       r.append(lineCell(row.type === "add" ? "" : row.oldLine), lineCell(row.type === "del" ? "" : row.newLine), markerCell(row.type), codeCell(row.text));
       table.append(r);
     }
@@ -2622,8 +2741,15 @@
       return el;
     }
     const ln = side === "left" ? row.oldLine : row.newLine;
+    anchor(el, row);
     el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
     return el;
+  }
+  function anchor(el, row) {
+    if (row.newLine !== undefined)
+      el.dataset.l = row.newLine;
+    else if (row.at !== undefined)
+      el.dataset.at = row.at;
   }
   function lineCell(n) {
     const el = document.createElement("div");
@@ -2652,13 +2778,14 @@
       if (!e.target.closest("button"))
         e.preventDefault();
     });
-    const btn = $("#diff-btn");
-    if (btn) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleDiff();
-      });
-    }
+    $("#diff-source")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setDiffMode("source");
+    });
+    $("#diff-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setDiffMode(doc_()?.diffMode || layoutPref());
+    });
     const menu = $("#diff-menu");
     if (menu) {
       menu.addEventListener("click", (e) => {
@@ -2701,8 +2828,9 @@
       const btn = $("#diff-btn");
       if (btn) {
         btn.classList.toggle("on", hasDiff && isDiffOn);
-        btn.title = withKeys(isDiffOn ? `Diff: active (${d.diffMode === "unified" ? "Unified" : "Split"}) — click to show source ({Mod+D})` : `Diff: off — click to show diff ({Mod+D})`);
+        btn.title = withKeys(`Show changes against HEAD, ${currentLayout === "unified" ? "unified" : "split"} ({Mod+D})`);
       }
+      $("#diff-source")?.classList.toggle("on", hasDiff && !isDiffOn);
       const menuItems = dsw.querySelectorAll(".diff-menu-item");
       for (const item of menuItems) {
         item.classList.toggle("active", item.dataset.diffOpt === currentLayout);
@@ -2806,7 +2934,12 @@
   // web/src/selbar.js
   var status = $("#status");
   var statsEl = $("#sel-stats");
-  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages" };
+  var diffview2 = $("#diffview");
+  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages", KeyE: "agent-edit" };
+  var agentHandler = null;
+  function setAgentHandler(fn) {
+    agentHandler = fn;
+  }
   var current = null;
   var allText = null;
   var allInfo = null;
@@ -2820,6 +2953,9 @@
     if (!d)
       return null;
     const range = sel.getRangeAt(0);
+    if (diffview2 && !diffview2.hidden && diffview2.contains(range.commonAncestorContainer)) {
+      return diffSelection(range, d);
+    }
     if (!vp.contains(range.commonAncestorContainer))
       return null;
     const text = sel.toString().trim();
@@ -2845,6 +2981,45 @@
     }
     return { text, l1, l2, path: d.path };
   }
+  function diffSelection(range, d) {
+    let l1 = Infinity, l2 = -Infinity, at1 = Infinity, at2 = -Infinity;
+    const parts = [];
+    const seen = new Set;
+    for (const el of diffview2.querySelectorAll("[data-l], [data-at]")) {
+      if (!range.intersectsNode(el))
+        continue;
+      const code = el.querySelector(".diff-code");
+      if (el.dataset.l !== undefined) {
+        const n = +el.dataset.l;
+        if (n < l1)
+          l1 = n;
+        if (n > l2)
+          l2 = n;
+        if (seen.has(n))
+          continue;
+        seen.add(n);
+      } else {
+        const n = +el.dataset.at;
+        if (n < at1)
+          at1 = n;
+        if (n > at2)
+          at2 = n;
+      }
+      parts.push(code ? code.textContent : "");
+    }
+    if (!parts.length)
+      return null;
+    if (l1 === Infinity) {
+      const last = Math.max(1, d.total || 1);
+      l1 = Math.min(last, Math.max(1, at1 - 1));
+      l2 = Math.max(l1, Math.min(last, at2));
+    }
+    const text = parts.join(`
+`).trim();
+    if (!text)
+      return null;
+    return { text, l1, l2, path: d.path, fromDiff: true };
+  }
   var refOf = ({ path, l1, l2 }) => path + ":" + (l1 === l2 ? l1 : l1 + "-" + l2);
   function showSelectionBar(info) {
     current = info;
@@ -2856,6 +3031,7 @@
     fitStatus();
   }
   function hideSelectionBar() {
+    closeSelMenu();
     if (!current)
       return;
     current = null;
@@ -2921,6 +3097,10 @@
       const ext = path.split(".").pop() || "";
       copyToClipboard("### Reference: " + ref + "\n```" + ext + `
 ` + text + "\n```", "Copied snippet for Agent (" + ref + ")");
+    } else if (act === "agent-edit") {
+      if (!agentHandler)
+        return false;
+      agentHandler(current);
     } else if (act === "usages") {
       findReferences(text.split(/\s+/)[0] || text);
     } else {
@@ -2928,30 +3108,91 @@
     }
     return true;
   }
+  var menu = $("#sel-menu");
+  function closeSelMenu() {
+    if (menu && !menu.hidden)
+      menu.hidden = true;
+  }
+  function openSelMenu(x, y) {
+    menu.replaceChildren();
+    for (const src of bar().querySelectorAll("[data-sel]")) {
+      if (src.hidden)
+        continue;
+      const item = document.createElement("button");
+      item.className = "sel-menu-item";
+      item.dataset.sel = src.dataset.sel;
+      item.setAttribute("role", "menuitem");
+      const label = document.createElement("span");
+      label.textContent = src.querySelector(".footer-btn-label").textContent;
+      item.append(label);
+      const kbd = src.querySelector("kbd");
+      if (kbd)
+        item.append(kbd.cloneNode(true));
+      menu.append(item);
+    }
+    menu.hidden = false;
+    const { offsetWidth: w, offsetHeight: h } = menu;
+    menu.style.left = Math.max(4, x + w > innerWidth - 4 ? x - w : x) + "px";
+    menu.style.top = Math.max(4, y + h > innerHeight - 4 ? y - h : y) + "px";
+  }
+  var bar = () => $("#footer-sel");
   function initSelectionBar() {
     document.addEventListener("mouseup", () => setTimeout(updateSelectionBar, 20));
     vp.addEventListener("keyup", (e) => {
       if (e.shiftKey)
         setTimeout(updateSelectionBar, 20);
     });
-    document.addEventListener("selectionchange", () => {
-      if (current)
-        updateSelectionBar();
-    });
+    document.addEventListener("selectionchange", () => updateSelectionBar());
     document.addEventListener("mousedown", (e) => {
-      if (!S2.selAll || e.target.closest?.("#footer-sel"))
+      if (!S2.selAll || e.button === 2 || e.target.closest?.("#footer-sel, #sel-menu"))
         return;
       if (e.target === vp && (e.offsetX >= vp.clientWidth || e.offsetY >= vp.clientHeight))
         return;
       clearSelectAll();
     }, true);
-    const bar = $("#footer-sel");
-    bar.addEventListener("mousedown", (e) => e.preventDefault());
-    bar.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-sel]");
-      if (btn)
+    for (const el of [bar(), menu]) {
+      if (!el)
+        continue;
+      el.addEventListener("mousedown", (e) => e.preventDefault());
+      el.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-sel]");
+        if (!btn)
+          return;
+        closeSelMenu();
         runSelectionAction(btn.dataset.sel);
+      });
+    }
+    if (!menu)
+      return;
+    document.addEventListener("contextmenu", (e) => {
+      if (menu.contains(e.target)) {
+        e.preventDefault();
+        return;
+      }
+      const inCode = vp.contains(e.target) || diffview2 && !diffview2.hidden && diffview2.contains(e.target);
+      if (!inCode) {
+        closeSelMenu();
+        return;
+      }
+      updateSelectionBar();
+      if (!current) {
+        closeSelMenu();
+        return;
+      }
+      e.preventDefault();
+      openSelMenu(e.clientX, e.clientY);
     });
+    document.addEventListener("mousedown", (e) => {
+      if (!menu.hidden && !menu.contains(e.target))
+        closeSelMenu();
+    }, true);
+    addEventListener("keydown", (e) => {
+      if (e.key === "Escape")
+        closeSelMenu();
+    });
+    addEventListener("resize", closeSelMenu);
+    addEventListener("blur", closeSelMenu);
+    document.addEventListener("scroll", closeSelMenu, true);
   }
 
   // web/src/tabs.js
@@ -3101,16 +3342,7 @@
       const keep = tgt.oldDoc;
       const hasDiff = !!j.diffAvailable;
       const newCur = Math.max(1, Math.min(keep.cur || 1, j.total));
-      let diffMode = null;
-      if (hasDiff) {
-        if (keep.diffDismissed) {
-          diffMode = null;
-        } else if (keep.diffMode) {
-          diffMode = keep.diffMode;
-        } else {
-          diffMode = layoutPref() || "split";
-        }
-      }
+      const diffMode = hasDiff ? keep.diffMode || null : null;
       const d2 = {
         path: tgt.path,
         name: tgt.path.split("/").pop(),
@@ -3132,7 +3364,8 @@
         gutter: null,
         diffMode,
         diffAvailable: hasDiff,
-        diffDismissed: !!keep.diffDismissed
+        diffDismissed: !!keep.diffDismissed || !keep.diffMode,
+        diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0
       };
       for (let k = 0;k < j.lines.length; k++) {
         d2.lines[j.start + k] = j.lines[k];
@@ -3409,6 +3642,8 @@
     [["Mod+A"], "Select whole file"],
     [["Alt+C", "Alt+A"], "Copy selection ref / for agent"],
     [["Alt+U"], "Find usages of selection"],
+    [["Alt+E"], "Edit selection with a coding harness"],
+    [["Right click"], "Selection actions at the pointer"],
     [["Mod+Home|Mod+Up", "Mod+End|Mod+Down"], "Top / bottom of file"],
     [["Home|Mod+Left", "End|Mod+Right"], "Start / end of line"],
     [["Left", "Right"], "Move caret along the line"],
@@ -3659,14 +3894,21 @@
         render();
         updateStatus();
       };
+      const shift = e.shiftKey;
       if (mod && e.key === "Home") {
         e.preventDefault();
-        toTop();
+        if (shift)
+          caretToEdge(false, true);
+        else
+          toTop();
         return;
       }
       if (mod && e.key === "End") {
         e.preventDefault();
-        toBottom();
+        if (shift)
+          caretToEdge(true, true);
+        else
+          toBottom();
         return;
       }
       if (isMac && mod && e.key === "ArrowUp") {
@@ -3681,42 +3923,52 @@
       }
       if (isMac && mod && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        caretToEdge(e.key === "ArrowRight");
+        caretToEdge(e.key === "ArrowRight", shift);
         return;
       }
-      if (e.key === "ArrowDown" || e.key === "j") {
+      if (mod && !isMac && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        moveCursor(1);
+        moveWord(e.key === "ArrowRight" ? 1 : -1, shift);
         return;
       }
-      if (e.key === "ArrowUp" || e.key === "k") {
+      if (isMac && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        moveCursor(-1);
+        moveWord(e.key === "ArrowRight" ? 1 : -1, shift);
+        return;
+      }
+      if (!mod && (e.key === "ArrowDown" || e.key === "j")) {
+        e.preventDefault();
+        moveCursor(1, shift);
+        return;
+      }
+      if (!mod && (e.key === "ArrowUp" || e.key === "k")) {
+        e.preventDefault();
+        moveCursor(-1, shift);
         return;
       }
       if (!mod && !e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
-        moveCol(-1);
+        moveCol(-1, shift);
         return;
       }
       if (!mod && !e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        moveCol(1);
+        moveCol(1, shift);
         return;
       }
       if (!mod && (e.key === "Home" || e.key === "End")) {
         e.preventDefault();
-        caretToEdge(e.key === "End");
+        caretToEdge(e.key === "End", shift);
         return;
       }
       if (e.key === "PageDown") {
         e.preventDefault();
-        moveCursor(Math.floor(vp.clientHeight / LH) - 2);
+        moveCursor(Math.floor(vp.clientHeight / LH) - 2, shift);
         return;
       }
       if (e.key === "PageUp") {
         e.preventDefault();
-        moveCursor(-(Math.floor(vp.clientHeight / LH) - 2));
+        moveCursor(-(Math.floor(vp.clientHeight / LH) - 2), shift);
         return;
       }
     }, { capture: true });
@@ -3948,6 +4200,409 @@
     });
   }
 
+  // web/src/agent.js
+  var box = $("#agentbox");
+  var input = $("#agent-input");
+  var refEl = $("#agent-ref");
+  var harnessBtn = $("#agent-harness");
+  var pickEl = $("#agent-pick");
+  var composeEl = $("#agent-compose");
+  var sendBtn = $("#agent-send");
+  var hintEl = $(".agent-hint");
+  var errEl = $("#agent-err");
+  var target2 = null;
+  var timer = null;
+  var installed = () => (S2.meta?.agents || []).filter((h) => h.installed);
+  var chosen = () => S2.meta && S2.meta.agent || "";
+  var offerable = () => !!chosen() || installed().length > 0;
+  var refOf2 = ({ path, l1, l2 }) => path + ":" + (l1 === l2 ? l1 : l1 + "-" + l2);
+  function applyAgentMeta() {
+    const btn = $('[data-sel="agent-edit"]');
+    if (btn)
+      btn.hidden = !offerable();
+    const foot = $('[data-action="agent-harness"]');
+    if (foot) {
+      foot.hidden = !offerable();
+      foot.querySelector(".footer-btn-label").textContent = "Agent: " + (chosen() || "choose");
+      foot.title = S2.meta && S2.meta.agentPinned ? "Coding harness, fixed for this run by -agent" : "Coding harness for Edit with Agent. Click to change";
+    }
+    if (harnessBtn) {
+      harnessBtn.textContent = chosen() || "choose harness";
+      harnessBtn.disabled = !!(S2.meta && S2.meta.agentPinned);
+      harnessBtn.title = S2.meta && S2.meta.agentPinned ? "Fixed for this run by -agent" : "Change the coding harness";
+    }
+  }
+  function openAgentEdit(info) {
+    if (!offerable() || !info)
+      return;
+    if (timer) {
+      showToast("!", "An edit is already running");
+      return;
+    }
+    target2 = info;
+    refEl.textContent = refOf2(info);
+    refEl.title = refOf2(info);
+    setBusy(false);
+    resetHint();
+    clearErr();
+    input.value = "";
+    box.hidden = false;
+    if (chosen())
+      showCompose();
+    else
+      showPicker();
+  }
+  function closeAgentEdit() {
+    if (timer)
+      return;
+    box.hidden = true;
+    setBusy(false);
+    clearErr();
+    target2 = null;
+  }
+  function clearErr() {
+    if (!errEl)
+      return;
+    errEl.textContent = "";
+    errEl.hidden = true;
+  }
+  function showErr(msg, streams = []) {
+    if (!errEl)
+      return;
+    errEl.textContent = "";
+    const head = document.createElement("div");
+    head.className = "agent-err-msg";
+    head.textContent = msg;
+    errEl.appendChild(head);
+    for (const [label, text] of streams) {
+      if (!text)
+        continue;
+      const name = document.createElement("div");
+      name.className = "agent-err-label";
+      name.textContent = label;
+      const pre = document.createElement("pre");
+      pre.className = "agent-err-out";
+      pre.textContent = text;
+      errEl.append(name, pre);
+    }
+    errEl.hidden = false;
+  }
+  function resetHint() {
+    if (!hintEl)
+      return;
+    hintEl.textContent = target2?.fromDiff ? "Editing uncommitted changes · Enter to send" : "Enter to send, Esc to cancel";
+  }
+  function setBusy(busy, msg) {
+    box.classList.toggle("busy", busy);
+    input.disabled = busy;
+    sendBtn.disabled = busy;
+    harnessBtn.disabled = busy || !!(S2.meta && S2.meta.agentPinned);
+    if (hintEl && msg)
+      hintEl.textContent = msg;
+  }
+  function showCompose() {
+    pickEl.hidden = true;
+    composeEl.hidden = false;
+    input.focus();
+  }
+  async function showPicker() {
+    composeEl.hidden = true;
+    pickEl.hidden = false;
+    pickEl.innerHTML = '<div class="hint">Looking for coding harnesses…</div>';
+    let list = S2.meta?.agents || [];
+    let settingsPath = "";
+    try {
+      const j = await api("/api/agent/harnesses");
+      list = j.harnesses || [];
+      settingsPath = j.settings || "";
+      S2.meta.agents = list;
+      S2.meta.agent = j.selected || "";
+      S2.meta.agentPinned = !!j.pinned;
+    } catch (e) {
+      pickEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc(e.message) + "</div>";
+      return;
+    }
+    const ready = list.filter((h) => h.installed);
+    if (!ready.length) {
+      pickEl.innerHTML = '<div class="hint">No coding harness found. Install ' + list.map((h) => "<b>" + esc(h.name) + "</b>").join(", ") + " and make sure it is on PATH.</div>";
+      return;
+    }
+    pickEl.innerHTML = '<div class="hint">This harness will edit files in this workspace.</div>' + optionsHtml(ready, settingsPath);
+    pickEl.querySelectorAll("[data-pick]").forEach((b) => {
+      b.addEventListener("click", () => pick(b.dataset.pick));
+    });
+  }
+  function optionsHtml(ready, settingsPath) {
+    let html = "";
+    for (const h of ready) {
+      html += '<button class="agent-opt' + (h.name === chosen() ? " on" : "") + '" data-pick="' + esc(h.name) + '">' + '<span class="agent-opt-name">' + esc(h.name) + "</span>" + '<code class="agent-opt-cmd">' + esc(h.cmd) + "</code></button>";
+    }
+    if (settingsPath)
+      html += '<div class="agent-note">Remembered in ' + esc(settingsPath) + "</div>";
+    return html;
+  }
+  async function pick(name) {
+    if (await select(name, showErr))
+      showCompose();
+  }
+  async function select(name, onError) {
+    try {
+      const j = await apiPost("/api/agent/select", { name });
+      S2.meta.agent = j.selected || "";
+      S2.meta.agents = j.harnesses || S2.meta.agents;
+      S2.meta.agentPinned = !!j.pinned;
+    } catch (e) {
+      onError(e.message);
+      return false;
+    }
+    applyAgentMeta();
+    showToast("✓", "Edits will run through " + name);
+    return true;
+  }
+  var footBtn = $('[data-action="agent-harness"]');
+  var menuEl = $("#agent-menu");
+  function closeMenu() {
+    if (menuEl)
+      menuEl.hidden = true;
+  }
+  async function toggleMenu() {
+    if (!menuEl.hidden) {
+      closeMenu();
+      return;
+    }
+    menuEl.innerHTML = '<div class="hint">Looking for coding harnesses…</div>';
+    menuEl.hidden = false;
+    placeMenu();
+    let j;
+    try {
+      j = await api("/api/agent/harnesses");
+    } catch (e) {
+      menuEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc(e.message) + "</div>";
+      return;
+    }
+    S2.meta.agents = j.harnesses || [];
+    S2.meta.agent = j.selected || "";
+    S2.meta.agentPinned = !!j.pinned;
+    applyAgentMeta();
+    if (menuEl.hidden)
+      return;
+    const ready = S2.meta.agents.filter((h) => h.installed);
+    let html = '<div class="hint">Coding harness for Edit with Agent</div>';
+    if (!ready.length) {
+      html += '<div class="hint">None found. Install ' + S2.meta.agents.map((h) => "<b>" + esc(h.name) + "</b>").join(", ") + " and make sure it is on PATH.</div>";
+    } else {
+      html += optionsHtml(ready, j.settings || "");
+      if (S2.meta.agentPinned)
+        html += '<div class="agent-note">Fixed for this run by -agent</div>';
+    }
+    menuEl.innerHTML = html;
+    menuEl.classList.toggle("pinned", S2.meta.agentPinned);
+    placeMenu();
+  }
+  function placeMenu() {
+    const r = footBtn.getBoundingClientRect();
+    menuEl.style.bottom = innerHeight - r.top + 4 + "px";
+    menuEl.style.left = Math.max(8, Math.min(r.left, innerWidth - menuEl.offsetWidth - 8)) + "px";
+  }
+  async function submit() {
+    if (timer)
+      return;
+    clearErr();
+    const instruction = input.value.trim();
+    if (!instruction || !target2)
+      return;
+    const params = { path: target2.path, l1: target2.l1, l2: target2.l2, instruction };
+    if (target2.fromDiff)
+      params.force = 1;
+    try {
+      await apiPost("/api/agent/edit", params);
+    } catch (e) {
+      if (!/uncommitted/.test(e.message) || !confirm(e.message + `
+
+Run the edit anyway?`)) {
+        showErr(e.message);
+        return;
+      }
+      try {
+        await apiPost("/api/agent/edit", { ...params, force: 1 });
+      } catch (e2) {
+        showErr(e2.message);
+        return;
+      }
+    }
+    hideSelectionBar();
+    setUndo(null);
+    const initialNote = "Editing with " + chosen() + "...";
+    setBusy(true, initialNote);
+    setStatusNote(initialNote);
+    timer = setTimeout(tick, 400);
+  }
+  async function tick() {
+    let j;
+    try {
+      j = await api("/api/agent/job");
+    } catch (e) {
+      timer = null;
+      if (e.body && "running" in e.body) {
+        await finish(e.body);
+        return;
+      }
+      setBusy(false);
+      resetHint();
+      setStatusNote("");
+      showErr(e.message);
+      box.hidden = false;
+      return;
+    }
+    if (j.running) {
+      const note = "Editing with " + j.harness + "... " + Math.round((j.ms || 0) / 1000) + "s";
+      setBusy(true, note);
+      setStatusNote(note);
+      timer = setTimeout(tick, 600);
+      return;
+    }
+    timer = null;
+    await finish(j);
+  }
+  async function finish(j) {
+    setStatusNote("");
+    const editTarget = target2;
+    setUndo(j);
+    if (j.error) {
+      setBusy(false);
+      resetHint();
+      showErr((j.harness || "agent") + ": " + j.error, [
+        ["stderr", (j.stderr || "").trim()],
+        ["stdout", (j.stdout || j.log || "").trim()]
+      ]);
+      if (j.changed?.length)
+        reloadWorkspace(null);
+      box.hidden = false;
+      return;
+    }
+    box.hidden = true;
+    setBusy(false);
+    target2 = null;
+    const changed = j.changed || [];
+    if (!changed.length && j.tracked !== false) {
+      showToast("✓", "Finished with no file changes");
+      return;
+    }
+    if (!await reloadWorkspace(editTarget, "Edited"))
+      return;
+    showToast("✓", (!changed.length ? "Reloaded the workspace" : changed.length === 1 ? "Updated " + changed[0] : "Updated " + changed.length + " files") + (j.undoable ? " · Undo in the footer" : ""));
+  }
+  async function reloadWorkspace(focus, what = "Changed") {
+    try {
+      await api("/api/reindex");
+      await reloadOpenTabs();
+      if (focus?.path) {
+        await openFile(focus.path, { line: focus.l1, push: false });
+      }
+      await drawTree("", treeEl, 0);
+    } catch (e) {
+      showToast("!", what + ", but the reload failed: " + e.message);
+      return false;
+    }
+    return true;
+  }
+  var undoBtn = $('[data-action="agent-undo"]');
+  var undoJob = null;
+  function setUndo(j) {
+    undoJob = j && j.undoable && j.changed?.length ? j : null;
+    if (!undoBtn)
+      return;
+    undoBtn.hidden = !undoJob;
+    if (undoJob) {
+      const n = undoJob.changed.length;
+      undoBtn.title = "Revert what " + undoJob.harness + " changed: " + undoJob.changed.join(", ");
+      undoBtn.querySelector(".footer-btn-label").textContent = n === 1 ? "Undo Edit" : "Undo Edit (" + n + ")";
+    }
+  }
+  async function undo() {
+    const j = undoJob;
+    if (!j || timer)
+      return;
+    const files = j.changed;
+    const list = files.slice(0, 12).join(`
+`) + (files.length > 12 ? `
+…and ` + (files.length - 12) + " more" : "");
+    if (!confirm("Revert what " + j.harness + ` changed?
+
+` + list))
+      return;
+    let res;
+    try {
+      res = await apiPost("/api/agent/undo");
+    } catch (e) {
+      if (!/changed since/.test(e.message) || !confirm(e.message + `.
+
+Undo anyway and lose those later changes?`)) {
+        showToast("!", e.message);
+        if (!/changed since/.test(e.message))
+          setUndo(null);
+        return;
+      }
+      try {
+        res = await apiPost("/api/agent/undo", { force: 1 });
+      } catch (e2) {
+        showToast("!", e2.message);
+        setUndo(null);
+        await reloadWorkspace(null, "Undo failed");
+        return;
+      }
+    }
+    setUndo(null);
+    const undone = res.undone || files;
+    if (!await reloadWorkspace(null, "Undone"))
+      return;
+    showToast("✓", undone.length === 1 ? "Reverted " + undone[0] : "Reverted " + undone.length + " files");
+  }
+  function initAgent() {
+    if (!box)
+      return;
+    setAgentHandler(openAgentEdit);
+    sendBtn.addEventListener("click", submit);
+    undoBtn?.addEventListener("click", undo);
+    api("/api/agent/job").then(setUndo, (e) => {
+      if (e.body)
+        setUndo(e.body);
+    });
+    if (footBtn && menuEl) {
+      footBtn.addEventListener("click", toggleMenu);
+      menuEl.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-pick]");
+        if (!b || S2.meta.agentPinned || timer)
+          return;
+        if (await select(b.dataset.pick, (msg) => showToast("!", msg)))
+          closeMenu();
+      });
+      document.addEventListener("mousedown", (e) => {
+        if (!menuEl.hidden && !menuEl.contains(e.target) && !footBtn.contains(e.target))
+          closeMenu();
+      });
+      addEventListener("keydown", (e) => {
+        if (e.key === "Escape")
+          closeMenu();
+      });
+      addEventListener("resize", closeMenu);
+    }
+    harnessBtn.addEventListener("click", () => {
+      if (!harnessBtn.disabled)
+        showPicker();
+    });
+    box.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeAgentEdit();
+      } else if (e.key === "Enter" && !e.shiftKey && !composeEl.hidden && !timer) {
+        e.preventDefault();
+        submit();
+      }
+    });
+  }
+
   // web/src/main.js
   initRenderer();
   initTabs();
@@ -3965,6 +4620,7 @@
   initShortcuts();
   initMarkdown();
   initDiff();
+  initAgent();
   initMetrics();
   initStatusFit();
   (async function boot() {
@@ -3992,6 +4648,7 @@
           b.hidden = false;
       }
     }
+    applyAgentMeta();
     document.title = S2.meta.name + " - px0";
     $("#root-name").textContent = S2.meta.name;
     $("#root-name").title = S2.meta.root;
@@ -4025,16 +4682,16 @@
       });
     }
     if (S2.meta && !S2.meta.ready) {
-      const timer = setInterval(async () => {
+      const timer2 = setInterval(async () => {
         try {
           const m = await api("/api/meta");
           if (m.ready) {
-            clearInterval(timer);
+            clearInterval(timer2);
             S2.meta = m;
             updateStatus();
           }
         } catch {
-          clearInterval(timer);
+          clearInterval(timer2);
         }
       }, 150);
     }
