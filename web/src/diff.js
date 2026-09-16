@@ -6,6 +6,7 @@
 // bounded in size, so a plain DOM render is simple and fast enough.
 import { $, S, doc_, esc, api } from './state.js';
 import { syncPreview } from './markdown.js';
+import { render } from './renderer.js';
 import { setStatusNote, updateStatus } from './status.js';
 
 export const diffview = $('#diffview');
@@ -73,6 +74,7 @@ export async function setDiffMode(mode) {
   syncPreview(); // markdown preview and diff view are mutually exclusive
   syncDiffView();
   updateStatus();
+  render(); // the minimap hides under the diff and returns with the source
 }
 
 async function drawDiff(d) {

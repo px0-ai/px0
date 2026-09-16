@@ -17,6 +17,7 @@ import { SEL_KEYS, runSelectionAction, selectAll, clearSelectAll, copySelectAll 
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
 import { toggleDiff } from './diff.js';
+import { toggleMinimap } from './minimap.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
    they show as ⌘/⌥/⇧ on a Mac and Ctrl/Alt/Shift elsewhere. Browsers keep
@@ -26,7 +27,7 @@ export const SHORTCUTS = [
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
   [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
-  [['Alt+L'], 'Toggle line numbers'], [['Alt+M'], 'Toggle Markdown preview'],
+  [['Alt+L'], 'Toggle line numbers'], [['Alt+K'], 'Toggle minimap'], [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
@@ -74,6 +75,7 @@ export function initShortcuts() {
     else if (act === 'goto') openPalette('line');
     else if (act === 'wrap') toggleWordWrap();
     else if (act === 'line-numbers') toggleLineNumbers();
+    else if (act === 'minimap') toggleMinimap();
     else if (act === 'md-preview') togglePreview();
     else if (act === 'palette') openPalette('command');
     else if (act === 'help') showHelp();
@@ -150,6 +152,12 @@ export function initShortcuts() {
     if (e.altKey && e.code === 'KeyL') {
       e.preventDefault();
       toggleLineNumbers();
+      return;
+    }
+
+    if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyK') {
+      e.preventDefault();
+      toggleMinimap();
       return;
     }
 

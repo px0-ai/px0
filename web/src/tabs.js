@@ -239,6 +239,7 @@ export function closeTab(i) {
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
     $('#empty').hidden = false; drawCrumbs();
     drawTabs(); updateStatus();
+    render(); // an empty paint clears what follows the view, such as the minimap
     return;
   }
   S.active = Math.min(i, S.tabs.length - 1);
