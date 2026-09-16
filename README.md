@@ -49,7 +49,7 @@ make dist
 - **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, Gemini CLI, or Cursor Agent on it, reloads what changed, shows harness errors inline, and offers a one-click undo.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (Tokyo Night, Catppuccin, Dracula, GitHub Dark, Gruvbox, Nord, Solarized, and more).
-- **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
+- **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, call trails, and active-file diagnostics in the Problems inspector. Falls back automatically to regex outlines.
 - **Virtual DOM / Zero Overhead**: Opening a 400,000-line file costs the same as a 10-line file; only visible rows are mounted. Reclaims memory after 15 seconds of inactivity.
 - **Completely Self-Contained**: Single static binary embedding all web assets. Zero runtime dependencies, no Electron, no Node, no cloud phone-homes.
 
@@ -73,7 +73,7 @@ When installed, language servers provide semantic Go-to-Definition (`F12`), hove
 | C# | `omnisharp` | Install OmniSharp on `PATH` |
 | LaTeX | `texlab` | `brew install texlab` |
 
-Servers spawn lazily on first request and shut down cleanly upon exit. Disable with `px0 -no-lsp`. You can also click **LSP: set up** in the status bar to view or trigger automatic installation for your OS.
+Servers spawn lazily on first request and shut down cleanly upon exit. Diagnostics stay scoped to open files, with changed lines listed first in the Problems inspector. Disable LSP with `px0 -no-lsp`. You can also click **LSP: set up** in the status bar to view or trigger automatic installation for your OS.
 
 ## Editing with a Coding Agent (Optional)
 
@@ -227,6 +227,7 @@ px0 --update
 | `Cmd/Ctrl+Shift+P`                                     | Command palette                                                                            |
 | `Cmd/Ctrl+Shift+O`                                     | Go to symbol in file                                                                       |
 | `Cmd/Ctrl+Shift+F`                                     | Full workspace search                                                                      |
+| `Cmd/Ctrl+Shift+M`                                     | Show problems in the active file                                                           |
 | `Cmd/Ctrl+F`                                           | Find in active file (seeded with the current editor selection)                             |
 | `Cmd/Ctrl+G`                                           | Jump to line                                                                               |
 | `Cmd/Ctrl+D`                                           | Toggle git diff of the active file (split or unified, whichever you used last)             |
@@ -331,7 +332,7 @@ For comprehensive technical deep-dives into the architecture, indexing, virtuali
 - `server.go`: HTTP routes, JSON API, gzip compression, and embedded asset serving.
 - `index.go`: Concurrently walks workspace, honors `.gitignore` (ignored files stay visible but dimmed in the explorer, and are never indexed or searched), builds in-memory path and trie structures in milliseconds.
 - `search.go` / `fuzzy.go`: High-performance substring and fuzzy file/symbol matching algorithms.
-- `lsp.go` / `lspnav.go` / `calls.go`: Lightweight JSON-RPC client communicating with local language servers over stdio, plus definitions, references and call trails.
+- `lsp.go` / `lspnav.go` / `diagnostics.go` / `calls.go`: Lightweight JSON-RPC client communicating with local language servers over stdio, plus definitions, references, diagnostics, and call trails.
 - `lspservers.go` / `lspsetup.go`: Language server registry, discovery, and install on request.
 - `agent.go` / `agent_undo.go` / `settings.go`: Coding harness discovery and dispatch, change detection, undo of the last edit, and the remembered harness choice.
 - `web/`: Native zero-dependency ES module frontend (custom virtual scroll, syntax highlight rendering, tab manager).

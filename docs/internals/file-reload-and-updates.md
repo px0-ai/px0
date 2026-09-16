@@ -272,6 +272,11 @@ updateStatus();
 - **Problem**: If a file extension was replaced with an image or binary file, passing it to the text virtualization buffer would corrupt line array parsing.
 - **Solution**: `if (j.image) continue;` skips image tabs, allowing specialized image rendering flows to handle the media.
 
+### 7. Stale LSP Diagnostics after Re-index
+- **Problem**: Diagnostics published for the old tab contents could remain visible after an external edit.
+- **Solution**: The replacement tab starts with empty diagnostics. `warmLSP()` requests them again, and the backend compares the file modification time and size before sending a full-text `textDocument/didChange`. The old snapshot stays cleared until the language server publishes for the new document version.
+- **Missing file**: If reload fails because the path was deleted or renamed, px0 keeps the old source readable but clears its gutter markers and diagnostics. The Problems pane reports that the file is no longer available.
+
 ---
 
 ## 6. Related Documentation

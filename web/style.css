@@ -194,9 +194,9 @@ body.right-hidden #right-side, body.right-hidden #right-resizer { display: none;
   height: 35px; flex: none; display: flex; align-items: center; justify-content: space-between;
   padding: 0 8px 0 12px; border-bottom: 1px solid var(--line);
 }
-.inspector-tabs { display: flex; gap: 4px; }
+.inspector-tabs { display: flex; gap: 2px; }
 .inspector-tab {
-  font-size: 12px; font-weight: 500; color: var(--faint); padding: 4px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 500; color: var(--faint); padding: 4px; border-radius: 4px;
   cursor: pointer; transition: color .1s, background .1s;
 }
 .inspector-tab:hover { color: var(--fg); background: var(--bg3); }
@@ -219,6 +219,23 @@ body.right-hidden #right-side, body.right-hidden #right-resizer { display: none;
   font: 10px var(--mono); color: var(--faint); background: var(--bg3);
   border-radius: 8px; padding: 1px 6px; flex: none;
 }
+
+/* problems */
+.problem-group {
+  padding: 8px 12px 4px; color: var(--faint); font: 600 10px var(--ui);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.problem { display: flex; align-items: flex-start; gap: 8px; padding: 6px 12px; cursor: pointer; }
+.problem:hover { background: var(--bg3); }
+.problem.sel { background: var(--sel); }
+.problem-dot { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--accent); flex: none; }
+.problem-error .problem-dot { background: var(--err); }
+.problem-warning .problem-dot { background: var(--mark-active); }
+.problem-hint .problem-dot { background: var(--faint); }
+.problem-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.problem-message { color: var(--fg); font: 12px/1.35 var(--ui); overflow-wrap: anywhere; }
+.problem-meta, .problem-pos { color: var(--faint); font: 10px/1.35 var(--mono); }
+.problem-pos { padding-top: 1px; flex: none; }
 
 /* call trail */
 .calls-dir { display: flex; gap: 2px; flex: none; }
@@ -372,6 +389,13 @@ body.hide-lines .c { padding-left: 16px; }
   border-left: 4px solid var(--gd);
   border-top: 3px solid transparent; border-bottom: 3px solid transparent;
 }
+.g.diag-error::before, .g.diag-warning::before, .g.diag-info::before, .g.diag-hint::before {
+  content: ""; position: absolute; right: 4px; top: 7px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent);
+}
+.g.diag-error::before { background: var(--err); }
+.g.diag-warning::before { background: var(--mark-active); }
+.g.diag-hint::before { background: var(--faint); }
 
 .row mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 1px 0; }
 /* The current match is a solid fill, so syntax colours on it are unreadable. */

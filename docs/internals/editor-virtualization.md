@@ -160,6 +160,8 @@ Search match markers (`<mark>`), symbol occurrence markers (`.occ`), and definit
 - Uses `document.createTreeWalker(row, NodeFilter.SHOW_TEXT)` to inspect only text nodes within `.c`.
 - Matches are split and wrapped without destroying or invalidating surrounding syntax highlighting tags (`.k`, `.s`, etc.).
 
+LSP gutter markers follow the same bound. Each tab stores its highest diagnostic severity per line in a `Map`; `paint()` performs one lookup for each mounted row. The Problems list is built only while its pane is visible and renders at most 1,000 rows. The badge and gutter still use the complete diagnostic set.
+
 ## 8. Dynamic Chunk Streaming & Whole-File Selection
 ### On-Demand Chunk Fetching (`ensureChunks`)
 

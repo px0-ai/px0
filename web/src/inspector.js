@@ -7,6 +7,7 @@ import { pushHistory } from './history.js';
 import { loadOutline, drawOutline } from './outline.js';
 import { displayPath } from './search.js';
 import { groupHits, flashFind, canAskServer, lspCall, positionNow } from './lsp.js';
+import { drawDiagnostics, loadDiagnostics } from './diagnostics.js';
 
 export function showRightInspector(tab = 'refs') {
   document.body.classList.remove('right-hidden');
@@ -26,10 +27,16 @@ export function setRightInspectorTab(tab) {
   $('#pane-right-refs')?.classList.toggle('active', tab === 'refs');
   $('#pane-right-symbols')?.classList.toggle('active', tab === 'symbols');
   $('#pane-right-calls')?.classList.toggle('active', tab === 'calls');
+  $('#pane-right-problems')?.classList.toggle('active', tab === 'problems');
   $('#pane-right-search')?.classList.toggle('active', tab === 'search');
   if (tab === 'symbols') {
     loadOutline();
     $('#right-symbols-filter')?.focus();
+  }
+  if (tab === 'problems') {
+    const d = doc_();
+    drawDiagnostics(d);
+    if (d) loadDiagnostics(d, !!(d.diagnostics?.error || d.diagnostics?.timedOut));
   }
   if (tab === 'search') $('#q')?.focus();
 }
@@ -171,5 +178,19 @@ export function initInspector() {
       const targetEl = $('#right-ref-target');
       if (targetEl && targetEl.textContent) flashFind(targetEl.textContent);
     }
+  });
+
+  $('#right-problems-list')?.addEventListener('click', e => {
+    const item = e.target.closest('.problem');
+    if (!item) return;
+    $$('#right-problems-list .problem.sel').forEach(x => x.classList.remove('sel'));
+    item.classList.add('sel');
+    const d = doc_(); if (!d) return;
+    d.cur = +item.dataset.n;
+    d.col = +item.dataset.col;
+    centerLine(d.cur);
+    render();
+    updateStatus();
+    pushHistory(d.path, d.cur, d.col);
   });
 }

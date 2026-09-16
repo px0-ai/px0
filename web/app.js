@@ -182,6 +182,7 @@
     ensureChunks(d, first, last);
     let html = "";
     const gut = d.gutter || null;
+    const diagnostics = d.diagnostics?.byLine;
     for (let i = first;i < last; i++) {
       const n = i + 1;
       const body = d.lines[i];
@@ -195,6 +196,9 @@
         if (gut.dels.has(n))
           rc += " gut-del";
       }
+      const severity = diagnostics?.get(n);
+      if (severity)
+        gc += " diag-" + severity;
       html += '<div class="' + rc + '" data-l="' + n + '">' + '<div class="' + gc + '">' + n + '</div><div class="c">' + (body === undefined ? "" : body) + "</div></div>";
     }
     const sel = saveSelection();
@@ -267,11 +271,11 @@
   }
   function toPos(node, off) {
     if (node === rowsEl) {
-      const row2 = rowsEl.children[off] || rowsEl.lastElementChild;
-      if (!row2)
+      const row = rowsEl.children[off] || rowsEl.lastElementChild;
+      if (!row)
         return null;
       const atEnd = !rowsEl.children[off];
-      return { line: +row2.dataset.l, col: atEnd ? $(".c", row2).textContent.length : 0 };
+      return { line: +row.dataset.l, col: atEnd ? $(".c", row).textContent.length : 0 };
     }
     const el = node.nodeType === 1 ? node : node.parentElement;
     const row = el && el.closest(".row");
@@ -1031,6 +1035,201 @@
     });
   }
 
+  // web/src/diagnostics.js
+  var DIAGNOSTIC_TRIES = 8;
+  var DIAGNOSTIC_RENDER_LIMIT = 1000;
+  var DIAGNOSTIC_RANK = { error: 1, warning: 2, info: 3, hint: 4 };
+  function emptyDiagnostics() {
+    return {
+      items: [],
+      byLine: new Map,
+      pending: false,
+      loaded: false,
+      loading: false,
+      timedOut: false,
+      error: "",
+      tries: 0,
+      timer: 0,
+      seq: 0
+    };
+  }
+  function diagnosticSeverity(n) {
+    return n === 1 ? "error" : n === 2 ? "warning" : n === 4 ? "hint" : "info";
+  }
+  function indexDiagnosticLines(items) {
+    const byLine = new Map;
+    for (const item of items) {
+      const severity = diagnosticSeverity(item.severity);
+      const previous = byLine.get(item.line);
+      if (!previous || DIAGNOSTIC_RANK[severity] < DIAGNOSTIC_RANK[previous]) {
+        byLine.set(item.line, severity);
+      }
+    }
+    return byLine;
+  }
+  function clearDiagnostics(d) {
+    const state = d?.diagnostics;
+    if (!state)
+      return;
+    clearTimeout(state.timer);
+    state.seq++;
+    state.items = [];
+    state.byLine.clear();
+  }
+  async function loadDiagnostics(d, force = false) {
+    const state = d?.diagnostics;
+    if (!state || !S2.tabs.includes(d) || d.lsp?.state === "off" || d.lsp?.state === "failed")
+      return;
+    if (force) {
+      clearTimeout(state.timer);
+      state.timer = 0;
+      state.loaded = false;
+      state.timedOut = false;
+      state.tries = 0;
+    }
+    if (state.loading || state.timer || state.loaded)
+      return;
+    state.loading = true;
+    state.error = "";
+    const seq = ++state.seq;
+    let result;
+    try {
+      result = await api("/api/lsp/diagnostics", {
+        path: d.path,
+        wait: state.tries === 0 ? 1 : 1200
+      });
+    } catch (err) {
+      if (!S2.tabs.includes(d) || d.diagnostics !== state || state.seq !== seq)
+        return;
+      state.loading = false;
+      state.loaded = true;
+      state.pending = false;
+      state.error = err.message;
+      if (doc_() === d)
+        drawDiagnostics(d);
+      return;
+    }
+    if (!S2.tabs.includes(d) || d.diagnostics !== state || state.seq !== seq)
+      return;
+    d.lsp = { state: result.state, server: result.server || "", missing: "" };
+    if (doc_() === d)
+      setLspState(result);
+    state.items = result.diagnostics || [];
+    state.byLine = indexDiagnosticLines(state.items);
+    state.loading = false;
+    state.pending = !!result.pending;
+    if (state.pending && state.tries < DIAGNOSTIC_TRIES) {
+      state.tries++;
+      state.timer = setTimeout(() => {
+        state.timer = 0;
+        loadDiagnostics(d);
+      }, 450);
+    } else {
+      state.loaded = true;
+      state.timedOut = state.pending;
+      state.pending = false;
+    }
+    if (doc_() === d) {
+      drawDiagnostics(d);
+      render();
+    }
+  }
+  function diagnosticChanged(d, item) {
+    const marks = d.gutter?.marks;
+    if (!marks)
+      return false;
+    for (const line of marks.keys()) {
+      if (line >= item.line && line <= item.endLine)
+        return true;
+    }
+    return false;
+  }
+  function renderDiagnosticGroup(label, items) {
+    if (!items.length)
+      return "";
+    let html = label ? '<div class="problem-group">' + label + "</div>" : "";
+    for (const item of items) {
+      const severity = diagnosticSeverity(item.severity);
+      const name = severity[0].toUpperCase() + severity.slice(1);
+      const source = [item.source, item.code].filter(Boolean).join(" ");
+      const position = item.line + ":" + (item.col + 1);
+      html += '<div class="problem problem-' + severity + '" data-n="' + item.line + '" data-col="' + item.col + '" title="Jump to ' + esc(position) + '">' + '<span class="problem-dot"></span><span class="problem-main"><span class="problem-message">' + esc(String(item.message || "Problem")) + '</span><span class="problem-meta">' + name + (source ? " · " + esc(source) : "") + '</span></span><span class="problem-pos">' + position + "</span></div>";
+    }
+    return html;
+  }
+  function renderDiagnosticLimit(total) {
+    if (total <= DIAGNOSTIC_RENDER_LIMIT)
+      return "";
+    return '<div class="hint">Showing ' + DIAGNOSTIC_RENDER_LIMIT.toLocaleString() + " of " + total.toLocaleString() + " problems.</div>";
+  }
+  function drawDiagnostics(d = doc_()) {
+    const title = $("#right-problems-target");
+    const badge = $("#right-problems-badge");
+    const list = $("#right-problems-list");
+    if (!title || !badge || !list)
+      return;
+    const visible = !document.body.classList.contains("right-hidden") && $("#pane-right-problems")?.classList.contains("active");
+    if (!d) {
+      title.textContent = "-";
+      badge.textContent = "0";
+      list.innerHTML = visible ? '<div class="hint">Open a file to see its problems.</div>' : "";
+      return;
+    }
+    title.textContent = d.name;
+    const state = d.diagnostics;
+    if (d.fileError) {
+      badge.textContent = "!";
+    } else if (d.lsp?.state === "off") {
+      badge.textContent = "0";
+    } else if (d.lsp?.state === "failed") {
+      badge.textContent = "!";
+    } else {
+      badge.textContent = !state?.loaded || state.pending || state.loading ? "…" : String(state.items.length);
+    }
+    if (!visible) {
+      list.innerHTML = "";
+      return;
+    }
+    if (d.fileError) {
+      list.innerHTML = '<div class="hint">File is no longer available.</div>';
+      return;
+    }
+    if (d.lsp?.state === "off") {
+      list.innerHTML = '<div class="hint">No language server for this file.</div>';
+      return;
+    }
+    if (d.lsp?.state === "failed") {
+      list.innerHTML = '<div class="hint">The language server failed.</div>';
+      return;
+    }
+    if (!state || !state.loaded || state.loading || state.pending) {
+      list.innerHTML = '<div class="hint">Waiting for diagnostics from ' + esc(d.lsp?.server || "the language server") + "…</div>";
+      return;
+    }
+    if (state.error) {
+      list.innerHTML = '<div class="hint">Could not load diagnostics: ' + esc(state.error) + "</div>";
+      return;
+    }
+    if (state.timedOut) {
+      list.innerHTML = '<div class="hint">No diagnostics received from ' + esc(d.lsp?.server || "the language server") + ".</div>";
+      return;
+    }
+    if (!state.items.length) {
+      list.innerHTML = '<div class="hint">No problems reported by ' + esc(d.lsp?.server || "the language server") + ".</div>";
+      return;
+    }
+    if (!d.gutter?.marks) {
+      list.innerHTML = renderDiagnosticGroup("", state.items.slice(0, DIAGNOSTIC_RENDER_LIMIT)) + renderDiagnosticLimit(state.items.length);
+      return;
+    }
+    const changed = [], elsewhere = [];
+    for (const item of state.items)
+      (diagnosticChanged(d, item) ? changed : elsewhere).push(item);
+    const shownChanged = changed.slice(0, DIAGNOSTIC_RENDER_LIMIT);
+    const shownElsewhere = elsewhere.slice(0, DIAGNOSTIC_RENDER_LIMIT - shownChanged.length);
+    list.innerHTML = renderDiagnosticGroup("Changed lines", shownChanged) + renderDiagnosticGroup("Elsewhere in file", shownElsewhere) + renderDiagnosticLimit(state.items.length);
+  }
+
   // web/src/inspector.js
   function showRightInspector(tab = "refs") {
     document.body.classList.remove("right-hidden");
@@ -1048,10 +1247,17 @@
     $("#pane-right-refs")?.classList.toggle("active", tab === "refs");
     $("#pane-right-symbols")?.classList.toggle("active", tab === "symbols");
     $("#pane-right-calls")?.classList.toggle("active", tab === "calls");
+    $("#pane-right-problems")?.classList.toggle("active", tab === "problems");
     $("#pane-right-search")?.classList.toggle("active", tab === "search");
     if (tab === "symbols") {
       loadOutline();
       $("#right-symbols-filter")?.focus();
+    }
+    if (tab === "problems") {
+      const d = doc_();
+      drawDiagnostics(d);
+      if (d)
+        loadDiagnostics(d, !!(d.diagnostics?.error || d.diagnostics?.timedOut));
     }
     if (tab === "search")
       $("#q")?.focus();
@@ -1195,6 +1401,22 @@
           flashFind(targetEl.textContent);
       }
     });
+    $("#right-problems-list")?.addEventListener("click", (e) => {
+      const item = e.target.closest(".problem");
+      if (!item)
+        return;
+      $$("#right-problems-list .problem.sel").forEach((x) => x.classList.remove("sel"));
+      item.classList.add("sel");
+      const d = doc_();
+      if (!d)
+        return;
+      d.cur = +item.dataset.n;
+      d.col = +item.dataset.col;
+      centerLine(d.cur);
+      render();
+      updateStatus();
+      pushHistory(d.path, d.cur, d.col);
+    });
   }
 
   // web/src/lsp.js
@@ -1212,10 +1434,19 @@
     return !at.imprecise && (S2.lsp.state === "ready" || S2.lsp.state === "indexing");
   }
   async function warmLSP(d, tries = 0) {
-    if (!d.lsp || d.lsp.state === "off" || d.lsp.state === "ready" || d.lsp.state === "failed")
+    if (!d.lsp)
       return;
+    if (d.lsp.state === "off" || d.lsp.state === "failed") {
+      drawDiagnostics(d);
+      return;
+    }
+    if (d.lsp.state === "ready") {
+      loadDiagnostics(d);
+      return;
+    }
     if (tries > 20)
       return;
+    const previous = d.lsp.state;
     let j;
     try {
       j = await api("/api/lsp/warm", { path: d.path, wait: tries === 0 ? 1 : 1200 });
@@ -1227,6 +1458,10 @@
     d.lsp = { state: j.state, server: j.server, missing: j.missing || "" };
     if (doc_() === d)
       setLspState(j);
+    if (j.state === "indexing" || j.state === "ready")
+      loadDiagnostics(d, j.state === "ready" && previous !== "ready");
+    if (j.state === "failed")
+      drawDiagnostics(d);
     if (j.state === "starting" || j.state === "indexing") {
       setTimeout(() => warmLSP(d, tries + 1), 900);
     }
@@ -1381,11 +1616,11 @@
       node = p.offsetNode;
       off = p.offset;
     } else if (document.caretRangeFromPoint) {
-      const r2 = document.caretRangeFromPoint(x, y);
-      if (!r2)
+      const r = document.caretRangeFromPoint(x, y);
+      if (!r)
         return null;
-      node = r2.startContainer;
-      off = r2.startOffset;
+      node = r.startContainer;
+      off = r.startOffset;
     } else
       return null;
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
@@ -1980,14 +2215,14 @@
     const d = doc_();
     if (!d || at.path !== d.path)
       return;
-    const seq2 = ++hoverSeq;
+    const seq = ++hoverSeq;
     let j;
     try {
       j = await api("/api/lsp/hover", { path: d.path, line: at.line, col: at.col, wait: 4000 });
     } catch {
       return;
     }
-    if (seq2 !== hoverSeq || doc_() !== d)
+    if (seq !== hoverSeq || doc_() !== d)
       return;
     setLspState(j);
     if (!j || j.empty || !j.signature && !j.doc)
@@ -2146,9 +2381,9 @@
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
     mdDrawn = d;
-    const target2 = d.mdAnchor && mdFindAnchor(d.mdAnchor);
-    if (target2)
-      mdScrollTo(target2);
+    const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
+    if (target)
+      mdScrollTo(target);
     else if (d.mdLine)
       previewLine(d.mdLine);
     else
@@ -2200,7 +2435,7 @@
   function mdSanitize(html, docPath) {
     const body = new DOMParser().parseFromString(html, "text/html").body;
     const dir = docPath.slice(0, docPath.lastIndexOf("/") + 1);
-    const base2 = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
+    const base = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
     for (const el of [...body.querySelectorAll("*")]) {
       if (!body.contains(el))
         continue;
@@ -2232,19 +2467,19 @@
       if (tag === "input")
         el.disabled = true;
       if (tag === "img")
-        mdSetImage(el, mdURL(attrs.src || ""), base2);
+        mdSetImage(el, mdURL(attrs.src || ""), base);
       if (tag === "a" && attrs.href)
-        mdSetLink(el, mdURL(attrs.href), base2);
+        mdSetLink(el, mdURL(attrs.href), base);
     }
     const frag = document.createDocumentFragment();
     while (body.firstChild)
       frag.appendChild(document.adoptNode(body.firstChild));
     return frag;
   }
-  function mdLocal(ref, base2) {
+  function mdLocal(ref, base) {
     let u;
     try {
-      u = new URL(ref, base2);
+      u = new URL(ref, base);
     } catch {
       return null;
     }
@@ -2256,7 +2491,7 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img, src, base) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
@@ -2264,12 +2499,12 @@
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
     } else if (src) {
-      const t = mdLocal(src, base2);
+      const t = mdLocal(src, base);
       if (t)
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
-  function mdSetLink(a, href, base2) {
+  function mdSetLink(a, href, base) {
     if (href.startsWith("#")) {
       a.setAttribute("href", href);
       a.dataset.anchor = href.slice(1);
@@ -2284,7 +2519,7 @@
       a.rel = "noopener noreferrer";
       return;
     }
-    const t = mdLocal(href, base2);
+    const t = mdLocal(href, base);
     if (!t)
       return;
     a.setAttribute("href", "/api/raw?path=" + encodeURIComponent(t.path));
@@ -2297,17 +2532,17 @@
     for (const q of $$("blockquote", mdArticle))
       mdAlert(q);
     for (const pre of $$("pre", mdArticle)) {
-      const wrap2 = document.createElement("div");
-      wrap2.className = "md-pre";
+      const wrap = document.createElement("div");
+      wrap.className = "md-pre";
       if (pre.dataset.lang)
-        wrap2.dataset.lang = pre.dataset.lang;
-      pre.replaceWith(wrap2);
+        wrap.dataset.lang = pre.dataset.lang;
+      pre.replaceWith(wrap);
       const copy = document.createElement("button");
       copy.className = "md-copy";
       copy.title = "Copy code";
       copy.setAttribute("aria-label", "Copy code");
       copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
-      wrap2.append(pre, copy);
+      wrap.append(pre, copy);
     }
   }
   function mdAlert(q) {
@@ -2486,7 +2721,7 @@
   }
   function showPreviewHit(i) {
     const marks = $$("mark.md-hit", mdArticle);
-    marks.forEach((m2, k) => m2.classList.toggle("on", k === i));
+    marks.forEach((m, k) => m.classList.toggle("on", k === i));
     const m = marks[i];
     if (!m)
       return;
@@ -2785,18 +3020,18 @@
     const sizeEl = $("#st-size");
     if (sizeEl)
       sizeEl.textContent = d ? fmtBytes(d.size) : "";
-    const isMd = !!(d && d.markdown), shown2 = previewing(d);
+    const isMd = !!(d && d.markdown), shown = previewing(d);
     const mdBtn = $('[data-action="md-preview"]');
     if (mdBtn) {
       mdBtn.hidden = !isMd;
-      mdBtn.classList.toggle("active", shown2);
+      mdBtn.classList.toggle("active", shown);
     }
     const sw = $("#md-switch");
     if (sw) {
       sw.hidden = !isMd;
       document.body.classList.toggle("md-tab", isMd);
       for (const b of sw.children)
-        b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown2);
+        b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown);
     }
     const hasDiff = !!(d && d.diffAvailable);
     const isDiffOn = !!(d && d.diffMode);
@@ -3183,9 +3418,9 @@
     let idx = S2.tabs.findIndex((t) => t.path === path);
     if (idx < 0) {
       let j;
-      const start2 = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
+      const start = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
       try {
-        j = await api("/api/file", { path, start: start2, count: CHUNK });
+        j = await api("/api/file", { path, start, count: CHUNK });
       } catch (e) {
         setStatusNote(path + ": " + e.message);
         return;
@@ -3195,7 +3430,7 @@
         return;
       }
       const hasDiff = !!j.diffAvailable;
-      const d2 = {
+      const d = {
         path,
         name: path.split("/").pop(),
         lang: j.lang,
@@ -3203,7 +3438,7 @@
         maxCols: j.maxCols,
         size: j.size,
         lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        chunks: new Set([start / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
@@ -3212,18 +3447,20 @@
         gen: 0,
         markdown: !!j.markdown,
         gutter: null,
+        diagnostics: emptyDiagnostics(),
+        fileError: "",
         diffMode: hasDiff ? layoutPref() || "split" : null,
         diffAvailable: hasDiff,
         diffDismissed: false
       };
       for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
+        d.lines[j.start + i] = j.lines[i];
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs.push(d);
       idx = S2.tabs.length - 1;
       if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, start / CHUNK);
+      loadGutter(d);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -3243,6 +3480,7 @@
     S2.lsp.state = d.lsp && d.lsp.state || "off";
     S2.lsp.server = d.lsp && d.lsp.server || "";
     S2.lsp.missing = d.lsp && d.lsp.missing || "";
+    drawDiagnostics(d);
     warmLSP(d);
     drawTabs();
     drawCrumbs();
@@ -3281,8 +3519,10 @@
       for (const n of j.added)
         marks.set(n, "add");
       d.gutter = { marks, dels: new Set(j.deleted) };
-      if (doc_() === d)
+      if (doc_() === d) {
+        drawDiagnostics(d);
         render();
+      }
     }).catch(() => {});
   }
   async function reloadOpenTabs() {
@@ -3311,8 +3551,19 @@
       if (idx < 0)
         continue;
       if (res.status !== "fulfilled") {
+        const message = res.reason?.message || "failed to load";
+        const state = tgt.oldDoc.diagnostics;
+        clearDiagnostics(tgt.oldDoc);
+        if (state) {
+          state.loading = false;
+          state.pending = false;
+          state.loaded = true;
+          state.timedOut = false;
+          state.error = "";
+        }
+        tgt.oldDoc.fileError = message;
         if (idx === S2.active) {
-          setStatusNote(tgt.path + ": " + (res.reason?.message || "failed to load"));
+          setStatusNote(tgt.path + ": " + message);
         }
         continue;
       }
@@ -3323,7 +3574,7 @@
       const hasDiff = !!j.diffAvailable;
       const newCur = Math.max(1, Math.min(keep.cur || 1, j.total));
       const diffMode = hasDiff ? keep.diffMode || null : null;
-      const d2 = {
+      const d = {
         path: tgt.path,
         name: tgt.path.split("/").pop(),
         lang: j.lang,
@@ -3342,25 +3593,29 @@
         markdown: !!j.markdown,
         mdScroll: keep.mdScroll || 0,
         gutter: null,
+        diagnostics: emptyDiagnostics(),
+        fileError: "",
         diffMode,
         diffAvailable: hasDiff,
         diffDismissed: !!keep.diffDismissed || !keep.diffMode,
         diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0
       };
       for (let k = 0;k < j.lines.length; k++) {
-        d2.lines[j.start + k] = j.lines[k];
+        d.lines[j.start + k] = j.lines[k];
       }
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs[idx] = d2;
+      d.lsp = j.lsp || { state: "off", server: "" };
+      clearDiagnostics(keep);
+      S2.tabs[idx] = d;
       if (j.refine)
-        refineChunk(d2, tgt.start / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, tgt.start / CHUNK);
+      loadGutter(d);
     }
     const d = doc_();
     if (d) {
       S2.lsp.state = d.lsp && d.lsp.state || "off";
       S2.lsp.server = d.lsp && d.lsp.server || "";
       S2.lsp.missing = d.lsp && d.lsp.missing || "";
+      drawDiagnostics(d);
       warmLSP(d);
       syncPreview();
       syncDiffView();
@@ -3398,6 +3653,7 @@
       closed.pending?.clear?.();
       closed.refining?.clear?.();
       closed.outline = null;
+      clearDiagnostics(closed);
     }
     if (S2.tabs.length === 0) {
       S2.active = -1;
@@ -3408,6 +3664,7 @@
       $("#empty").hidden = false;
       drawCrumbs();
       drawTabs();
+      drawDiagnostics();
       updateStatus();
       return;
     }
@@ -3417,6 +3674,7 @@
     syncDiffView();
     drawTabs();
     drawCrumbs();
+    drawDiagnostics(d);
     layout();
     vp.scrollTop = d.scrollTop;
     render();
@@ -3458,6 +3716,7 @@
     S2.lsp.state = S2.tabs[i].lsp && S2.tabs[i].lsp.state || "off";
     S2.lsp.server = S2.tabs[i].lsp && S2.tabs[i].lsp.server || "";
     S2.lsp.missing = S2.tabs[i].lsp && S2.tabs[i].lsp.missing || "";
+    drawDiagnostics(S2.tabs[i]);
     warmLSP(S2.tabs[i]);
     drawTabs();
     drawCrumbs();
@@ -3600,6 +3859,7 @@
     [["Mod+Shift+P"], "Command palette"],
     [["Mod+Shift+O"], "Go to symbol"],
     [["Mod+Shift+F"], "Search in files"],
+    [["Mod+Shift+M"], "Show problems"],
     [["Mod+F"], "Find in file"],
     [["Mod+G"], "Go to line"],
     [["Mod+D"], "Toggle diff view (git)"],
@@ -3732,6 +3992,11 @@
         e.preventDefault();
         showRightInspector("search");
         $("#q")?.select();
+        return;
+      }
+      if (mod && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        e.preventDefault();
+        showRightInspector("problems");
         return;
       }
       if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
@@ -3958,6 +4223,7 @@
     { name: "Go to Symbol in File…", run: () => openPalette("symbol") },
     { name: "Go to Line…", run: () => openPalette("line") },
     { name: "Search in Files", run: () => showRightInspector("search") },
+    { name: withKeys("Show Problems ({Mod+Shift+M})"), run: () => showRightInspector("problems") },
     { name: "Find in Current File", run: () => openFind(S2.lastWord) },
     { name: "Go to Definition", run: () => gotoDefinition() },
     { name: "Find All References (Right Panel)", run: () => findReferences() },
@@ -4654,16 +4920,16 @@ Undo anyway and lose those later changes?`)) {
       });
     }
     if (S2.meta && !S2.meta.ready) {
-      const timer2 = setInterval(async () => {
+      const timer = setInterval(async () => {
         try {
           const m = await api("/api/meta");
           if (m.ready) {
-            clearInterval(timer2);
+            clearInterval(timer);
             S2.meta = m;
             updateStatus();
           }
         } catch {
-          clearInterval(timer2);
+          clearInterval(timer);
         }
       }, 150);
     }
