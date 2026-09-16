@@ -8,6 +8,7 @@ import { mdview, previewing, findInPreview, showPreviewHit, clearPreviewMarks, p
 
 export const findbar = $('#findbar');
 export const findInput = $('#find-input');
+const findCase = $('#find-case');
 
 /* Text currently selected inside the editor viewport, reduced to its first
    non-empty line since find matches within a single line. */
@@ -44,10 +45,11 @@ export function clearFind() {
 export const runFind = debounce(async () => {
   const d = doc_(); if (!d) return;
   const q = findInput.value;
+  const cs = findCase.classList.contains('on');
   // The Markdown preview is searched as rendered text, in the page itself.
   if (previewing(d)) {
-    const n = findInPreview(q);
-    S.find = q ? { q, ci: false, hits: new Array(n).fill(null), byLine: new Set(), active: n ? 0 : -1, preview: true } : null;
+    const n = findInPreview(q, cs);
+    S.find = q ? { q, ci: cs, hits: new Array(n).fill(null), byLine: new Set(), active: n ? 0 : -1, preview: true } : null;
     $('#find-count').textContent = !q ? '0' : n ? '1 / ' + n : 'no results';
     $('#minimap-hits').innerHTML = previewHitOffsets().map(p => '<i style="top:' + p + '%"></i>').join('');
     if (n) jumpToHit(0);
@@ -55,7 +57,7 @@ export const runFind = debounce(async () => {
   }
   if (!q) { S.find = null; $('#find-count').textContent = '0'; $('#minimap-hits').innerHTML = ''; paint(); return; }
   let j;
-  try { j = await api('/api/search', { q, glob: d.path }); } catch { return; }
+  try { j = await api('/api/search', { q, glob: d.path, case: cs ? 1 : '' }); } catch { return; }
   const f = (j.results || []).find(r => r.path === d.path);
   const hits = [];
   if (f) {
@@ -66,7 +68,7 @@ export const runFind = debounce(async () => {
       hits.push({ line: m.line, n });
     }
   }
-  S.find = { q, ci: false, hits, byLine: new Set(hits.map(h => h.line)), active: hits.length ? 0 : -1 };
+  S.find = { q, ci: cs, hits, byLine: new Set(hits.map(h => h.line)), active: hits.length ? 0 : -1 };
   $('#find-count').textContent = hits.length ? '1 / ' + hits.length : 'no results';
   drawMinimap(hits, d.total);
   if (hits.length) jumpToHit(0); else paint();
@@ -103,6 +105,7 @@ export function initFind() {
     if (e.key === 'Enter') { e.preventDefault(); jumpToHit(S.find ? S.find.active + (e.shiftKey ? -1 : 1) : 0); }
     if (e.key === 'Escape') { clearFind(); vp.focus(); }
   });
+  findCase.addEventListener('click', () => { findCase.classList.toggle('on'); runFind(); });
   $('#find-next').addEventListener('click', () => jumpToHit(S.find ? S.find.active + 1 : 0));
   $('#find-prev').addEventListener('click', () => jumpToHit(S.find ? S.find.active - 1 : 0));
   $('#find-close').addEventListener('click', clearFind);

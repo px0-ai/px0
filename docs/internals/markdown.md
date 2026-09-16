@@ -231,7 +231,7 @@ Clicking the half that is already selected does nothing. The handler toggles onl
 
 The code view's features assume rows, so the preview substitutes its own versions:
 
-- Find (Ctrl+F). `runFind` in [`web/src/find.js`](../../web/src/find.js) calls `findInPreview(q)` instead of `/api/search`. It clears earlier `mark.md-hit` elements, then reuses `markNodes` from [`web/src/renderer.js`](../../web/src/renderer.js), the same text-node walker the code view uses, case-insensitively. `S.find.preview` routes `jumpToHit` to `showPreviewHit`, which scrolls the match to the middle when it is near an edge. Minimap ticks come from each mark's offset within `#mdview`'s scroll height.
+- Find (Ctrl+F). `runFind` in [`web/src/find.js`](../../web/src/find.js) calls `findInPreview(q, caseSensitive)` instead of `/api/search`. It clears earlier `mark.md-hit` elements, then reuses `markNodes` from [`web/src/renderer.js`](../../web/src/renderer.js), the same text-node walker the code view uses, case-insensitively unless the findbar Match case toggle (`#find-case`) is on. `S.find.preview` routes `jumpToHit` to `showPreviewHit`, which scrolls the match to the middle when it is near an edge. Minimap ticks come from each mark's offset within `#mdview`'s scroll height.
 - Select all (Ctrl+A). `selectPreview()` selects the contents of `#md` natively instead of the whole-file `S.selAll` mode, so Ctrl+C copies the rendered text.
 - Scrolling. `previewKey(e)` maps ArrowUp and ArrowDown (and `k` / `j`) to 48 px, PageUp and PageDown to 90% of the view, and Home and End (Cmd+Up and Cmd+Down on macOS) to the ends. `shortcuts.js` calls it before the code view's caret handling.
 

@@ -227,7 +227,7 @@ px0 --update
 | `Cmd/Ctrl+Shift+P`                                     | Command palette                                                                            |
 | `Cmd/Ctrl+Shift+O`                                     | Go to symbol in file                                                                       |
 | `Cmd/Ctrl+Shift+F`                                     | Full workspace search                                                                      |
-| `Cmd/Ctrl+F`                                           | Find in active file (seeded with the current editor selection)                             |
+| `Cmd/Ctrl+F`                                           | Find in active file (seeded with the current editor selection; `Aa` toggles Match case)    |
 | `Cmd/Ctrl+G`                                           | Jump to line                                                                               |
 | `Cmd/Ctrl+D`                                           | Toggle git diff of the active file (split or unified, whichever you used last)             |
 | `F12`, `Cmd/Ctrl+Click`                                | Go to definition                                                                           |
