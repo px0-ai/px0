@@ -34,6 +34,10 @@ export async function openFile(path, opts = {}) {
       showImage(path);
       return;
     }
+    if (j.pdf) {
+      showPdf(path);
+      return;
+    }
     const hasDiff = !!j.diffAvailable;
     const d = {
       path, name: path.split('/').pop(), lang: j.lang, total: j.total, maxCols: j.maxCols,
@@ -59,6 +63,7 @@ export async function openFile(path, opts = {}) {
 
   $('#empty').hidden = true;
   hideImage();
+  hidePdf();
   syncPreview();
   syncDiffView();
   if (!S.at || S.at.path !== d.path) S.at = null;
@@ -141,7 +146,7 @@ export async function reloadOpenTabs() {
     }
 
     const j = res.value;
-    if (j.image) continue;
+    if (j.image || j.pdf) continue;
 
     const keep = tgt.oldDoc;
     const hasDiff = !!j.diffAvailable;
@@ -308,6 +313,20 @@ export function showImage(path) {
 
 export function hideImage() {
   const b = $('#imgview');
+  if (b) b.remove();
+}
+
+export function showPdf(path) {
+  hidePdf();
+  const box = document.createElement('div');
+  box.id = 'pdfview';
+  box.innerHTML = '<iframe src="/api/raw?path=' + encodeURIComponent(path) + '" title="PDF preview"></iframe>';
+  editor.appendChild(box);
+  $('#empty').hidden = true;
+}
+
+export function hidePdf() {
+  const b = $('#pdfview');
   if (b) b.remove();
 }
 
