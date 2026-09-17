@@ -4,6 +4,7 @@ import { openFile } from './tabs.js';
 
 export const treeEl = $('#tree');
 export const openDirs = new Set();
+const treeLoads = new WeakMap();
 
 /* git status letter -> CSS class + label. Empty/absent = clean, no badge. */
 const GIT_STATUS = {
@@ -14,7 +15,7 @@ const GIT_STATUS = {
 
 export async function drawTree(dir, container, depth) {
   let j;
-  try { j = await api('/api/tree', { dir }); } catch { return; }
+  try { j = await api('/api/tree', { dir }); } catch { return false; }
   container.innerHTML = j.children.map(c => {
     const pad = 8 + depth * 12;
     // Ignored by .gitignore: still browsable, dimmed, and absent from search.
@@ -32,6 +33,7 @@ export async function drawTree(dir, container, depth) {
     return '<div class="tr file' + ig + gc + '" data-file="' + esc(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc(c.path) + note + '">' +
       '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + '</span>' + badge + '</div>';
   }).join('');
+  return true;
 }
 
 /* A colour family per file kind, drawn in CSS. Emoji or icon fonts would be at
@@ -54,23 +56,46 @@ export function fileKind(name) {
   return (i > 0 && FILE_KIND[name.slice(i + 1).toLowerCase()]) || 'other';
 }
 
-/* Expand the tree down to dir and scroll it into view. */
-export async function revealDir(dir) {
+// Clicks and reveals share pending requests, including on slow remote servers.
+async function expandTreeRow(row) {
+  const path = row.dataset.dir;
+  const kids = row.nextElementSibling;
+  row.classList.add('open');
+  kids.classList.add('open');
+  openDirs.add(path);
+  if (kids.dataset.loaded) return true;
+  if (!treeLoads.has(kids)) {
+    treeLoads.set(kids, drawTree(path, kids, path.split('/').length).then(loaded => {
+      if (loaded) kids.dataset.loaded = '1';
+      treeLoads.delete(kids);
+      return loaded;
+    }));
+  }
+  return treeLoads.get(kids);
+}
+
+async function expandTreePath(dir, isCurrent) {
   const parts = dir.split('/');
   for (let i = 0; i < parts.length; i++) {
+    if (!isCurrent()) return false;
     const p = parts.slice(0, i + 1).join('/');
     const row = treeEl.querySelector('[data-dir="' + CSS.escape(p) + '"]');
-    if (!row) break;
-    if (!row.classList.contains('open')) row.click();
-    await new Promise(r => setTimeout(r, 30));
+    if (!row || !await expandTreeRow(row)) return false;
   }
+  return isCurrent();
+}
+
+/* Expand the tree down to dir and scroll it into view. */
+export async function revealDir(dir) {
+  if (!await expandTreePath(dir, () => true)) return;
   const last = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
   if (last) last.scrollIntoView({ block: 'center' });
 }
 
-export async function revealFile(path) {
+export async function revealFile(path, isCurrent = () => true) {
   const idx = path.lastIndexOf('/');
-  if (idx > 0) await revealDir(path.slice(0, idx));
+  if (idx > 0 && !await expandTreePath(path.slice(0, idx), isCurrent)) return;
+  if (!isCurrent()) return;
   const row = treeEl.querySelector('[data-file="' + CSS.escape(path) + '"]');
   if (row) {
     $$('.tr.sel', treeEl).forEach(x => x.classList.remove('sel'));
@@ -90,16 +115,11 @@ export function initTree() {
     const dirRow = e.target.closest('[data-dir]');
     if (dirRow) {
       const path = dirRow.dataset.dir;
-      const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
-      const open = dirRow.classList.toggle('open');
-      kids.classList.toggle('open', open);
-      if (open) {
-        openDirs.add(path);
-        if (!kids.dataset.loaded) {
-          kids.dataset.loaded = '1';
-          await drawTree(path, kids, path.split('/').length);
-        }
-      } else openDirs.delete(path);
+      if (dirRow.classList.contains('open')) {
+        dirRow.classList.remove('open');
+        dirRow.nextElementSibling.classList.remove('open');
+        openDirs.delete(path);
+      } else await expandTreeRow(dirRow);
       return;
     }
     const f = e.target.closest('[data-file]');

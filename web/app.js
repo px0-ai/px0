@@ -640,6 +640,7 @@
   // web/src/tree.js
   var treeEl = $("#tree");
   var openDirs = new Set;
+  var treeLoads = new WeakMap;
   var GIT_STATUS = {
     M: ["git-M", "modified"],
     A: ["git-A", "added"],
@@ -654,7 +655,7 @@
     try {
       j = await api("/api/tree", { dir });
     } catch {
-      return;
+      return false;
     }
     container.innerHTML = j.children.map((c) => {
       const pad = 8 + depth * 12;
@@ -669,6 +670,7 @@
       const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc2(c.status) + "</span>" : "";
       return '<div class="tr file' + ig + gc + '" data-file="' + esc2(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc2(c.path) + note + '">' + '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc2(c.name) + "</span>" + badge + "</div>";
     }).join("");
+    return true;
   }
   var FILE_KIND = {
     go: "code",
@@ -735,25 +737,49 @@
     const i = name.lastIndexOf(".");
     return i > 0 && FILE_KIND[name.slice(i + 1).toLowerCase()] || "other";
   }
-  async function revealDir(dir) {
+  async function expandTreeRow(row) {
+    const path = row.dataset.dir;
+    const kids = row.nextElementSibling;
+    row.classList.add("open");
+    kids.classList.add("open");
+    openDirs.add(path);
+    if (kids.dataset.loaded)
+      return true;
+    if (!treeLoads.has(kids)) {
+      treeLoads.set(kids, drawTree(path, kids, path.split("/").length).then((loaded) => {
+        if (loaded)
+          kids.dataset.loaded = "1";
+        treeLoads.delete(kids);
+        return loaded;
+      }));
+    }
+    return treeLoads.get(kids);
+  }
+  async function expandTreePath(dir, isCurrent) {
     const parts = dir.split("/");
     for (let i = 0;i < parts.length; i++) {
+      if (!isCurrent())
+        return false;
       const p = parts.slice(0, i + 1).join("/");
       const row = treeEl.querySelector('[data-dir="' + CSS.escape(p) + '"]');
-      if (!row)
-        break;
-      if (!row.classList.contains("open"))
-        row.click();
-      await new Promise((r) => setTimeout(r, 30));
+      if (!row || !await expandTreeRow(row))
+        return false;
     }
+    return isCurrent();
+  }
+  async function revealDir(dir) {
+    if (!await expandTreePath(dir, () => true))
+      return;
     const last = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
     if (last)
       last.scrollIntoView({ block: "center" });
   }
-  async function revealFile(path) {
+  async function revealFile(path, isCurrent = () => true) {
     const idx = path.lastIndexOf("/");
-    if (idx > 0)
-      await revealDir(path.slice(0, idx));
+    if (idx > 0 && !await expandTreePath(path.slice(0, idx), isCurrent))
+      return;
+    if (!isCurrent())
+      return;
     const row = treeEl.querySelector('[data-file="' + CSS.escape(path) + '"]');
     if (row) {
       $$(".tr.sel", treeEl).forEach((x) => x.classList.remove("sel"));
@@ -770,17 +796,12 @@
       const dirRow = e.target.closest("[data-dir]");
       if (dirRow) {
         const path = dirRow.dataset.dir;
-        const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
-        const open = dirRow.classList.toggle("open");
-        kids.classList.toggle("open", open);
-        if (open) {
-          openDirs.add(path);
-          if (!kids.dataset.loaded) {
-            kids.dataset.loaded = "1";
-            await drawTree(path, kids, path.split("/").length);
-          }
-        } else
+        if (dirRow.classList.contains("open")) {
+          dirRow.classList.remove("open");
+          dirRow.nextElementSibling.classList.remove("open");
           openDirs.delete(path);
+        } else
+          await expandTreeRow(dirRow);
         return;
       }
       const f = e.target.closest("[data-file]");
@@ -1069,7 +1090,7 @@
       if (r) {
         $$(".rline.sel", resultsEl).forEach((x) => x.classList.remove("sel"));
         r.classList.add("sel");
-        openFile(r.dataset.p, { line: +r.dataset.n });
+        openFile(r.dataset.p, { line: +r.dataset.n, reveal: true });
         const q = $("#q").value;
         if (q)
           flashFind(q);
@@ -3826,6 +3847,10 @@
       loadOutline();
     if (push)
       pushHistory(path, line || d.cur, col);
+    if (opts.reveal && S2.settings?.["explorer.autoReveal"] !== false) {
+      showPanel("files");
+      await revealFile(path, () => doc_() === d);
+    }
   }
   function loadGutter(d) {
     if (!S2.meta?.git)
@@ -6315,7 +6340,7 @@
       pal.restoreTheme = null;
     closePalette();
     if (it.kind === "file")
-      openFile(it.path);
+      openFile(it.path, { reveal: true });
     else if (it.kind === "sym" || it.kind === "line") {
       const d = doc_();
       if (!d)

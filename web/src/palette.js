@@ -162,7 +162,7 @@ export function acceptPalette() {
   const it = pal.items[pal.sel];
   if (it.kind === 'theme') pal.restoreTheme = null;
   closePalette();
-  if (it.kind === 'file') openFile(it.path);
+  if (it.kind === 'file') openFile(it.path, { reveal: true });
   else if (it.kind === 'sym' || it.kind === 'line') {
     const d = doc_(); if (!d) return;
     d.cur = it.n; centerLine(it.n); render(); updateStatus(); pushHistory(d.path, it.n);

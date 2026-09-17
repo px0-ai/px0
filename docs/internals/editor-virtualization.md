@@ -181,3 +181,9 @@ Pressing `Ctrl+A` / `Cmd+A` outside a text input does not use the browser's nati
 ### Selection Actions
 
 Any selection, native or whole-file, drives the footer selection bar (`#footer-sel`) and the right-click menu (`#sel-menu`) in [`web/src/selbar.js`](../../web/src/selbar.js): Copy Ref, Copy with Context, Edit Inline, Find Usages, and reference copying via `Alt+C`. The viewport's `mousedown` handler only moves the caret for the primary button, so a right click on a selection neither moves the caret nor collapses the selection. See [Harness Editing & Agent Dispatch](agent-editing.md).
+
+## Explorer Reveal on Search Navigation
+
+File search (`palette.js`) and workspace search results (`search.js`) pass `reveal: true` to `openFile()` in `tabs.js`. After a successful open, it shows the sidebar and calls `revealFile()` unless `explorer.autoReveal` is false.
+
+`tree.js` awaits each ancestor's load before selecting and scrolling to the file, sharing pending loads with manual expansion. An active-document check prevents an outdated reveal from selecting or scrolling after navigation changes. The existing changed-files filter still applies.

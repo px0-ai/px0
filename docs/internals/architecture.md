@@ -50,6 +50,8 @@ sequenceDiagram
 
 ## 3. HTTP Server & API Catalog
 
+Search navigation uses `/api/tree` to [reveal the selected file in the explorer](editor-virtualization.md#explorer-reveal-on-search-navigation).
+
 The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps and applies pooled Gzip compression when accepted by the client.
 
 ### Endpoints Reference
