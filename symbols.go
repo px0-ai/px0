@@ -113,7 +113,7 @@ var outlineRules = map[string][]symRule{
 		r("func", 1, `^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([\w$]+)`),
 		r("class", 1, `^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([\w$]+)`),
 		r("type", 2, `^\s*(?:export\s+)?(?:declare\s+)?(interface|type|enum|namespace)\s+([\w$]+)`),
-		r("func", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function|\([^)]*\)\s*(?::[^=]*)?=>|[\w$]+\s*=>)`),
+		r("func", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function|\([^)]*\)\s*(?::[^=]*)?=>|[\w$]+\s*=>|\(\s*\{?\s*$)`),
 		r("const", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=`),
 		r("method", 1, `^\s{2,}(?:(?:public|private|protected|static|readonly|async|get|set)\s+)*([\w$]+)\s*\([^)]*\)\s*(?::[^{;]+)?\{`),
 	},

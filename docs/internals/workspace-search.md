@@ -111,6 +111,7 @@ type Match struct {
 When language servers are disabled or unavailable, px0 provides instantaneous symbol outlines and declaration jump navigation via heuristic regular expressions.
 
 JavaScript/TypeScript outline extraction rejects control-flow headers such as `if`, `for`, `while`, and `switch`, whose parenthesized blocks can otherwise look like indented methods.
+It also records arrow-function declarations from their opening line when parameters or return types continue onto later lines.
 
 ### Parallel Symbol Flagging
 

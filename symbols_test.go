@@ -20,6 +20,11 @@ func TestJavaScriptOutlineIgnoresControlFlow(t *testing.T) {
 		"    recover();\n" +
 		"  }\n" +
 		"};\n\n" +
+		"export const multiline = async ({\n" +
+		"  user_id,\n" +
+		"}: Params): Promise<string | null> => {\n" +
+		"  return null;\n" +
+		"};\n\n" +
 		"class Thing {\n" +
 		"  method(arg) {\n" +
 		"    if (arg) {\n" +
@@ -36,7 +41,7 @@ func TestJavaScriptOutlineIgnoresControlFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"func:good", "class:Thing", "method:method"}
+	want := []string{"func:good", "func:multiline", "class:Thing", "method:method"}
 	if len(syms) != len(want) {
 		t.Fatalf("outline = %v, want %v", syms, want)
 	}
