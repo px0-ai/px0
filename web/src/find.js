@@ -23,13 +23,12 @@ function editorSelection() {
 /* Seed priority: live editor selection, then the query already in an open
    findbar, then the caller's fallback (the last double-clicked word). */
 export function openFind(seed) {
-  if (!doc_()) return;
   const sel = editorSelection();
   if (sel) findInput.value = sel;
   else if (findbar.hidden && seed) findInput.value = seed;
   findbar.hidden = false;
   findInput.focus(); findInput.select();
-  if (findInput.value) runFind();
+  if (findInput.value && doc_()) runFind();
 }
 
 export function clearFind() {
