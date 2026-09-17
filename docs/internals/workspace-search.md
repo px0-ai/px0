@@ -110,6 +110,8 @@ type Match struct {
 
 When language servers are disabled or unavailable, px0 provides instantaneous symbol outlines and declaration jump navigation via heuristic regular expressions.
 
+JavaScript/TypeScript outline extraction rejects control-flow headers such as `if`, `for`, `while`, and `switch`, whose parenthesized blocks can otherwise look like indented methods.
+
 ### Parallel Symbol Flagging
 
 During full-text searches, lines that look like function, class, struct, or type declarations are automatically flagged (`Match.Def = true`). This allows the frontend to visually highlight definition matches in search results without running a secondary query.
