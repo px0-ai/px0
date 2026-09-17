@@ -5,15 +5,20 @@ import { render } from './renderer.js';
 import { updateStatus, setLspState } from './status.js';
 import { pushHistory } from './history.js';
 
-export async function loadOutline() {
-  const d = doc_();
+export async function loadOutline(target = doc_()) {
+  const d = target;
   const el = $('#outline');
   if (!d) { if (el) el.innerHTML = '<div class="hint">No file open.</div>'; return; }
   if (!d.outline) {
-    try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; }
-    catch { d.outline = []; }
+    if (!d.outlinePromise) {
+      d.outlinePromise = api('/api/outline', { path: d.path })
+        .then(j => j.symbols || [])
+        .catch(() => []);
+    }
+    d.outline = await d.outlinePromise;
   }
   drawOutline();
+  if (doc_() === d) render();
   upgradeOutline(d);
 }
 
@@ -29,7 +34,10 @@ export async function upgradeOutline(d) {
   if (!j.symbols || !j.symbols.length) { d.outlineLSP = false; return; }
   d.outline = j.symbols;
   d.outlineSource = j.server;
-  if (doc_() === d && $('#panel-outline')?.classList.contains('active')) drawOutline();
+  if (doc_() === d) {
+    if ($('#panel-outline')?.classList.contains('active')) drawOutline();
+    render();
+  }
 }
 
 export function drawOutline() {

@@ -201,6 +201,7 @@
       const c = $("#caret");
       if (c)
         c.hidden = true;
+      updateStickySymbol(null);
       return;
     }
     const top = vp.scrollTop;
@@ -236,6 +237,59 @@
     if (sel)
       restoreSelection(sel);
     placeCaret();
+    updateStickySymbol(d);
+  }
+  const stickyKind = {
+    func: "fn", method: "fn", fn: "fn", def: "fn", defp: "fn", defmacro: "mac",
+    class: "cls", struct: "str", interface: "int", trait: "trt", impl: "impl",
+    type: "typ", typealias: "typ", enum: "enm", record: "rec", object: "obj",
+    const: "cst", var: "var", let: "var", val: "var", module: "mod", mod: "mod",
+    namespace: "ns", package: "pkg", macro: "mac", extension: "ext", protocol: "int",
+    union: "uni", heading: "h", sym: "·"
+  };
+  const stickyContainers = new Set([
+    "func", "method", "fn", "def", "defp", "defmacro", "class", "struct", "interface",
+    "trait", "impl", "type", "typealias", "enum", "record", "object", "module", "mod",
+    "namespace", "package", "macro", "extension", "protocol", "union", "heading", "sym"
+  ]);
+  function updateStickySymbol(d) {
+    const el = $("#sticky-symbol");
+    if (!el)
+      return;
+    const md = $("#mdview");
+    const diff = $("#diffview");
+    if (!d || md && !md.hidden || diff && !diff.hidden || vp.scrollTop < LH || !d.outline?.length) {
+      el.hidden = true;
+      return;
+    }
+    let topLine = Math.floor(vp.scrollTop / LH) + 1;
+    if (document.body.classList.contains("word-wrap")) {
+      const top = vp.getBoundingClientRect().top;
+      for (const row of rowsEl.children) {
+        if (row.getBoundingClientRect().bottom > top + 1) {
+          topLine = +row.dataset.l;
+          break;
+        }
+      }
+    }
+    let current = null;
+    for (const symbol of d.outline) {
+      if (symbol.line > topLine)
+        break;
+      if (!stickyContainers.has(symbol.kind))
+        continue;
+      if (!current || symbol.line > current.line || symbol.line === current.line && symbol.indent >= current.indent)
+        current = symbol;
+    }
+    if (!current) {
+      el.hidden = true;
+      return;
+    }
+    $(".sticky-line", el).textContent = current.line;
+    $(".sticky-kind", el).textContent = stickyKind[current.kind] || String(current.kind || "sym").slice(0, 3);
+    $(".sticky-name", el).textContent = current.name;
+    el.title = current.name + " · line " + current.line;
+    el.hidden = false;
   }
   var caretKey = "";
   function placeCaret() {
@@ -517,8 +571,8 @@
   }
 
   // web/src/outline.js
-  async function loadOutline() {
-    const d = doc_();
+  async function loadOutline(target = doc_()) {
+    const d = target;
     const el = $("#outline");
     if (!d) {
       if (el)
@@ -526,13 +580,13 @@
       return;
     }
     if (!d.outline) {
-      try {
-        d.outline = (await api("/api/outline", { path: d.path })).symbols || [];
-      } catch {
-        d.outline = [];
-      }
+      if (!d.outlinePromise)
+        d.outlinePromise = api("/api/outline", { path: d.path }).then((j) => j.symbols || []).catch(() => []);
+      d.outline = await d.outlinePromise;
     }
     drawOutline();
+    if (doc_() === d)
+      render();
     upgradeOutline(d);
   }
   async function upgradeOutline(d) {
@@ -553,8 +607,11 @@
     }
     d.outline = j.symbols;
     d.outlineSource = j.server;
-    if (doc_() === d && $("#panel-outline")?.classList.contains("active"))
-      drawOutline();
+    if (doc_() === d) {
+      if ($("#panel-outline")?.classList.contains("active"))
+        drawOutline();
+      render();
+    }
   }
   function drawOutline() {
     const d = doc_();
@@ -3410,6 +3467,7 @@
     drawTabs();
     drawCrumbs();
     layout();
+    void loadOutline(d);
     if (line) {
       d.cur = line;
       centerLine(line);
@@ -3530,6 +3588,7 @@
       layout();
       vp.scrollTop = d.scrollTop;
       render();
+      void loadOutline(d);
       if ($("#panel-outline")?.classList.contains("active"))
         loadOutline();
     }
@@ -3628,6 +3687,7 @@
     vp.scrollTop = S2.tabs[i].scrollTop;
     render();
     updateStatus();
+    void loadOutline(S2.tabs[i]);
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);

@@ -67,6 +67,8 @@ export async function openFile(path, opts = {}) {
   S.lsp.missing = (d.lsp && d.lsp.missing) || '';
   warmLSP(d);
   drawTabs(); drawCrumbs(); layout();
+  // The sticky symbol header uses the outline even when the Symbols panel is closed.
+  void loadOutline(d);
 
   if (line) { d.cur = line; centerLine(line); }
   else vp.scrollTop = d.scrollTop;
@@ -198,6 +200,7 @@ export async function reloadOpenTabs() {
     layout();
     vp.scrollTop = d.scrollTop;
     render();
+    void loadOutline(d);
     if ($('#panel-outline')?.classList.contains('active')) loadOutline();
   }
 
@@ -288,6 +291,7 @@ export function switchTab(i) {
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = S.tabs[i].scrollTop;
   render(); updateStatus();
+  void loadOutline(S.tabs[i]);
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
   pushHistory(S.tabs[i].path, S.tabs[i].cur);
 }

@@ -329,6 +329,32 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
 #viewport { position: absolute; inset: 0; overflow: auto; contain: strict; cursor: text; }
 #sizer { position: relative; }
 #rows { position: absolute; top: 0; left: 0; will-change: transform; }
+
+/* VS Code-style sticky declaration for the symbol owning the first visible line. */
+#sticky-symbol {
+  position: absolute; inset: 0 0 auto 0; z-index: 8; height: var(--lh);
+  display: flex; align-items: center; gap: 8px; box-sizing: border-box;
+  padding: 0 18px 0 calc(var(--gw, 1) * 1ch + 44px);
+  overflow: hidden; white-space: nowrap; pointer-events: none;
+  background: color-mix(in srgb, var(--bg3) 96%, transparent);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--bg) 35%, transparent);
+  font: 11px/var(--lh) var(--ui); color: var(--dim);
+}
+#sticky-symbol .sticky-line {
+  position: absolute; left: 0; width: calc(var(--gw, 1) * 1ch + 30px);
+  box-sizing: border-box; padding: 0 14px 0 16px;
+  text-align: right; color: var(--faint); font-variant-numeric: tabular-nums;
+}
+#sticky-symbol .sticky-kind {
+  flex: none; color: var(--accent-fg); font: 10px/1 var(--mono);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+#sticky-symbol .sticky-name {
+  overflow: hidden; text-overflow: ellipsis; color: var(--fg);
+  font: 500 12px/1 var(--mono);
+}
+
 /* Caret: an overlay positioned by measurement, never a node inside the code. */
 #caret {
   position: absolute; top: 0; left: 0; z-index: 1; width: 2px; height: var(--lh);
@@ -517,7 +543,7 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 /* ---------- diff view (Mod+D): split (default) or unified render of a
    modified file's git diff against HEAD, in its own overlay like the
    Markdown preview -- not virtualized, since a single file's diff is small. */
-#diffview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
+#diffview { position: absolute; inset: 0; z-index: 9; overflow: auto; background: var(--bg); }
 #diffcontent { font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
 .diff-empty { padding: 24px 16px; color: var(--faint); font: 12px/1.4 var(--ui); }
 .diff-hunk-head {
@@ -545,7 +571,7 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-side-left { border-right: 1px solid var(--line); }
 
 /* ---------- markdown preview ---------- */
-#mdview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
+#mdview { position: absolute; inset: 0; z-index: 9; overflow: auto; background: var(--bg); }
 .md {
   max-width: 860px; margin: 0 auto; padding: 40px clamp(20px, 6%, 56px) 40vh;
   font: 15px/1.7 var(--ui); color: var(--fg); overflow-wrap: break-word;
@@ -1514,4 +1540,3 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   resize: none;
   tab-size: 2;
 }
-

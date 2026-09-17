@@ -24,6 +24,7 @@ The editor surface is defined in [`web/index.html`](../../web/index.html):
       <div id="caret" hidden></div>
     </div>
   </div>
+  <div id="sticky-symbol" hidden>...</div>
   <div id="findbar">...</div>
 </div>
 ```
@@ -35,11 +36,13 @@ flowchart TD
     Sizer["#sizer (Virtual Spacer: height = totalLines * LH)"]
     Rows["#rows (Recycled Elements: transform: translateY)"]
     Caret["#caret (Decoupled Overlay: transform: translate)"]
+    Sticky["#sticky-symbol (Current enclosing declaration)"]
 
     Editor --> Viewport
     Viewport --> Sizer
     Sizer --> Rows
     Sizer --> Caret
+    Editor --> Sticky
 ```
 
 ### Element Roles & Responsibilities
@@ -61,6 +64,12 @@ flowchart TD
 - `#caret`:
   - Independent overlay cursor element positioned directly under `#sizer`.
 
+- `#sticky-symbol`:
+  - Fixed-height overlay that shows the nearest enclosing function, method,
+    class, type, or module after its declaration scrolls above the viewport.
+  - Pointer-transparent and layered above source rows, but below Markdown
+    preview and Git diff overlays.
+
 ## 3. Virtualization & Recycling Pipeline (`paint()`)
 
 The browser DOM never holds elements for lines outside the immediate view. Only the current viewport plus overscan buffers are instantiated:
@@ -72,6 +81,21 @@ $$\text{count} = \left\lceil\frac{\text{clientHeight}}{\text{LH}}\right\rceil + 
 $$\text{last} = \min(\text{totalLines}, \text{first} + \text{count})$$
 
 At standard desktop display resolutions, the total number of mounted `.row` elements is capped between 50 and 70 elements.
+
+### Sticky Symbol Resolution
+
+The sticky declaration is updated at the end of `paint()`, after the current
+virtual row window has been mounted. `renderer.js` walks the active document's
+cached `outline` and chooses the last container-like symbol whose declaration
+line is no later than the first visible line. Local variable and constant
+symbols are deliberately ignored so a function body continues to display its
+enclosing function name. With word wrapping enabled, the first visible line is
+read from live row geometry rather than inferred only from `scrollTop`.
+
+`tabs.js` starts `loadOutline()` when a file is opened, switched to, or
+reloaded, even when the Symbols panel is closed. The regex outline is available
+first; when an LSP responds, its document symbols replace the fallback and
+trigger a new paint. This keeps the header useful without blocking file open.
 
 ### HTML Row Structure
 
