@@ -25,6 +25,9 @@ func TestSettingsDefaults(t *testing.T) {
 	if m["editor.cursorStyle"] != "line" {
 		t.Errorf("expected editor.cursorStyle line, got %v", m["editor.cursorStyle"])
 	}
+	if m["workbench.sideBar.location"] != "left" {
+		t.Errorf("expected workbench.sideBar.location left, got %v", m["workbench.sideBar.location"])
+	}
 	if m["explorer.compactFolders"] != true {
 		t.Errorf("expected explorer.compactFolders true, got %v", m["explorer.compactFolders"])
 	}

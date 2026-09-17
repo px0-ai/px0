@@ -1,8 +1,9 @@
 // web/src/settings.js
 import { $, $$, esc, S, api, apiPost } from './state.js';
-import { applyEditorTypography, toggleWordWrap, toggleLineNumbers } from './renderer.js';
+import { applyEditorTypography, toggleWordWrap, toggleLineNumbers, layout, render } from './renderer.js';
 import { setTheme, listThemes } from './theme.js';
 import { setLayoutPref } from './diff.js';
+import { setSidebarToggle } from './panels.js';
 
 export let settingsModalEl = null;
 const BUILTIN_SCHEMA = [
@@ -147,6 +148,15 @@ const BUILTIN_SCHEMA = [
     ]
   },
   {
+    key: "workbench.sideBar.location",
+    title: "Sidebar Position",
+    description: "Controls which side of the editor the file explorer sidebar is shown on.",
+    category: "Workbench",
+    type: "select",
+    default: "left",
+    options: ["left", "right"]
+  },
+  {
     key: "diffEditor.renderSideBySide",
     title: "Diff Side By Side",
     description: "Controls whether the diff editor shows changes in split (side-by-side) or unified mode.",
@@ -288,6 +298,7 @@ let settingsFilterQuery = '';
 const COMMONLY_USED_KEYS = new Set([
   'editor.fontSize',
   'workbench.colorTheme',
+  'workbench.sideBar.location',
   'editor.wordWrap',
   'editor.lineNumbers',
   'editor.tabSize',
@@ -376,6 +387,13 @@ export function applySettingLive(key, val) {
     }
     case 'workbench.colorTheme': {
       if (val) setTheme(val, true);
+      break;
+    }
+    case 'workbench.sideBar.location': {
+      document.body.classList.toggle('side-right', val === 'right');
+      try { localStorage.setItem('px0.side', val === 'right' ? 'right' : 'left'); } catch {}
+      layout();
+      render();
       break;
     }
     case 'diffEditor.renderSideBySide': {
@@ -671,7 +689,7 @@ function renderSettingsList() {
   container.innerHTML = html;
 }
 
-async function handleSettingChange(key, value) {
+export async function updateSetting(key, value) {
   // Update state locally
   if (!settingsData.settings) settingsData.settings = {};
   settingsData.settings[key] = value;
@@ -692,8 +710,13 @@ async function handleSettingChange(key, value) {
 async function handleResetSetting(key) {
   const def = settingsData.defaults ? settingsData.defaults[key] : undefined;
   if (def !== undefined) {
-    await handleSettingChange(key, def);
+    await updateSetting(key, def);
   }
+}
+
+export function toggleSidebarPosition() {
+  const cur = (S.settings && S.settings['workbench.sideBar.location']) || 'left';
+  updateSetting('workbench.sideBar.location', cur === 'right' ? 'left' : 'right');
 }
 
 async function handleSaveRawSettings() {
@@ -809,7 +832,7 @@ function initSettingsDOM() {
       } else {
         value = target.value;
       }
-      handleSettingChange(key, value);
+      updateSetting(key, value);
     });
 
     listEl.addEventListener('click', e => {
@@ -820,7 +843,7 @@ function initSettingsDOM() {
         if (value === 'true') value = true;
         else if (value === 'false') value = false;
         else if (!isNaN(Number(value)) && value.trim() !== '') value = Number(value);
-        if (key) handleSettingChange(key, value);
+        if (key) updateSetting(key, value);
         return;
       }
       const resetBtn = e.target.closest('.settings-reset-btn');
@@ -842,6 +865,7 @@ function initSettingsDOM() {
 }
 
 export function initSettings() {
+  setSidebarToggle(toggleSidebarPosition);
   initSettingsDOM();
   loadSettings().then(() => {
     applyAllSettingsLive();

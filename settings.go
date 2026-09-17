@@ -151,6 +151,15 @@ var settingsSchema = []settingSchemaItem{
 		},
 	},
 	{
+		Key:         "workbench.sideBar.location",
+		Title:       "Sidebar Position",
+		Description: "Controls which side of the editor the file explorer sidebar is shown on.",
+		Category:    "Workbench",
+		Type:        "select",
+		Default:     "left",
+		Options:     []string{"left", "right"},
+	},
+	{
 		Key:         "diffEditor.renderSideBySide",
 		Title:       "Diff Side By Side",
 		Description: "Controls whether the diff editor shows changes in split (side-by-side) or unified mode.",

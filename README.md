@@ -50,7 +50,7 @@ make dist
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (GitHub Dark, Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, Solarized, and more).
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
-- **Settings & Configuration Modal**: Press `Cmd/Ctrl+,` or click the ⚙️ icon in the status bar to open the VS Code-style Settings editor. Configure editor typography, cursor styles, diff modes, themes, search behavior, file exclusions, and coding agents with live preview and raw JSON synchronization (`~/.px0/settings.json`).
+- **Settings & Configuration Modal**: Press `Cmd/Ctrl+,` or click the ⚙️ icon in the status bar to open the VS Code-style Settings editor. Configure editor typography, cursor styles, diff modes, themes, sidebar placement, search behavior, file exclusions, and coding agents with live preview and raw JSON synchronization (`~/.px0/settings.json`).
 - **Virtual DOM / Zero Overhead**: Opening a 400,000-line file costs the same as a 10-line file; only visible rows are mounted. Reclaims memory after 15 seconds of inactivity.
 - **Completely Self-Contained**: Single static binary embedding all web assets. Zero runtime dependencies, no Electron, no Node, no cloud phone-homes.
 
@@ -147,6 +147,7 @@ px0 provides a built-in Settings editor modeled after VS Code. Settings are stor
 | `editor.scrollBeyondLastLine` | `true` | `true`, `false` | Allow scrolling past file end |
 | `editor.bracketPairColorization` | `true` | `true`, `false` | Rainbow bracket pairs and bracket matching |
 | `workbench.colorTheme` | `"github-dark"` | 14 built-in themes | Workbench color theme |
+| `workbench.sideBar.location` | `"left"` | `"left"`, `"right"` | Side of the editor the file explorer sidebar sits on |
 | `diffEditor.renderSideBySide` | `true` | `true`, `false` | Split vs. unified diff view |
 | `diffEditor.ignoreTrimWhitespace` | `true` | `true`, `false` | Ignore leading/trailing whitespace diffs |
 | `git.gutterIndicators` | `true` | `true`, `false` | Gutter change indicators |

@@ -298,11 +298,11 @@
   }
   function toPos(node, off) {
     if (node === rowsEl) {
-      const row2 = rowsEl.children[off] || rowsEl.lastElementChild;
-      if (!row2)
+      const row = rowsEl.children[off] || rowsEl.lastElementChild;
+      if (!row)
         return null;
       const atEnd = !rowsEl.children[off];
-      return { line: +row2.dataset.l, col: atEnd ? $(".c", row2).textContent.length : 0 };
+      return { line: +row.dataset.l, col: atEnd ? $(".c", row).textContent.length : 0 };
     }
     const el = node.nodeType === 1 ? node : node.parentElement;
     const row = el && el.closest(".row");
@@ -793,10 +793,46 @@
   }
 
   // web/src/panels.js
+  var sidebarToggle = null;
+  function setSidebarToggle(fn) {
+    sidebarToggle = fn;
+  }
   function showPanel(name) {
     document.body.classList.remove("side-hidden");
     layout();
     render();
+  }
+  var sideMenu = $("#side-menu");
+  var sideMenuBtn = $("#btn-side-menu");
+  function closeSideMenu() {
+    if (sideMenu && !sideMenu.hidden)
+      sideMenu.hidden = true;
+    sideMenuBtn?.setAttribute("aria-expanded", "false");
+  }
+  function placeSideMenu(anchor) {
+    const { offsetWidth: w, offsetHeight: h } = sideMenu;
+    if (anchor.el) {
+      const r = anchor.el.getBoundingClientRect();
+      sideMenu.style.left = Math.max(4, Math.min(r.right - w, innerWidth - w - 4)) + "px";
+      sideMenu.style.top = r.bottom + 4 + "px";
+    } else {
+      sideMenu.style.left = Math.max(4, anchor.x + w > innerWidth - 4 ? anchor.x - w : anchor.x) + "px";
+      sideMenu.style.top = Math.max(4, anchor.y + h > innerHeight - 4 ? anchor.y - h : anchor.y) + "px";
+    }
+  }
+  function openSideMenu(anchor) {
+    if (!sideMenu)
+      return;
+    const onRight = document.body.classList.contains("side-right");
+    sideMenu.replaceChildren();
+    const item = document.createElement("button");
+    item.className = "side-menu-item";
+    item.setAttribute("role", "menuitem");
+    item.textContent = onRight ? "Move Sidebar to Left" : "Move Sidebar to Right";
+    sideMenu.append(item);
+    sideMenu.hidden = false;
+    placeSideMenu(anchor);
+    sideMenuBtn?.setAttribute("aria-expanded", "true");
   }
   function initPanels() {
     $("#btn-reindex").addEventListener("click", async () => {
@@ -821,7 +857,8 @@
       addEventListener("mousemove", (e) => {
         if (!dragging)
           return;
-        $("#side").style.width = Math.max(170, Math.min(620, e.clientX)) + "px";
+        const raw = document.body.classList.contains("side-right") ? innerWidth - e.clientX : e.clientX;
+        $("#side").style.width = Math.max(170, Math.min(620, raw)) + "px";
       });
       addEventListener("mouseup", () => {
         if (dragging) {
@@ -832,6 +869,48 @@
         }
       });
     })();
+    sideMenuBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (sideMenu && !sideMenu.hidden)
+        closeSideMenu();
+      else
+        openSideMenu({ el: sideMenuBtn });
+    });
+    document.addEventListener("contextmenu", (e) => {
+      if (sideMenu && sideMenu.contains(e.target)) {
+        e.preventDefault();
+        return;
+      }
+      if (!e.target.closest("#side") || e.target.closest("a"))
+        return;
+      e.preventDefault();
+      openSideMenu({ x: e.clientX, y: e.clientY });
+    });
+    addEventListener("keydown", (e) => {
+      if (e.key === "Escape")
+        closeSideMenu();
+    });
+    if (sideMenu) {
+      sideMenu.addEventListener("mousedown", (e) => e.preventDefault());
+      sideMenu.addEventListener("click", (e) => {
+        if (!e.target.closest(".side-menu-item"))
+          return;
+        closeSideMenu();
+        if (sidebarToggle)
+          sidebarToggle();
+        showToast("✓", "Sidebar moved to " + (document.body.classList.contains("side-right") ? "right" : "left"));
+      });
+      document.addEventListener("mousedown", (e) => {
+        if (sideMenu.hidden)
+          return;
+        if (sideMenu.contains(e.target) || sideMenuBtn && sideMenuBtn.contains(e.target))
+          return;
+        closeSideMenu();
+      }, true);
+      addEventListener("resize", closeSideMenu);
+      addEventListener("blur", closeSideMenu);
+      document.addEventListener("scroll", closeSideMenu, true);
+    }
   }
 
   // web/src/find.js
@@ -1201,7 +1280,8 @@
       addEventListener("mousemove", (e) => {
         if (!dragging)
           return;
-        const w = Math.max(200, Math.min(700, window.innerWidth - e.clientX));
+        const raw = document.body.classList.contains("side-right") ? e.clientX : window.innerWidth - e.clientX;
+        const w = Math.max(200, Math.min(700, raw));
         $("#right-side").style.width = w + "px";
       });
       addEventListener("mouseup", () => {
@@ -1440,11 +1520,11 @@
       node = p.offsetNode;
       off = p.offset;
     } else if (document.caretRangeFromPoint) {
-      const r2 = document.caretRangeFromPoint(x, y);
-      if (!r2)
+      const r = document.caretRangeFromPoint(x, y);
+      if (!r)
         return null;
-      node = r2.startContainer;
-      off = r2.startOffset;
+      node = r.startContainer;
+      off = r.startOffset;
     } else
       return null;
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
@@ -2210,9 +2290,9 @@
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
     mdDrawn = d;
-    const target2 = d.mdAnchor && mdFindAnchor(d.mdAnchor);
-    if (target2)
-      mdScrollTo(target2);
+    const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
+    if (target)
+      mdScrollTo(target);
     else if (d.mdLine)
       previewLine(d.mdLine);
     else
@@ -2264,7 +2344,7 @@
   function mdSanitize(html, docPath) {
     const body = new DOMParser().parseFromString(html, "text/html").body;
     const dir = docPath.slice(0, docPath.lastIndexOf("/") + 1);
-    const base2 = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
+    const base = MD_ORIGIN + "/" + dir.split("/").map(encodeURIComponent).join("/");
     for (const el of [...body.querySelectorAll("*")]) {
       if (!body.contains(el))
         continue;
@@ -2296,19 +2376,19 @@
       if (tag === "input")
         el.disabled = true;
       if (tag === "img")
-        mdSetImage(el, mdURL(attrs.src || ""), base2);
+        mdSetImage(el, mdURL(attrs.src || ""), base);
       if (tag === "a" && attrs.href)
-        mdSetLink(el, mdURL(attrs.href), base2);
+        mdSetLink(el, mdURL(attrs.href), base);
     }
     const frag = document.createDocumentFragment();
     while (body.firstChild)
       frag.appendChild(document.adoptNode(body.firstChild));
     return frag;
   }
-  function mdLocal(ref, base2) {
+  function mdLocal(ref, base) {
     let u;
     try {
-      u = new URL(ref, base2);
+      u = new URL(ref, base);
     } catch {
       return null;
     }
@@ -2320,7 +2400,7 @@
     } catch {}
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
-  function mdSetImage(img, src, base2) {
+  function mdSetImage(img, src, base) {
     const m = MD_SCHEME.exec(src);
     if (m) {
       if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
@@ -2328,12 +2408,12 @@
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
     } else if (src) {
-      const t = mdLocal(src, base2);
+      const t = mdLocal(src, base);
       if (t)
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
     }
   }
-  function mdSetLink(a, href, base2) {
+  function mdSetLink(a, href, base) {
     if (href.startsWith("#")) {
       a.setAttribute("href", href);
       a.dataset.anchor = href.slice(1);
@@ -2348,7 +2428,7 @@
       a.rel = "noopener noreferrer";
       return;
     }
-    const t = mdLocal(href, base2);
+    const t = mdLocal(href, base);
     if (!t)
       return;
     a.setAttribute("href", "/api/raw?path=" + encodeURIComponent(t.path));
@@ -2361,17 +2441,17 @@
     for (const q of $$("blockquote", mdArticle))
       mdAlert(q);
     for (const pre of $$("pre", mdArticle)) {
-      const wrap2 = document.createElement("div");
-      wrap2.className = "md-pre";
+      const wrap = document.createElement("div");
+      wrap.className = "md-pre";
       if (pre.dataset.lang)
-        wrap2.dataset.lang = pre.dataset.lang;
-      pre.replaceWith(wrap2);
+        wrap.dataset.lang = pre.dataset.lang;
+      pre.replaceWith(wrap);
       const copy = document.createElement("button");
       copy.className = "md-copy";
       copy.title = "Copy code";
       copy.setAttribute("aria-label", "Copy code");
       copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
-      wrap2.append(pre, copy);
+      wrap.append(pre, copy);
     }
   }
   function mdAlert(q) {
@@ -2550,7 +2630,7 @@
   }
   function showPreviewHit(i) {
     const marks = $$("mark.md-hit", mdArticle);
-    marks.forEach((m2, k) => m2.classList.toggle("on", k === i));
+    marks.forEach((m, k) => m.classList.toggle("on", k === i));
     const m = marks[i];
     if (!m)
       return;
@@ -2863,18 +2943,18 @@
     const sizeEl = $("#st-size");
     if (sizeEl)
       sizeEl.textContent = d ? fmtBytes(d.size) : "";
-    const isMd = !!(d && d.markdown), shown2 = previewing(d);
+    const isMd = !!(d && d.markdown), shown = previewing(d);
     const mdBtn = $('[data-action="md-preview"]');
     if (mdBtn) {
       mdBtn.hidden = !isMd;
-      mdBtn.classList.toggle("active", shown2);
+      mdBtn.classList.toggle("active", shown);
     }
     const sw = $("#md-switch");
     if (sw) {
       sw.hidden = !isMd;
       document.body.classList.toggle("md-tab", isMd);
       for (const b of sw.children)
-        b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown2);
+        b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown);
     }
     const hasDiff = !!(d && d.diffAvailable);
     const isDiffOn = !!(d && d.diffMode);
@@ -3346,9 +3426,9 @@
     let idx = S2.tabs.findIndex((t) => t.path === path);
     if (idx < 0) {
       let j;
-      const start2 = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
+      const start = line ? Math.max(0, Math.floor((line - 1) / CHUNK) * CHUNK) : 0;
       try {
-        j = await api("/api/file", { path, start: start2, count: CHUNK });
+        j = await api("/api/file", { path, start, count: CHUNK });
       } catch (e) {
         setStatusNote(path + ": " + e.message, 4000);
         return;
@@ -3358,7 +3438,7 @@
         return;
       }
       const hasDiff = !!j.diffAvailable;
-      const d2 = {
+      const d = {
         path,
         name: path.split("/").pop(),
         lang: j.lang,
@@ -3366,7 +3446,7 @@
         maxCols: j.maxCols,
         size: j.size,
         lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        chunks: new Set([start / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
@@ -3380,13 +3460,13 @@
         diffDismissed: false
       };
       for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs.push(d2);
+        d.lines[j.start + i] = j.lines[i];
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs.push(d);
       idx = S2.tabs.length - 1;
       if (j.refine)
-        refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, start / CHUNK);
+      loadGutter(d);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -3486,7 +3566,7 @@
       const hasDiff = !!j.diffAvailable;
       const newCur = Math.max(1, Math.min(keep.cur || 1, j.total));
       const diffMode = hasDiff ? keep.diffMode || null : null;
-      const d2 = {
+      const d = {
         path: tgt.path,
         name: tgt.path.split("/").pop(),
         lang: j.lang,
@@ -3511,13 +3591,13 @@
         diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0
       };
       for (let k = 0;k < j.lines.length; k++) {
-        d2.lines[j.start + k] = j.lines[k];
+        d.lines[j.start + k] = j.lines[k];
       }
-      d2.lsp = j.lsp || { state: "off", server: "" };
-      S2.tabs[idx] = d2;
+      d.lsp = j.lsp || { state: "off", server: "" };
+      S2.tabs[idx] = d;
       if (j.refine)
-        refineChunk(d2, tgt.start / CHUNK);
-      loadGutter(d2);
+        refineChunk(d, tgt.start / CHUNK);
+      loadGutter(d);
     }
     const d = doc_();
     if (d) {
@@ -3912,6 +3992,15 @@
       ]
     },
     {
+      key: "workbench.sideBar.location",
+      title: "Sidebar Position",
+      description: "Controls which side of the editor the file explorer sidebar is shown on.",
+      category: "Workbench",
+      type: "select",
+      default: "left",
+      options: ["left", "right"]
+    },
+    {
       key: "diffEditor.renderSideBySide",
       title: "Diff Side By Side",
       description: "Controls whether the diff editor shows changes in split (side-by-side) or unified mode.",
@@ -4053,6 +4142,7 @@
   var COMMONLY_USED_KEYS = new Set([
     "editor.fontSize",
     "workbench.colorTheme",
+    "workbench.sideBar.location",
     "editor.wordWrap",
     "editor.lineNumbers",
     "editor.tabSize",
@@ -4147,6 +4237,15 @@
       case "workbench.colorTheme": {
         if (val)
           setTheme(val, true);
+        break;
+      }
+      case "workbench.sideBar.location": {
+        document.body.classList.toggle("side-right", val === "right");
+        try {
+          localStorage.setItem("px0.side", val === "right" ? "right" : "left");
+        } catch {}
+        layout();
+        render();
         break;
       }
       case "diffEditor.renderSideBySide": {
@@ -4425,7 +4524,7 @@
     }).join("");
     container.innerHTML = html;
   }
-  async function handleSettingChange(key, value) {
+  async function updateSetting(key, value) {
     if (!settingsData.settings)
       settingsData.settings = {};
     settingsData.settings[key] = value;
@@ -4442,8 +4541,12 @@
   async function handleResetSetting(key) {
     const def = settingsData.defaults ? settingsData.defaults[key] : undefined;
     if (def !== undefined) {
-      await handleSettingChange(key, def);
+      await updateSetting(key, def);
     }
+  }
+  function toggleSidebarPosition() {
+    const cur = S2.settings && S2.settings["workbench.sideBar.location"] || "left";
+    updateSetting("workbench.sideBar.location", cur === "right" ? "left" : "right");
   }
   async function handleSaveRawSettings() {
     const rawEditor = $("#settings-raw-editor");
@@ -4535,24 +4638,24 @@
       renderSettingsNav();
       renderSettingsList();
     });
-    const listEl2 = $("#settings-list");
-    if (listEl2) {
-      listEl2.addEventListener("change", (e) => {
-        const target2 = e.target;
-        const key = target2.dataset.key;
+    const listEl = $("#settings-list");
+    if (listEl) {
+      listEl.addEventListener("change", (e) => {
+        const target = e.target;
+        const key = target.dataset.key;
         if (!key)
           return;
         let value;
-        if (target2.type === "checkbox") {
-          value = target2.checked;
-        } else if (target2.type === "number") {
-          value = parseFloat(target2.value);
+        if (target.type === "checkbox") {
+          value = target.checked;
+        } else if (target.type === "number") {
+          value = parseFloat(target.value);
         } else {
-          value = target2.value;
+          value = target.value;
         }
-        handleSettingChange(key, value);
+        updateSetting(key, value);
       });
-      listEl2.addEventListener("click", (e) => {
+      listEl.addEventListener("click", (e) => {
         const pill = e.target.closest(".settings-pill-tag");
         if (pill) {
           const key = pill.dataset.setKey;
@@ -4564,7 +4667,7 @@
           else if (!isNaN(Number(value)) && value.trim() !== "")
             value = Number(value);
           if (key)
-            handleSettingChange(key, value);
+            updateSetting(key, value);
           return;
         }
         const resetBtn = e.target.closest(".settings-reset-btn");
@@ -4588,6 +4691,7 @@
     });
   }
   function initSettings() {
+    setSidebarToggle(toggleSidebarPosition);
     initSettingsDOM();
     loadSettings().then(() => {
       applyAllSettingsLive();
@@ -4988,6 +5092,7 @@
     { name: withKeys("Toggle Word Wrap ({Alt+Z})"), run: () => toggleWordWrap() },
     { name: withKeys("Toggle Markdown Preview ({Alt+M})"), run: () => togglePreview() },
     { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => document.body.classList.toggle("side-hidden") },
+    { name: "Toggle Sidebar Position", run: toggleSidebarPosition },
     { name: "Select Theme…", run: () => openPalette("theme") },
     { name: "Next Theme", run: cycleTheme },
     { name: "Re-index Workspace", run: () => $("#btn-reindex").click() },
@@ -5541,15 +5646,15 @@
     if (!instruction || !session.target)
       return;
     const params = { path: session.target.path, l1: session.target.l1, l2: session.target.l2, instruction };
-    let job2;
+    let job;
     try {
-      job2 = await apiPost("/api/agent/edit", params);
+      job = await apiPost("/api/agent/edit", params);
     } catch (e) {
       showErr(session, e.message);
       return;
     }
-    session.jobId = job2.id;
-    session.harness = job2.harness;
+    session.jobId = job.id;
+    session.harness = job.harness;
     hideSelectionBar();
     const initialNote = "Editing with " + (chosenModel() ? chosen() + " (" + chosenModel() + ")" : chosen()) + "...";
     setBusy(session, true, initialNote);
@@ -5687,6 +5792,7 @@
       const wrapPref = localStorage.getItem("px0.wrap");
       S2.wrap = wrapPref !== null ? wrapPref === "true" : true;
       document.body.classList.toggle("word-wrap", S2.wrap);
+      document.body.classList.toggle("side-right", localStorage.getItem("px0.side") === "right");
       S2.lineNumbers = true;
       document.body.classList.remove("hide-lines");
       const mdPref = localStorage.getItem("px0.mdPreview");

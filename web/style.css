@@ -47,6 +47,15 @@ input { font: inherit; color: inherit; background: none; border: 0; outline: 0; 
   display: flex; flex-direction: column; overflow: hidden;
 }
 body.side-hidden #side, body.side-hidden #resizer { display: none; }
+
+/* Sidebar on the right: mirror the row so the explorer sits on the right and
+   the inspector on the left, keeping the editor centred. Borders and the
+   resizers' overlap margins swap sides with it. */
+body.side-right #app { flex-direction: row-reverse; }
+body.side-right #side { border-right: 0; border-left: 1px solid var(--line); }
+body.side-right #right-side { border-left: 0; border-right: 1px solid var(--line); }
+body.side-right #resizer { margin-left: 0; margin-right: -2px; }
+body.side-right #right-resizer { margin-right: 0; margin-left: -2px; }
 .panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
 .panel.active { display: flex; }
 .panel-head {
@@ -844,19 +853,19 @@ kbd {
 #footer-sel .footer-btn { flex: none; }
 
 /* Right-click menu on a selection: the footer's actions at the pointer. */
-#sel-menu {
+#sel-menu, #side-menu {
   position: fixed; z-index: 70; min-width: 190px;
   display: flex; flex-direction: column; gap: 1px; padding: 4px;
   background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow);
   user-select: none;
 }
-#sel-menu[hidden] { display: none; }
-.sel-menu-item {
+#sel-menu[hidden], #side-menu[hidden] { display: none; }
+.sel-menu-item, .side-menu-item {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 5px 8px; border-radius: 4px; text-align: left;
   font: 12px var(--ui); color: var(--fg);
 }
-.sel-menu-item:hover { background: var(--bg4); color: var(--accent-fg); }
+.sel-menu-item:hover, .side-menu-item:hover { background: var(--bg4); color: var(--accent-fg); }
 .sel-menu-item:hover .footer-kbd { color: var(--fg); border-color: var(--accent); }
 #st-lsp { display: flex; align-items: center; gap: 5px; }
 #st-lsp::before {

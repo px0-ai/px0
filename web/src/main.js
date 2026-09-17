@@ -53,6 +53,10 @@ initSettings();
     S.wrap = wrapPref !== null ? wrapPref === 'true' : true;
     document.body.classList.toggle('word-wrap', S.wrap);
 
+    // Restore the sidebar's side (default left) before first paint, so a
+    // remembered right-side layout never flashes on the left first.
+    document.body.classList.toggle('side-right', localStorage.getItem('px0.side') === 'right');
+
     // Line numbers are always ON
     S.lineNumbers = true;
     document.body.classList.remove('hide-lines');

@@ -22,3 +22,6 @@ build/
 # Logs
 *.log
 px0
+
+# Agent configs
+.commandcode/

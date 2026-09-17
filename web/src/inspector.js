@@ -136,7 +136,8 @@ export function initInspector() {
     rrz.addEventListener('mousedown', e => { dragging = true; rrz.classList.add('drag'); e.preventDefault(); });
     addEventListener('mousemove', e => {
       if (!dragging) return;
-      const w = Math.max(200, Math.min(700, window.innerWidth - e.clientX));
+      const raw = document.body.classList.contains('side-right') ? e.clientX : window.innerWidth - e.clientX;
+      const w = Math.max(200, Math.min(700, raw));
       $('#right-side').style.width = w + 'px';
     });
     addEventListener('mouseup', () => { if (dragging) { dragging = false; rrz.classList.remove('drag'); layout(); render(); } });

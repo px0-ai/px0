@@ -18,7 +18,7 @@
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button id="btn-side-menu" class="mini" title="Sidebar settings" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></button></span></header>
     <div class="panel-body" id="tree"></div>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
@@ -170,6 +170,9 @@
 
     <!-- Selection context menu: the footer's selection actions, at the pointer -->
     <div id="sel-menu" role="menu" hidden></div>
+
+    <!-- Sidebar context menu: panel actions, at the pointer -->
+    <div id="side-menu" role="menu" hidden></div>
 
     <!-- Metrics menu, opened from CPU/RAM status bar -->
     <div id="metrics-menu" role="menu" hidden></div>

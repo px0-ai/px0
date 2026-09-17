@@ -13,7 +13,7 @@ import { showCalls, openLspSetup } from './calls.js';
 import { showHelp } from './shortcuts.js';
 import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
 import { togglePreview } from './markdown.js';
-import { openSettings } from './settings.js';
+import { openSettings, toggleSidebarPosition } from './settings.js';
 
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
@@ -41,6 +41,7 @@ export const COMMANDS = [
   { name: withKeys('Toggle Word Wrap ({Alt+Z})'), run: () => toggleWordWrap() },
   { name: withKeys('Toggle Markdown Preview ({Alt+M})'), run: () => togglePreview() },
   { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => document.body.classList.toggle('side-hidden') },
+  { name: 'Toggle Sidebar Position', run: toggleSidebarPosition },
   { name: 'Select Theme…', run: () => openPalette('theme') },
   { name: 'Next Theme', run: cycleTheme },
   { name: 'Re-index Workspace', run: () => $('#btn-reindex').click() },
