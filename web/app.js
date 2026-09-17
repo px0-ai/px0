@@ -247,11 +247,22 @@
     namespace: "ns", package: "pkg", macro: "mac", extension: "ext", protocol: "int",
     union: "uni", heading: "h", sym: "·"
   };
-  const stickyContainers = new Set([
-    "func", "method", "fn", "def", "defp", "defmacro", "class", "struct", "interface",
-    "trait", "impl", "type", "typealias", "enum", "record", "object", "module", "mod",
-    "namespace", "package", "macro", "extension", "protocol", "union", "heading", "sym"
-  ]);
+  const stickyFunctions = new Set(["func", "method", "fn", "def", "defp", "defmacro"]);
+  function enclosingFunction(outline, line) {
+    const scopes = [];
+    for (const symbol of outline) {
+      if (symbol.line > line)
+        break;
+      while (scopes.length && symbol.indent <= scopes[scopes.length - 1].indent)
+        scopes.pop();
+      scopes.push(symbol);
+    }
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      if (stickyFunctions.has(scopes[i].kind))
+        return scopes[i];
+    }
+    return null;
+  }
   function updateStickySymbol(d) {
     const el = $("#sticky-symbol");
     if (!el)
@@ -273,15 +284,7 @@
         }
       }
     }
-    let current = null;
-    for (const symbol of d.outline) {
-      if (symbol.line > topLine)
-        break;
-      if (!stickyContainers.has(symbol.kind))
-        continue;
-      if (!current || symbol.line > current.line || symbol.line === current.line && symbol.indent >= current.indent)
-        current = symbol;
-    }
+    const current = enclosingFunction(d.outline, topLine);
     if (!current) {
       el.hidden = true;
       delete el.dataset.line;
@@ -551,7 +554,7 @@
       const line = Number($("#sticky-symbol").dataset.line);
       if (!line)
         return;
-      vp.scrollTop = Math.max(0, (line - 1) * LH);
+      vp.scrollTo({ top: Math.max(0, (line - 1) * LH), behavior: "smooth" });
       render();
     });
     new ResizeObserver(() => {

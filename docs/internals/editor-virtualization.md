@@ -86,11 +86,11 @@ At standard desktop display resolutions, the total number of mounted `.row` elem
 
 The sticky declaration is updated at the end of `paint()`, after the current
 virtual row window has been mounted. `renderer.js` walks the active document's
-cached `outline` and chooses the last container-like symbol whose declaration
-line is no later than the first visible line. Local variable and constant
-symbols are deliberately ignored so a function body continues to display its
-enclosing function name. With word wrapping enabled, the first visible line is
-read from live row geometry rather than inferred only from `scrollTop`.
+cached `outline` as an indentation-based scope stack. It shows only when the
+first visible line is inside a function or method; a previous function is not
+shown merely because it is the nearest declaration. With word wrapping enabled,
+the first visible line is read from live row geometry rather than inferred only
+from `scrollTop`.
 
 `tabs.js` starts `loadOutline()` when a file is opened, switched to, or
 reloaded, even when the Symbols panel is closed. The regex outline is available
