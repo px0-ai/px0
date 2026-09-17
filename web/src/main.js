@@ -17,8 +17,11 @@ import { initShortcuts } from './shortcuts.js';
 import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
-import { initAgent, applyAgentMeta } from './agent.js';
-import { updateStatus, initMetrics, initStatusFit, updateMetricsDisplay } from './status.js';
+import { initAgent, applyAgentMeta, loadAgentAsync } from './agent.js';
+import { initMetrics, initStatusFit, updateMetricsDisplay, updateStatus } from './status.js';
+import { initSettings } from './settings.js';
+import { initVim } from './vim.js';
+import { initImageViewer } from './imageview.js';
 
 // Initialize all subsystems
 initRenderer();
@@ -40,6 +43,9 @@ initDiff();
 initAgent();
 initMetrics();
 initStatusFit();
+initSettings();
+initVim();
+initImageViewer();
 
 // Bootstrap application lifecycle
 (async function boot() {
@@ -51,10 +57,9 @@ initStatusFit();
     S.wrap = wrapPref !== null ? wrapPref === 'true' : true;
     document.body.classList.toggle('word-wrap', S.wrap);
 
-    // Restore line numbers (default ON)
-    const linesPref = localStorage.getItem('px0.lineNumbers');
-    S.lineNumbers = linesPref !== null ? linesPref === 'true' : true;
-    document.body.classList.toggle('hide-lines', !S.lineNumbers);
+    // Line numbers are always ON
+    S.lineNumbers = true;
+    document.body.classList.remove('hide-lines');
 
     // Restore Markdown preview (default ON)
     const mdPref = localStorage.getItem('px0.mdPreview');
@@ -121,4 +126,7 @@ initStatusFit();
       }
     }, 150);
   }
+
+  // Load harnesses and models asynchronously after the browser is loaded.
+  loadAgentAsync();
 })();

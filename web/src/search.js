@@ -6,12 +6,28 @@ import { flashFind } from './lsp.js';
 export const resultsEl = $('#results');
 export let lastResults = null;
 
+let searchAbort = null;
+
+export function cancelSearch() {
+  if (searchAbort) {
+    searchAbort.abort();
+    searchAbort = null;
+  }
+}
+
 // The search panel is optional markup; without it every entry point is a no-op.
 export const runSearch = debounce(async () => {
   const qEl = $('#q');
   if (!qEl || !resultsEl) return;
   const q = qEl.value;
-  if (!q.trim()) { resultsEl.innerHTML = ''; return; }
+  if (!q.trim()) {
+    cancelSearch();
+    resultsEl.innerHTML = '';
+    return;
+  }
+  cancelSearch();
+  const controller = new AbortController();
+  searchAbort = controller;
   resultsEl.innerHTML = '<div class="hint">searching…</div>';
   const params = {
     q, glob: $('#glob')?.value || '',
@@ -20,10 +36,17 @@ export const runSearch = debounce(async () => {
     re: $('#o-re')?.classList.contains('on') ? 1 : '',
   };
   try {
-    const j = await api('/api/search', params);
-    renderResults(j);
+    const j = await api('/api/search', params, { signal: controller.signal });
+    if (searchAbort === controller) {
+      searchAbort = null;
+      renderResults(j);
+    }
   } catch (e) {
-    resultsEl.innerHTML = '<div class="hint">' + esc(e.message) + '</div>';
+    if (e.name === 'AbortError') return;
+    if (searchAbort === controller) {
+      searchAbort = null;
+      resultsEl.innerHTML = '<div class="hint">' + esc(e.message) + '</div>';
+    }
   }
 }, 160);
 

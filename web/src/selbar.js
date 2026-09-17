@@ -1,5 +1,5 @@
 // web/src/selbar.js
-import { $, S, doc_ } from './state.js';
+import { $, S, doc_, keyLabel } from './state.js';
 import { vp, copyToClipboard, showToast } from './ui.js';
 import { render } from './renderer.js';
 import { findReferences } from './lsp.js';
@@ -12,7 +12,7 @@ import { fitStatus } from './status.js';
 const status = $('#status');
 const statsEl = $('#sel-stats');
 // Queried rather than imported from diff.js, to keep the modules independent.
-const diffview = $('#diffview');
+const diffviewEl = $('#diffview');
 
 // e.code, not e.key: Option+letter types a symbol on macOS.
 export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', KeyE: 'agent-edit' };
@@ -35,7 +35,7 @@ export function getSelectedRangeInfo() {
   if (!d) return null;
 
   const range = sel.getRangeAt(0);
-  if (diffview && !diffview.hidden && diffview.contains(range.commonAncestorContainer)) {
+  if (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(range.commonAncestorContainer)) {
     return diffSelection(range, d);
   }
   if (!vp.contains(range.commonAncestorContainer)) return null;
@@ -70,7 +70,7 @@ function diffSelection(range, d) {
   let l1 = Infinity, l2 = -Infinity, at1 = Infinity, at2 = -Infinity;
   const parts = [];
   const seen = new Set();
-  for (const el of diffview.querySelectorAll('[data-l], [data-at]')) {
+  for (const el of diffviewEl.querySelectorAll('[data-l], [data-at]')) {
     if (!range.intersectsNode(el)) continue;
     const code = el.querySelector('.diff-code');
     if (el.dataset.l !== undefined) {
@@ -97,13 +97,11 @@ function diffSelection(range, d) {
   return { text, l1, l2, path: d.path, fromDiff: true };
 }
 
-const refOf = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
+const selectionRef = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
 
 function showSelectionBar(info) {
   current = info;
-  const ref = refOf(info);
   const lines = info.l2 - info.l1 + 1;
-  statsEl.title = ref;
   statsEl.textContent = (lines === 1 ? '1 line' : lines + ' lines') + ' · ' +
     info.text.length.toLocaleString() + ' chars';
   status.classList.add('selecting');
@@ -114,6 +112,7 @@ export function hideSelectionBar() {
   closeSelMenu();
   if (!current) return;
   current = null;
+  if (statsEl) statsEl.textContent = '';
   status.classList.remove('selecting');
   fitStatus();
 }
@@ -167,12 +166,14 @@ export function copySelectAll() {
 export function runSelectionAction(act) {
   if (!current) return false;
   const { text, path } = current;
-  const ref = refOf(current);
+  const ref = selectionRef(current);
   if (act === 'copy-ref') {
-    copyToClipboard(ref, 'Copied ' + ref);
+    copyToClipboard(ref, 'Copied');
   } else if (act === 'copy-agent') {
     const ext = path.split('.').pop() || '';
-    copyToClipboard('### Reference: ' + ref + '\n```' + ext + '\n' + text + '\n```', 'Copied snippet for Agent (' + ref + ')');
+    const lineStr = current.l1 === current.l2 ? 'line ' + current.l1 : 'lines ' + current.l1 + '-' + current.l2;
+    const snippet = '@' + path + ' ' + lineStr + '\n```' + ext + '\n' + text + '\n```';
+    copyToClipboard(snippet, 'Copied');
   } else if (act === 'agent-edit') {
     if (!agentHandler) return false;
     agentHandler(current);
@@ -192,22 +193,29 @@ export function closeSelMenu() {
   if (menu && !menu.hidden) menu.hidden = true;
 }
 
-/* Built from the footer's own buttons each time, so the two can never disagree
-   about which actions exist or whether Edit with Agent is on offer. */
+const SEL_MENU_ITEMS = [
+  { sel: 'copy-ref', label: 'Copy Ref', keys: 'Alt+C' },
+  { sel: 'copy-agent', label: 'Copy with Context', keys: 'Alt+A' },
+  { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
+  { sel: 'usages', label: 'Find Usages', keys: 'Alt+U' },
+];
+
+/* Built from the selection actions each time, keeping Find Usages in context menu. */
 function openSelMenu(x, y) {
   menu.replaceChildren();
-  for (const src of bar().querySelectorAll('[data-sel]')) {
-    if (src.hidden) continue;
-    const item = document.createElement('button');
-    item.className = 'sel-menu-item';
-    item.dataset.sel = src.dataset.sel;
-    item.setAttribute('role', 'menuitem');
+  for (const item of SEL_MENU_ITEMS) {
+    const btn = document.createElement('button');
+    btn.className = 'sel-menu-item';
+    btn.dataset.sel = item.sel;
+    btn.setAttribute('role', 'menuitem');
     const label = document.createElement('span');
-    label.textContent = src.querySelector('.footer-btn-label').textContent;
-    item.append(label);
-    const kbd = src.querySelector('kbd');
-    if (kbd) item.append(kbd.cloneNode(true));
-    menu.append(item);
+    label.textContent = item.label;
+    btn.append(label);
+    const kbd = document.createElement('kbd');
+    kbd.className = 'footer-kbd';
+    kbd.textContent = keyLabel(item.keys);
+    btn.append(kbd);
+    menu.append(btn);
   }
   menu.hidden = false;
   // Open toward the pointer's bottom-right, flipping at the window's edges.
@@ -251,7 +259,7 @@ export function initSelectionBar() {
      keeps its own menu, which is what a right click on plain code expects. */
   document.addEventListener('contextmenu', e => {
     if (menu.contains(e.target)) { e.preventDefault(); return; }
-    const inCode = vp.contains(e.target) || (diffview && !diffview.hidden && diffview.contains(e.target));
+    const inCode = vp.contains(e.target) || (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(e.target));
     if (!inCode) { closeSelMenu(); return; }
     updateSelectionBar();
     if (!current) { closeSelMenu(); return; }

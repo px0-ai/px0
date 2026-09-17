@@ -5,6 +5,7 @@ import { updateStatus } from './status.js';
 import { loadOutline } from './outline.js';
 import { treeEl, openDirs, drawTree } from './tree.js';
 import { reloadOpenTabs } from './tabs.js';
+import { showToast } from './ui.js';
 
 export function showPanel(name) {
   document.body.classList.remove('side-hidden');
@@ -14,7 +15,6 @@ export function showPanel(name) {
 
 export function initPanels() {
   $('#btn-reindex').addEventListener('click', async () => {
-    $('#st-index').textContent = 'reindexing…';
     const j = await api('/api/reindex');
     S.meta.files = j.files; S.meta.indexMs = j.indexMs;
     treeEl.innerHTML = ''; openDirs.clear();
@@ -22,6 +22,7 @@ export function initPanels() {
     // Reindex is a refresh: re-fetch open tabs quietly in place without tab switching.
     await reloadOpenTabs();
     updateStatus();
+    showToast('✓', 'Workspace reindexed');
   });
 
   /* sidebar resize */

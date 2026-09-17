@@ -6,6 +6,7 @@
 import { showToast } from './ui.js';
 
 const KEY = 'px0.theme';
+const DEFAULT_THEME = 'github-dark';
 const THEME_SELECTOR = /^(?::root|html)?\[data-theme=["']?([\w-]+)["']?\]$/;
 
 let themes = null;
@@ -57,6 +58,7 @@ export function initTheme() {
   let saved = null;
   try { saved = localStorage.getItem(KEY); } catch {}
   if (saved && setTheme(saved, false)) return;
+  if (setTheme(DEFAULT_THEME, false)) return;
   // The attribute in index.html may name a theme that was since removed.
   const all = listThemes();
   if (all.length && !all.some(t => t.id === currentTheme())) setTheme(all[0].id, false);

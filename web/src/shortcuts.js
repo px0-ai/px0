@@ -1,7 +1,7 @@
 // web/src/shortcuts.js
 import { $, $$, esc, S, doc_, isMac, MOD, LH, keyCaps } from './state.js';
 import { vp, sizer } from './ui.js';
-import { layout, render, paint, toggleWordWrap, toggleLineNumbers } from './renderer.js';
+import { layout, render, paint, toggleWordWrap } from './renderer.js';
 import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
@@ -18,16 +18,20 @@ import { toggleTreeExpansion } from './tree.js';
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
 import { toggleDiff } from './diff.js';
+import { openSettings, closeSettings, isSettingsOpen } from './settings.js';
+import { handleVimKeyDown, showVimHelp, closeVimHelp } from './vim.js';
+import { handleImageKey } from './imageview.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
    they show as ⌘/⌥/⇧ on a Mac and Ctrl/Alt/Shift elsewhere. Browsers keep
    Ctrl+W and Cmd+W for themselves, so Alt+W is the close shortcut shown. */
 export const SHORTCUTS = [
+  [['Mod+,'], 'Open settings'],
   [['Mod+K'], 'Quick search / palette'], [['Mod+P'], 'Go to file'],
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
   [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
-  [['Alt+L'], 'Toggle line numbers'], [['Alt+M'], 'Toggle Markdown preview'],
+  [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
@@ -37,8 +41,8 @@ export const SHORTCUTS = [
   [['Alt+W'], 'Close tab'], [['Alt+Shift+T'], 'Reopen closed tab'], [['Ctrl+Tab'], 'Next tab'],
   [['Alt+1…9'], 'Select tab'], [['Double click'], 'Highlight all occurrences'],
   [['Mod+A'], 'Select whole file'],
-  [['Alt+C', 'Alt+A'], 'Copy selection ref / for agent'], [['Alt+U'], 'Find usages of selection'],
-  [['Alt+E'], 'Edit selection with a coding harness'],
+  [['Alt+C', 'Alt+A'], 'Copy selection ref / with context'], [['Alt+U'], 'Find usages of selection'],
+  [['Alt+E'], 'Edit selection inline'],
   [['Right click'], 'Selection actions at the pointer'],
   [['Mod+Home|Mod+Up', 'Mod+End|Mod+Down'], 'Top / bottom of file'],
   [['Home|Mod+Left', 'End|Mod+Right'], 'Start / end of line'],
@@ -49,17 +53,24 @@ export const SHORTCUTS = [
 export function showHelp() {
   const h = $('#helpsheet');
   const ver = S.meta?.version ? ` <span class="help-version">v${esc(S.meta.version)}</span>` : '';
-  h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver + '</div><dl class="help-grid">' +
+  h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver +
+    '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;">View Vim Keybindings</button></div><dl class="help-grid">' +
     SHORTCUTS.map(([combos, v]) =>
       '<dt>' + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
       '<dd>' + esc(v) + '</dd>').join('') + '</dl></div>';
   h.hidden = false;
+  h.querySelector('#btn-switch-to-vim-help')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    h.hidden = true;
+    showVimHelp();
+  });
 }
 
 export const inField = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
 
 export function initShortcuts() {
   $('#btn-theme')?.addEventListener('click', cycleTheme);
+  $('#btn-settings')?.addEventListener('click', () => openSettings('ui'));
   $('#btn-help')?.addEventListener('click', showHelp);
   $('#st-ver')?.addEventListener('click', showHelp);
   $('#helpsheet').addEventListener('click', () => { $('#helpsheet').hidden = true; });
@@ -75,9 +86,10 @@ export function initShortcuts() {
     else if (act === 'find') openFind(S.lastWord);
     else if (act === 'goto') openPalette('line');
     else if (act === 'wrap') toggleWordWrap();
-    else if (act === 'line-numbers') toggleLineNumbers();
     else if (act === 'md-preview') togglePreview();
     else if (act === 'palette') openPalette('command');
+    else if (act === 'settings') openSettings('ui');
+    else if (act === 'vim-help') showVimHelp();
     else if (act === 'help') showHelp();
   });
 
@@ -85,6 +97,10 @@ export function initShortcuts() {
     const mod = e[MOD];
 
     if (e.key === 'Escape') {
+      const lb = $('#img-lightbox');
+      if (lb && !lb.hidden) { lb.hidden = true; return; }
+      if (!$('#vim-helpsheet')?.hidden) { closeVimHelp(); return; }
+      if (isSettingsOpen()) { closeSettings(); return; }
       if (!overlay.hidden) { closePalette(); return; }
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
       if (!hovercard.hidden) { clearLink(); return; }
@@ -93,6 +109,12 @@ export function initShortcuts() {
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
       if (inField(document.activeElement)) document.activeElement.blur();
+      return;
+    }
+
+    if (mod && (e.key === ',' || e.key === '<')) {
+      e.preventDefault();
+      openSettings('ui');
       return;
     }
 
@@ -150,12 +172,6 @@ export function initShortcuts() {
       return;
     }
 
-    if (e.altKey && e.code === 'KeyL') {
-      e.preventDefault();
-      toggleLineNumbers();
-      return;
-    }
-
     if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyM') {
       e.preventDefault();
       togglePreview();
@@ -169,9 +185,12 @@ export function initShortcuts() {
     if (plainMod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); if (previewing()) selectPreview(); else selectAll(); return; }
     if (plainMod && (e.key === 'c' || e.key === 'C') && copySelectAll()) { e.preventDefault(); return; }
 
+    if (handleVimKeyDown(e)) return;
+
     if (e.key === '?') { e.preventDefault(); showHelp(); return; }
     const d = doc_();
     if (!d) return;
+    if (d.isImage) { if (handleImageKey(e)) e.preventDefault(); return; }
     if (previewing(d)) { if (previewKey(e)) e.preventDefault(); return; }
     const toTop = () => { vp.scrollTop = 0; d.cur = 1; render(); updateStatus(); };
     const toBottom = () => { vp.scrollTop = sizer.offsetHeight; d.cur = d.total; render(); updateStatus(); };

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -265,8 +266,17 @@ func (s *searcher) scan(data []byte, ext string, max int, w *workBuf) []Match {
 
 // Search greps every indexed file in parallel.
 func Search(ix *Index, o SearchOpts) ([]FileMatches, bool, error) {
+	return SearchContext(context.Background(), ix, o)
+}
+
+// SearchContext greps every indexed file in parallel, aborting worker goroutines
+// and returning immediately if ctx is cancelled.
+func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches, bool, error) {
 	if strings.TrimSpace(o.Query) == "" {
 		return nil, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	if o.MaxFiles == 0 {
 		o.MaxFiles = 200
@@ -300,6 +310,9 @@ func Search(ix *Index, o SearchOpts) ([]FileMatches, bool, error) {
 			defer wg.Done()
 			w := &workBuf{}
 			for i := range jobs {
+				if ctx.Err() != nil {
+					continue // context cancelled: drain jobs and terminate quickly
+				}
 				f := &files[i]
 				if f.Size == 0 || f.Size > searchFileCap {
 					continue
@@ -314,6 +327,9 @@ func Search(ix *Index, o SearchOpts) ([]FileMatches, bool, error) {
 				if err != nil || isBinary(data) {
 					continue
 				}
+				if ctx.Err() != nil {
+					continue
+				}
 				m := s.scan(data, strings.ToLower(filepath.Ext(f.Path)), o.MaxPerFil, w)
 				w.release()
 				if len(m) == 0 {
@@ -326,11 +342,23 @@ func Search(ix *Index, o SearchOpts) ([]FileMatches, bool, error) {
 			}
 		}()
 	}
+
 	for i := range files {
-		jobs <- i
+		select {
+		case <-ctx.Done():
+			break
+		case jobs <- i:
+		}
+		if ctx.Err() != nil {
+			break
+		}
 	}
 	close(jobs)
 	wg.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 
 	sort.Slice(results, func(i, j int) bool { return results[i].Path < results[j].Path })
 	truncated := false

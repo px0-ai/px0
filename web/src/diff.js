@@ -16,7 +16,7 @@ let shown = null; // doc the diff view is currently showing, null while hidden
 // d.diffMode is 'split' | 'unified' | null (off), per tab. The layout last
 // picked (split vs unified) is remembered globally as the default for the
 // next file entering diff view.
-function setLayoutPref(mode) {
+export function setLayoutPref(mode) {
   try { localStorage.setItem('px0.diffLayout', mode); } catch {}
 }
 
@@ -54,14 +54,14 @@ export async function toggleDiff() {
   if (!S.meta?.git) return;
   const d = doc_();
   if (!d) return;
-  if (!d.diffMode && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
+  if (!d.diffMode && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo', 4000); return; }
   setDiffMode(d.diffMode ? 'source' : (layoutPref() || 'split'));
 }
 
 export async function setDiffMode(mode) {
   const d = doc_();
   if (!d) return;
-  if (mode !== 'source' && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
+  if (mode !== 'source' && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo', 4000); return; }
   if (mode === 'source') {
     d.diffMode = null;
     d.diffDismissed = true;
@@ -86,7 +86,7 @@ async function drawDiff(d) {
     } catch (e) {
       d.diffText = '';
       d.diffHunks = [];
-      setStatusNote('No diff: ' + e.message);
+      setStatusNote('No diff: ' + e.message, 4000);
     } finally {
       d.diffReq = null;
     }
@@ -114,12 +114,25 @@ function renderDiff(d) {
     frag.append(d.diffMode === 'unified' ? unifiedTable(hunk) : splitTable(hunk));
   }
   diffContent.append(frag);
+  syncDiffAgentTargets();
+}
+
+export function syncDiffAgentTargets() {
+  if (!diffview || diffview.hidden) return;
+  const d = doc_();
+  if (!d) return;
+  const ranges = (S.agentTargets || []).filter(t => t.path === d.path);
+  for (const el of diffview.querySelectorAll('[data-l]')) {
+    const l = +el.dataset.l;
+    const inAgent = ranges.some(r => l >= r.l1 && l <= r.l2);
+    el.classList.toggle('agent-sel', inAgent);
+  }
 }
 
 function hunkHeader(hunk) {
   const el = document.createElement('div');
   el.className = 'diff-hunk-head';
-  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@' + (hunk.section ? ' ' + hunk.section : '');
+  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@';
   return el;
 }
 

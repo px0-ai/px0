@@ -71,11 +71,11 @@ export function colAtPoint(x, y) {
 }
 
 /* Keep the caret inside the horizontally scrolled area when it moves. */
-function revealCaretX(x) {
+export function revealCaretX(x) {
   const d = doc_();
   if (x == null || S.wrap || !d) return;
   const g = rowFor(d.cur)?.querySelector('.g');
-  const gw = S.lineNumbers && g ? g.offsetWidth : 0;
+  const gw = g ? g.offsetWidth : 0;
   if (x < vp.scrollLeft + gw + 8) vp.scrollLeft = Math.max(0, x - gw - 40);
   else if (x > vp.scrollLeft + vp.clientWidth - 24) vp.scrollLeft = x - vp.clientWidth + 60;
 }

@@ -3,18 +3,18 @@ export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 export const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const request = async (method, path, params) => {
+const request = async (method, path, params, opts = {}) => {
   const u = new URL(path, location.origin);
   for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== '') u.searchParams.set(k, v);
-  const r = await fetch(u, { method });
+  const r = await fetch(u, { method, ...opts });
   const j = await r.json();
   // The body rides along: some replies, like a failed agent job, carry detail beyond the message.
   if (j.error) throw Object.assign(new Error(j.error), { body: j });
   return j;
 };
-export const api = (path, params) => request('GET', path, params);
+export const api = (path, params, opts) => request('GET', path, params, opts);
 // For requests that change the machine; the server only accepts these as POST from this page.
-export const apiPost = (path, params) => request('POST', path, params);
+export const apiPost = (path, params, opts) => request('POST', path, params, opts);
 
 export const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 // navigator.platform is deprecated but is still the only signal some browsers give.
@@ -75,6 +75,8 @@ export const S = {
   wrap: true,        // word wrap (default ON)
   lineNumbers: true, // line numbers gutter (default ON)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
+  settings: null,    // loaded from /api/settings
+  agentTargets: [],  // [{ id, path, l1, l2 }, ...] ranges of open compose/edit sessions
 };
 
 export const doc_ = () => (S.active >= 0 ? S.tabs[S.active] : null);

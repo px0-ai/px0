@@ -45,6 +45,7 @@ export function onMove({ x, y, mod }) {
     else return; // still on the same word: nothing to do
   }
 
+  if (S.settings && (S.settings['lsp.hover.enabled'] === false || S.settings['lsp.enabled'] === false)) return;
   if (S.lsp.state !== 'ready' && S.lsp.state !== 'indexing') return;
   clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => hoverAt(x, y), HOVER_DELAY);
@@ -74,7 +75,7 @@ export async function showHover(at, x, y) {
     (j.doc ? '<div class="doc">' + esc(j.doc) + '</div>' : '') +
     '<div class="actions">' +
       '<button id="hc-copy-ref" title="Copy file and line reference">Copy Ref</button>' +
-      '<button id="hc-copy-ai" title="Copy snippet with file path for AI Agent / LLMs">Copy for Agent</button>' +
+      '<button id="hc-copy-ai" title="Copy snippet with file path and line numbers">Copy with Context</button>' +
       '<button id="hc-find-refs" title="Find all usages across codebase">Usages</button>' +
       '<button id="hc-calls" title="' + withKeys('Trace callers and callees ({Alt+Shift+H})') + '">Calls</button>' +
     '</div>' +
@@ -88,14 +89,15 @@ export async function showHover(at, x, y) {
 
   if (btnRef) btnRef.onclick = (e) => {
     e.stopPropagation();
-    copyToClipboard(refPath, 'Copied ' + refPath);
+    copyToClipboard(refPath, 'Copied');
   };
   if (btnAi) btnAi.onclick = (e) => {
     e.stopPropagation();
     const lineText = d.lines[at.line - 1] || at.word || '';
     const ext = d.path.split('.').pop() || '';
-    const text = '### Reference: ' + refPath + '\n```' + ext + '\n' + lineText + '\n```';
-    copyToClipboard(text, 'Copied snippet for Agent (' + refPath + ')');
+    const lineStr = 'line ' + at.line;
+    const text = '@' + d.path + ' ' + lineStr + '\n```' + ext + '\n' + lineText + '\n```';
+    copyToClipboard(text, 'Copied');
   };
   if (btnRefs) btnRefs.onclick = (e) => {
     e.stopPropagation();

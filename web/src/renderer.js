@@ -13,7 +13,7 @@ export function layout() {
   if (!d) return;
   const digits = String(d.total).length;
   editor.style.setProperty('--gw', digits);
-  const gutter = S.lineNumbers ? (digits * S.chW + 30) : 16;
+  const gutter = digits * S.chW + 30;
   const w = S.wrap ? vp.clientWidth : Math.max(vp.clientWidth, gutter + (d.maxCols + 4) * S.chW);
   sizer.style.height = (d.total * LH + Math.max(120, vp.clientHeight * 0.5)) + 'px';
   sizer.style.width = w + 'px';
@@ -32,8 +32,20 @@ export function toggleWordWrap(forced) {
 export function toggleLineNumbers(forced) {
   S.lineNumbers = typeof forced === 'boolean' ? forced : !S.lineNumbers;
   document.body.classList.toggle('hide-lines', !S.lineNumbers);
-  try { localStorage.setItem('px0.lineNumbers', S.lineNumbers ? 'true' : 'false'); } catch {}
-  updateEditorOptionControls();
+  layout();
+  render();
+}
+
+export function applyEditorTypography(fontSize, fontFamily, lineHeight, tabSize) {
+  if (fontSize) document.documentElement.style.setProperty('--fs', fontSize + 'px');
+  if (fontFamily) document.documentElement.style.setProperty('--mono', fontFamily);
+  if (lineHeight) {
+    document.documentElement.style.setProperty('--lh', lineHeight + 'px');
+  } else if (fontSize) {
+    document.documentElement.style.setProperty('--lh', Math.round(fontSize * 1.5) + 'px');
+  }
+  if (tabSize) document.documentElement.style.setProperty('--tab-size', tabSize);
+  measure();
   layout();
   render();
 }
@@ -41,8 +53,6 @@ export function toggleLineNumbers(forced) {
 export function updateEditorOptionControls() {
   const wrapBtn = $('[data-action="wrap"]');
   if (wrapBtn) wrapBtn.classList.toggle('active', !!S.wrap);
-  const linesBtn = $('[data-action="line-numbers"]');
-  if (linesBtn) linesBtn.classList.toggle('active', !!S.lineNumbers);
 }
 
 let raf = 0;
@@ -62,11 +72,13 @@ export function paint() {
 
   let html = '';
   const gut = d.gutter || null;
+  const agentRanges = (S.agentTargets || []).filter(t => t.path === d.path);
   for (let i = first; i < last; i++) {
     const n = i + 1;
     const body = d.lines[i];
     let rc = 'row', gc = 'g';
     if (n === d.cur) rc += ' cur';
+    if (agentRanges.some(r => n >= r.l1 && n <= r.l2)) rc += ' agent-sel';
     if (gut) {
       const m = gut.marks.get(n);
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';
@@ -116,7 +128,7 @@ export function placeCaret() {
   }
   // Scrolled horizontally under the sticky gutter: hide rather than draw over it.
   const g = $('.g', row);
-  if (g && S.lineNumbers && x < g.getBoundingClientRect().right - 1) { el.hidden = true; return null; }
+  if (g && x < g.getBoundingClientRect().right - 1) { el.hidden = true; return null; }
   el.style.transform = 'translate(' + (x - base.left) + 'px,' + (y - base.top) + 'px)';
   el.hidden = false;
   const key = d.path + ':' + d.cur + ':' + col;

@@ -9,7 +9,7 @@ px0 avoids heavy third-party Go git libraries (such as `go-git`, which can consu
 Instead, px0 adheres to a Pure Shell-Out Architecture:
 
 - Shells out directly to the host `git` binary.
-- Never stages, commits, or changes refs or the index. The only workspace writes px0 makes are undoing a harness edit, which reads blobs with `git cat-file` ([Harness Editing & Agent Dispatch](agent-editing.md)).
+- Never stages, commits, or changes refs or the index. The only workspace writes px0 makes are the ones a dispatched coding harness makes itself ([Harness Editing & Agent Dispatch](agent-editing.md)).
 - Zero disk footprint: holds all status and diff structures in volatile memory on the `Index` (`Node.Status`).
 - Graceful degradation: if `git` is not installed, or if the opened directory is not a git repository, git features degrade silently without warnings or errors.
 - Can be disabled explicitly using the `-no-git` CLI flag.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,11 +60,18 @@ func agentServer(t *testing.T, root, harness string) *Server {
 	return s
 }
 
+// waitIdle waits for the most recently started job to finish. Tests that keep
+// several jobs in flight at once poll a specific id instead.
 func waitIdle(t *testing.T, s *Server) *agentJob {
+	t.Helper()
+	return waitIdleID(t, s, 0)
+}
+
+func waitIdleID(t *testing.T, s *Server, id int64) *agentJob {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		if j := s.agent.Job(); j != nil && !j.Running {
+		if j := s.agent.Job(id); j != nil && !j.Running {
 			return j
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -268,7 +276,7 @@ func TestAgentEditRunsHarnessAndReportsChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"### Reference: keep.go:1", "### Instruction", "add a line"} {
+	for _, want := range []string{"@keep.go line 1", "### Instruction", "add a line"} {
 		if !strings.Contains(string(prompt), want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
@@ -327,7 +335,7 @@ func TestAgentRefusesSecondEditWhileRunning(t *testing.T) {
 	waitIdle(t, s)
 }
 
-func TestAgentRefusesUncommittedFileUntilForced(t *testing.T) {
+func TestAgentAllowsEditOverUncommittedFileWithoutForce(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
@@ -335,20 +343,92 @@ func TestAgentRefusesUncommittedFileUntilForced(t *testing.T) {
 	// sub/mod.go is modified but not committed by gitRepo.
 	s := agentServer(t, root, writeHarness(t, "printf 'touched\\n' >> keep.go\n"))
 
-	code, body := agentPost(t, s, "/api/agent/edit?path=sub/mod.go&l1=1&l2=1&instruction=hi")
-	if code != http.StatusConflict {
-		t.Fatalf("edit over uncommitted work = %d, want 409", code)
-	}
-	msg, _ := body["error"].(string)
-	if !strings.Contains(msg, "uncommitted") {
-		t.Fatalf("error = %q, want it to mention uncommitted work", msg)
-	}
-
-	if code, _ = agentPost(t, s, "/api/agent/edit?path=sub/mod.go&l1=1&l2=1&instruction=hi&force=1"); code != 200 {
-		t.Fatalf("forced edit = %d, want 200", code)
+	code, _ := agentPost(t, s, "/api/agent/edit?path=sub/mod.go&l1=1&l2=1&instruction=hi")
+	if code != http.StatusOK {
+		t.Fatalf("edit over uncommitted work = %d, want 200", code)
 	}
 	if job := waitIdle(t, s); job.Error != "" {
-		t.Fatalf("forced run failed: %s", job.Error)
+		t.Fatalf("run failed: %s", job.Error)
+	}
+}
+
+func TestAgentModelSelectionAndDefaults(t *testing.T) {
+	isolateSettings(t)
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := m.Detect()
+	for _, h := range rows {
+		if len(h.Models) == 0 {
+			t.Fatalf("%s should list models", h.Name)
+		}
+		if h.Model == "" {
+			t.Fatalf("%s should have a default model", h.Name)
+		}
+		if h.Model != h.Models[0] {
+			t.Fatalf("%s default model %q != least capable model %q", h.Name, h.Model, h.Models[0])
+		}
+	}
+}
+
+func TestPresetArgvOrder(t *testing.T) {
+	for _, p := range agentPresets {
+		n := len(p.Args)
+		if n < 2 {
+			t.Fatalf("preset %s args too short: %v", p.Name, p.Args)
+		}
+		if p.Args[n-1] != "{prompt}" {
+			t.Fatalf("preset %s args %v: want {prompt} at the very end", p.Name, p.Args)
+		}
+
+		// When resolved with default model, {prompt} must remain at the very end
+		_, resolved, _, err := resolveAgentSpec(p.Name, "")
+		if err != nil {
+			continue // tool may not be installed in test env
+		}
+		rn := len(resolved)
+		if rn < 2 || resolved[rn-1] != "{prompt}" {
+			t.Fatalf("resolved %s args %v: want {prompt} at the very end", p.Name, resolved)
+		}
+	}
+}
+
+func TestClaudeModelDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\necho 'Current model: Sonnet 5'\necho 'Usage: /model <name>. Available: sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID.'\n"
+	if err := os.WriteFile(fakeClaude, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	discoveredModelsMu.Lock()
+	delete(discoveredModels, "claude")
+	delete(discoveringModels, "claude")
+	discoveredModelsMu.Unlock()
+
+	runModelDiscovery("claude", fakeClaude, []string{"haiku", "sonnet", "opus"})
+
+	discoveredModelsMu.Lock()
+	models := discoveredModels["claude"]
+	discoveredModelsMu.Unlock()
+
+	if len(models) == 0 {
+		t.Fatal("expected discovered models for claude, got none")
+	}
+	if models[0] != "haiku" {
+		t.Fatalf("expected least capable default 'haiku' at index 0, got %q", models[0])
+	}
+	// Check that fable, best, sonnet[1m] etc are parsed
+	foundFable := false
+	for _, m := range models {
+		if m == "fable" {
+			foundFable = true
+			break
+		}
+	}
+	if !foundFable {
+		t.Fatalf("expected 'fable' in discovered models: %v", models)
 	}
 }
 
@@ -373,84 +453,31 @@ func TestAgentReportsEditToAlreadyModifiedFile(t *testing.T) {
 	}
 }
 
-// Undo puts back each kind of path a run can touch: a clean file from HEAD, an
-// already-modified file from the copy taken before the run, and a new file or
-// directory by removing it.
-func TestAgentUndoRestoresEveryKindOfChange(t *testing.T) {
+// Two edits on disjoint line ranges of the same file run at the same time;
+// only an overlapping range is refused.
+func TestAgentAllowsNonOverlappingEditsInParallel(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
 	root := gitRepo(t)
-	s := agentServer(t, root, writeHarness(t, strings.Join([]string{
-		"printf 'x\\n' >> keep.go",
-		"printf 'x\\n' >> sub/mod.go",
-		"printf 'new\\n' > fresh.go",
-		"mkdir -p newdir && printf 'n\\n' > newdir/f.go",
-		"rm untr.go",
-	}, "\n")+"\n"))
+	s := agentServer(t, root, writeHarness(t, "sleep 1\n"))
 
-	read := func(rel string) string {
-		b, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			return "<missing>"
-		}
-		return string(b)
-	}
-	exists := func(rel string) bool { _, err := os.Stat(filepath.Join(root, rel)); return err == nil }
-
-	if code, _ := agentPost(t, s, "/api/agent/undo"); code != http.StatusNotFound {
-		t.Fatalf("undo before any edit = %d, want 404", code)
-	}
-	if code, _ := agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=hi"); code != 200 {
-		t.Fatalf("edit = %d, want 200", code)
-	}
-	job := waitIdle(t, s)
-	if job.Error != "" || !job.Undoable {
-		t.Fatalf("job error=%q undoable=%v note=%q", job.Error, job.Undoable, job.UndoNote)
-	}
-
-	code, body := agentPost(t, s, "/api/agent/undo")
+	code, first := agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=one")
 	if code != 200 {
-		t.Fatalf("undo = %d %v", code, body)
+		t.Fatalf("first edit = %d, want 200", code)
 	}
-	if got := read("keep.go"); got != "keep\n" {
-		t.Fatalf("keep.go = %q, want the committed content", got)
+	code, _ = agentPost(t, s, "/api/agent/edit?path=keep.go&l1=2&l2=2&instruction=two")
+	if code != 200 {
+		t.Fatalf("disjoint-range edit = %d, want 200 (should run in parallel)", code)
 	}
-	if got := read("sub/mod.go"); got != "line two\n" {
-		t.Fatalf("sub/mod.go = %q, want the uncommitted content from before the run", got)
+	code, _ = agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=2&instruction=three")
+	if code != http.StatusConflict {
+		t.Fatalf("edit overlapping both = %d, want 409", code)
 	}
-	if got := read("untr.go"); got != "untracked\n" {
-		t.Fatalf("untr.go = %q, want it restored", got)
-	}
-	if exists("fresh.go") || exists("newdir") {
-		t.Fatal("files the run created should be removed")
-	}
-	if code, _ := agentPost(t, s, "/api/agent/undo"); code != http.StatusNotFound {
-		t.Fatalf("second undo = %d, want 404", code)
-	}
-}
 
-// Undo never overwrites work done after the edit unless told to.
-func TestAgentUndoRefusesWhenChangedSince(t *testing.T) {
-	if !gitInstalled() {
-		t.Skip("git not installed")
-	}
-	root := gitRepo(t)
-	s := agentServer(t, root, writeHarness(t, "printf 'x\\n' >> keep.go\n"))
-	agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=hi")
-	waitIdle(t, s)
-
-	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("mine, written after\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if code, _ := agentPost(t, s, "/api/agent/undo"); code != http.StatusConflict {
-		t.Fatalf("undo over later work = %d, want 409", code)
-	}
-	if code, _ := agentPost(t, s, "/api/agent/undo?force=1"); code != 200 {
-		t.Fatalf("forced undo = %d, want 200", code)
-	}
-	if b, _ := os.ReadFile(filepath.Join(root, "keep.go")); string(b) != "keep\n" {
-		t.Fatalf("keep.go = %q after forced undo", b)
+	firstID := int64(first["id"].(float64))
+	if job := waitIdleID(t, s, firstID); job.Error != "" {
+		t.Fatalf("first edit failed: %s", job.Error)
 	}
 }
 
@@ -465,7 +492,6 @@ func TestAgentMutationsRejectCrossOriginPost(t *testing.T) {
 		"/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=hi",
 		"/api/agent/select?name=claude",
 		"/api/agent/cancel",
-		"/api/agent/undo",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		req.Host = "127.0.0.1:7777"
@@ -479,6 +505,40 @@ func TestAgentMutationsRejectCrossOriginPost(t *testing.T) {
 		if code, _ := get(t, s, path); code != http.StatusMethodNotAllowed {
 			t.Fatalf("GET %s = %d, want 405", path, code)
 		}
+	}
+}
+
+func TestAgentCancelJob(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	// Harness that sleeps to simulate a long-running edit
+	s := agentServer(t, root, writeHarness(t, "sleep 5\n"))
+
+	code, first := agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=first")
+	if code != http.StatusOK {
+		t.Fatalf("edit first = %d, want 200", code)
+	}
+	id := int64(first["id"].(float64))
+
+	// Cancel by id
+	cancelCode, cancelBody := agentPost(t, s, fmt.Sprintf("/api/agent/cancel?id=%d", id))
+	if cancelCode != http.StatusOK {
+		t.Fatalf("cancel = %d, want 200", cancelCode)
+	}
+	if cancelled, _ := cancelBody["cancelled"].(bool); !cancelled {
+		t.Fatalf("cancelled = false, want true")
+	}
+
+	// Job should be stopped
+	time.Sleep(100 * time.Millisecond)
+	code, job := get(t, s, fmt.Sprintf("/api/agent/job?id=%d", id))
+	if code != http.StatusOK {
+		t.Fatalf("job = %d, want 200", code)
+	}
+	if running, _ := job["running"].(bool); running {
+		t.Fatalf("job still running after cancel")
 	}
 }
 
@@ -536,9 +596,77 @@ func TestLineRefAndPrompt(t *testing.T) {
 		t.Fatalf("range ref = %q", lineRef(4, 9))
 	}
 	p := agentPrompt("web/src/app.js", 2, 5, "const x = 1;", "rename x to count")
-	for _, want := range []string{"### Reference: web/src/app.js:2-5", "```js", "const x = 1;", "rename x to count"} {
+	for _, want := range []string{"@web/src/app.js lines 2-5", "```js", "const x = 1;", "rename x to count"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	pSingle := agentPrompt("a.go", 4, 4, "pkg a", "fix")
+	if !strings.Contains(pSingle, "@a.go line 4") {
+		t.Fatalf("single line prompt missing @a.go line 4:\n%s", pSingle)
+	}
+}
+
+func TestShellQuoteAndCommand(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{
+			in:   []string{"agy", "--mode", "accept-edits", "-p", "hello world"},
+			want: "agy --mode accept-edits -p 'hello world'",
+		},
+		{
+			in:   []string{"echo", "it's working"},
+			want: "echo 'it'\\''s working'",
+		},
+		{
+			in:   []string{"tool", ""},
+			want: "tool ''",
+		},
+	}
+	for _, tc := range cases {
+		got := shellCommand(tc.in)
+		if got != tc.want {
+			t.Errorf("shellCommand(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestAllPresetArgvFormatting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	for _, p := range agentPresets {
+		binPath := filepath.Join(dir, p.Args[0])
+		if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, p := range agentPresets {
+		name, resolved, model, err := resolveAgentSpec(p.Name, "")
+		if err != nil {
+			t.Fatalf("resolveAgentSpec(%q) error: %v", p.Name, err)
+		}
+		if name != p.Name {
+			t.Errorf("name = %q, want %q", name, p.Name)
+		}
+		if model != p.DefaultModel {
+			t.Errorf("model = %q, want %q", model, p.DefaultModel)
+		}
+		if resolved[len(resolved)-1] != "{prompt}" {
+			t.Errorf("%s final arg = %q, want {prompt}", p.Name, resolved[len(resolved)-1])
+		}
+		// Ensure model flag was inserted properly
+		hasModel := false
+		for i, a := range resolved {
+			if a == p.ModelFlag && i+1 < len(resolved) && resolved[i+1] == p.DefaultModel {
+				hasModel = true
+				break
+			}
+		}
+		if !hasModel {
+			t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
 		}
 	}
 }

@@ -13,6 +13,7 @@ import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
 import { syncDiffView, layoutPref, diffScrollTop } from './diff.js';
+import { syncImageView } from './imageview.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
@@ -27,29 +28,31 @@ export async function openFile(path, opts = {}) {
     try {
       j = await api('/api/file', { path, start, count: CHUNK });
     } catch (e) {
-      setStatusNote(path + ': ' + e.message);
+      setStatusNote(path + ': ' + e.message, 4000);
       return;
     }
-    if (j.image) {
-      showImage(path);
-      return;
-    }
-    const hasDiff = !!j.diffAvailable;
+    const isImg = !!j.image;
+    const hasDiff = !isImg && !!j.diffAvailable;
     const d = {
-      path, name: path.split('/').pop(), lang: j.lang, total: j.total, maxCols: j.maxCols,
-      size: j.size, lines: new Array(j.total), chunks: new Set([start / CHUNK]),
+      path, name: path.split('/').pop(), lang: isImg ? 'image' : j.lang,
+      total: isImg ? 0 : j.total, maxCols: isImg ? 0 : j.maxCols,
+      size: j.size, lines: isImg ? [] : new Array(j.total),
+      chunks: new Set(isImg ? [] : [start / CHUNK]),
       pending: new Set(), refining: new Set(), scrollTop: 0, cur: line || 1,
-      outline: null, gen: 0, markdown: !!j.markdown, gutter: null,
+      outline: null, gen: 0, markdown: !isImg && !!j.markdown, isImage: isImg,
+      gutter: null,
       diffMode: hasDiff ? (layoutPref() || 'split') : null,
       diffAvailable: hasDiff,
       diffDismissed: false,
     };
-    for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
-    d.lsp = j.lsp || { state: 'off', server: '' };
+    if (!isImg) {
+      for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
+    }
+    d.lsp = (!isImg && j.lsp) || { state: 'off', server: '' };
     S.tabs.push(d);
     idx = S.tabs.length - 1;
-    if (j.refine) refineChunk(d, start / CHUNK);
-    loadGutter(d);
+    if (!isImg && j.refine) refineChunk(d, start / CHUNK);
+    if (!isImg) loadGutter(d);
   }
   const prev = doc_();
   if (prev && prev !== S.tabs[idx]) prev.scrollTop = vp.scrollTop;
@@ -58,7 +61,7 @@ export async function openFile(path, opts = {}) {
   const d = S.tabs[idx];
 
   $('#empty').hidden = true;
-  hideImage();
+  syncImageView();
   syncPreview();
   syncDiffView();
   if (!S.at || S.at.path !== d.path) S.at = null;
@@ -135,13 +138,16 @@ export async function reloadOpenTabs() {
 
     if (res.status !== 'fulfilled') {
       if (idx === S.active) {
-        setStatusNote(tgt.path + ': ' + (res.reason?.message || 'failed to load'));
+        setStatusNote(tgt.path + ': ' + (res.reason?.message || 'failed to load'), 4000);
       }
       continue;
     }
 
     const j = res.value;
-    if (j.image) continue;
+    if (j.image) {
+      tgt.oldDoc.size = j.size;
+      continue;
+    }
 
     const keep = tgt.oldDoc;
     const hasDiff = !!j.diffAvailable;
@@ -193,6 +199,7 @@ export async function reloadOpenTabs() {
     S.lsp.server = (d.lsp && d.lsp.server) || '';
     S.lsp.missing = (d.lsp && d.lsp.missing) || '';
     warmLSP(d);
+    syncImageView();
     syncPreview();
     syncDiffView();
     layout();
@@ -234,6 +241,7 @@ export function closeTab(i) {
   }
   if (S.tabs.length === 0) {
     S.active = -1;
+    syncImageView();
     syncPreview();
     syncDiffView();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
@@ -243,6 +251,7 @@ export function closeTab(i) {
   }
   S.active = Math.min(i, S.tabs.length - 1);
   const d = doc_();
+  syncImageView();
   syncPreview();
   syncDiffView();
   drawTabs(); drawCrumbs(); layout();
@@ -264,7 +273,8 @@ export async function reopenClosedTab() {
 
 export function drawTabs() {
   $('#tabs').innerHTML = S.tabs.map((t, i) =>
-    '<div class="tab' + (i === S.active ? ' active' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
+    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
+    (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
     '<span class="tn">' + esc(t.name) + '</span><span class="x" data-close="' + i + '" title="' + withKeys('Close tab ({Alt+W})') + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join('');
   const act = $('#tabs .tab.active');
   if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -276,6 +286,7 @@ export function switchTab(i) {
   const prev = doc_();
   if (prev) prev.scrollTop = vp.scrollTop;
   S.active = i;
+  syncImageView();
   syncPreview();
   syncDiffView();
   clearFind();
@@ -298,17 +309,12 @@ export function drawCrumbs() {
 }
 
 export function showImage(path) {
-  hideImage();
-  const box = document.createElement('div');
-  box.id = 'imgview';
-  box.innerHTML = '<img src="/api/raw?path=' + encodeURIComponent(path) + '" alt="">';
-  editor.appendChild(box);
-  $('#empty').hidden = true;
+  openFile(path);
 }
 
 export function hideImage() {
   const b = $('#imgview');
-  if (b) b.remove();
+  if (b) b.hidden = true;
 }
 
 export function initTabs() {

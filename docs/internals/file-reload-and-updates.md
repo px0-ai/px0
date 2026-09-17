@@ -6,7 +6,7 @@ This document details the end-to-end architecture, performance optimizations, an
 
 ## 1. Problem Statement & Motivation
 
-Most file mutations (such as `git checkout`, `git pull`, branch switching, code generation, or edits from an external IDE) occur on the host filesystem outside of px0's process boundary. Edits px0 dispatches to a coding harness, and their undo, reuse the same reload path once they finish (see [Harness Editing & Agent Dispatch](agent-editing.md)).
+Most file mutations (such as `git checkout`, `git pull`, branch switching, code generation, or edits from an external IDE) occur on the host filesystem outside of px0's process boundary. Edits px0 dispatches to a coding harness reuse the same reload path once they finish (see [Harness Editing & Agent Dispatch](agent-editing.md)).
 
 Users trigger a workspace re-index by clicking the **Re-index** button (`#btn-reindex` in the sidebar header) or via the Command Palette (`Mod+K` &rarr; `Re-index Workspace`).
 
