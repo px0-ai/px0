@@ -335,7 +335,7 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
   position: absolute; inset: 0 0 auto 0; z-index: 8; height: var(--lh);
   display: flex; align-items: center; gap: 8px; box-sizing: border-box;
   padding: 0 18px 0 calc(var(--gw, 1) * 1ch + 44px);
-  overflow: hidden; white-space: nowrap; pointer-events: none;
+  overflow: hidden; white-space: nowrap; cursor: pointer;
   background: color-mix(in srgb, var(--bg3) 96%, transparent);
   border-bottom: 1px solid var(--line);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--bg) 35%, transparent);

@@ -67,8 +67,8 @@ flowchart TD
 - `#sticky-symbol`:
   - Fixed-height overlay that shows the nearest enclosing function, method,
     class, type, or module after its declaration scrolls above the viewport.
-  - Pointer-transparent and layered above source rows, but below Markdown
-    preview and Git diff overlays.
+  - Clicking it scrolls the source viewport to the declaration's first line.
+  - Layered above source rows, but below Markdown preview and Git diff overlays.
 
 ## 3. Virtualization & Recycling Pipeline (`paint()`)
 

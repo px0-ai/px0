@@ -260,6 +260,7 @@
     const diff = $("#diffview");
     if (!d || md && !md.hidden || diff && !diff.hidden || vp.scrollTop < LH || !d.outline?.length) {
       el.hidden = true;
+      delete el.dataset.line;
       return;
     }
     let topLine = Math.floor(vp.scrollTop / LH) + 1;
@@ -283,8 +284,10 @@
     }
     if (!current) {
       el.hidden = true;
+      delete el.dataset.line;
       return;
     }
+    el.dataset.line = current.line;
     $(".sticky-line", el).textContent = current.line;
     $(".sticky-kind", el).textContent = stickyKind[current.kind] || String(current.kind || "sym").slice(0, 3);
     $(".sticky-name", el).textContent = current.name;
@@ -544,6 +547,13 @@
   }
   function initRenderer() {
     vp.addEventListener("scroll", render, { passive: true });
+    $("#sticky-symbol")?.addEventListener("click", () => {
+      const line = Number($("#sticky-symbol").dataset.line);
+      if (!line)
+        return;
+      vp.scrollTop = Math.max(0, (line - 1) * LH);
+      render();
+    });
     new ResizeObserver(() => {
       layout();
       render();
