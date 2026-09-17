@@ -79,27 +79,46 @@ export async function revealFile(path) {
   }
 }
 
+async function setDirOpen(dirRow, open) {
+  const path = dirRow.dataset.dir;
+  const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
+  dirRow.classList.toggle('open', open);
+  kids.classList.toggle('open', open);
+  if (open) {
+    openDirs.add(path);
+    if (!kids.dataset.loaded) {
+      kids.dataset.loaded = '1';
+      await drawTree(path, kids, path.split('/').length);
+    }
+  } else openDirs.delete(path);
+}
+
+export async function toggleTreeExpansion() {
+  const changedOnly = treeEl.classList.contains('changed-only');
+  const selector = changedOnly ? '.tr.dir.dirty:not(.open)' : '.tr.dir:not(.open)';
+  let opened = false;
+  for (;;) {
+    const row = treeEl.querySelector(selector);
+    if (!row) break;
+    await setDirOpen(row, true);
+    opened = true;
+  }
+  if (opened) return;
+  for (const row of $$('.tr.dir.open', treeEl).reverse()) await setDirOpen(row, false);
+}
+
 export function initTree() {
   // "Changed only" filter: hide clean files and known-clean folders (CSS-driven).
   $('#btn-changed')?.addEventListener('click', e => {
     const on = treeEl.classList.toggle('changed-only');
     e.currentTarget.classList.toggle('active', on);
   });
+  $('#btn-expand-tree')?.addEventListener('click', toggleTreeExpansion);
 
   treeEl.addEventListener('click', async e => {
     const dirRow = e.target.closest('[data-dir]');
     if (dirRow) {
-      const path = dirRow.dataset.dir;
-      const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
-      const open = dirRow.classList.toggle('open');
-      kids.classList.toggle('open', open);
-      if (open) {
-        openDirs.add(path);
-        if (!kids.dataset.loaded) {
-          kids.dataset.loaded = '1';
-          await drawTree(path, kids, path.split('/').length);
-        }
-      } else openDirs.delete(path);
+      await setDirOpen(dirRow, !dirRow.classList.contains('open'));
       return;
     }
     const f = e.target.closest('[data-file]');

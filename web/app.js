@@ -761,26 +761,46 @@
       row.scrollIntoView({ block: "center" });
     }
   }
+  async function setDirOpen(dirRow, open) {
+    const path = dirRow.dataset.dir;
+    const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
+    dirRow.classList.toggle("open", open);
+    kids.classList.toggle("open", open);
+    if (open) {
+      openDirs.add(path);
+      if (!kids.dataset.loaded) {
+        kids.dataset.loaded = "1";
+        await drawTree(path, kids, path.split("/").length);
+      }
+    } else
+      openDirs.delete(path);
+  }
+  async function toggleTreeExpansion() {
+    const changedOnly = treeEl.classList.contains("changed-only");
+    const selector = changedOnly ? ".tr.dir.dirty:not(.open)" : ".tr.dir:not(.open)";
+    let opened = false;
+    for (; ; ) {
+      const row = treeEl.querySelector(selector);
+      if (!row)
+        break;
+      await setDirOpen(row, true);
+      opened = true;
+    }
+    if (opened)
+      return;
+    for (const row of $$(".tr.dir.open", treeEl).reverse())
+      await setDirOpen(row, false);
+  }
   function initTree() {
     $("#btn-changed")?.addEventListener("click", (e) => {
       const on = treeEl.classList.toggle("changed-only");
       e.currentTarget.classList.toggle("active", on);
     });
+    $("#btn-expand-tree")?.addEventListener("click", toggleTreeExpansion);
     treeEl.addEventListener("click", async (e) => {
       const dirRow = e.target.closest("[data-dir]");
       if (dirRow) {
-        const path = dirRow.dataset.dir;
-        const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
-        const open = dirRow.classList.toggle("open");
-        kids.classList.toggle("open", open);
-        if (open) {
-          openDirs.add(path);
-          if (!kids.dataset.loaded) {
-            kids.dataset.loaded = "1";
-            await drawTree(path, kids, path.split("/").length);
-          }
-        } else
-          openDirs.delete(path);
+        await setDirOpen(dirRow, !dirRow.classList.contains("open"));
         return;
       }
       const f = e.target.closest("[data-file]");
@@ -5771,6 +5791,7 @@
     [["Mod+J"], "Toggle right inspector (Symbols/Refs)"],
     [["Alt+Left", "Alt+Right"], "Navigate back / forward"],
     [["Mod+B"], "Toggle sidebar"],
+    [["Alt+E"], "Expand / collapse folders"],
     [["Alt+W"], "Close tab"],
     [["Alt+Shift+T"], "Reopen closed tab"],
     [["Ctrl+Tab"], "Next tab"],
@@ -5938,6 +5959,11 @@
         document.body.classList.toggle("side-hidden");
         layout();
         render();
+        return;
+      }
+      if (e.altKey && !mod && !e.shiftKey && e.code === "KeyE") {
+        e.preventDefault();
+        toggleTreeExpansion();
         return;
       }
       if (mod && !e.shiftKey && (e.key === "d" || e.key === "D")) {
@@ -6883,9 +6909,11 @@
     if (S2.meta.metrics)
       updateMetricsDisplay(S2.meta.metrics);
     if (S2.meta.git) {
-      const b = $("#btn-changed");
-      if (b)
-        b.hidden = false;
+      for (const id of ["#btn-changed", "#btn-expand-tree"]) {
+        const b = $(id);
+        if (b)
+          b.hidden = false;
+      }
     }
     applyAgentMeta();
     document.title = S2.meta.name + " - px0";

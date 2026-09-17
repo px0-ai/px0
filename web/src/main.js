@@ -73,7 +73,12 @@ initImageViewer();
   measure();
   S.meta = await api('/api/meta');
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
-  if (S.meta.git) { const b = $('#btn-changed'); if (b) b.hidden = false; }
+  if (S.meta.git) {
+    for (const id of ['#btn-changed', '#btn-expand-tree']) {
+      const b = $(id);
+      if (b) b.hidden = false;
+    }
+  }  
   applyAgentMeta();
   document.title = S.meta.name + ' - px0';
   $('#root-name').textContent = S.meta.name;
