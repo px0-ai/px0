@@ -90,7 +90,9 @@ cached `outline` as an indentation-based scope stack. It shows only when the
 first visible line is inside a function or method; a previous function is not
 shown merely because it is the nearest declaration. With word wrapping enabled,
 the first visible line is read from live row geometry rather than inferred only
-from `scrollTop`.
+from `scrollTop`. Blank and comment-only lines immediately above a function are
+assigned to the function below them, so documentation comments do not inherit
+the function above them.
 
 `tabs.js` starts `loadOutline()` when a file is opened, switched to, or
 reloaded, even when the Symbols panel is closed. The regex outline is available

@@ -263,6 +263,28 @@
     }
     return null;
   }
+  function commentOrBlank(line) {
+    const text = (line || "").trim();
+    return !text || /^(?:<span class="c">[\s\S]*<\/span>)+$/.test(text);
+  }
+  function resolveFunction(outline, line, lines) {
+    const current = enclosingFunction(outline, line);
+    const next = outline.find((symbol) => symbol.line > line);
+    if (!next)
+      return current;
+    let prelude = true;
+    for (let n = line; n < next.line; n++) {
+      if (!commentOrBlank(lines[n - 1])) {
+        prelude = false;
+        break;
+      }
+    }
+    if (prelude && stickyFunctions.has(next.kind))
+      return next;
+    if (prelude && (!current || next.indent <= current.indent))
+      return null;
+    return current;
+  }
   function updateStickySymbol(d) {
     const el = $("#sticky-symbol");
     if (!el)
@@ -284,7 +306,7 @@
         }
       }
     }
-    const current = enclosingFunction(d.outline, topLine);
+    const current = resolveFunction(d.outline, topLine, d.lines);
     if (!current) {
       el.hidden = true;
       delete el.dataset.line;
