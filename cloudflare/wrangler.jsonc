@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "px0-cf",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "vars": {
+    "MAX_REPO_MB": "200"
+  },
+  "assets": {
+    "directory": "../web",
+    "binding": "ASSETS",
+    // px0's own index.html is served explicitly by the Worker at /index.html
+    // (see worker/index.ts serveIndexHtml) — disable the Assets binding's
+    // default clean-URL redirect (/index.html -> /), which would otherwise
+    // fight that.
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "containers": [
+    {
+      "class_name": "PxContainer",
+      "image": "./container/Dockerfile",
+      "max_instances": 20
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "PxContainer", "name": "PX0_CONTAINER" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PxContainer"] }
+  ],
+  // Exact hostname only — px0.shvm.in is a single first-level subdomain of
+  // shvm.in, already covered by its existing free Universal SSL cert. No
+  // wildcard, so this can never intercept db.shvm.in, now.shvm.in, or any
+  // other existing subdomain on the zone. custom_domain lets Cloudflare
+  // provision the DNS record itself.
+  "routes": [
+    { "pattern": "px0.shvm.in", "custom_domain": true }
+  ]
+}
