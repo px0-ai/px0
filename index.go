@@ -39,9 +39,13 @@ type Index struct {
 	mu       sync.RWMutex
 	files    []FileEntry
 	children map[string][]Node
-	builtAt  time.Time
-	buildMS  int64
-	readyCh  chan struct{}
+	// status holds git working-tree codes from the last Build, keyed like
+	// FileEntry.Path. Nil until the first build that probes git: non-nil
+	// (possibly empty) means the snapshot is known, so absent = clean.
+	status  map[string]string
+	builtAt time.Time
+	buildMS int64
+	readyCh chan struct{}
 }
 
 func NewIndex(root string) *Index {
@@ -78,6 +82,28 @@ func (ix *Index) Files() []FileEntry {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
 	return ix.files
+}
+
+// dirtyStatus reports the git working-tree code for rel from the last index
+// build. False means the file is clean or nothing is known yet (build still
+// in flight, git off). The /api/file path uses it as a negative cache: a
+// clean file would `git diff` empty, so the open answers without forking git.
+func (ix *Index) dirtyStatus(rel string) (string, bool) {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	if ix.status == nil {
+		return "", false
+	}
+	code, ok := ix.status[rel]
+	return code, ok
+}
+
+// statusKnown reports whether the last build captured git status (git was
+// available, even if the tree was clean). Absent + known = clean.
+func (ix *Index) statusKnown() bool {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return ix.status != nil
 }
 
 // Children lists a directory for the tree. Ignored directories are never walked,
@@ -266,6 +292,11 @@ func (ix *Index) Build() {
 	// Overlay git working-tree status onto file nodes (computed concurrently with
 	// the walk above); nil when git is unavailable or off.
 	gs := <-gsCh
+	if gs == nil && gitAvailable(ix.root) {
+		// Clean tree: keep a non-nil snapshot so opens know "absent = clean"
+		// and can skip the per-open `git diff` fork.
+		gs = map[string]string{}
+	}
 
 	// Every ancestor directory of a changed file is dirty, so a collapsed folder
 	// can badge without the frontend fetching its subtree.
@@ -289,7 +320,7 @@ func (ix *Index) Build() {
 			}
 		}
 	}
-	ix.files, ix.children = files, children
+	ix.files, ix.children, ix.status = files, children, gs
 	ix.builtAt, ix.buildMS = time.Now(), time.Since(start).Milliseconds()
 	select {
 	case <-ix.readyCh:

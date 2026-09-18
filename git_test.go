@@ -274,6 +274,11 @@ func TestGitGutter(t *testing.T) {
 	if cleanBody["diffAvailable"] != false {
 		t.Errorf("clean.go diffAvailable = %v, want false", cleanBody["diffAvailable"])
 	}
+	// Untracked files diff empty against HEAD: false without forking git.
+	_, untrBody := get(t, s, "/api/file?path=untr.go")
+	if untrBody["diffAvailable"] != false {
+		t.Errorf("untr.go diffAvailable = %v, want false", untrBody["diffAvailable"])
+	}
 }
 
 func BenchmarkGitStatus(b *testing.B) {

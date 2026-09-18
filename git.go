@@ -142,6 +142,30 @@ func mapXY(xy string) string {
 	}
 }
 
+// diffAvailableCached answers whether rel has a diff against HEAD without
+// forking git on the common path. Clean files (absent from the `git status`
+// snapshot the index took at build time) would diff empty, and untracked
+// files diff empty by definition, so only dirty tracked files pay for a live
+// `git diff`. A file dirtied after the snapshot reads stale (false) until the
+// next build, but the UI re-checks via /api/gutter right after every open and
+// corrects the tab, so the staleness window is a single paint.
+func diffAvailableCached(ix *Index, rel string) bool {
+	root := ix.Root()
+	if !gitAvailable(root) {
+		return false
+	}
+	if code, ok := ix.dirtyStatus(rel); ok {
+		if code == "U" {
+			return false
+		}
+		return gitDiff(root, rel) != ""
+	}
+	if ix.statusKnown() {
+		return false
+	}
+	return gitDiff(root, rel) != ""
+}
+
 // gitDiff returns the unified diff of relpath against HEAD. relpath is relative
 // to the served root; git resolves it against -C root. Fails quiet -> "".
 func gitDiff(root, relpath string) string {

@@ -529,7 +529,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := Open(abs, rel)
+	d, err := openWithStat(abs, rel, st)
 	if err != nil {
 		fail(w, 415, err.Error())
 		return
@@ -550,10 +550,10 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	lines, exact := d.Lines(start, start+count)
 	_, coming := d.Exact()
-	diffAvail := false
-	if gitAvailable(s.ix.Root()) {
-		diffAvail = gitDiff(s.ix.Root(), rel) != ""
-	}
+	// Diff state comes from the index's status snapshot, not a fork: clean
+	// files skip `git diff` entirely (see diffAvailableCached). The UI
+	// confirms via /api/gutter right after open anyway.
+	diffAvail := diffAvailableCached(s.ix, rel)
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
 		"start": start, "lines": lines, "size": st.Size(),
