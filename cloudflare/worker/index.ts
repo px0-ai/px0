@@ -335,6 +335,17 @@ const LOADING_OVERLAY_HTML = `
 </script>
 `;
 
+const EXAMPLE_REPOS = [
+  "caddyserver/caddy",
+  "pallets/flask",
+  "vuejs/core",
+  "sveltejs/svelte",
+  "expressjs/express",
+  "BurntSushi/ripgrep",
+];
+
+const AUTOCOMPLETE_REPOS = [...EXAMPLE_REPOS, "sindresorhus/awesome", "fastapi/fastapi", "px0-ai/px0"];
+
 const LANDING_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -343,21 +354,48 @@ const LANDING_HTML = `<!doctype html>
 <title>px0-cf</title>
 <style>
   body { background:#0b0d10; color:#e6e6e6; font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;
-         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
-  form { display:flex; gap:.5rem; width:min(90vw,560px); }
-  input { flex:1; padding:.75rem 1rem; border-radius:8px; border:1px solid #333; background:#16191d; color:inherit; font-size:1rem; }
-  button { padding:.75rem 1.25rem; border-radius:8px; border:0; background:#4f7cff; color:#fff; font-size:1rem; cursor:pointer; }
-  .wrap { text-align:center; }
-  h1 { font-weight:600; margin-bottom:1.5rem; }
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:1.5rem; box-sizing:border-box; }
+  .wrap { text-align:center; width:min(90vw,560px); }
+  .badge { display:inline-block; font-size:.75rem; letter-spacing:.02em; color:#9aa0a6;
+           border:1px solid #262a30; border-radius:999px; padding:.25rem .75rem; margin-bottom:1rem; }
+  h1 { font-weight:600; font-size:1.75rem; margin:0 0 .6rem; }
+  .sub { color:#9aa0a6; font-size:.9rem; margin:0 0 1.75rem; }
+  .sub a { color:#4f7cff; text-decoration:none; }
+  .sub a:hover { text-decoration:underline; }
+  form { display:flex; gap:.5rem; }
+  input { flex:1; min-width:0; padding:.75rem 1rem; border-radius:8px; border:1px solid #333;
+          background:#16191d; color:inherit; font-size:1rem; }
+  input:focus { outline:none; border-color:#4f7cff; }
+  button { padding:.75rem 1.25rem; border-radius:8px; border:0; background:#4f7cff; color:#fff;
+           font-size:1rem; cursor:pointer; white-space:nowrap; }
+  button:hover { background:#3d68e0; }
+  .examples { margin-top:1.5rem; display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; justify-content:center; }
+  .examples-label { color:#6b7075; font-size:.8rem; margin-right:.15rem; }
+  .chip { color:#c7cbd1; text-decoration:none; font-size:.8rem; background:#16191d; border:1px solid #262a30;
+          border-radius:999px; padding:.35rem .75rem; }
+  .chip:hover { border-color:#4f7cff; color:#fff; }
+  .foot { margin-top:2rem; color:#5a5f65; font-size:.75rem; }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Paste a GitHub repo</h1>
+    <div class="badge">px0 on Cloudflare Containers</div>
+    <h1>Browse any GitHub repo, instantly</h1>
+    <p class="sub">Paste a repo and get a fast, searchable file tree with syntax highlighting &mdash;
+      no cloning, no setup. Runs the real <a href="https://github.com/px0-ai/px0" target="_blank" rel="noopener">px0</a>
+      binary for you, on demand.</p>
     <form action="/" method="get">
-      <input name="go" placeholder="owner/repo or a github.com URL" autofocus>
+      <input name="go" list="repo-suggestions" autocomplete="off" placeholder="owner/repo or a github.com URL" autofocus>
       <button type="submit">Browse</button>
     </form>
+    <datalist id="repo-suggestions">
+      ${AUTOCOMPLETE_REPOS.map((r) => `<option value="${r}">`).join("\n      ")}
+    </datalist>
+    <div class="examples">
+      <span class="examples-label">Try:</span>
+      ${EXAMPLE_REPOS.map((r) => `<a class="chip" href="/${r}">${r}</a>`).join("\n      ")}
+    </div>
+    <div class="foot">Public repos only &middot; 200MB size cap &middot; idle repos are evicted to make room for others</div>
   </div>
 </body>
 </html>`;
