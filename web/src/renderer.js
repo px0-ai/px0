@@ -132,13 +132,68 @@ function commentOrBlank(line) {
   return !text || /^(?:<span class="c">[\s\S]*<\/span>)+$/.test(text);
 }
 
+function codeLine(line) {
+  return (line || '')
+    .replace(/<span class="c">[\s\S]*?<\/span>/g, '')
+    .replace(/<[^>]*>/g, '');
+}
+
+function functionEndLine(lines, symbol) {
+  let parenDepth = 0;
+  let bodyDepth = 0;
+  let bodyStarted = false;
+  let quote = '';
+  let escaped = false;
+
+  for (let n = symbol.line; n <= lines.length; n++) {
+    const raw = lines[n - 1];
+    if (raw == null) return null;
+    const text = codeLine(raw);
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === '\'' || ch === '"' || ch === '`') {
+        quote = ch;
+        continue;
+      }
+      if (ch === '(') {
+        parenDepth++;
+        continue;
+      }
+      if (ch === ')') {
+        parenDepth = Math.max(0, parenDepth - 1);
+        continue;
+      }
+      if (ch === '{') {
+        if (!bodyStarted && parenDepth === 0) bodyStarted = true;
+        if (bodyStarted) bodyDepth++;
+        continue;
+      }
+      if (ch === '}' && bodyStarted) {
+        bodyDepth--;
+        if (bodyDepth === 0) return n;
+      }
+    }
+  }
+  return null;
+}
+
 // Leading blank/comment-only lines belong to the declaration below them. This
 // check runs before the enclosing stack so comments between two functions do
 // not inherit the function above them. A local declaration inside a function
 // does not end that function's scope, so only a same-level non-function blocks
 // the current header.
 function resolveFunction(outline, line, lines) {
-  const current = enclosingFunction(outline, line);
+  let current = enclosingFunction(outline, line);
+  if (current) {
+    const end = functionEndLine(lines, current);
+    if (end && line > end) current = null;
+  }
   const next = outline.find(symbol => symbol.line > line);
   if (!next) return current;
 
