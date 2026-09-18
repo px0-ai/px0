@@ -86,7 +86,8 @@ At standard desktop display resolutions, the total number of mounted `.row` elem
 
 The sticky declaration is updated at the end of `paint()`, after the current
 virtual row window has been mounted. `renderer.js` walks the active document's
-cached `outline` as an indentation-based scope stack. It shows only when the
+cached `outline` as an indentation-based scope stack plus cached brace
+boundaries. It shows only when the
 first visible line is inside a function or method; a previous function is not
 shown merely because it is the nearest declaration. With word wrapping enabled,
 the first visible line is read from live row geometry rather than inferred only
@@ -95,10 +96,11 @@ assigned to the function below them, so documentation comments do not inherit
 the function above them. For brace-delimited functions, the matching closing
 brace also ends the sticky scope.
 
-`tabs.js` starts `loadOutline()` when a file is opened, switched to, or
-reloaded, even when the Symbols panel is closed. The regex outline is available
-first; when an LSP responds, its document symbols replace the fallback and
-trigger a new paint. This keeps the header useful without blocking file open.
+`tabs.js` schedules `loadOutline()` during browser idle time when a file is
+opened, switched to, or reloaded. Opening the Symbols panel still loads it
+immediately. The regex outline is available first; when an LSP responds, its
+document symbols replace the fallback and trigger a new paint. This keeps the
+header useful without adding a whole-file scan to the file-open path.
 
 ### HTML Row Structure
 

@@ -263,17 +263,21 @@
     }
     return null;
   }
-  function commentOrBlank(line) {
-    const text = (line || "").trim();
-    return !text || /^(?:<span class="c">[\s\S]*<\/span>)+$/.test(text);
-  }
   function codeLine(line) {
-    return (line || "").replace(/<span class="c">[\s\S]*?<\/span>/g, "").replace(/<[^>]*>/g, "");
+    return (line || "").replace(/<i class=c>[\s\S]*?<\/i>/g, "").replace(/<i class="c">[\s\S]*?<\/i>/g, "").replace(/<span class="c">[\s\S]*?<\/span>/g, "").replace(/<[^>]*>/g, "");
+  }
+  function commentOrBlank(line) {
+    return !codeLine(line).trim();
   }
   function functionEndLine(lines, symbol) {
+    const declaration = codeLine(lines[symbol.line - 1]);
+    const arrowFunction = symbol.kind === "func" && /\b(?:const|let|var)\b/.test(declaration);
     let parenDepth = 0;
     let bodyDepth = 0;
     let bodyStarted = false;
+    let paramsStarted = false;
+    let paramsClosed = false;
+    let arrowSeen = false;
     let quote = "";
     let escaped = false;
     for (let n = symbol.line; n <= lines.length; n++) {
@@ -297,15 +301,23 @@
           continue;
         }
         if (ch === "(") {
+          paramsStarted = true;
           parenDepth++;
           continue;
         }
         if (ch === ")") {
           parenDepth = Math.max(0, parenDepth - 1);
+          if (paramsStarted && parenDepth === 0)
+            paramsClosed = true;
+          continue;
+        }
+        if (arrowFunction && ch === "=" && text2[i + 1] === ">") {
+          arrowSeen = true;
+          i++;
           continue;
         }
         if (ch === "{") {
-          if (!bodyStarted && parenDepth === 0)
+          if (!bodyStarted && parenDepth === 0 && (paramsClosed || arrowSeen))
             bodyStarted = true;
           if (bodyStarted)
             bodyDepth++;
@@ -320,10 +332,20 @@
     }
     return null;
   }
-  function resolveFunction(outline, line, lines) {
+  function functionEndFor(d, symbol) {
+    if (!d.stickyFunctionEnds)
+      d.stickyFunctionEnds = new Map();
+    if (d.stickyFunctionEnds.has(symbol.line))
+      return d.stickyFunctionEnds.get(symbol.line);
+    const end = functionEndLine(d.lines, symbol);
+    d.stickyFunctionEnds.set(symbol.line, end);
+    return end;
+  }
+  function resolveFunction(d, line) {
+    const { outline, lines } = d;
     let current = enclosingFunction(outline, line);
     if (current) {
-      const end = functionEndLine(lines, current);
+      const end = functionEndFor(d, current);
       if (end && line > end)
         current = null;
     }
@@ -364,7 +386,7 @@
         }
       }
     }
-    const current = resolveFunction(d.outline, topLine, d.lines);
+    const current = resolveFunction(d, topLine);
     if (!current) {
       el.hidden = true;
       delete el.dataset.line;
@@ -581,6 +603,7 @@
           return;
         for (let i = 0;i < j.lines.length; i++)
           d.lines[j.start + i] = j.lines[i];
+        d.stickyFunctionEnds?.clear();
         d.chunks.add(c);
         d.pending.delete(c);
         if (doc_() === d)
@@ -624,6 +647,8 @@
           changed = true;
         }
       }
+      if (changed)
+        d.stickyFunctionEnds?.clear();
       if (changed && doc_() === d)
         render();
     }, delay);
@@ -672,15 +697,31 @@
         el.innerHTML = '<div class="hint">No file open.</div>';
       return;
     }
+    d.outlineScheduled = false;
     if (!d.outline) {
       if (!d.outlinePromise)
         d.outlinePromise = api("/api/outline", { path: d.path }).then((j) => j.symbols || []).catch(() => []);
       d.outline = await d.outlinePromise;
     }
-    drawOutline();
-    if (doc_() === d)
+    if (doc_() === d) {
+      drawOutline();
       render();
+    }
     upgradeOutline(d);
+  }
+  function scheduleOutline(d) {
+    if (!d || d.outline || d.outlinePromise || d.outlineScheduled)
+      return;
+    d.outlineScheduled = true;
+    const run = () => {
+      d.outlineScheduled = false;
+      if (doc_() === d)
+        void loadOutline(d);
+    };
+    if (typeof window.requestIdleCallback === "function")
+      window.requestIdleCallback(run, { timeout: 1e3 });
+    else
+      setTimeout(run, 250);
   }
   async function upgradeOutline(d) {
     if (d.outlineLSP || S2.lsp.state === "off" || S2.lsp.state === "failed")
@@ -693,12 +734,15 @@
       d.outlineLSP = false;
       return;
     }
-    setLspState(j);
+    d.lsp = { state: j.state || "off", server: j.server || "", missing: j.missing || "" };
+    if (doc_() === d)
+      setLspState(j);
     if (!j.symbols || !j.symbols.length) {
       d.outlineLSP = false;
       return;
     }
     d.outline = j.symbols;
+    d.stickyFunctionEnds?.clear();
     d.outlineSource = j.server;
     if (doc_() === d) {
       if ($("#panel-outline")?.classList.contains("active"))
@@ -3560,7 +3604,7 @@
     drawTabs();
     drawCrumbs();
     layout();
-    void loadOutline(d);
+    scheduleOutline(d);
     if (line) {
       d.cur = line;
       centerLine(line);
@@ -3681,7 +3725,7 @@
       layout();
       vp.scrollTop = d.scrollTop;
       render();
-      void loadOutline(d);
+      scheduleOutline(d);
       if ($("#panel-outline")?.classList.contains("active"))
         loadOutline();
     }
@@ -3780,7 +3824,7 @@
     vp.scrollTop = S2.tabs[i].scrollTop;
     render();
     updateStatus();
-    void loadOutline(S2.tabs[i]);
+    scheduleOutline(S2.tabs[i]);
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);

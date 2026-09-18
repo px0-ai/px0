@@ -9,6 +9,7 @@ export async function loadOutline(target = doc_()) {
   const d = target;
   const el = $('#outline');
   if (!d) { if (el) el.innerHTML = '<div class="hint">No file open.</div>'; return; }
+  d.outlineScheduled = false;
   if (!d.outline) {
     if (!d.outlinePromise) {
       d.outlinePromise = api('/api/outline', { path: d.path })
@@ -17,9 +18,24 @@ export async function loadOutline(target = doc_()) {
     }
     d.outline = await d.outlinePromise;
   }
-  drawOutline();
-  if (doc_() === d) render();
+  if (doc_() === d) {
+    drawOutline();
+    render();
+  }
   upgradeOutline(d);
+}
+
+// Outline extraction is whole-file work. Keep it out of the open/switch path
+// and let the browser run it when the active tab is idle.
+export function scheduleOutline(d) {
+  if (!d || d.outline || d.outlinePromise || d.outlineScheduled) return;
+  d.outlineScheduled = true;
+  const run = () => {
+    d.outlineScheduled = false;
+    if (doc_() === d) void loadOutline(d);
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 1000 });
+  else setTimeout(run, 250);
 }
 
 /* A language server's document symbols beat regex on every axis, so swap them
@@ -30,9 +46,11 @@ export async function upgradeOutline(d) {
   let j;
   try { j = await api('/api/lsp/symbols', { path: d.path, wait: 20000 }); }
   catch { d.outlineLSP = false; return; }
-  setLspState(j);
+  d.lsp = { state: j.state || 'off', server: j.server || '', missing: j.missing || '' };
+  if (doc_() === d) setLspState(j);
   if (!j.symbols || !j.symbols.length) { d.outlineLSP = false; return; }
   d.outline = j.symbols;
+  d.stickyFunctionEnds?.clear();
   d.outlineSource = j.server;
   if (doc_() === d) {
     if ($('#panel-outline')?.classList.contains('active')) drawOutline();

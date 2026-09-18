@@ -127,21 +127,27 @@ function enclosingFunction(outline, line) {
   return null;
 }
 
-function commentOrBlank(line) {
-  const text = (line || '').trim();
-  return !text || /^(?:<span class="c">[\s\S]*<\/span>)+$/.test(text);
-}
-
 function codeLine(line) {
   return (line || '')
+    .replace(/<i class=c>[\s\S]*?<\/i>/g, '')
+    .replace(/<i class="c">[\s\S]*?<\/i>/g, '')
     .replace(/<span class="c">[\s\S]*?<\/span>/g, '')
     .replace(/<[^>]*>/g, '');
 }
 
+function commentOrBlank(line) {
+  return !codeLine(line).trim();
+}
+
 function functionEndLine(lines, symbol) {
+  const declaration = codeLine(lines[symbol.line - 1]);
+  const arrowFunction = symbol.kind === 'func' && /\b(?:const|let|var)\b/.test(declaration);
   let parenDepth = 0;
   let bodyDepth = 0;
   let bodyStarted = false;
+  let paramsStarted = false;
+  let paramsClosed = false;
+  let arrowSeen = false;
   let quote = '';
   let escaped = false;
 
@@ -162,15 +168,22 @@ function functionEndLine(lines, symbol) {
         continue;
       }
       if (ch === '(') {
+        paramsStarted = true;
         parenDepth++;
         continue;
       }
       if (ch === ')') {
         parenDepth = Math.max(0, parenDepth - 1);
+        if (paramsStarted && parenDepth === 0) paramsClosed = true;
+        continue;
+      }
+      if (arrowFunction && ch === '=' && text[i + 1] === '>') {
+        arrowSeen = true;
+        i++;
         continue;
       }
       if (ch === '{') {
-        if (!bodyStarted && parenDepth === 0) bodyStarted = true;
+        if (!bodyStarted && parenDepth === 0 && (paramsClosed || arrowSeen)) bodyStarted = true;
         if (bodyStarted) bodyDepth++;
         continue;
       }
@@ -183,15 +196,24 @@ function functionEndLine(lines, symbol) {
   return null;
 }
 
+function functionEndFor(d, symbol) {
+  if (!d.stickyFunctionEnds) d.stickyFunctionEnds = new Map();
+  if (d.stickyFunctionEnds.has(symbol.line)) return d.stickyFunctionEnds.get(symbol.line);
+  const end = functionEndLine(d.lines, symbol);
+  d.stickyFunctionEnds.set(symbol.line, end);
+  return end;
+}
+
 // Leading blank/comment-only lines belong to the declaration below them. This
 // check runs before the enclosing stack so comments between two functions do
 // not inherit the function above them. A local declaration inside a function
 // does not end that function's scope, so only a same-level non-function blocks
 // the current header.
-function resolveFunction(outline, line, lines) {
+function resolveFunction(d, line) {
+  const { outline, lines } = d;
   let current = enclosingFunction(outline, line);
   if (current) {
-    const end = functionEndLine(lines, current);
+    const end = functionEndFor(d, current);
     if (end && line > end) current = null;
   }
   const next = outline.find(symbol => symbol.line > line);
@@ -230,7 +252,7 @@ function updateStickySymbol(d) {
     }
   }
 
-  const current = resolveFunction(d.outline, topLine, d.lines);
+  const current = resolveFunction(d, topLine);
   if (!current) {
     el.hidden = true;
     delete el.dataset.line;
@@ -444,6 +466,7 @@ export function ensureChunks(d, first, last) {
       .then(j => {
         if (gen !== d.gen) return; // superseded by a background highlight swap
         for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
+        d.stickyFunctionEnds?.clear();
         d.chunks.add(c); d.pending.delete(c);
         if (doc_() === d) render();
         if (j.refine) refineChunk(d, c);
@@ -472,6 +495,7 @@ export function refineChunk(d, c, delay = 800, tries = 0) {
     for (let i = 0; i < j.lines.length; i++) {
       if (d.lines[j.start + i] !== j.lines[i]) { d.lines[j.start + i] = j.lines[i]; changed = true; }
     }
+    if (changed) d.stickyFunctionEnds?.clear();
     if (changed && doc_() === d) render();
   }, delay);
 }
