@@ -20,7 +20,15 @@
     {
       "class_name": "PxContainer",
       "image": "./container/Dockerfile",
-      "max_instances": 20
+      // One shared container hosts every repo (see PxContainer.ts / the
+      // Go supervisor in container/pxd) — only the "shared" DO name is
+      // ever used going forward. Set to a small headroom above 1, not 1
+      // itself: Cloudflare's max_instances accounting appears to count
+      // historical DO-container associations (leftover from Part 1's
+      // now-abandoned per-repo DO names, e.g. "octocat/Hello-World"),
+      // not just currently-running containers, so 1 is too tight even
+      // though only one is ever actually live at a time in this design.
+      "max_instances": 5
     }
   ],
   "durable_objects": {

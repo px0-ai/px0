@@ -155,14 +155,15 @@ async function routeToContainer(
   fwd.headers.set("X-Px0-Owner", owner);
   fwd.headers.set("X-Px0-Repo", repo);
   fwd.headers.set("X-Px0-Ref", ref);
-  fwd.headers.set("X-Px0-Max-Repo-Mb", env.MAX_REPO_MB || "200");
   // px0 gzips its own responses when it sees Accept-Encoding; Cloudflare's
   // edge already compresses the response to the real browser, so let px0
   // serve plain and avoid an extra (and, through the container proxy,
   // observed-corrupting) compression layer in between.
   fwd.headers.delete("Accept-Encoding");
 
-  const stub = env.PX0_CONTAINER.getByName(`${owner}/${repo}`);
+  // One shared container hosts every repo (see PxContainer.ts) — no longer
+  // one container per owner/repo, so there's only ever one DO name to route to.
+  const stub = env.PX0_CONTAINER.getByName("shared");
   const resp = await stub.fetch(fwd);
 
   if (isCacheable && resp.ok) {
