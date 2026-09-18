@@ -273,7 +273,7 @@ px0 --update
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | `Cmd/Ctrl+,`                                           | Open Settings (UI)                                                                         |
 | `Cmd/Ctrl+K`                                           | Universal palette / quick open                                                             |
-| `Cmd/Ctrl+P`                                           | Go to file                                                                                 |
+| `Cmd/Ctrl+P`                                           | Go to file; current file on top if it matches, 5 recent on an empty query                   |
 | `Cmd/Ctrl+Shift+P`                                     | Command palette                                                                            |
 | `Cmd/Ctrl+Shift+O`                                     | Go to symbol in file                                                                       |
 | `Cmd/Ctrl+Shift+F`                                     | Full workspace search                                                                      |

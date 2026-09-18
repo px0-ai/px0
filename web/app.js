@@ -63,12 +63,14 @@
   var LH2 = 20;
   var CHUNK = 1000;
   var OVERSCAN = 24;
+  var RECENT_SHOWN = 5;
   var S2 = {
     meta: null,
     tabs: [],
     active: -1,
     hist: [],
     histIdx: -1,
+    recent: [],
     find: null,
     occ: null,
     selAll: null,
@@ -520,6 +522,14 @@
     if (S2.hist.length > 120)
       S2.hist.shift();
     S2.histIdx = S2.hist.length - 1;
+  }
+  function touchRecent(path) {
+    const i = S2.recent.indexOf(path);
+    if (i >= 0)
+      S2.recent.splice(i, 1);
+    S2.recent.unshift(path);
+    if (S2.recent.length > RECENT_SHOWN + 1)
+      S2.recent.pop();
   }
   function go(delta) {
     const i = S2.histIdx + delta;
@@ -3870,6 +3880,7 @@
     }
     S2.active = idx;
     const d = S2.tabs[idx];
+    touchRecent(d.path);
     $("#empty").hidden = true;
     syncImageView();
     syncPreview();
@@ -4117,6 +4128,7 @@
     updateStatus();
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
+    touchRecent(S2.tabs[i].path);
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);
     saveWorkspaceState();
   }
@@ -7238,20 +7250,42 @@
       } catch {
         return;
       }
-      pal.items = j.results.map((r) => {
-        const cut = r.path.length - r.name.length;
-        return {
-          kind: "file",
-          path: r.path,
-          label: fuzzyHTML(r.path.slice(cut), (r.pos || []).filter((p) => p >= cut).map((p) => p - cut)),
-          sub: fuzzyHTML(r.path.slice(0, Math.max(0, cut - 1)), (r.pos || []).filter((p) => p < cut)),
-          raw: true
-        };
-      });
+      if (!pal)
+        return;
+      const byPath = new Map(j.results.map((r) => [r.path, r]));
+      const pinned = pinnedFiles(q ? 0 : RECENT_SHOWN).filter((it) => !q || byPath.has(it.path)).map((it) => byPath.has(it.path) ? { ...fileItem(byPath.get(it.path)), right: it.right } : it);
+      const seen = new Set(pinned.map((it) => it.path));
+      pal.items = pinned.concat(j.results.filter((r) => !seen.has(r.path)).map(fileItem));
     }
-    pal.sel = mode === "theme" ? Math.max(0, pal.items.findIndex((it) => it.id === currentTheme())) : 0;
+    pal.sel = mode === "theme" ? Math.max(0, pal.items.findIndex((it) => it.id === currentTheme())) : mode === "file" && q ? Math.max(0, pal.items.findIndex((it) => it.right !== "current")) : 0;
     drawPalette();
   }, 40);
+  function pinnedFiles(count) {
+    const cur = doc_()?.path;
+    const paths = S2.recent.filter((p) => p !== cur).slice(0, count);
+    if (cur)
+      paths.unshift(cur);
+    return paths.map((p) => {
+      const i = p.lastIndexOf("/");
+      return {
+        kind: "file",
+        path: p,
+        label: p.slice(i + 1),
+        sub: p.slice(0, Math.max(0, i)),
+        right: p === cur ? "current" : "recent"
+      };
+    });
+  }
+  function fileItem(r) {
+    const cut = r.path.length - r.name.length;
+    return {
+      kind: "file",
+      path: r.path,
+      label: fuzzyHTML(r.path.slice(cut), (r.pos || []).filter((p) => p >= cut).map((p) => p - cut)),
+      sub: fuzzyHTML(r.path.slice(0, Math.max(0, cut - 1)), (r.pos || []).filter((p) => p < cut)),
+      raw: true
+    };
+  }
   function fuzzyHTML(text, pos) {
     if (!pos || !pos.length)
       return esc2(text);
