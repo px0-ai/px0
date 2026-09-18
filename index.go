@@ -267,26 +267,17 @@ func (ix *Index) Build() {
 	// the walk above); nil when git is unavailable or off.
 	gs := <-gsCh
 
-	// Every ancestor directory of a changed file is dirty, so a collapsed folder
-	// can badge without the frontend fetching its subtree.
-	dirtyDirs := map[string]bool{}
-	for p := range gs {
-		for i := strings.LastIndexByte(p, '/'); i >= 0; i = strings.LastIndexByte(p, '/') {
-			p = p[:i]
-			dirtyDirs[p] = true
-		}
-	}
-
 	ix.mu.Lock()
 	if gs != nil {
-		for _, kids := range children {
-			for i := range kids {
-				if kids[i].Dir {
-					kids[i].Dirty = dirtyDirs[kids[i].Path]
-				} else if code, ok := gs[kids[i].Path]; ok {
-					kids[i].Status = code
-				}
+		for p, code := range gs {
+			if code == "D" {
+				addDeletedNode(children, p)
 			}
+		}
+		dirtyDirs := gitDirtyDirs(gs)
+		for _, kids := range children {
+			applyGitStatus(kids, gs, dirtyDirs)
+			sortNodes(kids)
 		}
 	}
 	ix.files, ix.children = files, children
@@ -297,4 +288,67 @@ func (ix *Index) Build() {
 		close(ix.readyCh)
 	}
 	ix.mu.Unlock()
+}
+
+func addDeletedNode(children map[string][]Node, path string) {
+	if path == "" {
+		return
+	}
+	parts := strings.Split(path, "/")
+	dir := ""
+	for i := 0; i < len(parts)-1; i++ {
+		name := parts[i]
+		if name == "" || name == "." || name == ".." {
+			return
+		}
+		child := name
+		if dir != "" {
+			child = dir + "/" + name
+		}
+		ensureChildNode(children, dir, Node{Name: name, Path: child, Dir: true})
+		if _, ok := children[child]; !ok {
+			children[child] = nil
+		}
+		dir = child
+	}
+	name := parts[len(parts)-1]
+	if name == "" || name == "." || name == ".." {
+		return
+	}
+	ensureChildNode(children, dir, Node{Name: name, Path: path, Status: "D"})
+}
+
+func ensureChildNode(children map[string][]Node, dir string, node Node) {
+	for i := range children[dir] {
+		if children[dir][i].Name == node.Name {
+			return
+		}
+	}
+	children[dir] = append(children[dir], node)
+}
+
+// gitDirtyDirs marks ancestors so collapsed folders can badge changed children.
+func gitDirtyDirs(gs map[string]string) map[string]bool {
+	dirtyDirs := map[string]bool{}
+	for path := range gs {
+		for i := strings.LastIndexByte(path, '/'); i >= 0; i = strings.LastIndexByte(path, '/') {
+			path = path[:i]
+			dirtyDirs[path] = true
+		}
+	}
+	return dirtyDirs
+}
+
+func applyGitStatus(kids []Node, gs map[string]string, dirtyDirs map[string]bool) {
+	for i := range kids {
+		applyGitStatusToNode(&kids[i], gs, dirtyDirs)
+	}
+}
+
+func applyGitStatusToNode(node *Node, gs map[string]string, dirtyDirs map[string]bool) {
+	if node.Dir {
+		node.Dirty = dirtyDirs[node.Path]
+		return
+	}
+	node.Status = gs[node.Path]
 }

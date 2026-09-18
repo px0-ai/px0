@@ -483,7 +483,36 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not indexed: "+dir)
 		return
 	}
-	writeJSON(w, map[string]any{"dir": dir, "children": kids})
+	writeJSON(w, map[string]any{"dir": dir, "children": s.gitTreeChildren(dir, kids)})
+}
+
+func (s *Server) gitTreeChildren(dir string, kids []Node) []Node {
+	gs := gitStatus(s.ix.Root())
+	children := map[string][]Node{dir: append([]Node(nil), kids...)}
+	if gs != nil {
+		for path, code := range gs {
+			if code == "D" {
+				addDeletedNode(children, path)
+			}
+		}
+	}
+	out := children[dir]
+	dirtyDirs := gitDirtyDirs(gs)
+	filtered := make([]Node, 0, len(out))
+	for i := range out {
+		applyGitStatusToNode(&out[i], gs, dirtyDirs)
+		if out[i].Status == "" && !out[i].Dirty && s.nodeMissing(out[i]) {
+			continue
+		}
+		filtered = append(filtered, out[i])
+	}
+	sortNodes(filtered)
+	return filtered
+}
+
+func (s *Server) nodeMissing(node Node) bool {
+	_, err := os.Stat(filepath.Join(s.ix.Root(), filepath.FromSlash(node.Path)))
+	return os.IsNotExist(err)
 }
 
 func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
