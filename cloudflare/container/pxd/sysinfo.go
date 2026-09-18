@@ -2,10 +2,26 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 )
+
+// dirSizeMB sums file sizes under path. Used as a defense-in-depth check
+// on actual fetched/checked-out content, on top of the pre-flight GitHub
+// API size check (see provision() in registry.go for why both exist).
+func dirSizeMB(path string) int64 {
+	var total int64
+	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	return total / (1024 * 1024)
+}
 
 // memAvailableMB reports memory available to THIS container specifically.
 // /proc/meminfo is deliberately NOT used here: inside a container it

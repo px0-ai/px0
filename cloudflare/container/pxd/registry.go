@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -196,7 +197,18 @@ func (reg *registry) provision(rr *residentRepo) {
 	defer close(rr.done)
 
 	rr.setStatus("checking-size", "")
-	if sizeKB, err := githubRepoSizeKB(rr.owner, rr.repo); err == nil && sizeKB > maxRepoMB*1024 {
+	sizeKB, err := githubRepoSizeKB(rr.owner, rr.repo)
+	if err != nil {
+		// Fail CLOSED, not open: this check previously skipped silently on
+		// any error (network blip, or GitHub's unauthenticated rate limit
+		// — 60 req/hour, easy to hit on a shared container egress IP),
+		// which let a repo the size of torvalds/linux through uncapped
+		// straight into a clone that filled the container's entire disk.
+		rr.setStatus("error", "could not verify repository size — try again shortly")
+		log.Printf("[%s/%s] size check failed: %v", rr.owner, rr.repo, err)
+		return
+	}
+	if sizeKB > maxRepoMB*1024 {
 		rr.setStatus("error", fmt.Sprintf("repo exceeds %dMB cap", maxRepoMB))
 		return
 	}
@@ -247,8 +259,31 @@ func (reg *registry) provision(rr *residentRepo) {
 		rr.kill()
 		return
 	}
+
+	// Defense in depth, on top of the pre-flight size check above: `git
+	// fetch` downloads packed (compressed) objects into .git, which is
+	// usually meaningfully smaller than the working tree `checkout` is
+	// about to expand it into — this is what actually exhausted the
+	// container's disk for torvalds/linux (fetch itself succeeded;
+	// checkout is what ran out of space mid-write). Check the packed size
+	// here, before paying for the expansion.
+	if fetchedMB := dirSizeMB(dir); fetchedMB > int64(maxRepoMB) {
+		rr.setStatus("error", fmt.Sprintf("fetched content already exceeds %dMB cap (~%dMB packed)", maxRepoMB, fetchedMB))
+		rr.kill()
+		return
+	}
+
 	if err := runGit(dir, "checkout", "-q", "FETCH_HEAD"); err != nil {
 		rr.setStatus("error", "checkout failed: "+err.Error())
+		rr.kill()
+		return
+	}
+
+	// One more check after checkout expands the working tree, in case a
+	// repo has a high pack-to-tree expansion ratio that the packed-size
+	// check above wasn't conservative enough to catch.
+	if totalMB := dirSizeMB(dir); totalMB > int64(maxRepoMB)*2 {
+		rr.setStatus("error", fmt.Sprintf("checked-out content is unexpectedly large (~%dMB) — rejecting", totalMB))
 		rr.kill()
 		return
 	}
@@ -314,12 +349,24 @@ func (reg *registry) pickEvictable(exclude *residentRepo) *residentRepo {
 	return best
 }
 
+// githubRepoSizeKB fetches a repo's size via GitHub's API. Any failure —
+// network error, non-200 (rate limited, not found, etc.) — is returned as
+// an error; the caller must treat that as "could not verify," not "small
+// enough." A rate-limited response (403) still returns a normal JSON body
+// (e.g. {"message":"API rate limit exceeded..."}) with no "size" field,
+// which would silently decode as size:0 — a real repo the size of
+// torvalds/linux actually got past the cap and filled the container's
+// disk this way before the explicit status check below was added.
 func githubRepoSizeKB(owner, repo string) (int, error) {
 	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo))
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
+		return 0, fmt.Errorf("github api returned %d: %s", resp.StatusCode, string(body))
+	}
 	var payload struct {
 		Size int `json:"size"`
 	}
