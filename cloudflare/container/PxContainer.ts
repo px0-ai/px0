@@ -83,6 +83,25 @@ export class PxContainer extends Container<Env> {
     }
 
     await this.ensureStarted();
+
+    // Single, non-blocking status check for the browser's own loading/error
+    // overlay (see worker/index.ts's /__pxcf/status route) — as opposed to
+    // pollRepoReady below, which loops until ready/error/timeout before
+    // this method proxies the real request. This call is itself what
+    // triggers provisioning on a cold repo, same as the poll loop does.
+    if (request.headers.get("X-Px0-Status-Only") === "1") {
+      const path = `/status/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}.json?ref=${encodeURIComponent(ref)}`;
+      try {
+        const res = await this.containerFetch(new Request(`http://internal${path}`), 8081);
+        return new Response(res.body, {
+          status: res.ok ? 200 : 502,
+          headers: { "content-type": "application/json" },
+        });
+      } catch {
+        return Response.json({ status: "booting", message: "" });
+      }
+    }
+
     const status = await this.pollRepoReady(owner, repo, ref);
 
     if (status.status === "error") {

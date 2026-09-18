@@ -43,6 +43,13 @@ export default {
       return handleLanding(request, env);
     }
 
+    // Polled by the loading/error overlay injected into index.html (see
+    // serveIndexHtml) — a single, non-blocking status check, not gated
+    // behind the same "wait until ready" loop /api/* goes through.
+    if (url.pathname === "/__pxcf/status") {
+      return handleStatusCheck(request, env);
+    }
+
     // Bare API/other px0 routes (no owner/repo in the path) arrive here when
     // px0's own frontend does `fetch('/api/...')` with an absolute path from
     // a page that was loaded at /owner/repo. Recover the repo from Referer.
@@ -102,6 +109,45 @@ async function serveIndexHtml(request: Request, env: Env): Promise<Response> {
   // recover repo context on those prefix-less requests. Pin the policy
   // explicitly rather than relying on the browser's default.
   out.headers.set("Referrer-Policy", "same-origin");
+
+  // px0 itself has no concept of "the backend is still provisioning" or
+  // "the backend rejected this repo" — it's designed for instant local
+  // filesystem access. Without this, a cold-starting or rejected (e.g.
+  // over the size cap) repo just shows px0's bare default shell with no
+  // explanation while its own fetch()es silently fail underneath. This
+  // overlay is injected at serve time only — px0's own index.html on disk
+  // is untouched — and removes itself once the repo is actually ready.
+  return new HTMLRewriter().on("body", new AppendOverlay()).transform(out);
+}
+
+class AppendOverlay {
+  element(element: Element) {
+    element.append(LOADING_OVERLAY_HTML, { html: true });
+  }
+}
+
+async function handleStatusCheck(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const owner = url.searchParams.get("owner");
+  const repo = url.searchParams.get("repo");
+  const ref = url.searchParams.get("ref") || "HEAD";
+  if (!owner || !repo) {
+    return Response.json({ error: "missing owner/repo" }, { status: 400 });
+  }
+
+  const fwd = new Request(request.url, {
+    method: "GET",
+    headers: {
+      "X-Px0-Owner": owner,
+      "X-Px0-Repo": repo,
+      "X-Px0-Ref": ref,
+      "X-Px0-Status-Only": "1",
+    },
+  });
+  const stub = env.PX0_CONTAINER.getByName("shared");
+  const resp = await stub.fetch(fwd);
+  const out = new Response(resp.body, resp);
+  out.headers.set("Cache-Control", "no-store");
   return out;
 }
 
@@ -196,6 +242,98 @@ async function handleLanding(request: Request, env: Env): Promise<Response> {
   }
   return new Response(LANDING_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
+
+const LOADING_OVERLAY_HTML = `
+<style>
+  #pxcf-overlay { position: fixed; inset: 0; z-index: 2147483647; background: #0b0d10; color: #e6e6e6;
+    display: flex; align-items: center; justify-content: center;
+    font: 15px/1.6 -apple-system,BlinkMacSystemFont,sans-serif; transition: opacity .25s ease; }
+  #pxcf-overlay.pxcf-hidden { opacity: 0; pointer-events: none; }
+  #pxcf-box { text-align: center; max-width: 440px; padding: 2rem; }
+  #pxcf-spinner { width: 26px; height: 26px; margin: 0 auto 1.25rem; border: 3px solid #262a30;
+    border-top-color: #4f7cff; border-radius: 50%; animation: pxcf-spin .8s linear infinite; }
+  @keyframes pxcf-spin { to { transform: rotate(360deg); } }
+  #pxcf-overlay.pxcf-error #pxcf-spinner { display: none; }
+  #pxcf-icon-error { display: none; font-size: 26px; margin-bottom: 1rem; }
+  #pxcf-overlay.pxcf-error #pxcf-icon-error { display: block; }
+  #pxcf-title { font-size: 16px; font-weight: 600; margin-bottom: .4rem; }
+  #pxcf-msg { color: #9aa0a6; font-size: 13px; word-break: break-word; }
+  #pxcf-back { display: none; margin-top: 1.25rem; color: #4f7cff; text-decoration: none; font-size: 13px; }
+  #pxcf-overlay.pxcf-error #pxcf-back { display: inline-block; }
+</style>
+<div id="pxcf-overlay">
+  <div id="pxcf-box">
+    <div id="pxcf-spinner"></div>
+    <div id="pxcf-icon-error">&#9888;</div>
+    <div id="pxcf-title">Loading&hellip;</div>
+    <div id="pxcf-msg"></div>
+    <a id="pxcf-back" href="/">&larr; back to px0-cf</a>
+  </div>
+</div>
+<script>
+(function () {
+  var parts = location.pathname.split('/').filter(Boolean);
+  if (parts.length < 2) return;
+  var owner = parts[0], repo = parts[1];
+  var ref = new URLSearchParams(location.search).get('ref') || 'HEAD';
+
+  var overlay = document.getElementById('pxcf-overlay');
+  var title = document.getElementById('pxcf-title');
+  var msg = document.getElementById('pxcf-msg');
+
+  var LABELS = {
+    booting: 'Starting up…',
+    'checking-size': 'Checking repository size…',
+    cloning: 'Cloning ' + owner + '/' + repo + '…'
+  };
+
+  var start = Date.now();
+  var stopped = false;
+
+  function statusUrl() {
+    return '/__pxcf/status?owner=' + encodeURIComponent(owner) + '&repo=' + encodeURIComponent(repo) + '&ref=' + encodeURIComponent(ref);
+  }
+
+  function showError(title_, message) {
+    stopped = true;
+    overlay.classList.add('pxcf-error');
+    title.textContent = title_;
+    msg.textContent = message;
+  }
+
+  function poll() {
+    if (stopped) return;
+    fetch(statusUrl())
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.status === 'ready') {
+          stopped = true;
+          overlay.classList.add('pxcf-hidden');
+          setTimeout(function () { overlay.remove(); }, 300);
+          return;
+        }
+        if (s.status === 'error') {
+          showError('Couldn\\'t load ' + owner + '/' + repo, s.message || 'Something went wrong.');
+          return;
+        }
+        title.textContent = LABELS[s.status] || ('Loading ' + owner + '/' + repo + '…');
+        msg.textContent = Date.now() - start > 20000
+          ? 'Still working — this repo may be large, or the server is cold-starting.'
+          : '';
+        setTimeout(poll, 700);
+      })
+      .catch(function () {
+        if (Date.now() - start > 45000) {
+          showError('Lost connection', 'Could not reach the server. Try reloading the page.');
+          return;
+        }
+        setTimeout(poll, 1000);
+      });
+  }
+  poll();
+})();
+</script>
+`;
 
 const LANDING_HTML = `<!doctype html>
 <html lang="en">
