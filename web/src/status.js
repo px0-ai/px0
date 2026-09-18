@@ -7,6 +7,14 @@ export function updateStatus() {
   const sizeEl = $('#st-size');
   if (sizeEl) sizeEl.textContent = d ? fmtBytes(d.size) : '';
 
+  if (d && d.isImage) {
+    const posEl = $('#st-pos');
+    if (posEl) {
+      const zoomText = d.imageFit ? `Fit (${Math.round((d.imageScale || 1) * 100)}%)` : `${Math.round((d.imageScale || 1) * 100)}%`;
+      posEl.textContent = d.imageMeta ? `${d.imageMeta.width} × ${d.imageMeta.height} px · ${zoomText}` : zoomText;
+    }
+  }
+
   const isMd = !!(d && d.markdown), shown = previewing(d);
   const mdBtn = $('[data-action="md-preview"]');
   if (mdBtn) {
@@ -30,20 +38,13 @@ export function updateStatus() {
     const btn = $('#diff-btn');
     if (btn) {
       btn.classList.toggle('on', hasDiff && isDiffOn);
-      btn.title = withKeys(isDiffOn
-        ? `Diff: active (${d.diffMode === 'unified' ? 'Unified' : 'Split'}) — click to show source ({Mod+D})`
-        : `Diff: off — click to show diff ({Mod+D})`);
+      btn.title = withKeys(`Show changes against HEAD, ${currentLayout === 'unified' ? 'unified' : 'split'} ({Mod+D})`);
     }
+    $('#diff-source')?.classList.toggle('on', hasDiff && !isDiffOn);
     const menuItems = dsw.querySelectorAll('.diff-menu-item');
     for (const item of menuItems) {
       item.classList.toggle('active', item.dataset.diffOpt === currentLayout);
     }
-  }
-
-  const idxEl = $('#st-index');
-  if (idxEl && S.meta) {
-    idxEl.textContent = S.meta.indexMs + 'ms';
-    idxEl.title = `Workspace Indexing: took ${S.meta.indexMs}ms to index ${S.meta.files.toLocaleString()} files (${S.meta.ready ? 'ready' : 'in progress'})`;
   }
 
   const verEl = $('#st-ver');
@@ -54,9 +55,21 @@ export function updateStatus() {
   drawLspStatus();
 }
 
-export function setStatusNote(msg) {
+let noteTimer = null;
+
+export function setStatusNote(msg, timeoutMs = 0) {
+  if (noteTimer) {
+    clearTimeout(noteTimer);
+    noteTimer = null;
+  }
   const el = $('#st-pos');
-  if (el) el.textContent = msg;
+  if (el) el.textContent = msg || '';
+  if (msg && timeoutMs > 0) {
+    noteTimer = setTimeout(() => {
+      if (el && el.textContent === msg) el.textContent = '';
+      noteTimer = null;
+    }, timeoutMs);
+  }
 }
 
 export function fmtBytes(n) {
@@ -90,15 +103,68 @@ export function drawLspStatus() {
   if (state === 'failed') el.title = 'The language server did not start. Click for details.';
 }
 
+const metricsMenuEl = $('#metrics-menu');
+let lastMetrics = null;
+
+function renderMetricsMenu(m) {
+  if (!metricsMenuEl || !m) return;
+  metricsMenuEl.innerHTML = `
+    <div class="metrics-title">
+      <span>Process Metrics</span>
+      <span class="toast-chip">px0</span>
+    </div>
+    <div class="metrics-grid">
+      <div class="metrics-row">
+        <span class="metrics-label">Resident RAM (RSS)</span>
+        <span class="metrics-val">${fmtBytes(m.rssBytes)}</span>
+      </div>
+      <div class="metrics-row">
+        <span class="metrics-label">CPU Usage</span>
+        <span class="metrics-val">${m.cpuUsage.toFixed(1)}%</span>
+      </div>
+      <div class="metrics-row">
+        <span class="metrics-label">Active Goroutines</span>
+        <span class="metrics-val">${m.goroutines || 0}</span>
+      </div>
+    </div>
+  `;
+}
+
+export function closeMetricsMenu() {
+  if (metricsMenuEl) metricsMenuEl.hidden = true;
+}
+
+function placeMetricsMenu() {
+  const contEl = $('#st-metrics');
+  if (!contEl || !metricsMenuEl) return;
+  const r = contEl.getBoundingClientRect();
+  metricsMenuEl.style.bottom = (innerHeight - r.top + 6) + 'px';
+  metricsMenuEl.style.right = Math.max(8, innerWidth - r.right) + 'px';
+  metricsMenuEl.style.left = 'auto';
+}
+
+export function toggleMetricsMenu() {
+  if (!metricsMenuEl) return;
+  if (!metricsMenuEl.hidden) {
+    closeMetricsMenu();
+    return;
+  }
+  if (lastMetrics) renderMetricsMenu(lastMetrics);
+  metricsMenuEl.hidden = false;
+  placeMetricsMenu();
+  refreshMetrics();
+}
+
 export function updateMetricsDisplay(m) {
   if (!m) return;
+  lastMetrics = m;
   const cpuEl = $('#st-cpu');
   const ramEl = $('#st-ram');
-  const contEl = $('#st-metrics');
   if (cpuEl) cpuEl.textContent = `${m.cpuUsage.toFixed(1)}%`;
   if (ramEl) ramEl.textContent = fmtBytes(m.rssBytes);
-  if (contEl) {
-    contEl.title = `Editor OS Process Usage:\n• Resident RAM (RSS): ${fmtBytes(m.rssBytes)}\n• CPU Usage: ${m.cpuUsage.toFixed(1)}%\n• Active Goroutines: ${m.goroutines || 0}`;
+  if (metricsMenuEl && !metricsMenuEl.hidden) {
+    renderMetricsMenu(m);
+    placeMetricsMenu();
   }
 }
 
@@ -110,6 +176,26 @@ export async function refreshMetrics() {
 }
 
 export function initMetrics() {
+  const contEl = $('#st-metrics');
+  if (contEl) {
+    contEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMetricsMenu();
+    });
+    contEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleMetricsMenu();
+      }
+    });
+  }
+  addEventListener('click', (e) => {
+    if (!e.target.closest('#metrics-menu, #st-metrics')) closeMetricsMenu();
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMetricsMenu();
+  });
+
   refreshMetrics();
   setInterval(refreshMetrics, 2500);
 }

@@ -54,7 +54,7 @@ func gitStatus(root string) map[string]string {
 	if !info.ok {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v2", "-z").Output()
+	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v2", "-z", "-uall").Output()
 	if err != nil {
 		return nil
 	}

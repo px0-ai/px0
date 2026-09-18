@@ -97,6 +97,14 @@ export function jumpToHit(i) {
   render(); updateStatus();
 }
 
+export function findNextMatch(delta = 1) {
+  if (!S.find || !S.find.hits || !S.find.hits.length) {
+    if (findInput.value) { runFind(); return; }
+    return;
+  }
+  jumpToHit(S.find.active + delta);
+}
+
 export function initFind() {
   findInput.addEventListener('input', runFind);
   findInput.addEventListener('keydown', e => {

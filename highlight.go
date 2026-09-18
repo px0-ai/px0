@@ -512,6 +512,19 @@ func Evict(abs string) bool {
 	return cache.remove(abs)
 }
 
+// EvictAll clears the syntax highlighting document cache entirely.
+func EvictAll() {
+	cache.clear()
+}
+
+func (c *hlCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ll.Init()
+	c.items = map[string]*list.Element{}
+	c.used = 0
+}
+
 func isBinary(b []byte) bool {
 	n := len(b)
 	if n > 8000 {

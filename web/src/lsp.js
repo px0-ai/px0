@@ -3,9 +3,8 @@ import { $, S, doc_, api } from './state.js';
 import { paint } from './renderer.js';
 import { updateStatus, setStatusNote, setLspState } from './status.js';
 import { openFile } from './tabs.js';
-import { showPanel } from './panels.js';
 import { renderResults, runSearch } from './search.js';
-import { inspectReferences } from './inspector.js';
+import { inspectReferences, showRightInspector } from './inspector.js';
 
 /* Language servers answer precisely but can take a long time to wake up, while
    the regex index answers in milliseconds and is always there. So: use the
@@ -61,7 +60,7 @@ export async function gotoDefinition(arg) {
   if (!d || !at) return;
 
   if (canAskServer(at)) {
-    setStatusNote('definition of ' + at.word + '…');
+    setStatusNote('definition of ' + at.word + '…', 8000);
     const j = await lspCall('def', at, S.lsp.state === 'ready' ? 5000 : 20000);
     updateStatus();
     if (j && j.hits && j.hits.length) { acceptHits(at.word, j.hits, j.server, 'definition'); return; }
@@ -72,15 +71,16 @@ export async function gotoDefinition(arg) {
     });
   }
 
-  setStatusNote('searching for ' + at.word + '…');
+  setStatusNote('searching for ' + at.word + '…', 8000);
   let rx;
   try { rx = await api('/api/def', { sym: at.word, path: d.path }); }
-  catch (e) { setStatusNote(e.message); return; }
+  catch (e) { setStatusNote(e.message, 4000); return; }
   updateStatus();
   if (rx.lsp) setLspState(rx.lsp);
 
   if (!rx.defs || !rx.defs.length) {
-    showPanel('search');
+    setStatusNote('');
+    showRightInspector('search');
     const q = $('#q');
     if (q) { q.value = at.word; $('#o-word')?.classList.add('on'); runSearch(); }
     return;
@@ -100,19 +100,21 @@ export function acceptHits(word, hits, server, noun, refCount) {
     const h = hits[0];
     openFile(h.path, { line: h.line });
     flashFind(h.mid || word);
-    setStatusNote(server ? server + ' · ' + h.path + ':' + h.line : h.path + ':' + h.line);
+    setStatusNote(server ? server + ' · ' + h.path + ':' + h.line : h.path + ':' + h.line, 4000);
     return;
   }
+  setStatusNote('');
   showHits(word, hits, server, noun, refCount);
 }
 
 export function showHits(word, hits, server, noun, refCount) {
+  setStatusNote('');
   const n = hits.length;
   let head = n + ' ' + noun + (n === 1 ? '' : 's') + ' of "' + word + '"';
   head += server ? '  ·  ' + server : '  ·  text match, no language server';
   if (refCount) head += '  ·  ' + refCount + ' other references';
   renderResults({ results: groupHits(hits), files: 0, total: n, header: head, exact: !!server });
-  showPanel('search');
+  showRightInspector('search');
 }
 
 export function groupHits(hits) {

@@ -5,7 +5,20 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
+
+func fmtDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm %ds", m, s)
+}
 
 // Ape-style 256-color palette
 const (
@@ -21,7 +34,32 @@ const (
 var (
 	uiForcedColor *bool
 	uiQuiet       = false
+	uiVerbose     = false
 )
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func uiVerbosePrompt(jobID int64, harness string, prompt string, w io.Writer) {
+	if !uiVerbose || uiQuiet {
+		return
+	}
+	lines := strings.Split(prompt, "\n")
+	fmt.Fprintf(w, "  %s %s\n", uiDim("prompt:", w), uiFaint(fmt.Sprintf("(%d lines)", len(lines)), w))
+	for _, l := range lines {
+		fmt.Fprintf(w, "  %s %s\n", uiFaint("│", w), uiDim(l, w))
+	}
+}
 
 func colorEnabled(w io.Writer) bool {
 	if uiForcedColor != nil {
@@ -53,6 +91,7 @@ func paint(text string, code string, bold bool, w io.Writer) string {
 func uiDim(t string, w io.Writer) string    { return paint(t, colorDim, false, w) }
 func uiFaint(t string, w io.Writer) string  { return paint(t, colorFaint, false, w) }
 func uiAccent(t string, w io.Writer) string { return paint(t, colorAccent, false, w) }
+func uiInfo(t string, w io.Writer) string   { return paint(t, colorInfo, false, w) }
 func uiStrong(t string, w io.Writer) string {
 	if colorEnabled(w) {
 		return "\033[1m" + t + "\033[0m"
