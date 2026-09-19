@@ -346,7 +346,20 @@ func (c *lspClient) call(ctx context.Context, method string, params any, out any
 	}
 }
 
+func resolveInitOptions(def lspServerDef, rawSettings map[string]any) map[string]any {
+	var userLSP map[string]any
+	if v, ok := rawSettings["lsp."+def.Name]; ok {
+		if m, isMap := v.(map[string]any); isMap {
+			userLSP = m
+		}
+	}
+	return deepMerge(def.InitOptions, userLSP)
+}
+
 func (c *lspClient) initialize(ctx context.Context) error {
+	rawSettings := readSettingsRawMap()
+	mergedInitOptions := resolveInitOptions(c.def, rawSettings)
+
 	params := map[string]any{
 		"processId": os.Getpid(),
 		"rootUri":   pathToURI(c.root),
@@ -384,7 +397,7 @@ func (c *lspClient) initialize(ctx context.Context) error {
 			},
 			"window": map[string]any{"workDoneProgress": true},
 		},
-		"initializationOptions": c.def.InitOptions,
+		"initializationOptions": mergedInitOptions,
 	}
 
 	var res struct {
@@ -548,4 +561,63 @@ func uriToPath(uri string) (string, error) {
 		p = strings.TrimPrefix(p, "/")
 	}
 	return filepath.FromSlash(p), nil
+}
+
+// deepClone recursively clones a JSON-like value so the result shares no mutable references.
+func deepClone(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		if val == nil {
+			return nil
+		}
+		out := make(map[string]any, len(val))
+		for k, inner := range val {
+			out[k] = deepClone(inner)
+		}
+		return out
+	case []any:
+		if val == nil {
+			return nil
+		}
+		out := make([]any, len(val))
+		for i, inner := range val {
+			out[i] = deepClone(inner)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// deepMerge merges user settings over base settings.
+// - Maps merge recursively.
+// - Arrays/slices and primitives are completely replaced by the user value.
+// - When both sides have the same key, the user value wins.
+// - The returned map shares no nested maps or slices with base or user.
+func deepMerge(base, user map[string]any) map[string]any {
+	if base == nil && user == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range base {
+		out[k] = deepClone(v)
+	}
+	if user == nil {
+		return out
+	}
+	for k, uVal := range user {
+		bVal, ok := out[k]
+		if !ok {
+			out[k] = deepClone(uVal)
+			continue
+		}
+		bMap, bIsMap := bVal.(map[string]any)
+		uMap, uIsMap := uVal.(map[string]any)
+		if bIsMap && uIsMap {
+			out[k] = deepMerge(bMap, uMap)
+		} else {
+			out[k] = deepClone(uVal)
+		}
+	}
+	return out
 }
