@@ -31,6 +31,7 @@ export const runSearch = debounce(async () => {
   resultsEl.innerHTML = '<div class="hint">searching…</div>';
   const params = {
     q, glob: $('#glob')?.value || '',
+    exclude: $('#exclude')?.value || '',
     case: $('#o-case')?.classList.contains('on') ? 1 : '',
     word: $('#o-word')?.classList.contains('on') ? 1 : '',
     re: $('#o-re')?.classList.contains('on') ? 1 : '',
@@ -108,6 +109,7 @@ export function initSearch() {
 
   $('#q').addEventListener('input', runSearch);
   $('#glob').addEventListener('input', runSearch);
+  $('#exclude').addEventListener('input', runSearch);
   $$('.opt').forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); runSearch(); }));
   $('#q').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); const f = $('.rline', resultsEl); if (f) f.click(); }

@@ -523,6 +523,45 @@ func TestSearchGlobFilter(t *testing.T) {
 	}
 }
 
+func TestSearchExcludeFilter(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	cases := []struct {
+		query   string
+		exclude string
+		want    []string
+	}{
+		{"greet", "", []string{"greet.go", "main.go"}},
+		{"greet", "greet.go", []string{"main.go"}},
+		{"greet", "*.go", nil},
+		{"handler", "sub/**", nil},
+		{"greet", "sub/**, greet.go", []string{"main.go"}},
+	}
+	for _, c := range cases {
+		u := "/api/search?q=" + url.QueryEscape(c.query)
+		if c.exclude != "" {
+			u += "&exclude=" + url.QueryEscape(c.exclude)
+		}
+		code, body := get(t, s, u)
+		if code != http.StatusOK {
+			t.Fatalf("exclude %q: status %d", c.exclude, code)
+		}
+		var got []string
+		for _, result := range body["results"].([]any) {
+			got = append(got, result.(map[string]any)["path"].(string))
+		}
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("exclude %q matched %v, want %v", c.exclude, got, c.want)
+		}
+	}
+
+	code, body := get(t, s, "/api/search?q=greet&glob=*.go&exclude=greet.go")
+	results := body["results"].([]any)
+	if code != http.StatusOK || len(results) != 1 || results[0].(map[string]any)["path"] != "main.go" {
+		t.Errorf("exclude did not remove a file from the include set: status=%d body=%v", code, body)
+	}
+}
+
 func TestCloseEndpoint(t *testing.T) {
 	s, root := newTestServer(t)
 
