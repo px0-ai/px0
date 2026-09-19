@@ -95,6 +95,22 @@ export function restoreOpenDirs(dirs) {
   }
 }
 
+export function collapseAllDirs() {
+  openDirs.clear();
+
+  treeEl.querySelectorAll('.tr.dir.open').forEach(row => {
+    row.classList.remove('open');
+  });
+
+  treeEl.querySelectorAll('.kids.open').forEach(kids => {
+    kids.classList.remove('open');
+  });
+
+  try {
+    sessionStorage.setItem('px0.openDirs', JSON.stringify(Array.from(openDirs)));
+  } catch {}
+}
+
 /* Expand the tree down to dir and scroll it into view. */
 export async function revealDir(dir) {
   const parts = dir.split('/');
@@ -226,6 +242,7 @@ export function updateSidebarToggleState() {
 export async function setSidebarMode(mode) {
   const btnChanged = $('#btn-changed');
   const btnFiles = $('#btn-files');
+  const btnCollapse = $('#btn-collapse-tree');
   updateSidebarToggleState();
   const hasGitChanges = !!(S.meta?.git && S.meta.gitChanges > 0);
 
@@ -233,16 +250,23 @@ export async function setSidebarMode(mode) {
     treeEl.classList.add('changed-only');
     btnChanged?.classList.add('active');
     btnFiles?.classList.remove('active');
+    if (btnCollapse) btnCollapse.hidden = true;
     await expandDirtyDirs();
   } else {
     treeEl.classList.remove('changed-only');
     btnFiles?.classList.add('active');
     btnChanged?.classList.remove('active');
+    if (btnCollapse) btnCollapse.hidden = false;
   }
 }
 
 export function initTree() {
   updateSidebarToggleState();
+
+  $('#btn-collapse-tree')?.addEventListener('click', () => {
+    if (treeEl.classList.contains('changed-only')) return;
+    collapseAllDirs();
+  });
 
   $('#btn-changed')?.addEventListener('click', async () => {
     const hasGitChanges = !!(S.meta?.git && S.meta.gitChanges > 0);
