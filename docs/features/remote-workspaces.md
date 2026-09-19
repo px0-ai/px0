@@ -20,6 +20,7 @@ px0 simplifies remote code inspection into a single shell command. Because the e
   - Bind to localhost for private tunnels (`-host 127.0.0.1`).
   - Bind to all interfaces for Tailscale/VPN access (`-host 0.0.0.0`).
 - **Headless Server Mode (`-no-open`)**: Starts the server silently on remote machines or in Docker containers without attempting to invoke a local web browser.
+- **Machine-Readable Startup (`-print-url`)**: Prints exactly one plain bound URL to stdout and suppresses narration, so launchers can safely combine it with `-port 0` without scraping terminal output.
 - **Built-in Security & Sandboxing**:
   - **Path Traversal Protection**: Enforces strict path sandboxing; requests attempting to escape the workspace root using `../` or symlink cycle attacks are immediately blocked.
   - **DNS Rebinding Defense**: Inspects incoming HTTP `Host` headers to prevent cross-site scripting attacks via malicious DNS records.
@@ -50,6 +51,12 @@ docker run -p 7777:7777 -v $(pwd):/workspace px0:latest -host 0.0.0.0 /workspace
 ### 3. CI/CD Runner Debugging
 When a build or test suite fails on a remote CI runner, download px0, run it in the background, and inspect generated artifacts, failure logs, and git status directly in your browser.
 
+For launchers that need the actual OS-assigned port, use machine-readable output:
+```bash
+px0 -no-open -port 0 -print-url /workspace
+```
+The first and only stdout line is the bound URL. Diagnostics and fatal errors remain on stderr.
+
 ---
 
 ## CLI Flag Reference
@@ -64,6 +71,7 @@ When a build or test suite fails on a remote CI runner, download px0, run it in 
 | `-agent H` | none | Pin active coding agent harness for session |
 | `-no-agent` | `false` | Disable coding agent editing features entirely |
 | `-quiet` | `false` | Suppress CLI narration on stdout |
+| `-print-url` | `false` | Print only the bound URL to stdout for automation |
 | `-update` | `false` | Check for updates and install latest release |
 | `-version` | `false` | Print version and architecture and exit |
 

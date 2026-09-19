@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIgnorePatterns(t *testing.T) {
@@ -700,6 +705,72 @@ func TestViewerURL(t *testing.T) {
 
 	if got := viewerURL("127.0.0.1:7777", "", 0); got != "http://127.0.0.1:7777" {
 		t.Fatalf("viewerURL without a file = %q", got)
+	}
+}
+
+func TestPrintURLIsMachineReadable(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "px0-test")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build px0: %v\n%s", err, out)
+	}
+
+	cmd := exec.Command(bin,
+		"-print-url", "-no-open", "-port", "0", "-no-lsp", "-no-git",
+		"-no-agent", "-no-telemetry", t.TempDir(),
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	})
+
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	reader := bufio.NewReader(stdout)
+	go func() {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			errCh <- err
+			return
+		}
+		lineCh <- strings.TrimSpace(line)
+	}()
+
+	var line string
+	select {
+	case line = <-lineCh:
+	case err := <-errCh:
+		t.Fatalf("read URL: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for URL")
+	}
+	u, err := url.Parse(line)
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" {
+		t.Fatalf("-print-url output %q is not a bound loopback URL", line)
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	if strings.TrimSpace(string(rest)) != "" {
+		t.Fatalf("-print-url emitted extra stdout: %q", rest)
 	}
 }
 

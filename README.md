@@ -262,6 +262,7 @@ px0 --update
 | `-no-telemetry` | `false`  | Disable anonymous usage telemetry                               |
 | `-no-color`  | `false`     | Strip ANSI escape sequences from terminal output                |
 | `-quiet`     | `false`     | Suppress CLI narration (errors still print to stderr)           |
+| `-print-url` | `false`     | Print only the bound URL to stdout for launchers and automation |
 | `-update`    | `false`     | Check for updates and install the latest version                |
 | `-version`   | `false`     | Print version and architecture and exit                         |
 

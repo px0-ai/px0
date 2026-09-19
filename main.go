@@ -37,6 +37,7 @@ func main() {
 		doUpdate     = flag.Bool("update", false, "check for and install latest version of px0")
 		noColor      = flag.Bool("no-color", false, "disable colour output")
 		quiet        = flag.Bool("quiet", false, "suppress narration")
+		printURL     = flag.Bool("print-url", false, "print only the bound URL to stdout for automation")
 		verbose      = flag.Bool("verbose", false, "log requests, searches, symbols, and agent prompts to terminal")
 		noTelemetry  = flag.Bool("no-telemetry", false, "disable anonymous usage telemetry")
 		agentCmd     = flag.String("agent", "", "pin the coding harness used for edits (claude, gemini, cursor-agent, agy, opencode, codex, aider, goose, or a command template containing {prompt}); detected and chosen in the UI when omitted")
@@ -52,7 +53,7 @@ func main() {
 		f := false
 		uiForcedColor = &f
 	}
-	if *quiet {
+	if *quiet || *printURL {
 		uiQuiet = true
 	}
 	if *verbose {
@@ -112,6 +113,9 @@ func main() {
 	srv := &http.Server{Handler: pxSrv}
 
 	url := viewerURL(addr, initialFile, initialLine)
+	if *printURL {
+		fmt.Fprintln(os.Stdout, url)
+	}
 	uiHeading("px0 "+version, nil, os.Stdout)
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
