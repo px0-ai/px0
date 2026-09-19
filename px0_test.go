@@ -703,6 +703,21 @@ func TestViewerURL(t *testing.T) {
 	}
 }
 
+func TestLocalhostName(t *testing.T) {
+	cases := map[string]string{
+		"My Project": "my-project",
+		"repo_name":  "repo-name",
+		"---repo---": "repo",
+		"!!!":        "px0",
+		"project.v2": "project-v2",
+	}
+	for input, want := range cases {
+		if got := localhostName(input); got != want {
+			t.Errorf("localhostName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestVersionDrivenFromVERSIONFile(t *testing.T) {
 	data, err := os.ReadFile("VERSION")
 	if err != nil {
