@@ -2952,7 +2952,7 @@
     if (!d.diffHunks || !d.diffHunks.length) {
       const p = document.createElement("div");
       p.className = "diff-empty";
-      p.textContent = "No changes against HEAD.";
+      p.textContent = `No changes against ${S2.meta?.gitBase || "HEAD"}.`;
       diffContent.append(p);
       return;
     }
@@ -3164,10 +3164,11 @@
       document.body.classList.toggle("diff-tab", hasDiff);
       const btn = $("#diff-btn");
       if (btn) {
+        const gitBase = S2.meta?.gitBase || "HEAD";
         btn.disabled = !hasDiff;
         btn.classList.toggle("disabled", !hasDiff);
         btn.classList.toggle("on", hasDiff && isDiffOn);
-        btn.title = hasDiff ? withKeys(`Show changes against HEAD, ${currentLayout === "unified" ? "unified" : "split"} ({Mod+D})`) : "There are no git modified files.";
+        btn.title = hasDiff ? withKeys(`Show changes against ${gitBase}, ${currentLayout === "unified" ? "unified" : "split"} ({Mod+D})`) : "There are no git modified files.";
       }
       const srcBtn = $("#diff-source");
       if (srcBtn) {

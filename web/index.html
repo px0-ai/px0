@@ -54,11 +54,11 @@
         <button data-md="preview" title="Rendered Markdown ({Alt+M})">Preview</button>
         <button data-md="source" title="Markdown source ({Alt+M})">Source</button>
       </div>
-      <!-- Modified files in a git repo only: view the file's diff against HEAD -->
+      <!-- Modified files in a git repo only: view the file's configured diff -->
       <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
         <button id="diff-source" data-diff-opt="source" title="Show the file ({Mod+D})">Source</button>
         <div class="diff-seg">
-        <button id="diff-btn" title="Show changes against HEAD ({Mod+D})">
+        <button id="diff-btn" title="Show git changes ({Mod+D})">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="diff-btn-icon"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
           <span class="diff-btn-label">Diff</span>
           <svg viewBox="0 0 10 10" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="diff-caret"><path d="M2 3.5L5 6.5L8 3.5"/></svg>

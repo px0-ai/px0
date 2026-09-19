@@ -1,7 +1,7 @@
 // web/src/diff.js
 // Git diff view for the active tab: renders the file's unified diff against
-// HEAD in a dedicated overlay (like the Markdown preview), in either a
-// side-by-side split layout (default) or a single-column unified layout.
+// the configured git base in a dedicated overlay (like the Markdown preview),
+// in either a side-by-side split layout (default) or a unified layout.
 // Unlike the code viewport this is not virtualized -- a file's own diff is
 // bounded in size, so a plain DOM render is simple and fast enough.
 import { $, S, doc_, esc, api } from './state.js';
@@ -109,7 +109,7 @@ function renderDiff(d) {
   if (!d.diffHunks || !d.diffHunks.length) {
     const p = document.createElement('div');
     p.className = 'diff-empty';
-    p.textContent = 'No changes against HEAD.';
+    p.textContent = `No changes against ${S.meta?.gitBase || 'HEAD'}.`;
     diffContent.append(p);
     return;
   }

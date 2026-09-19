@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,11 @@ import (
 // gitDisabled turns off all git awareness (the -no-git flag). Like uiQuiet, a
 // process-wide switch set once in main before anything reads it.
 var gitDisabled bool
+
+var (
+	gitCompareBase  = "HEAD"
+	gitCompareLabel = "HEAD"
+)
 
 type gitInfo struct {
 	ok       bool
@@ -30,6 +36,49 @@ func gitAvailable(root string) bool { return gitProbe(root).ok }
 
 // gitDir returns the absolute path to the repository's .git directory.
 func gitDir(root string) string { return gitProbe(root).gitdir }
+
+// configureGitDiffBase resolves ref to the merge base it shares with HEAD.
+// The immutable commit keeps every status and diff request on the same base
+// even if the named branch moves while px0 is running.
+func configureGitDiffBase(root, ref string) error {
+	gitCompareBase = "HEAD"
+	gitCompareLabel = "HEAD"
+	if ref == "" {
+		return nil
+	}
+	if !gitAvailable(root) {
+		return fmt.Errorf("git is unavailable for this workspace")
+	}
+	out, err := exec.Command("git", "-C", root, "merge-base", ref, "HEAD").CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	base := strings.TrimSpace(string(out))
+	if base == "" {
+		return fmt.Errorf("git merge-base returned no commit")
+	}
+	gitCompareBase = base
+	gitCompareLabel = ref
+	return nil
+}
+
+func gitDiffBase() string {
+	if gitCompareBase == "" {
+		return "HEAD"
+	}
+	return gitCompareBase
+}
+
+func gitDiffBaseLabel() string {
+	if gitCompareLabel == "" {
+		return "HEAD"
+	}
+	return gitCompareLabel
+}
 
 func gitProbe(root string) gitInfo {
 	if gitDisabled {
@@ -89,6 +138,29 @@ func gitStatus(root string) map[string]string {
 	}
 
 	status := map[string]string{}
+	if gitDiffBase() != "HEAD" {
+		if diffOut, err := exec.Command("git", "-C", root, "diff", "--name-status", "-z", "--find-renames", gitDiffBase(), "--").Output(); err == nil {
+			items := strings.Split(string(diffOut), "\x00")
+			for i := 0; i < len(items); {
+				code := items[i]
+				i++
+				if code == "" || i >= len(items) {
+					continue
+				}
+				if code[0] == 'R' || code[0] == 'C' {
+					i++ // old path
+					if i >= len(items) {
+						break
+					}
+				}
+				path := items[i]
+				i++
+				if k, ok := key(path); ok {
+					status[k] = mapNameStatus(code[0])
+				}
+			}
+		}
+	}
 	fields := strings.Split(string(out), "\x00")
 	for i := 0; i < len(fields); i++ {
 		f := fields[i]
@@ -104,14 +176,18 @@ func gitStatus(root string) map[string]string {
 			p := strings.SplitN(f, " ", 9)
 			if len(p) == 9 {
 				if k, ok := key(p[8]); ok {
-					status[k] = mapXY(p[1])
+					if _, exists := status[k]; !exists {
+						status[k] = mapXY(p[1])
+					}
 				}
 			}
 		case '2': // "2 <XY> ... <Rscore> <path>", then original path in the next field
 			p := strings.SplitN(f, " ", 10)
 			if len(p) == 10 {
 				if k, ok := key(p[9]); ok {
-					status[k] = mapXY(p[1])
+					if _, exists := status[k]; !exists {
+						status[k] = mapXY(p[1])
+					}
 				}
 			}
 			i++ // the original path follows as its own NUL-terminated field
@@ -128,6 +204,21 @@ func gitStatus(root string) map[string]string {
 		return nil
 	}
 	return status
+}
+
+func mapNameStatus(code byte) string {
+	switch code {
+	case 'A':
+		return "A"
+	case 'D':
+		return "D"
+	case 'R':
+		return "R"
+	case 'C':
+		return "C"
+	default:
+		return "M"
+	}
 }
 
 // mapXY collapses a porcelain v2 two-letter XY code (X=index, Y=worktree) into
@@ -156,20 +247,20 @@ func mapXY(xy string) string {
 	}
 }
 
-// gitDiff returns the unified diff of relpath against HEAD. relpath is relative
+// gitDiff returns the unified diff of relpath against the configured base. relpath is relative
 // to the served root; git resolves it against -C root. Fails quiet -> "".
 func gitDiff(root, relpath string) string {
 	if !gitAvailable(root) {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", root, "diff", "--no-color", "HEAD", "--", relpath).Output()
+	out, err := exec.Command("git", "-C", root, "diff", "--no-color", gitDiffBase(), "--", relpath).Output()
 	if err != nil {
 		return ""
 	}
 	return string(out)
 }
 
-// gitHunks parses the unified diff of relpath against HEAD into 1-based
+// gitHunks parses the unified diff of relpath against the configured base into 1-based
 // NEW-FILE line numbers for a change gutter: added lines, modified (replaced)
 // lines, and one marker per pure-deletion run (the new-file line immediately
 // preceding the removed run; 0 means "before the first line"). Fails quiet:

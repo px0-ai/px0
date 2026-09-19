@@ -1,6 +1,6 @@
 # Git Awareness & Visual Diff Viewer
 
-px0 includes built-in Git awareness and an interactive visual diff viewer. It highlights working-tree modifications across your file tree and editor gutters, and lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`.
+px0 includes built-in Git awareness and an interactive visual diff viewer. It highlights changes across your file tree and editor gutters, and lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`. Pass `-diff <ref>` to review all branch and working-tree changes since that ref diverged from `HEAD`.
 
 ---
 
@@ -17,7 +17,7 @@ px0 provides non-destructive, zero-latency Git awareness. It queries Git status 
 - **Real-Time Live Status Synchronization**: px0 establishes a lightweight Server-Sent Events (SSE) connection (`/api/git/stream`) to push working-tree status changes directly to the browser. You do not need to refresh the browser or click manual reindex buttons when files change on disk.
 - **Sub-Millisecond CLI Change Awareness**: When you execute Git operations in your terminal (`git checkout`, `git reset`, `git add`, `git commit`, `git restore`, `git stash`), px0 detects the operation in sub-milliseconds by checking metadata timestamps on Git control files (`.git/index`, `.git/HEAD`, `.git/packed-refs`), instantly updating your view without scanning files on disk.
 - **File Tree Status Badges**: The file explorer decorates changed files with colored badges indicating their Git working-tree status:
-  - `M` (Modified): Working tree file differs from `HEAD`.
+  - `M` (Modified): File differs from the active comparison base.
   - `A` (Added / Staged): Newly added file staged in the index.
   - `D` (Deleted): File removed from the working tree.
   - `U` (Untracked): New file not yet tracked by Git.
@@ -32,7 +32,7 @@ px0 provides non-destructive, zero-latency Git awareness. It queries Git status 
   - Red triangle or marker for deleted lines.
 - **Interactive Diff Viewer (`Cmd/Ctrl+D`)**: Toggle between normal source view and full Git diff with a single keystroke.
 - **Side-by-Side & Unified Diff Modes**:
-  - **Side-by-Side (Split)**: View original `HEAD` code on the left and active working-tree code on the right with synchronized scrolling.
+  - **Side-by-Side (Split)**: View code from the comparison base on the left and the active working tree on the right with synchronized scrolling.
   - **Unified**: View changes inline with consecutive additions and deletions.
 - **Whitespace Diff Filtering**: Toggle whitespace trimming to hide trivial indentation and trailing space differences when reviewing significant logic changes.
 - **Direct Agent Editing from Diffs**: Select any modified or added line in the diff view and trigger an AI agent edit (`Alt+E`) to refine or correct the change on the spot.
@@ -46,7 +46,7 @@ px0 provides non-destructive, zero-latency Git awareness. It queries Git status 
 When an AI coding agent (Claude Code, Gemini CLI, Cursor Agent, Antigravity, Aider) edits your code in the background:
 1. Switch to the **Git Changes** view in the sidebar to isolate touched files.
 2. Status badges and gutter markers update in real time as the agent writes to disk.
-3. Open any modified file and press **`Cmd/Ctrl+D`** to review side-by-side changes against `HEAD`.
+3. Open any modified file and press **`Cmd/Ctrl+D`** to review side-by-side changes against the active comparison base.
 4. If an edit needs refinement, select the relevant lines directly inside the diff view and press `Alt+E` to prompt the agent with a targeted correction.
 
 ### Terminal Interaction Without Stale Views
@@ -64,7 +64,7 @@ Before committing code from your terminal, open px0 to perform a visual walk-thr
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
-| `Cmd/Ctrl+D` | Editor | Toggle Git Diff View (Split / Unified vs. `HEAD`) |
+| `Cmd/Ctrl+D` | Editor | Toggle Git Diff View (Split / Unified vs. the comparison base) |
 | Toggle Segment (`Files` / `Changes`) | Sidebar Header | Switch between File Explorer and Changed Files Only |
 | Toggle Icon | Diff Header | Switch between Side-by-Side and Unified Diff |
 | Space Icon | Diff Header | Toggle Ignore Leading/Trailing Whitespace |
@@ -80,6 +80,7 @@ Git behavior can be customized in Settings (`Cmd/Ctrl+,`):
 - **Diff Editor: Render Side-by-Side** (`diffEditor.renderSideBySide`): Default layout for the diff view (`true` for split, `false` for unified).
 - **Diff Editor: Ignore Trim Whitespace** (`diffEditor.ignoreTrimWhitespace`): Ignore leading and trailing whitespace diffs (defaults to `true`).
 - **CLI Flag `-no-git`**: Launch px0 with Git features completely disabled (`px0 -no-git`) for environments where Git is not installed or when viewing plain directory archives.
+- **CLI Flag `-diff <ref>`**: Compare the current branch and working tree with `merge-base(<ref>, HEAD)`. For example, `px0 -diff main` shows the complete reviewable branch diff while preserving untracked-file and conflict badges. An invalid ref emits a warning and falls back to `HEAD`.
 
 ---
 

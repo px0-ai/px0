@@ -168,6 +168,82 @@ func TestGitDiff(t *testing.T) {
 	}
 }
 
+func TestGitDiffBaseRef(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	write("changed.go", "base\n")
+	run("init")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "T")
+	run("config", "commit.gpgsign", "false")
+	run("add", "-A")
+	run("commit", "-qm", "base")
+	run("branch", "review-base")
+	write("changed.go", "branch\n")
+	write("added.go", "added\n")
+	run("add", "-A")
+	run("commit", "-qm", "branch work")
+	write("changed.go", "branch\ndirty\n")
+	write("untracked.go", "untracked\n")
+
+	if err := configureGitDiffBase(root, "review-base"); err != nil {
+		t.Fatal(err)
+	}
+	defer configureGitDiffBase("", "")
+
+	status := gitStatus(root)
+	want := map[string]string{"changed.go": "M", "added.go": "A", "untracked.go": "U"}
+	for path, code := range want {
+		if status[path] != code {
+			t.Errorf("status[%q] = %q, want %q (full: %v)", path, status[path], code, status)
+		}
+	}
+	diff := gitDiff(root, "changed.go")
+	for _, line := range []string{"-base", "+branch", "+dirty"} {
+		if !strings.Contains(diff, line) {
+			t.Errorf("diff missing %q:\n%s", line, diff)
+		}
+	}
+
+	ix := NewIndex(root)
+	ix.Build()
+	s := NewServer(ix, nil)
+	_, meta := get(t, s, "/api/meta")
+	if meta["gitBase"] != "review-base" {
+		t.Errorf("gitBase = %v, want review-base", meta["gitBase"])
+	}
+
+	if err := configureGitDiffBase(root, "does-not-exist"); err == nil {
+		t.Fatal("configureGitDiffBase accepted an invalid ref")
+	}
+	if gitDiffBase() != "HEAD" || gitDiffBaseLabel() != "HEAD" {
+		t.Errorf("invalid ref left base=%q label=%q, want HEAD", gitDiffBase(), gitDiffBaseLabel())
+	}
+}
+
 func TestGitCleanRepo(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")

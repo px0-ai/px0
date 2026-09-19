@@ -10,7 +10,7 @@ Because speed of access is everything when inspecting code, **px0 is obsessively
 
 ### Where px0 fits in best:
 
-- **Verifying AI Agent Output**: Trace symbol references, inspect live git diffs against `HEAD`, review generated code, send a fix back to the agent from the diff, and close the tab without leaving your terminal flow.
+- **Verifying AI Agent Output**: Trace symbol references, inspect live git diffs against `HEAD` or a branch merge base, review generated code, send a fix back to the agent from the diff, and close the tab without leaving your terminal flow.
 - **Remote & Cloud Server Inspection**: Spin up on any remote server, VM, or CI runner and browse the codebase instantly from your local browser—no SSH keys, no port forwarding hassle, and no heavy remote desktop/daemons.
 - **Auditing Large Repositories**: Read through massive, 50,000+ file codebases on a laptop without background indexers hogging RAM or spinning up fans.
 - **Sidecar to Terminal Editors**: Keep lightweight editors (like Vim, Neovim, or Helix) in the terminal for typing, while using px0 as a high-density, rich graphical inspection and diff console.
@@ -47,7 +47,7 @@ make dist
 - **Blazing Fast Navigation**: Fuzzy file search (`Cmd/Ctrl+P`), symbol outline (`Cmd/Ctrl+Shift+O`), and workspace regex search (`Cmd/Ctrl+Shift+F`) in milliseconds.
 - **Remote-First, Zero SSH Hassle**: Spin up on any remote server, cloud instance, or runner in < 1 ms. Inspect remote code in your local browser over a single port (Tailscale, WireGuard, reverse proxy, or tunnel) without SSH key setups, port forwarding churn, or remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
-- **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
+- **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` or a branch merge base (`Cmd/Ctrl+D`).
 - **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, or Cursor Agent on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (GitHub Dark, Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, Solarized, and more).
@@ -257,6 +257,7 @@ px0 --update
 | `-no-open`   | `false`     | Do not launch the web browser automatically                     |
 | `-no-lsp`    | `false`     | Disable language server discovery and use regex-based outline   |
 | `-no-git`    | `false`     | Disable git awareness (tree status badges and the diff view)    |
+| `-diff REF`  | none        | Compare against the merge base of `REF` and `HEAD`              |
 | `-agent H`   | none        | Pin the coding harness for edits: `claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`, or a command template containing `{prompt}` |
 | `-no-agent`  | `false`     | Do not offer editing through a coding harness                   |
 | `-no-telemetry` | `false`  | Disable anonymous usage telemetry                               |

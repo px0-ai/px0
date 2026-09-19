@@ -264,6 +264,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"builtAt":     at,
 		"ready":       s.ix.Ready(),
 		"git":         gitAvailable(s.ix.Root()),
+		"gitBase":     gitDiffBaseLabel(),
 		"gitChanges":  gitCount,
 		"gitFiles":    gitFiles,
 		"lspServers":  s.lsp.Available(),
@@ -606,7 +607,7 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, abs)
 }
 
-// handleDiff returns the unified diff of a file against HEAD. available is false
+// handleDiff returns the unified diff of a file against the configured base. available is false
 // (with an empty diff and 200) when git is off/absent or the file is unchanged.
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
@@ -908,4 +909,3 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 405, "method not allowed")
 	}
 }
-

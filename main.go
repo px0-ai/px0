@@ -31,6 +31,7 @@ func main() {
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
+		diffRef      = flag.String("diff", "", "compare git changes with the merge base of this ref and HEAD")
 		dev          = flag.String("dev", "", "serve the UI from this source directory instead of the embedded copy")
 		showVer      = flag.Bool("version", false, "print version and exit")
 		showVerShort = flag.Bool("v", false, "print version and exit (shorthand)")
@@ -87,6 +88,9 @@ func main() {
 	root, initialFile, initialLine, err := resolveTarget(target)
 	if err != nil {
 		fatal(err)
+	}
+	if err := configureGitDiffBase(root, *diffRef); err != nil {
+		uiStatus("warn", fmt.Sprintf("invalid diff ref %q; using HEAD", *diffRef), err.Error(), 0, os.Stderr)
 	}
 
 	ln, addr, err := listen(*host, *port)

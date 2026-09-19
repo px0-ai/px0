@@ -40,11 +40,12 @@ export function updateStatus() {
     document.body.classList.toggle('diff-tab', hasDiff);
     const btn = $('#diff-btn');
     if (btn) {
+      const gitBase = S.meta?.gitBase || 'HEAD';
       btn.disabled = !hasDiff;
       btn.classList.toggle('disabled', !hasDiff);
       btn.classList.toggle('on', hasDiff && isDiffOn);
       btn.title = hasDiff
-        ? withKeys(`Show changes against HEAD, ${currentLayout === 'unified' ? 'unified' : 'split'} ({Mod+D})`)
+        ? withKeys(`Show changes against ${gitBase}, ${currentLayout === 'unified' ? 'unified' : 'split'} ({Mod+D})`)
         : 'There are no git modified files.';
     }
     const srcBtn = $('#diff-source');
