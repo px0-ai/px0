@@ -146,6 +146,15 @@ type gzipWriter struct {
 
 func (g gzipWriter) Write(b []byte) (int, error) { return g.w.Write(b) }
 
+func (g gzipWriter) Flush() {
+	if err := g.w.Flush(); err != nil {
+		return
+	}
+	if f, ok := g.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // safePath resolves a client-supplied relative path inside the root, refusing
 // anything that escapes it.
 func (s *Server) safePath(rel string) (string, string, bool) {
@@ -908,4 +917,3 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 405, "method not allowed")
 	}
 }
-

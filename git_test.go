@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -402,11 +403,13 @@ func TestGitWatcherStreamAndRefresh(t *testing.T) {
 	ix.Build()
 
 	s := NewServer(ix, nil)
-	ts := httptest.NewServer(s.mux)
+	ts := httptest.NewServer(s)
 	defer ts.Close()
 
 	// 1. Connect to SSE stream
-	req, err := http.NewRequest("GET", ts.URL+"/api/git/stream", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/git/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,6 +418,9 @@ func TestGitWatcherStreamAndRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	if !resp.Uncompressed {
+		t.Fatal("expected the SSE response to pass through gzip middleware")
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)

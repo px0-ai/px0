@@ -50,7 +50,7 @@ sequenceDiagram
 
 ## 3. HTTP Server & API Catalog
 
-The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps and applies pooled Gzip compression when accepted by the client.
+The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps and applies pooled Gzip compression when accepted by the client. The compression writer preserves flush semantics so streaming responses, including live Git status events, are delivered immediately.
 
 ### Endpoints Reference
 
