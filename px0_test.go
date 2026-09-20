@@ -725,3 +725,41 @@ func TestMetaIncludesVersion(t *testing.T) {
 		t.Fatalf("expected version %q in /api/meta, got %v", version, body["version"])
 	}
 }
+
+func TestPWAManifest(t *testing.T) {
+	s, _ := newTestServer(t)
+	code, body := get(t, s, "/manifest.webmanifest")
+	if code != http.StatusOK || body["display"] != "standalone" {
+		t.Fatalf("manifest: %d %v", code, body)
+	}
+	icons, _ := body["icons"].([]any)
+	if len(icons) == 0 {
+		t.Fatal("manifest has no icons")
+	}
+	first, _ := icons[0].(map[string]any)
+	if first["sizes"] != "512x512" || first["purpose"] != "any maskable" {
+		t.Fatalf("Chromium install expects a 512x512 any maskable icon first, got %v", first)
+	}
+	for _, path := range []string{
+		"/apple-touch-icon.png", "/favicon.ico",
+		"/static/icons/icon-512.png", "/static/logo/px0-logo-dark.png",
+	} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d", path, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	html := rec.Body.String()
+	if !strings.Contains(html, `href="/manifest.webmanifest"`) {
+		t.Fatal("index.html does not link the manifest")
+	}
+	if !strings.Contains(html, `href="/apple-touch-icon.png"`) {
+		t.Fatal("index.html does not link a local apple-touch-icon")
+	}
+	if strings.Contains(html, "px0.ai/favicon") || strings.Contains(html, "px0.ai/logo") {
+		t.Fatal("index.html must not hotlink px0.ai favicons/logos (transparent logos become white Dock icons)")
+	}
+}

@@ -23,7 +23,6 @@ import { initSettings } from './settings.js';
 import { initVim } from './vim.js';
 import { initImageViewer } from './imageview.js';
 import { initGitStream } from './gitstream.js';
-
 // Initialize all subsystems
 initRenderer();
 initTabs();

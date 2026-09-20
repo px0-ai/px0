@@ -15,7 +15,6 @@ import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
 import { togglePreview } from './markdown.js';
 import { openSettings } from './settings.js';
 import { showVimHelp, isVimEnabled, setVimModeEnabled } from './vim.js';
-
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
 export const palList = $('#pal-list');
