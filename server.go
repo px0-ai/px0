@@ -58,6 +58,19 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	sub, _ := fs.Sub(assets, "web")
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 	s.mux.HandleFunc("/static/themes.css", s.handleThemes)
+	// Well-known URLs crawled by Safari when building a Dock web app (macOS uses manifest icons).
+	s.mux.HandleFunc("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
+		serveWebAsset(w, r, "manifest.json", "application/manifest+json")
+	})
+	s.mux.HandleFunc("/apple-touch-icon.png", func(w http.ResponseWriter, r *http.Request) {
+		serveWebAsset(w, r, "icons/icon-1024.png", "image/png")
+	})
+	s.mux.HandleFunc("/apple-touch-icon-precomposed.png", func(w http.ResponseWriter, r *http.Request) {
+		serveWebAsset(w, r, "icons/icon-1024.png", "image/png")
+	})
+	s.mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		serveWebAsset(w, r, "favicon.ico", "image/x-icon")
+	})
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/api/meta", s.handleMeta)
 	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
@@ -214,6 +227,26 @@ func (s *Server) agentHarnesses() []agentHarness {
 		return []agentHarness{}
 	}
 	return s.agent.Detect()
+}
+
+func serveWebAsset(w http.ResponseWriter, r *http.Request, rel string, contentType string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b, err := fs.ReadFile(assets, "web/"+rel)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+		return
+	}
+	w.Write(b)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
