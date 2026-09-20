@@ -50,7 +50,7 @@ sequenceDiagram
 
 ## 3. HTTP Server & API Catalog
 
-The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps and applies pooled Gzip compression when accepted by the client.
+The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps, sets `Cache-Control: no-store` and `Content-Security-Policy`, and applies pooled Gzip compression when accepted by the client.
 
 ### Endpoints Reference
 
@@ -151,6 +151,25 @@ When navigating code via LSP Go-to-Definition, targets often reside outside the 
 - Rather than opening up arbitrary filesystem reads, targets returned by the trusted LSP server are admitted into an in-memory allowlist: `extAllowed[canonicalPath] = true`.
 - `/api/file` and `/api/raw` permit reading external files only if the exact path exists in `extAllowed`.
 - External paths can never be enumerated via `/api/tree` or searched via `/api/search`.
+
+### Content-Security-Policy
+
+The UI is a document on px0's origin, which also serves the file APIs. `ServeHTTP` therefore sends a `Content-Security-Policy` on every response, including `/` and `/api/raw`, so a document that slipped through still cannot run a second script origin.
+
+| Directive | Value | Why |
+| --------- | ----- | --- |
+| `default-src` | `'self'` | Fallback: same origin only |
+| `script-src` | `'self'` | Only `/static/app.js`. Blocks inline `<script>`, `javascript:` URLs, and CDN script |
+| `style-src` | `'self' 'unsafe-inline' https://fonts.googleapis.com` | Bundled CSS, the UI's indent/minimap `style="..."` attributes, Google Fonts stylesheet |
+| `font-src` | `'self' https://fonts.gstatic.com` | JetBrains Mono files |
+| `img-src` | `'self' data: https: http:` | `/api/raw` images, Markdown `https`/`http`/`data:` images, `https://px0.ai` logos |
+| `connect-src` | `'self'` | `fetch` to `/api/*` only |
+| `object-src` | `'none'` | No Flash/PDF plugins |
+| `base-uri` | `'none'` | An injected `<base>` cannot retarget relative URLs |
+| `frame-ancestors` | `'none'` | The UI cannot be framed |
+| `form-action` | `'none'` | px0 has no forms |
+
+`style-src` includes `'unsafe-inline'` because the tree, outline, call trail, and minimap set `style` attributes from JS. That is a CSS-injection gap, not a script gap: Markdown sanitization already drops `style` attributes from preview HTML.
 
 ### Origin Verification for Installers
 
