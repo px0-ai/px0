@@ -86,6 +86,8 @@ Discovery alone never enables editing. Finding `claude` on PATH is not consent t
 
 The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). Changing either dropdown updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
 
+Each dispatch reads `agent.timeoutSeconds` from the current settings and gives the harness its own deadline. Values outside the documented 10–600 second range, or values that cannot be parsed, fall back to the 120-second default. Updating the setting affects the next dispatch without restarting px0.
+
 The choice is written to:
 
 ```

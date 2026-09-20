@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSettingsDefaults(t *testing.T) {
@@ -36,6 +37,36 @@ func TestSettingsDefaults(t *testing.T) {
 	}
 	if m["agent.timeoutSeconds"] != 120.0 && m["agent.timeoutSeconds"] != 120 {
 		t.Errorf("expected agent.timeoutSeconds 120, got %v", m["agent.timeoutSeconds"])
+	}
+}
+
+func TestConfiguredAgentTimeout(t *testing.T) {
+	isolateSettings(t)
+
+	if got := configuredAgentTimeout(); got != defaultAgentTimeout {
+		t.Fatalf("default timeout = %s, want %s", got, defaultAgentTimeout)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  time.Duration
+	}{
+		{name: "minimum", value: 10.0, want: 10 * time.Second},
+		{name: "custom", value: 45.0, want: 45 * time.Second},
+		{name: "maximum", value: 600.0, want: 10 * time.Minute},
+		{name: "below minimum", value: 9.0, want: defaultAgentTimeout},
+		{name: "above maximum", value: 601.0, want: defaultAgentTimeout},
+		{name: "wrong type", value: "30", want: defaultAgentTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := updateSettingsMap(map[string]any{"agent.timeoutSeconds": tc.value}); err != nil {
+				t.Fatal(err)
+			}
+			if got := configuredAgentTimeout(); got != tc.want {
+				t.Fatalf("configured timeout = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }
 
