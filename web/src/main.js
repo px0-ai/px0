@@ -1,11 +1,11 @@
 // web/src/main.js
 import { $, S, api, applyKeyLabels } from './state.js';
 import { measure, layout, render, initRenderer, updateEditorOptionControls } from './renderer.js';
-import { initTabs, openFile } from './tabs.js';
+import { initTabs, openFile, restoreWorkspaceTabs, switchTab } from './tabs.js';
 import { initCursor } from './cursor.js';
 import { initHover } from './hover.js';
 import { initSelectionBar } from './selbar.js';
-import { drawTree, treeEl, initTree, revealFile } from './tree.js';
+import { drawTree, treeEl, initTree, revealFile, refreshTree, restoreOpenDirs, setSidebarMode, updateSidebarToggleState } from './tree.js';
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
 import { initPanels } from './panels.js';
@@ -17,7 +17,12 @@ import { initShortcuts } from './shortcuts.js';
 import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
-import { updateStatus, initMetrics, initStatusFit, updateMetricsDisplay } from './status.js';
+import { initAgent, applyAgentMeta, loadAgentAsync } from './agent.js';
+import { initMetrics, initStatusFit, updateMetricsDisplay, updateStatus } from './status.js';
+import { initSettings } from './settings.js';
+import { initVim } from './vim.js';
+import { initImageViewer } from './imageview.js';
+import { initGitStream } from './gitstream.js';
 
 // Initialize all subsystems
 initRenderer();
@@ -36,8 +41,12 @@ initPalette();
 initShortcuts();
 initMarkdown();
 initDiff();
+initAgent();
 initMetrics();
 initStatusFit();
+initSettings();
+initVim();
+initImageViewer();
 
 // Bootstrap application lifecycle
 (async function boot() {
@@ -49,10 +58,9 @@ initStatusFit();
     S.wrap = wrapPref !== null ? wrapPref === 'true' : true;
     document.body.classList.toggle('word-wrap', S.wrap);
 
-    // Restore line numbers (default ON)
-    const linesPref = localStorage.getItem('px0.lineNumbers');
-    S.lineNumbers = linesPref !== null ? linesPref === 'true' : true;
-    document.body.classList.toggle('hide-lines', !S.lineNumbers);
+    // Line numbers are always ON
+    S.lineNumbers = true;
+    document.body.classList.remove('hide-lines');
 
     // Restore Markdown preview (default ON)
     const mdPref = localStorage.getItem('px0.mdPreview');
@@ -66,7 +74,8 @@ initStatusFit();
   measure();
   S.meta = await api('/api/meta');
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
-  if (S.meta.git) { const b = $('#btn-changed'); if (b) b.hidden = false; }
+  updateSidebarToggleState();
+  applyAgentMeta();
   document.title = S.meta.name + ' - px0';
   $('#root-name').textContent = S.meta.name;
   $('#root-name').title = S.meta.root;
@@ -74,8 +83,19 @@ initStatusFit();
     const emptyVerEl = $('#empty-ver');
     if (emptyVerEl) emptyVerEl.textContent = 'v' + S.meta.version;
   }
-  updateStatus();
-  await drawTree('', treeEl, 0);
+  try {
+    const savedDirs = JSON.parse(sessionStorage.getItem('px0.openDirs') || '[]');
+    restoreOpenDirs(savedDirs);
+  } catch {}
+  await refreshTree();
+  initGitStream();
+
+  const hasGitChanges = !!(S.meta?.git && S.meta.gitChanges > 0);
+  if (hasGitChanges) {
+    await setSidebarMode('git');
+  } else {
+    setSidebarMode('files');
+  }
 
   const params = new URLSearchParams(window.location.search);
   const initialPath = params.get('path');
@@ -91,6 +111,20 @@ initStatusFit();
       const cleanUrl = u.pathname + (cleanSearch ? '?' + cleanSearch : '') + u.hash;
       window.history.replaceState({}, '', cleanUrl);
     } catch {}
+  } else {
+    const restored = await restoreWorkspaceTabs();
+    if (hasGitChanges) {
+      const hasActiveDiff = S.tabs[S.active]?.diffAvailable;
+      if (!hasActiveDiff) {
+        const changedTabIdx = S.tabs.findIndex(t => t.diffAvailable);
+        if (changedTabIdx >= 0) {
+          switchTab(changedTabIdx);
+        } else if (S.meta.gitFiles && S.meta.gitFiles.length > 0) {
+          await openFile(S.meta.gitFiles[0]);
+          await revealFile(S.meta.gitFiles[0]);
+        }
+      }
+    }
   }
 
   if (document.fonts && document.fonts.ready) {
@@ -113,4 +147,7 @@ initStatusFit();
       }
     }, 150);
   }
+
+  // Load harnesses and models asynchronously after the browser is loaded.
+  loadAgentAsync();
 })();

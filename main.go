@@ -38,7 +38,10 @@ func main() {
 		doUpdate     = flag.Bool("update", false, "check for and install latest version of px0")
 		noColor      = flag.Bool("no-color", false, "disable colour output")
 		quiet        = flag.Bool("quiet", false, "suppress narration")
+		verbose      = flag.Bool("verbose", false, "log requests, searches, symbols, and agent prompts to terminal")
 		noTelemetry  = flag.Bool("no-telemetry", false, "disable anonymous usage telemetry")
+		agentCmd     = flag.String("agent", "", "pin the coding harness used for edits (claude, gemini, cursor-agent, agy, opencode, codex, aider, goose, or a command template containing {prompt}); detected and chosen in the UI when omitted")
+		noAgent      = flag.Bool("no-agent", false, "do not offer editing through a coding harness")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [file or directory]\n\nflags:\n", version)
@@ -52,6 +55,9 @@ func main() {
 	}
 	if *quiet {
 		uiQuiet = true
+	}
+	if *verbose {
+		uiVerbose = true
 	}
 	if *noGit {
 		gitDisabled = true
@@ -94,7 +100,17 @@ func main() {
 	tel := NewTelemetryService(*noTelemetry)
 	defer tel.Close("normal")
 
-	srv := &http.Server{Handler: NewServer(ix, lsp)}
+	pxSrv := NewServer(ix, lsp)
+	var agent *agentManager
+	if !*noAgent {
+		agent, err = newAgentManager(root, *agentCmd, lsp)
+		if err != nil {
+			fatal(fmt.Errorf("-agent: %w", err))
+		}
+		pxSrv.SetAgent(agent)
+	}
+
+	srv := &http.Server{Handler: pxSrv}
 
 	url := viewerURL(addr, initialFile, initialLine)
 	uiHeading("px0 "+version, nil, os.Stdout)
@@ -120,6 +136,21 @@ func main() {
 		if names := lsp.Available(); len(names) > 0 {
 			uiBullet(fmt.Sprintf("language servers: %s (started on first use)", strings.Join(names, ", ")), os.Stdout)
 		}
+		if agent != nil {
+			var found []string
+			for _, h := range agent.Detect() {
+				if h.Installed {
+					item := h.Name
+					if h.Model != "" {
+						item = fmt.Sprintf("%s (%s)", h.Name, h.Model)
+					}
+					found = append(found, item)
+				}
+			}
+			if uiVerbose && len(found) > 0 {
+				uiStatus("info", uiInfo("coding harnesses: "+strings.Join(found, ", "), os.Stdout), "", 0, os.Stdout)
+			}
+		}
 
 		tel.Track("session_started", map[string]any{
 			"files_bucket": filesBucket(n),
@@ -141,7 +172,7 @@ func main() {
 		<-stop
 		interrupted = true
 		fmt.Print("\r")
-		uiStatus("warn", "interrupted", "", 0, os.Stderr)
+		uiStatus("info", "px0 stopped", "", 0, os.Stderr)
 		go func() {
 			<-stop // Second interrupt forces immediate exit
 			os.Exit(130)
@@ -153,6 +184,7 @@ func main() {
 
 	err = srv.Serve(ln)
 	lsp.Close()
+	agent.Close()
 
 	if interrupted {
 		tel.Close("interrupted")

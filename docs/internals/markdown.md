@@ -175,6 +175,9 @@ These cases come from the browser checks run against the implementation:
 
 - GitHub alerts. A blockquote whose first paragraph opens with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` loses the marker, gains a `.md-alert-title` paragraph, and gets `.md-alert .md-alert-<kind>`.
 - Code block wrappers. Each `<pre>` moves into `.md-pre`, which carries `data-lang` for a corner label and a copy button. The button holds an SVG icon rather than a text label, because find in the preview walks text nodes and would otherwise match the word "Copy".
+- Inline image enhancements. Every kept `<img>` is injected with `loading="lazy"` and `decoding="async"`, preventing layout shifts and deferring offscreen network transfers. Standalone images receive `.md-zoomable`, affording hover highlights and zoom-in cursors.
+- Interactive Lightbox (`#img-lightbox`). Clicking a standalone image opens a centered modal over a blurred backdrop (`rgba(0, 0, 0, 0.72)` + `backdrop-filter: blur(8px)`). The lightbox displays natural dimensions, offers an "Open in Tab" button (to promote the image into a dedicated image tab), a "Copy Path" button, and dismisses on `Esc` or backdrop click.
+- Broken image recovery. An error event listener registered during the capture phase on `#md` detects failed image loads and replaces the element with a styled `.md-img-broken` card displaying the missing path. See [Image Viewer Architecture](image-viewer.md) for full details.
 
 Styles live under `/* ---------- markdown preview ---------- */` in [`web/style.css`](../../web/style.css). They read only existing theme tokens, so all themes work without changes. Alerts set a local `--alert` property from existing tokens: Note `--accent`, Tip `--gi`, Important `--nc`, Warning `--mark-active`, Caution `--err`. [`styling-and-themes.md`](styling-and-themes.md) lists every token the preview uses.
 
@@ -245,7 +248,7 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 - The preview does not reload when the file changes on disk. Close and reopen the tab.
 - Images that load after a scroll position is restored can push content down.
 - Relative images in a Markdown file outside the workspace (opened through a language server) do not load, because `/api/raw` accepts only workspace paths.
-- The selection bar actions (Copy Ref, Copy for Agent, Find Usages) do not act on text selected in the preview.
+- The selection bar and right-click menu actions (Copy Ref, Copy with Context, Edit Inline, Find Usages) do not act on text selected in the preview. Switch to Source to edit.
 
 ## 11. Tests
 

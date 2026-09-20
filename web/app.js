@@ -2,20 +2,32 @@
   // web/src/state.js
   var $ = (s, r = document) => r.querySelector(s);
   var $$ = (s, r = document) => [...r.querySelectorAll(s)];
-  var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  var request = async (method, path, params) => {
+  var esc2 = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  var request = async (method, path, params, opts = {}) => {
     const u = new URL(path, location.origin);
-    for (const [k, v] of Object.entries(params || {}))
-      if (v !== undefined && v !== "")
-        u.searchParams.set(k, v);
-    const r = await fetch(u, { method });
+    const fetchOpts = { method, ...opts };
+    const isPost = method === "POST" || method === "PUT" || method === "PATCH";
+    if (params) {
+      const hasComplex = typeof params === "object" && params !== null && (Array.isArray(params) || Object.values(params).some((v) => typeof v === "object" && v !== null));
+      if (isPost && (opts.json || hasComplex)) {
+        fetchOpts.headers = { "Content-Type": "application/json", ...opts.headers || {} };
+        fetchOpts.body = JSON.stringify(params);
+      } else {
+        for (const [k, v] of Object.entries(params)) {
+          if (v !== undefined && v !== "")
+            u.searchParams.set(k, v);
+        }
+      }
+    }
+    const r = await fetch(u, fetchOpts);
     const j = await r.json();
     if (j.error)
-      throw new Error(j.error);
+      throw Object.assign(new Error(j.error), { body: j });
     return j;
   };
-  var api = (path, params) => request("GET", path, params);
-  var apiPost = (path, params) => request("POST", path, params);
+  var api = (path, params, opts) => request("GET", path, params, opts);
+  var apiPost = (path, params, opts) => request("POST", path, params, opts);
+  var apiPostJson = (path, params, opts) => request("POST", path, params, { json: true, ...opts });
   var debounce = (fn, ms) => {
     let t;
     return (...a) => {
@@ -38,7 +50,7 @@
     const key = parts.pop() || "";
     return parts.join("") + (parts.length && /^[a-z]{2,}$/i.test(key) ? " " : "") + key;
   };
-  var keyCaps = (combo) => keyParts(combo).map((k) => "<kbd>" + esc(k) + "</kbd>").join("");
+  var keyCaps = (combo) => keyParts(combo).map((k) => "<kbd>" + esc2(k) + "</kbd>").join("");
   var withKeys = (text) => text.replace(/\{([^}]+)\}/g, (_, combo) => keyLabel(combo));
   function applyKeyLabels(root = document) {
     for (const el of $$("[data-keys]", root))
@@ -48,7 +60,7 @@
     for (const el of $$('[title*="{"]', root))
       el.title = withKeys(el.title);
   }
-  var LH = 20;
+  var LH2 = 20;
   var CHUNK = 1000;
   var OVERSCAN = 24;
   var S2 = {
@@ -70,7 +82,9 @@
     chW: 7.8,
     wrap: true,
     lineNumbers: true,
-    mdPreview: true
+    mdPreview: true,
+    settings: null,
+    agentTargets: []
   };
   var doc_ = () => S2.active >= 0 ? S2.tabs[S2.active] : null;
 
@@ -81,17 +95,34 @@
   var editor = $("#editor");
   var toastEl = $("#toast");
   var toastTimer = 0;
-  function showToast(accentText, text) {
+  var toastLeaveTimer = 0;
+  function showToast(accentText, text, duration = 2200) {
     if (!toastEl)
       return;
-    toastEl.innerHTML = (accentText ? '<span class="toast-accent">' + esc(accentText) + "</span> " : "") + esc(text);
-    toastEl.hidden = false;
     clearTimeout(toastTimer);
+    clearTimeout(toastLeaveTimer);
+    toastEl.classList.remove("toast-hide");
+    let iconHtml = "";
+    if (accentText) {
+      if (accentText === "✓") {
+        iconHtml = '<span class="toast-icon toast-icon-ok"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6"/></svg></span>';
+      } else if (accentText === "!") {
+        iconHtml = '<span class="toast-icon toast-icon-warn"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="8" y1="4" x2="8" y2="9"/><circle cx="8" cy="12.5" r="0.6" fill="currentColor"/></svg></span>';
+      } else {
+        iconHtml = '<span class="toast-chip">' + esc2(accentText) + "</span>";
+      }
+    }
+    toastEl.innerHTML = iconHtml + '<span class="toast-msg">' + esc2(text) + "</span>";
+    toastEl.hidden = false;
     toastTimer = setTimeout(() => {
-      toastEl.hidden = true;
-    }, 2200);
+      toastEl.classList.add("toast-hide");
+      toastLeaveTimer = setTimeout(() => {
+        toastEl.hidden = true;
+        toastEl.classList.remove("toast-hide");
+      }, 180);
+    }, duration);
   }
-  async function copyToClipboard(text, notify = "Copied to clipboard") {
+  async function copyToClipboard(text, notify = "Copied") {
     try {
       await navigator.clipboard.writeText(text);
       showToast("✓", notify);
@@ -124,9 +155,9 @@
       return;
     const digits = String(d.total).length;
     editor.style.setProperty("--gw", digits);
-    const gutter = S2.lineNumbers ? digits * S2.chW + 30 : 16;
+    const gutter = digits * S2.chW + 30;
     const w = S2.wrap ? vp.clientWidth : Math.max(vp.clientWidth, gutter + (d.maxCols + 4) * S2.chW);
-    sizer.style.height = d.total * LH + Math.max(120, vp.clientHeight * 0.5) + "px";
+    sizer.style.height = d.total * LH2 + Math.max(120, vp.clientHeight * 0.5) + "px";
     sizer.style.width = w + "px";
     rowsEl.style.width = w + "px";
   }
@@ -143,10 +174,22 @@
   function toggleLineNumbers(forced) {
     S2.lineNumbers = typeof forced === "boolean" ? forced : !S2.lineNumbers;
     document.body.classList.toggle("hide-lines", !S2.lineNumbers);
-    try {
-      localStorage.setItem("px0.lineNumbers", S2.lineNumbers ? "true" : "false");
-    } catch {}
-    updateEditorOptionControls();
+    layout();
+    render();
+  }
+  function applyEditorTypography(fontSize, fontFamily, lineHeight, tabSize) {
+    if (fontSize)
+      document.documentElement.style.setProperty("--fs", fontSize + "px");
+    if (fontFamily)
+      document.documentElement.style.setProperty("--mono", fontFamily);
+    if (lineHeight) {
+      document.documentElement.style.setProperty("--lh", lineHeight + "px");
+    } else if (fontSize) {
+      document.documentElement.style.setProperty("--lh", Math.round(fontSize * 1.5) + "px");
+    }
+    if (tabSize)
+      document.documentElement.style.setProperty("--tab-size", tabSize);
+    measure();
     layout();
     render();
   }
@@ -154,9 +197,6 @@
     const wrapBtn = $('[data-action="wrap"]');
     if (wrapBtn)
       wrapBtn.classList.toggle("active", !!S2.wrap);
-    const linesBtn = $('[data-action="line-numbers"]');
-    if (linesBtn)
-      linesBtn.classList.toggle("active", !!S2.lineNumbers);
   }
   var raf = 0;
   function render() {
@@ -176,18 +216,23 @@
       return;
     }
     const top = vp.scrollTop;
-    const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
-    const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
+    const first = Math.max(0, Math.floor(top / LH2) - OVERSCAN);
+    const count = Math.ceil(vp.clientHeight / LH2) + OVERSCAN * 2;
     const last = Math.min(d.total, first + count);
     ensureChunks(d, first, last);
     let html = "";
     const gut = d.gutter || null;
+    const agentRanges = (S2.agentTargets || []).filter((t) => t.path === d.path);
     for (let i = first;i < last; i++) {
       const n = i + 1;
       const body = d.lines[i];
       let rc = "row", gc = "g";
       if (n === d.cur)
         rc += " cur";
+      if (agentRanges.some((r) => n >= r.l1 && n <= r.l2))
+        rc += " agent-sel";
+      if (agentRanges.some((r) => n === r.l1))
+        rc += " agent-anchor";
       if (gut) {
         const m = gut.marks.get(n);
         if (m)
@@ -198,7 +243,7 @@
       html += '<div class="' + rc + '" data-l="' + n + '">' + '<div class="' + gc + '">' + n + '</div><div class="c">' + (body === undefined ? "" : body) + "</div></div>";
     }
     const sel = saveSelection();
-    rowsEl.style.transform = "translateY(" + first * LH + "px)";
+    rowsEl.style.transform = "translateY(" + first * LH2 + "px)";
     rowsEl.innerHTML = html;
     rowsEl.classList.toggle("all", S2.selAll === d);
     decorate(first, last);
@@ -228,14 +273,14 @@
       r.collapse(true);
       const rect = r.getClientRects()[0] || r.getBoundingClientRect();
       x = rect.left;
-      y = S2.wrap ? rect.top - (LH - rect.height) / 2 : row.getBoundingClientRect().top;
+      y = S2.wrap ? rect.top - (LH2 - rect.height) / 2 : row.getBoundingClientRect().top;
     } else {
       const cr = code.getBoundingClientRect();
       x = cr.left + parseFloat(getComputedStyle(code).paddingLeft || "0");
       y = cr.top;
     }
     const g = $(".g", row);
-    if (g && S2.lineNumbers && x < g.getBoundingClientRect().right - 1) {
+    if (g && x < g.getBoundingClientRect().right - 1) {
       el.hidden = true;
       return null;
     }
@@ -544,7 +589,7 @@
       if (!items.length)
         return '<div class="hint">No symbols found.</div>';
       const base = Math.min(...items.map((s) => s.indent));
-      return (d.outlineSource ? '<div class="hint"><span class="src">' + esc(d.outlineSource) + "</span> · " + items.length + " symbols</div>" : "") + items.map((s) => '<div class="sym" data-n="' + s.line + '" style="padding-left:' + (10 + Math.min(s.indent - base, 16) * 5) + 'px" title="Jump to ' + esc(s.name) + " at line " + s.line + '">' + '<span class="kd" data-k="' + esc(s.kind) + '">' + esc(kindLabel(s.kind)) + "</span>" + '<span class="sn">' + esc(s.name) + '</span><span class="sl">' + s.line + "</span></div>").join("");
+      return (d.outlineSource ? '<div class="hint"><span class="src">' + esc2(d.outlineSource) + "</span> · " + items.length + " symbols</div>" : "") + items.map((s) => '<div class="sym" data-n="' + s.line + '" style="padding-left:' + (10 + Math.min(s.indent - base, 16) * 5) + 'px" title="Jump to ' + esc2(s.name) + " at line " + s.line + '">' + '<span class="kd" data-k="' + esc2(s.kind) + '">' + esc2(kindLabel(s.kind)) + "</span>" + '<span class="sn">' + esc2(s.name) + '</span><span class="sl">' + s.line + "</span></div>").join("");
     };
     if (el)
       el.innerHTML = renderSymHtml(syms);
@@ -631,12 +676,12 @@
       const note = c.ignored ? " (ignored by .gitignore, not searched)" : "";
       if (c.dir) {
         const dc = c.dirty ? " dirty" : "";
-        return '<div class="tw"><div class="tr dir' + ig + dc + '" data-dir="' + esc(c.path) + '" style="padding-left:' + pad + 'px" title="Folder: ' + esc(c.path) + note + '">' + '<span class="ar"></span><span class="nm">' + esc(c.name) + "</span></div>" + '<div class="kids" data-kids="' + esc(c.path) + '"></div></div>';
+        return '<div class="tw"><div class="tr dir' + ig + dc + '" data-dir="' + esc2(c.path) + '" style="padding-left:' + pad + 'px" title="Folder: ' + esc2(c.path) + note + '">' + '<span class="ar"></span><span class="nm">' + esc2(c.name) + "</span></div>" + '<div class="kids" data-kids="' + esc2(c.path) + '"></div></div>';
       }
       const g = GIT_STATUS[c.status];
       const gc = g ? " dirty " + g[0] : "";
-      const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc(c.status) + "</span>" : "";
-      return '<div class="tr file' + ig + gc + '" data-file="' + esc(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc(c.path) + note + '">' + '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc(c.name) + "</span>" + badge + "</div>";
+      const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc2(c.status) + "</span>" : "";
+      return '<div class="tr file' + ig + gc + '" data-file="' + esc2(c.path) + '" style="padding-left:' + (pad + 12) + 'px" title="Open ' + esc2(c.path) + note + '">' + '<span class="ic" data-t="' + fileKind(c.name) + '"></span><span class="nm">' + esc2(c.name) + "</span>" + badge + "</div>";
     }).join("");
   }
   var FILE_KIND = {
@@ -704,6 +749,33 @@
     const i = name.lastIndexOf(".");
     return i > 0 && FILE_KIND[name.slice(i + 1).toLowerCase()] || "other";
   }
+  async function refreshTree() {
+    await drawTree("", treeEl, 0);
+    const dirs = Array.from(openDirs).sort((a, b) => a.split("/").length - b.split("/").length);
+    for (const path of dirs) {
+      const dirRow = treeEl.querySelector('[data-dir="' + CSS.escape(path) + '"]');
+      const kids = treeEl.querySelector('[data-kids="' + CSS.escape(path) + '"]');
+      if (kids && dirRow) {
+        dirRow.classList.add("open");
+        kids.classList.add("open");
+        kids.dataset.loaded = "1";
+        await drawTree(path, kids, path.split("/").length);
+      } else {
+        openDirs.delete(path);
+      }
+    }
+    if (treeEl.classList.contains("changed-only")) {
+      await expandDirtyDirs();
+    }
+  }
+  function restoreOpenDirs(dirs) {
+    if (Array.isArray(dirs)) {
+      for (const d of dirs) {
+        if (typeof d === "string")
+          openDirs.add(d);
+      }
+    }
+  }
   async function revealDir(dir) {
     const parts = dir.split("/");
     for (let i = 0;i < parts.length; i++) {
@@ -711,13 +783,23 @@
       const row = treeEl.querySelector('[data-dir="' + CSS.escape(p) + '"]');
       if (!row)
         break;
-      if (!row.classList.contains("open"))
-        row.click();
-      await new Promise((r) => setTimeout(r, 30));
+      if (!row.classList.contains("open")) {
+        row.classList.add("open");
+        const kids = treeEl.querySelector('[data-kids="' + CSS.escape(p) + '"]');
+        if (kids) {
+          kids.classList.add("open");
+          openDirs.add(p);
+          kids.dataset.loaded = "1";
+          await drawTree(p, kids, p.split("/").length);
+        }
+      }
     }
     const last = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
     if (last)
       last.scrollIntoView({ block: "center" });
+    try {
+      sessionStorage.setItem("px0.openDirs", JSON.stringify(Array.from(openDirs)));
+    } catch {}
   }
   async function revealFile(path) {
     const idx = path.lastIndexOf("/");
@@ -730,10 +812,108 @@
       row.scrollIntoView({ block: "center" });
     }
   }
+  async function expandDirtyDirs(container = treeEl) {
+    const dirtyRows = Array.from(container.querySelectorAll(".tr.dir.dirty:not(.open)"));
+    for (const dirRow of dirtyRows) {
+      const path = dirRow.dataset.dir;
+      const kids = container.querySelector('[data-kids="' + CSS.escape(path) + '"]');
+      if (kids) {
+        dirRow.classList.add("open");
+        kids.classList.add("open");
+        kids.dataset.loaded = "1";
+        openDirs.add(path);
+        await drawTree(path, kids, path.split("/").length);
+        await expandDirtyDirs(kids);
+      }
+    }
+    try {
+      sessionStorage.setItem("px0.openDirs", JSON.stringify(Array.from(openDirs)));
+    } catch {}
+  }
+  async function patchTreeGitStatus(statuses = {}, dirtyDirs = {}) {
+    const dirRows = treeEl.querySelectorAll(".tr.dir");
+    for (const dirRow of dirRows) {
+      const p = dirRow.dataset.dir;
+      dirRow.classList.toggle("dirty", !!dirtyDirs[p]);
+    }
+    const dirtyFiles = treeEl.querySelectorAll(".tr.file.dirty");
+    for (const fileRow of dirtyFiles) {
+      const p = fileRow.dataset.file;
+      if (!statuses[p]) {
+        fileRow.classList.remove("dirty", "git-M", "git-A", "git-D", "git-untracked", "git-R");
+        const badge = fileRow.querySelector(".gs");
+        if (badge)
+          badge.remove();
+      }
+    }
+    for (const [p, code] of Object.entries(statuses)) {
+      const fileRow = treeEl.querySelector('[data-file="' + CSS.escape(p) + '"]');
+      if (!fileRow)
+        continue;
+      const g = GIT_STATUS[code];
+      fileRow.classList.remove("git-M", "git-A", "git-D", "git-untracked", "git-R");
+      if (g) {
+        fileRow.classList.add("dirty", g[0]);
+        let badge = fileRow.querySelector(".gs");
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "gs";
+          fileRow.appendChild(badge);
+        }
+        badge.title = "git: " + g[1];
+        badge.textContent = code;
+      } else {
+        fileRow.classList.remove("dirty");
+        const badge = fileRow.querySelector(".gs");
+        if (badge)
+          badge.remove();
+      }
+    }
+    if (treeEl.classList.contains("changed-only")) {
+      await expandDirtyDirs();
+    }
+  }
+  function updateSidebarToggleState() {
+    const btnChanged = $("#btn-changed");
+    const hasGitChanges = !!(S2.meta?.git && S2.meta.gitChanges > 0);
+    if (btnChanged) {
+      btnChanged.disabled = !hasGitChanges;
+      btnChanged.classList.toggle("disabled", !hasGitChanges);
+      if (!S2.meta?.git) {
+        btnChanged.title = "Git not available in workspace";
+      } else if (!hasGitChanges) {
+        btnChanged.title = "There are no git modified files.";
+      } else {
+        btnChanged.title = "Git changes (show changed files only)";
+      }
+    }
+  }
+  async function setSidebarMode(mode) {
+    const btnChanged = $("#btn-changed");
+    const btnFiles = $("#btn-files");
+    updateSidebarToggleState();
+    const hasGitChanges = !!(S2.meta?.git && S2.meta.gitChanges > 0);
+    if (mode === "git" && hasGitChanges) {
+      treeEl.classList.add("changed-only");
+      btnChanged?.classList.add("active");
+      btnFiles?.classList.remove("active");
+      await expandDirtyDirs();
+    } else {
+      treeEl.classList.remove("changed-only");
+      btnFiles?.classList.add("active");
+      btnChanged?.classList.remove("active");
+    }
+  }
   function initTree() {
-    $("#btn-changed")?.addEventListener("click", (e) => {
-      const on = treeEl.classList.toggle("changed-only");
-      e.currentTarget.classList.toggle("active", on);
+    updateSidebarToggleState();
+    $("#btn-changed")?.addEventListener("click", async () => {
+      const hasGitChanges = !!(S2.meta?.git && S2.meta.gitChanges > 0);
+      if (!hasGitChanges)
+        return;
+      await setSidebarMode("git");
+    });
+    $("#btn-files")?.addEventListener("click", () => {
+      setSidebarMode("files");
     });
     treeEl.addEventListener("click", async (e) => {
       const dirRow = e.target.closest("[data-dir]");
@@ -744,12 +924,13 @@
         kids.classList.toggle("open", open);
         if (open) {
           openDirs.add(path);
-          if (!kids.dataset.loaded) {
-            kids.dataset.loaded = "1";
-            await drawTree(path, kids, path.split("/").length);
-          }
+          kids.dataset.loaded = "1";
+          await drawTree(path, kids, path.split("/").length);
         } else
           openDirs.delete(path);
+        try {
+          sessionStorage.setItem("px0.openDirs", JSON.stringify(Array.from(openDirs)));
+        } catch {}
         return;
       }
       const f = e.target.closest("[data-file]");
@@ -767,18 +948,31 @@
     layout();
     render();
   }
-  function initPanels() {
-    $("#btn-reindex").addEventListener("click", async () => {
-      $("#st-index").textContent = "reindexing…";
+  async function reindexWorkspace() {
+    try {
       const j = await api("/api/reindex");
       S2.meta.files = j.files;
       S2.meta.indexMs = j.indexMs;
-      treeEl.innerHTML = "";
-      openDirs.clear();
-      await drawTree("", treeEl, 0);
+      if (j.gitChanges !== undefined)
+        S2.meta.gitChanges = j.gitChanges;
+      if (j.gitFiles !== undefined)
+        S2.meta.gitFiles = j.gitFiles;
+      const hasGitChanges = !!(S2.meta?.git && S2.meta.gitChanges > 0);
+      if (hasGitChanges) {
+        await setSidebarMode("git");
+      } else {
+        setSidebarMode("files");
+      }
+      await refreshTree();
       await reloadOpenTabs();
       updateStatus();
-    });
+      showToast("✓", "Workspace refreshed");
+    } catch (e) {
+      showToast("!", "Refresh failed: " + e.message);
+    }
+  }
+  function initPanels() {
+    $("#btn-reindex").addEventListener("click", reindexWorkspace);
     (() => {
       const rz = $("#resizer");
       let dragging = false;
@@ -905,12 +1099,22 @@
     }
     const h = S2.find.hits[S2.find.active];
     d.cur = h.line;
-    const y = (h.line - 1) * LH;
-    if (y < vp.scrollTop + LH * 2 || y > vp.scrollTop + vp.clientHeight - LH * 3)
+    const y = (h.line - 1) * LH2;
+    if (y < vp.scrollTop + LH2 * 2 || y > vp.scrollTop + vp.clientHeight - LH2 * 3)
       centerLine(h.line);
     $("#find-count").textContent = S2.find.active + 1 + " / " + n;
     render();
     updateStatus();
+  }
+  function findNextMatch(delta = 1) {
+    if (!S2.find || !S2.find.hits || !S2.find.hits.length) {
+      if (findInput.value) {
+        runFind();
+        return;
+      }
+      return;
+    }
+    jumpToHit(S2.find.active + delta);
   }
   function initFind() {
     findInput.addEventListener("input", runFind);
@@ -944,15 +1148,26 @@
   // web/src/search.js
   var resultsEl = $("#results");
   var lastResults = null;
+  var searchAbort = null;
+  function cancelSearch() {
+    if (searchAbort) {
+      searchAbort.abort();
+      searchAbort = null;
+    }
+  }
   var runSearch = debounce(async () => {
     const qEl = $("#q");
     if (!qEl || !resultsEl)
       return;
     const q = qEl.value;
     if (!q.trim()) {
+      cancelSearch();
       resultsEl.innerHTML = "";
       return;
     }
+    cancelSearch();
+    const controller = new AbortController;
+    searchAbort = controller;
     resultsEl.innerHTML = '<div class="hint">searching…</div>';
     const params = {
       q,
@@ -962,10 +1177,18 @@
       re: $("#o-re")?.classList.contains("on") ? 1 : ""
     };
     try {
-      const j = await api("/api/search", params);
-      renderResults(j);
+      const j = await api("/api/search", params, { signal: controller.signal });
+      if (searchAbort === controller) {
+        searchAbort = null;
+        renderResults(j);
+      }
     } catch (e) {
-      resultsEl.innerHTML = '<div class="hint">' + esc(e.message) + "</div>";
+      if (e.name === "AbortError")
+        return;
+      if (searchAbort === controller) {
+        searchAbort = null;
+        resultsEl.innerHTML = '<div class="hint">' + esc2(e.message) + "</div>";
+      }
     }
   }, 160);
   function renderResults(j) {
@@ -977,11 +1200,11 @@
       return;
     }
     const head = j.header || j.total.toLocaleString() + " result" + (j.total === 1 ? "" : "s") + " in " + j.files.toLocaleString() + " file" + (j.files === 1 ? "" : "s") + (j.truncated ? " (truncated)" : "");
-    let html = '<div class="hint">' + esc(head) + "</div>";
+    let html = '<div class="hint">' + esc2(head) + "</div>";
     for (const f of j.results) {
-      html += '<div class="rfile" data-toggle="' + esc(f.path) + '" title="' + esc(f.path) + '">' + '<span class="ar">&#9660;</span>' + (f.ext ? '<span class="ext">ext</span>' : "") + '<span class="fp">' + esc(displayPath(f.path)) + "</span>" + '<span class="cnt">' + f.matches.length + "</span></div>" + '<div data-group="' + esc(f.path) + '">';
+      html += '<div class="rfile" data-toggle="' + esc2(f.path) + '" title="' + esc2(f.path) + '">' + '<span class="ar">&#9660;</span>' + (f.ext ? '<span class="ext">ext</span>' : "") + '<span class="fp">' + esc2(displayPath(f.path)) + "</span>" + '<span class="cnt">' + f.matches.length + "</span></div>" + '<div data-group="' + esc2(f.path) + '">';
       for (const m of f.matches) {
-        html += '<div class="rline" data-p="' + esc(f.path) + '" data-n="' + m.line + '" title="Jump to ' + esc(f.path) + ":" + m.line + '">' + '<span class="rn">' + m.line + '</span><span class="rt">' + esc(m.pre) + "<mark>" + esc(m.mid) + "</mark>" + esc(m.post) + "</span></div>";
+        html += '<div class="rline" data-p="' + esc2(f.path) + '" data-n="' + m.line + '" title="Jump to ' + esc2(f.path) + ":" + m.line + '">' + '<span class="rn">' + m.line + '</span><span class="rt">' + esc2(m.pre) + "<mark>" + esc2(m.mid) + "</mark>" + esc2(m.post) + "</span></div>";
       }
       html += "</div>";
     }
@@ -1039,11 +1262,14 @@
     render();
   }
   function hideRightInspector() {
+    cancelSearch();
     document.body.classList.add("right-hidden");
     layout();
     render();
   }
   function setRightInspectorTab(tab) {
+    if (tab !== "search")
+      cancelSearch();
     $$(".inspector-tab").forEach((b) => b.classList.toggle("active", b.dataset.itab === tab));
     $("#pane-right-refs")?.classList.toggle("active", tab === "refs");
     $("#pane-right-symbols")?.classList.toggle("active", tab === "symbols");
@@ -1065,16 +1291,16 @@
     targetEl.textContent = word;
     badgeEl.textContent = hits.length;
     if (!hits.length) {
-      listEl.innerHTML = '<div class="hint">No references found for "<b>' + esc(word) + '</b>".</div>';
+      listEl.innerHTML = '<div class="hint">No references found for "<b>' + esc2(word) + '</b>".</div>';
       return;
     }
     const grouped = groupHits(hits);
-    const head = hits.length + " reference" + (hits.length === 1 ? "" : "s") + (server ? " · " + esc(server) : " · text search");
+    const head = hits.length + " reference" + (hits.length === 1 ? "" : "s") + (server ? " · " + esc2(server) : " · text search");
     let html = '<div class="hint">' + head + "</div>";
     for (const f of grouped) {
-      html += '<div class="rfile" data-toggle="r-' + esc(f.path) + '" title="' + esc(f.path) + '">' + '<span class="ar">&#9660;</span>' + '<span class="fp">' + esc(displayPath(f.path)) + "</span>" + '<span class="cnt">' + f.matches.length + "</span></div>" + '<div data-group="r-' + esc(f.path) + '">';
+      html += '<div class="rfile" data-toggle="r-' + esc2(f.path) + '" title="' + esc2(f.path) + '">' + '<span class="ar">&#9660;</span>' + '<span class="fp">' + esc2(displayPath(f.path)) + "</span>" + '<span class="cnt">' + f.matches.length + "</span></div>" + '<div data-group="r-' + esc2(f.path) + '">';
       for (const m of f.matches) {
-        html += '<div class="rline" data-p="' + esc(f.path) + '" data-n="' + m.line + '" title="Jump to ' + esc(f.path) + ":" + m.line + '">' + '<span class="rn">' + m.line + '</span><span class="rt">' + esc(m.pre) + "<mark>" + esc(m.mid || word) + "</mark>" + esc(m.post) + "</span></div>";
+        html += '<div class="rline" data-p="' + esc2(f.path) + '" data-n="' + m.line + '" title="Jump to ' + esc2(f.path) + ":" + m.line + '">' + '<span class="rn">' + m.line + '</span><span class="rt">' + esc2(m.pre) + "<mark>" + esc2(m.mid || word) + "</mark>" + esc2(m.post) + "</span></div>";
       }
       html += "</div>";
     }
@@ -1094,13 +1320,14 @@
     if (badgeEl)
       badgeEl.textContent = "…";
     if (listEl)
-      listEl.innerHTML = '<div class="hint">Finding references for "' + esc(at.word) + '"…</div>';
+      listEl.innerHTML = '<div class="hint">Finding references for "' + esc2(at.word) + '"…</div>';
     if (canAskServer(at)) {
-      setStatusNote("references to " + at.word + "…");
+      setStatusNote("references to " + at.word + "…", 8000);
       try {
         const j = await lspCall("refs", at, 30000);
         updateStatus();
         if (j && j.hits && j.hits.length) {
+          setStatusNote("");
           renderRightResults(at.word, j.hits, j.server, true);
           return;
         }
@@ -1108,10 +1335,11 @@
         updateStatus();
       }
     }
-    setStatusNote("searching references to " + at.word + "…");
+    setStatusNote("searching references to " + at.word + "…", 8000);
     try {
       const j = await api("/api/search", { q: at.word, word: true, case: true });
       updateStatus();
+      setStatusNote("");
       const hits = [];
       if (j.results) {
         for (const f of j.results) {
@@ -1123,8 +1351,9 @@
       renderRightResults(at.word, hits, "", false);
     } catch (err) {
       updateStatus();
+      setStatusNote("");
       if (listEl)
-        listEl.innerHTML = '<div class="hint">Search error: ' + esc(err.message) + "</div>";
+        listEl.innerHTML = '<div class="hint">Search error: ' + esc2(err.message) + "</div>";
     }
   }
   function initInspector() {
@@ -1249,7 +1478,7 @@
     if (!d || !at)
       return;
     if (canAskServer(at)) {
-      setStatusNote("definition of " + at.word + "…");
+      setStatusNote("definition of " + at.word + "…", 8000);
       const j = await lspCall("def", at, S2.lsp.state === "ready" ? 5000 : 20000);
       updateStatus();
       if (j && j.hits && j.hits.length) {
@@ -1262,18 +1491,19 @@
           showHits(at.word, j.hits, j.server, "definition");
       });
     }
-    setStatusNote("searching for " + at.word + "…");
+    setStatusNote("searching for " + at.word + "…", 8000);
     let rx;
     try {
       rx = await api("/api/def", { sym: at.word, path: d.path });
     } catch (e) {
-      setStatusNote(e.message);
+      setStatusNote(e.message, 4000);
       return;
     }
     updateStatus();
     if (rx.lsp)
       setLspState(rx.lsp);
     if (!rx.defs || !rx.defs.length) {
+      setStatusNote("");
       showRightInspector("search");
       const q = $("#q");
       if (q) {
@@ -1297,12 +1527,14 @@
       const h = hits[0];
       openFile(h.path, { line: h.line });
       flashFind(h.mid || word);
-      setStatusNote(server ? server + " · " + h.path + ":" + h.line : h.path + ":" + h.line);
+      setStatusNote(server ? server + " · " + h.path + ":" + h.line : h.path + ":" + h.line, 4000);
       return;
     }
+    setStatusNote("");
     showHits(word, hits, server, noun, refCount);
   }
   function showHits(word, hits, server, noun, refCount) {
+    setStatusNote("");
     const n = hits.length;
     let head = n + " " + noun + (n === 1 ? "" : "s") + ' of "' + word + '"';
     head += server ? "  ·  " + server : "  ·  text match, no language server";
@@ -1406,67 +1638,186 @@
     if (x == null || S2.wrap || !d)
       return;
     const g = rowFor(d.cur)?.querySelector(".g");
-    const gw = S2.lineNumbers && g ? g.offsetWidth : 0;
+    const gw = g ? g.offsetWidth : 0;
     if (x < vp.scrollLeft + gw + 8)
       vp.scrollLeft = Math.max(0, x - gw - 40);
     else if (x > vp.scrollLeft + vp.clientWidth - 24)
       vp.scrollLeft = x - vp.clientWidth + 60;
   }
-  function moveCol(delta) {
+  function updateDomSelection() {
     const d = doc_();
     if (!d)
       return;
+    const sel = window.getSelection();
+    if (!sel)
+      return;
+    if (!d.selAnchor) {
+      if (sel.rangeCount && !sel.isCollapsed && vp.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+        sel.removeAllRanges();
+      }
+      return;
+    }
+    const pa = toPoint(d.selAnchor);
+    const headCol = d.col === Infinity ? rowFor(d.cur) ? $(".c", rowFor(d.cur)).textContent.length : 0 : d.col || 0;
+    const pf = toPoint({ line: d.cur, col: headCol });
+    if (pa && pf) {
+      sel.setBaseAndExtent(pa[0], pa[1], pf[0], pf[1]);
+    }
+  }
+  function ensureAnchor(d) {
+    if (!d.selAnchor) {
+      const col = d.col === Infinity ? rowFor(d.cur) ? $(".c", rowFor(d.cur)).textContent.length : 0 : d.col || 0;
+      d.selAnchor = { line: d.cur, col };
+    }
+  }
+  function clearSelection(d) {
+    if (d)
+      d.selAnchor = null;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed && vp.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      sel.removeAllRanges();
+    }
+  }
+  function moveCol(delta, shift = false) {
+    const d = doc_();
+    if (!d)
+      return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     const row = rowFor(d.cur);
     const len = row ? $(".c", row).textContent.length : 0;
     const col = Math.min(d.col || 0, len) + delta;
     if (col < 0) {
       if (d.cur > 1) {
         d.col = Infinity;
-        moveCursor(-1);
-      }
+        moveCursor(-1, shift);
+      } else
+        updateDomSelection();
       return;
     }
     if (col > len) {
       if (d.cur < d.total) {
         d.col = 0;
-        moveCursor(1);
-      }
+        moveCursor(1, shift);
+      } else
+        updateDomSelection();
       return;
     }
     d.col = col;
     revealCaretX(placeCaret());
+    updateDomSelection();
   }
-  function caretToEdge(end) {
+  function moveWord(delta, shift = false) {
     const d = doc_();
     if (!d)
       return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
+    const row = rowFor(d.cur);
+    const text = row ? $(".c", row).textContent : "";
+    const len = text.length;
+    let col = Math.min(d.col === Infinity ? len : d.col || 0, len);
+    if (delta < 0) {
+      if (col === 0) {
+        if (d.cur > 1) {
+          d.col = Infinity;
+          moveCursor(-1, shift);
+        }
+        return;
+      }
+      col--;
+      while (col > 0 && /\s/.test(text[col]))
+        col--;
+      if (WORD.test(text[col])) {
+        while (col > 0 && WORD.test(text[col - 1]))
+          col--;
+      } else {
+        while (col > 0 && !WORD.test(text[col - 1]) && !/\s/.test(text[col - 1]))
+          col--;
+      }
+    } else {
+      if (col >= len) {
+        if (d.cur < d.total) {
+          d.col = 0;
+          moveCursor(1, shift);
+        }
+        return;
+      }
+      if (WORD.test(text[col])) {
+        while (col < len && WORD.test(text[col]))
+          col++;
+      } else if (!/\s/.test(text[col])) {
+        while (col < len && !WORD.test(text[col]) && !/\s/.test(text[col]))
+          col++;
+      }
+      while (col < len && /\s/.test(text[col]))
+        col++;
+    }
+    d.col = col;
+    revealCaretX(placeCaret());
+    updateDomSelection();
+  }
+  function caretToEdge(end, shift = false) {
+    const d = doc_();
+    if (!d)
+      return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     d.col = end ? Infinity : 0;
     revealCaretX(placeCaret());
+    updateDomSelection();
   }
-  function moveCursor(delta) {
+  function moveCursor(delta, shift = false) {
     const d = doc_();
     if (!d)
       return;
+    if (shift)
+      ensureAnchor(d);
+    else
+      d.selAnchor = null;
     d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
-    const y = (d.cur - 1) * LH;
+    const y = (d.cur - 1) * LH2;
     if (y < vp.scrollTop)
-      vp.scrollTop = y - LH;
-    else if (y > vp.scrollTop + vp.clientHeight - LH * 2)
-      vp.scrollTop = y - vp.clientHeight + LH * 3;
+      vp.scrollTop = y - LH2;
+    else if (y > vp.scrollTop + vp.clientHeight - LH2 * 2)
+      vp.scrollTop = y - vp.clientHeight + LH2 * 3;
     render();
     updateStatus();
+    updateDomSelection();
   }
   function initCursor() {
     vp.addEventListener("mousedown", (e) => {
+      if (e.button !== 0)
+        return;
       const row = e.target.closest(".row");
       if (!row)
         return;
       const d = doc_();
       if (!d)
         return;
-      d.cur = +row.dataset.l;
+      const targetLine = +row.dataset.l;
       const p = colAtPoint(e.clientX, e.clientY);
-      d.col = p && p.line === d.cur ? p.col : 0;
+      const targetCol = p && p.line === targetLine ? p.col : 0;
+      if (e.shiftKey) {
+        ensureAnchor(d);
+        d.cur = targetLine;
+        d.col = targetCol;
+        placeCaret();
+        updateStatus();
+        updateDomSelection();
+        for (const r of rowsEl.children)
+          r.classList.toggle("cur", +r.dataset.l === d.cur);
+        return;
+      }
+      d.selAnchor = null;
+      d.cur = targetLine;
+      d.col = targetCol;
       placeCaret();
       updateStatus();
       const w = wordAtPoint(e.clientX, e.clientY);
@@ -1514,7 +1865,7 @@
       s = await api("/api/lsp/setup", { path: d.path });
     } catch (e) {
       if (my === setupSeq)
-        el.innerHTML = hintHtml("Could not check language servers: " + esc(e.message));
+        el.innerHTML = hintHtml("Could not check language servers: " + esc2(e.message));
       return;
     }
     if (my !== setupSeq || doc_() !== d)
@@ -1546,7 +1897,7 @@
     try {
       j = await apiPost("/api/lsp/start", { path: d.path });
     } catch (e) {
-      el.innerHTML = hintHtml("Could not start the language server: " + esc(e.message));
+      el.innerHTML = hintHtml("Could not start the language server: " + esc2(e.message));
       return;
     }
     if (doc_() !== d)
@@ -1572,49 +1923,49 @@
       return hintHtml("Language servers are turned off: px0 was started with <b>-no-lsp</b>. " + "Restart it without that flag for call trails, hover and precise references.");
     }
     if (!s.servers.length) {
-      return hintHtml("px0 knows no language server for <b>" + esc(ext) + "</b> files, so call trails are not available here.");
+      return hintHtml("px0 knows no language server for <b>" + esc2(ext) + "</b> files, so call trails are not available here.");
     }
     const offer = s.servers.filter((v) => v.options.length || v.job);
     const running = s.servers.some((v) => v.job && v.job.running);
     let html = '<div class="lsp-setup">';
     if (s.state === "failed") {
-      html += "<p><b>" + esc(s.server) + '</b> did not start: <span class="lsp-reason">' + esc(s.reason || "unknown error") + "</span></p>" + '<div class="lsp-row"><button class="lsp-btn" data-start>Retry</button></div>';
+      html += "<p><b>" + esc2(s.server) + '</b> did not start: <span class="lsp-reason">' + esc2(s.reason || "unknown error") + "</span></p>" + '<div class="lsp-row"><button class="lsp-btn" data-start title="Retry starting language server">Retry</button></div>';
       if (offer.length)
         html += "<p>If it is broken or incomplete, install it again:</p>";
     } else {
-      html += "<p>Call trails, hover and precise references for " + esc(s.lang) + " need a language server, and none is installed.</p>";
+      html += "<p>Call trails, hover and precise references for " + esc2(s.lang) + " need a language server, and none is installed.</p>";
     }
     for (const v of offer) {
-      html += '<div class="lsp-server"><div class="lsp-name">' + esc(v.name) + "</div>";
+      html += '<div class="lsp-server"><div class="lsp-name">' + esc2(v.name) + "</div>";
       v.options.forEach((o, i) => {
-        html += '<div class="lsp-opt"><code>' + esc(o.cmd) + '</code><span class="lsp-acts">';
+        html += '<div class="lsp-opt"><code>' + esc2(o.cmd) + '</code><span class="lsp-acts">';
         if (!o.auto)
           html += '<span class="lsp-need">run in a terminal</span>';
         else if (!o.hasTool)
-          html += '<span class="lsp-need">needs ' + esc(o.tool) + "</span>";
+          html += '<span class="lsp-need">needs ' + esc2(o.tool) + "</span>";
         else
-          html += '<button class="lsp-btn primary" data-install="' + esc(v.name) + '" data-option="' + i + '"' + (running ? " disabled" : "") + ">Install</button>";
-        html += '<button class="lsp-btn" data-copy="' + esc(o.cmd) + '">Copy</button></span></div>';
+          html += '<button class="lsp-btn primary" data-install="' + esc2(v.name) + '" data-option="' + i + '"' + (running ? " disabled" : "") + ' title="Install language server">Install</button>';
+        html += '<button class="lsp-btn" data-copy="' + esc2(o.cmd) + '" title="Copy command to clipboard">Copy</button></span></div>';
       });
       if (v.job)
         html += job(v.job);
       html += "</div>";
     }
     if (!offer.length) {
-      html += "<p>px0 has no installer for this one. Install " + s.servers.map((v) => "<b>" + esc(v.name) + "</b>").join(" or ") + " and make sure it is on PATH.</p>";
+      html += "<p>px0 has no installer for this one. Install " + s.servers.map((v) => "<b>" + esc2(v.name) + "</b>").join(" or ") + " and make sure it is on PATH.</p>";
     }
-    html += '<div class="lsp-row"><span>Installed one yourself?</span><button class="lsp-btn" data-start>Detect and start</button></div></div>';
+    html += '<div class="lsp-row"><span>Installed one yourself?</span><button class="lsp-btn" data-start title="Detect and start language server">Detect and start</button></div></div>';
     return html;
   }
   function job(j) {
     const tail = (j.log || "").trimEnd().split(`
 `).slice(-12).join(`
 `);
-    const log = tail ? "<pre>" + esc(tail) + "</pre>" : "";
+    const log = tail ? "<pre>" + esc2(tail) + "</pre>" : "";
     if (j.running)
-      return '<div class="lsp-job">Installing with <code>' + esc(j.cmd) + "</code>…" + log + "</div>";
+      return '<div class="lsp-job">Installing with <code>' + esc2(j.cmd) + "</code>…" + log + "</div>";
     if (j.error)
-      return '<div class="lsp-job err">Install failed: ' + esc(j.error) + log + "</div>";
+      return '<div class="lsp-job err">Install failed: ' + esc2(j.error) + log + "</div>";
     return "";
   }
   function wire(el, d, onReady) {
@@ -1638,7 +1989,7 @@
   // web/src/calls.js
   var T = null;
   var dirPref = "in";
-  var seq = 0;
+  var callSeq = 0;
   var flat = [];
   var listEl = () => $("#right-calls-list");
   var hint = (html) => {
@@ -1678,30 +2029,32 @@
       return;
     }
     if (!at || at.imprecise) {
-      hint("Click a function name in the editor, then press <b>" + esc(keyLabel("Alt+Shift+H")) + "</b>.");
+      hint("Click a function name in the editor, then press <b>" + esc2(keyLabel("Alt+Shift+H")) + "</b>.");
       return;
     }
-    const my = ++seq;
+    const my = ++callSeq;
     T = null;
     $("#right-calls-target").textContent = at.word;
-    hint('Tracing calls for "' + esc(at.word) + '"…');
-    setStatusNote("call trail for " + at.word + "…");
+    hint('Tracing calls for "' + esc2(at.word) + '"…');
+    setStatusNote("call trail for " + at.word + "…", 8000);
     let j;
     try {
       j = await api("/api/lsp/calls", { path: d.path, line: at.line, col: at.col, wait: S2.lsp.state === "ready" ? 1e4 : 30000 });
     } catch (e) {
-      if (my === seq) {
+      if (my === callSeq) {
         updateStatus();
-        hint('Could not trace "' + esc(at.word) + '": ' + esc(explain(e.message)));
+        setStatusNote("");
+        hint('Could not trace "' + esc2(at.word) + '": ' + esc2(explain(e.message)));
       }
       return;
     }
-    if (my !== seq)
+    if (my !== callSeq)
       return;
     setLspState(j);
     updateStatus();
+    setStatusNote("");
     if (!j.nodes || !j.nodes.length) {
-      hint('"' + esc(at.word) + '" is not a function ' + esc(j.server || "the language server") + " can trace.");
+      hint('"' + esc2(at.word) + '" is not a function ' + esc2(j.server || "the language server") + " can trace.");
       return;
     }
     T = { path: d.path, word: at.word, dir: dirPref, roots: j.nodes.map((n) => wrap(n, null)) };
@@ -1759,10 +2112,10 @@
       const tip = t.path + ":" + t.line + (node.cycle ? `
 (recursive, already in this trail)` : "") + (n.detail ? `
 ` + n.detail : "");
-      html += '<div class="sym cnode" data-i="' + i + '" style="padding-left:' + (6 + depth * 14) + 'px" title="' + esc(tip) + '">' + '<span class="car' + (node.cycle ? " cyc" : "") + '">' + arrow + "</span>" + '<span class="kd" data-k="' + esc(n.kind) + '">' + esc(n.kind) + "</span>" + '<span class="sn">' + esc(n.name) + "</span>" + '<span class="sl">' + esc(base(t.path)) + ":" + t.line + calls + "</span></div>";
+      html += '<div class="sym cnode" data-i="' + i + '" style="padding-left:' + (6 + depth * 14) + 'px" title="' + esc2(tip) + '">' + '<span class="car' + (node.cycle ? " cyc" : "") + '">' + arrow + "</span>" + '<span class="kd" data-k="' + esc2(n.kind) + '">' + esc2(n.kind) + "</span>" + '<span class="sn">' + esc2(n.name) + "</span>" + '<span class="sl">' + esc2(base(t.path)) + ":" + t.line + calls + "</span></div>";
       const pad = 'style="padding-left:' + (26 + (depth + 1) * 14) + 'px"';
       if (node.err)
-        html += '<div class="cnone" ' + pad + ">" + esc(node.err) + "</div>";
+        html += '<div class="cnone" ' + pad + ">" + esc2(node.err) + "</div>";
       else if (node.open && node.kids && !node.kids.length)
         html += '<div class="cnone" ' + pad + ">" + none + "</div>";
       if (node.open && node.kids)
@@ -1855,6 +2208,8 @@
       else
         return;
     }
+    if (S2.settings && (S2.settings["lsp.hover.enabled"] === false || S2.settings["lsp.enabled"] === false))
+      return;
     if (S2.lsp.state !== "ready" && S2.lsp.state !== "indexing")
       return;
     clearTimeout(hoverTimer);
@@ -1869,14 +2224,14 @@
     const d = doc_();
     if (!d || at.path !== d.path)
       return;
-    const seq2 = ++hoverSeq;
+    const seq = ++hoverSeq;
     let j;
     try {
       j = await api("/api/lsp/hover", { path: d.path, line: at.line, col: at.col, wait: 4000 });
     } catch {
       return;
     }
-    if (seq2 !== hoverSeq || doc_() !== d)
+    if (seq !== hoverSeq || doc_() !== d)
       return;
     setLspState(j);
     if (!j || j.empty || !j.signature && !j.doc)
@@ -1884,23 +2239,24 @@
     S2.hover = at;
     S2.hoverAnchor = { x, y };
     const refPath = d.path + ":" + at.line;
-    hovercard.innerHTML = (j.signature ? '<div class="sig">' + j.signature + "</div>" : "") + (j.doc ? '<div class="doc">' + esc(j.doc) + "</div>" : "") + '<div class="actions">' + '<button id="hc-copy-ref" title="Copy file and line reference">Copy Ref</button>' + '<button id="hc-copy-ai" title="Copy snippet with file path for AI Agent / LLMs">Copy for Agent</button>' + '<button id="hc-find-refs" title="Find all usages across codebase">Usages</button>' + '<button id="hc-calls" title="' + withKeys("Trace callers and callees ({Alt+Shift+H})") + '">Calls</button>' + "</div>" + '<div class="foot"><b>' + esc(j.server || "lsp") + "</b>" + "<span>" + withKeys("{Mod+Click} definition") + "</span>" + "<span>" + withKeys("{Shift+F12} references") + "</span></div>";
+    hovercard.innerHTML = (j.signature ? '<div class="sig">' + j.signature + "</div>" : "") + (j.doc ? '<div class="doc">' + esc2(j.doc) + "</div>" : "") + '<div class="actions">' + '<button id="hc-copy-ref" title="Copy file and line reference">Copy Ref</button>' + '<button id="hc-copy-ai" title="Copy snippet with file path and line numbers">Copy with Context</button>' + '<button id="hc-find-refs" title="Find all usages across codebase">Usages</button>' + '<button id="hc-calls" title="' + withKeys("Trace callers and callees ({Alt+Shift+H})") + '">Calls</button>' + "</div>" + '<div class="foot"><b>' + esc2(j.server || "lsp") + "</b>" + "<span>" + withKeys("{Mod+Click} definition") + "</span>" + "<span>" + withKeys("{Shift+F12} references") + "</span></div>";
     const btnRef = hovercard.querySelector("#hc-copy-ref");
     const btnAi = hovercard.querySelector("#hc-copy-ai");
     const btnRefs = hovercard.querySelector("#hc-find-refs");
     if (btnRef)
       btnRef.onclick = (e) => {
         e.stopPropagation();
-        copyToClipboard(refPath, "Copied " + refPath);
+        copyToClipboard(refPath, "Copied");
       };
     if (btnAi)
       btnAi.onclick = (e) => {
         e.stopPropagation();
         const lineText = d.lines[at.line - 1] || at.word || "";
         const ext = d.path.split(".").pop() || "";
-        const text = "### Reference: " + refPath + "\n```" + ext + `
+        const lineStr = "line " + at.line;
+        const text = "@" + d.path + " " + lineStr + "\n```" + ext + `
 ` + lineText + "\n```";
-        copyToClipboard(text, "Copied snippet for Agent (" + refPath + ")");
+        copyToClipboard(text, "Copied");
       };
     if (btnRefs)
       btnRefs.onclick = (e) => {
@@ -2146,16 +2502,25 @@
     return { path: path.slice(1), hash: u.hash.slice(1) };
   }
   function mdSetImage(img, src, base2) {
+    img.setAttribute("loading", "lazy");
+    img.setAttribute("decoding", "async");
+    img.classList.add("md-zoomable");
     const m = MD_SCHEME.exec(src);
     if (m) {
-      if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src))
+      if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src)) {
         img.setAttribute("src", src);
+        img.dataset.origSrc = src;
+      }
     } else if (src.startsWith("//")) {
       img.setAttribute("src", src);
+      img.dataset.origSrc = src;
     } else if (src) {
       const t = mdLocal(src, base2);
-      if (t)
+      if (t) {
         img.setAttribute("src", "/api/raw?path=" + encodeURIComponent(t.path));
+        img.dataset.rawPath = t.path;
+        img.dataset.origSrc = src;
+      }
     }
   }
   function mdSetLink(a, href, base2) {
@@ -2275,7 +2640,7 @@
     return 1;
   }
   function sourceToLine(line) {
-    vp.scrollTop = (line - 1) * LH;
+    vp.scrollTop = (line - 1) * LH2;
     for (let i = 0;i < 3; i++) {
       paint();
       const r = rowFor(line);
@@ -2406,7 +2771,13 @@
         copyToClipboard($("pre", copy.parentElement).textContent, "Copied code block");
         return;
       }
+      const img = e.target.closest("img.md-zoomable");
       const a = e.target.closest("a");
+      if (img && !a && e.button === 0 && !e[MOD] && !e.shiftKey) {
+        e.preventDefault();
+        openLightbox(img);
+        return;
+      }
       if (!a || e.button !== 0 || e[MOD] || e.shiftKey)
         return;
       if ("path" in a.dataset) {
@@ -2417,6 +2788,69 @@
         mdJump(a.dataset.anchor);
       }
     });
+    mdArticle.addEventListener("error", (e) => {
+      if (e.target && e.target.localName === "img") {
+        const img = e.target;
+        const path = img.dataset.rawPath || img.dataset.origSrc || img.getAttribute("src") || "image";
+        const fallback = document.createElement("div");
+        fallback.className = "md-img-broken";
+        fallback.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 14l5-5 3 3 4-4"/><circle cx="5.5" cy="5.5" r="1.5"/><line x1="2" y1="2" x2="14" y2="14"/></svg><span>Image not found: ' + esc(path) + "</span>";
+        img.replaceWith(fallback);
+      }
+    }, true);
+    const lb = $("#img-lightbox");
+    if (lb) {
+      lb.addEventListener("click", (e) => {
+        if (e.target.closest(".lightbox-close") || e.target.classList.contains("lightbox-backdrop")) {
+          lb.hidden = true;
+        }
+      });
+    }
+  }
+  function openLightbox(img) {
+    const lb = $("#img-lightbox");
+    if (!lb)
+      return;
+    const lbImg = $("#lb-img");
+    const lbTitle = $("#lb-title");
+    const lbMeta = $("#lb-meta");
+    const lbOpenTab = $("#lb-open-tab");
+    const lbCopyPath = $("#lb-copy-path");
+    const src = img.getAttribute("src");
+    const rawPath = img.dataset.rawPath || "";
+    const alt = img.getAttribute("alt") || "";
+    const displayTitle = rawPath || alt || src.split("/").pop() || "Image Preview";
+    lbImg.src = src;
+    lbTitle.textContent = displayTitle;
+    lbTitle.title = displayTitle;
+    const updateMeta = () => {
+      if (lbImg.naturalWidth) {
+        lbMeta.textContent = `${lbImg.naturalWidth} × ${lbImg.naturalHeight} px`;
+      } else {
+        lbMeta.textContent = "";
+      }
+    };
+    if (lbImg.complete && lbImg.naturalWidth)
+      updateMeta();
+    else
+      lbImg.onload = updateMeta;
+    if (rawPath) {
+      lbOpenTab.hidden = false;
+      lbOpenTab.onclick = () => {
+        lb.hidden = true;
+        openFile(rawPath);
+      };
+      lbCopyPath.hidden = false;
+      lbCopyPath.onclick = () => {
+        copyToClipboard(rawPath, "Copied image path");
+      };
+    } else {
+      lbOpenTab.hidden = true;
+      lbCopyPath.onclick = () => {
+        copyToClipboard(src, "Copied image URL");
+      };
+    }
+    lb.hidden = false;
   }
 
   // web/src/diff.js
@@ -2435,19 +2869,26 @@
       return "split";
     }
   }
-  function syncDiffView() {
+  function syncDiffView(force = false) {
     const d = doc_();
     const want = d && d.diffMode ? d : null;
-    if (want !== shown) {
+    if (force && want) {
+      want.diffText = undefined;
+      want.diffHunks = undefined;
+    }
+    if (want !== shown || force) {
       shown = want;
       diffview.hidden = !want;
       if (want)
-        drawDiff(want);
+        drawDiff(want, force);
       else
         diffContent.replaceChildren();
     } else if (want && want.diffHunks !== undefined) {
       renderDiff(want);
     }
+  }
+  function diffScrollTop() {
+    return diffview.hidden ? 0 : diffview.scrollTop;
   }
   async function toggleDiff() {
     if (!S2.meta?.git)
@@ -2456,7 +2897,7 @@
     if (!d)
       return;
     if (!d.diffMode && !d.diffAvailable) {
-      setStatusNote("No diff — clean file or not a git repo");
+      setStatusNote("No diff — clean file or not a git repo", 4000);
       return;
     }
     setDiffMode(d.diffMode ? "source" : layoutPref() || "split");
@@ -2466,7 +2907,7 @@
     if (!d)
       return;
     if (mode !== "source" && !d.diffAvailable) {
-      setStatusNote("No diff — clean file or not a git repo");
+      setStatusNote("No diff — clean file or not a git repo", 4000);
       return;
     }
     if (mode === "source") {
@@ -2475,24 +2916,25 @@
     } else {
       d.diffMode = mode;
       d.diffDismissed = false;
+      d.openedInDiffView = true;
       setLayoutPref(mode);
     }
     syncPreview();
     syncDiffView();
     updateStatus();
   }
-  async function drawDiff(d) {
-    if (d.diffText === undefined) {
+  async function drawDiff(d, force = false) {
+    if (force || d.diffText === undefined) {
       diffContent.replaceChildren();
       try {
-        d.diffReq = d.diffReq || api("/api/diff", { path: d.path });
+        d.diffReq = api("/api/diff", { path: d.path });
         const j = await d.diffReq;
         d.diffText = j.diff || "";
         d.diffHunks = parseDiff(d.diffText);
       } catch (e) {
         d.diffText = "";
         d.diffHunks = [];
-        setStatusNote("No diff: " + e.message);
+        setStatusNote("No diff: " + e.message, 4000);
       } finally {
         d.diffReq = null;
       }
@@ -2500,6 +2942,10 @@
         return;
     }
     renderDiff(d);
+    if (d.diffScroll) {
+      diffview.scrollTop = d.diffScroll;
+      d.diffScroll = 0;
+    }
   }
   function renderDiff(d) {
     diffContent.replaceChildren();
@@ -2516,11 +2962,27 @@
       frag.append(d.diffMode === "unified" ? unifiedTable(hunk) : splitTable(hunk));
     }
     diffContent.append(frag);
+    syncDiffAgentTargets();
+  }
+  function syncDiffAgentTargets() {
+    if (!diffview || diffview.hidden)
+      return;
+    const d = doc_();
+    if (!d)
+      return;
+    const ranges = (S2.agentTargets || []).filter((t) => t.path === d.path);
+    for (const el of diffview.querySelectorAll("[data-l]")) {
+      const l = +el.dataset.l;
+      const inAgent = ranges.some((r) => l >= r.l1 && l <= r.l2);
+      const isAnchor = ranges.some((r) => l === r.l1);
+      el.classList.toggle("agent-sel", inAgent);
+      el.classList.toggle("agent-anchor", isAnchor);
+    }
   }
   function hunkHeader(hunk) {
     const el = document.createElement("div");
     el.className = "diff-hunk-head";
-    el.textContent = "@@ -" + hunk.oldStart + " +" + hunk.newStart + " @@" + (hunk.section ? " " + hunk.section : "");
+    el.textContent = "@@ -" + hunk.oldStart + " +" + hunk.newStart + " @@";
     return el;
   }
   var HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[ \t]?(.*)$/;
@@ -2545,7 +3007,7 @@
       if (c === "+")
         cur.rows.push({ type: "add", newLine: newLine++, text: body });
       else if (c === "-")
-        cur.rows.push({ type: "del", oldLine: oldLine++, text: body });
+        cur.rows.push({ type: "del", oldLine: oldLine++, at: newLine, text: body });
       else
         cur.rows.push({ type: "ctx", oldLine: oldLine++, newLine: newLine++, text: body });
     }
@@ -2557,6 +3019,7 @@
     for (const row of hunk.rows) {
       const r = document.createElement("div");
       r.className = "diff-row diff-" + row.type;
+      anchor(r, row);
       r.append(lineCell(row.type === "add" ? "" : row.oldLine), lineCell(row.type === "del" ? "" : row.newLine), markerCell(row.type), codeCell(row.text));
       table.append(r);
     }
@@ -2602,8 +3065,15 @@
       return el;
     }
     const ln = side === "left" ? row.oldLine : row.newLine;
+    anchor(el, row);
     el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
     return el;
+  }
+  function anchor(el, row) {
+    if (row.newLine !== undefined)
+      el.dataset.l = row.newLine;
+    else if (row.at !== undefined)
+      el.dataset.at = row.at;
   }
   function lineCell(n) {
     const el = document.createElement("div");
@@ -2621,7 +3091,7 @@
   function codeCell(text) {
     const el = document.createElement("div");
     el.className = "diff-code";
-    el.innerHTML = esc(text || "") || "&nbsp;";
+    el.innerHTML = esc2(text || "") || "&nbsp;";
     return el;
   }
   function initDiff() {
@@ -2632,13 +3102,17 @@
       if (!e.target.closest("button"))
         e.preventDefault();
     });
-    const btn = $("#diff-btn");
-    if (btn) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleDiff();
-      });
-    }
+    $("#diff-source")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setDiffMode("source");
+    });
+    $("#diff-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const d = doc_();
+      if (!d || !d.diffAvailable)
+        return;
+      setDiffMode(d.diffMode || layoutPref());
+    });
     const menu = $("#diff-menu");
     if (menu) {
       menu.addEventListener("click", (e) => {
@@ -2658,6 +3132,13 @@
     const sizeEl = $("#st-size");
     if (sizeEl)
       sizeEl.textContent = d ? fmtBytes(d.size) : "";
+    if (d && d.isImage) {
+      const posEl = $("#st-pos");
+      if (posEl) {
+        const zoomText = d.imageFit ? `Fit (${Math.round((d.imageScale || 1) * 100)}%)` : `${Math.round((d.imageScale || 1) * 100)}%`;
+        posEl.textContent = d.imageMeta ? `${d.imageMeta.width} × ${d.imageMeta.height} px · ${zoomText}` : zoomText;
+      }
+    }
     const isMd = !!(d && d.markdown), shown2 = previewing(d);
     const mdBtn = $('[data-action="md-preview"]');
     if (mdBtn) {
@@ -2671,27 +3152,32 @@
       for (const b of sw.children)
         b.classList.toggle("on", isMd && b.dataset.md === "preview" === shown2);
     }
+    const isCode = d && !d.isImage;
+    const inGit = !!S2.meta?.git;
     const hasDiff = !!(d && d.diffAvailable);
     const isDiffOn = !!(d && d.diffMode);
     const currentLayout = d && d.diffMode || layoutPref();
     const dsw = $("#diff-switch");
     if (dsw) {
-      dsw.hidden = !hasDiff;
+      const showSwitch = inGit && isCode;
+      dsw.hidden = !showSwitch;
       document.body.classList.toggle("diff-tab", hasDiff);
       const btn = $("#diff-btn");
       if (btn) {
+        btn.disabled = !hasDiff;
+        btn.classList.toggle("disabled", !hasDiff);
         btn.classList.toggle("on", hasDiff && isDiffOn);
-        btn.title = withKeys(isDiffOn ? `Diff: active (${d.diffMode === "unified" ? "Unified" : "Split"}) — click to show source ({Mod+D})` : `Diff: off — click to show diff ({Mod+D})`);
+        btn.title = hasDiff ? withKeys(`Show changes against HEAD, ${currentLayout === "unified" ? "unified" : "split"} ({Mod+D})`) : "There are no git modified files.";
+      }
+      const srcBtn = $("#diff-source");
+      if (srcBtn) {
+        srcBtn.classList.toggle("on", !hasDiff || !isDiffOn);
+        srcBtn.title = withKeys("Show the file ({Mod+D})");
       }
       const menuItems = dsw.querySelectorAll(".diff-menu-item");
       for (const item of menuItems) {
         item.classList.toggle("active", item.dataset.diffOpt === currentLayout);
       }
-    }
-    const idxEl = $("#st-index");
-    if (idxEl && S2.meta) {
-      idxEl.textContent = S2.meta.indexMs + "ms";
-      idxEl.title = `Workspace Indexing: took ${S2.meta.indexMs}ms to index ${S2.meta.files.toLocaleString()} files (${S2.meta.ready ? "ready" : "in progress"})`;
     }
     const verEl = $("#st-ver");
     if (verEl && S2.meta?.version) {
@@ -2700,10 +3186,22 @@
     }
     drawLspStatus();
   }
-  function setStatusNote(msg) {
+  var noteTimer = null;
+  function setStatusNote(msg, timeoutMs = 0) {
+    if (noteTimer) {
+      clearTimeout(noteTimer);
+      noteTimer = null;
+    }
     const el = $("#st-pos");
     if (el)
-      el.textContent = msg;
+      el.textContent = msg || "";
+    if (msg && timeoutMs > 0) {
+      noteTimer = setTimeout(() => {
+        if (el && el.textContent === msg)
+          el.textContent = "";
+        noteTimer = null;
+      }, timeoutMs);
+    }
   }
   function fmtBytes(n) {
     if (n < 1024)
@@ -2741,21 +3239,71 @@
     if (state === "failed")
       el.title = "The language server did not start. Click for details.";
   }
+  var metricsMenuEl = $("#metrics-menu");
+  var lastMetrics = null;
+  function renderMetricsMenu(m) {
+    if (!metricsMenuEl || !m)
+      return;
+    metricsMenuEl.innerHTML = `
+    <div class="metrics-title">
+      <span>Process Metrics</span>
+      <span class="toast-chip">px0</span>
+    </div>
+    <div class="metrics-grid">
+      <div class="metrics-row">
+        <span class="metrics-label">Resident RAM (RSS)</span>
+        <span class="metrics-val">${fmtBytes(m.rssBytes)}</span>
+      </div>
+      <div class="metrics-row">
+        <span class="metrics-label">CPU Usage</span>
+        <span class="metrics-val">${m.cpuUsage.toFixed(1)}%</span>
+      </div>
+      <div class="metrics-row">
+        <span class="metrics-label">Active Goroutines</span>
+        <span class="metrics-val">${m.goroutines || 0}</span>
+      </div>
+    </div>
+  `;
+  }
+  function closeMetricsMenu() {
+    if (metricsMenuEl)
+      metricsMenuEl.hidden = true;
+  }
+  function placeMetricsMenu() {
+    const contEl = $("#st-metrics");
+    if (!contEl || !metricsMenuEl)
+      return;
+    const r = contEl.getBoundingClientRect();
+    metricsMenuEl.style.bottom = innerHeight - r.top + 6 + "px";
+    metricsMenuEl.style.right = Math.max(8, innerWidth - r.right) + "px";
+    metricsMenuEl.style.left = "auto";
+  }
+  function toggleMetricsMenu() {
+    if (!metricsMenuEl)
+      return;
+    if (!metricsMenuEl.hidden) {
+      closeMetricsMenu();
+      return;
+    }
+    if (lastMetrics)
+      renderMetricsMenu(lastMetrics);
+    metricsMenuEl.hidden = false;
+    placeMetricsMenu();
+    refreshMetrics();
+  }
   function updateMetricsDisplay(m) {
     if (!m)
       return;
+    lastMetrics = m;
     const cpuEl = $("#st-cpu");
     const ramEl = $("#st-ram");
-    const contEl = $("#st-metrics");
     if (cpuEl)
       cpuEl.textContent = `${m.cpuUsage.toFixed(1)}%`;
     if (ramEl)
       ramEl.textContent = fmtBytes(m.rssBytes);
-    if (contEl) {
-      contEl.title = `Editor OS Process Usage:
-• Resident RAM (RSS): ${fmtBytes(m.rssBytes)}
-• CPU Usage: ${m.cpuUsage.toFixed(1)}%
-• Active Goroutines: ${m.goroutines || 0}`;
+    if (metricsMenuEl && !metricsMenuEl.hidden) {
+      renderMetricsMenu(m);
+      placeMetricsMenu();
     }
   }
   async function refreshMetrics() {
@@ -2765,6 +3313,27 @@
     } catch {}
   }
   function initMetrics() {
+    const contEl = $("#st-metrics");
+    if (contEl) {
+      contEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMetricsMenu();
+      });
+      contEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleMetricsMenu();
+        }
+      });
+    }
+    addEventListener("click", (e) => {
+      if (!e.target.closest("#metrics-menu, #st-metrics"))
+        closeMetricsMenu();
+    });
+    addEventListener("keydown", (e) => {
+      if (e.key === "Escape")
+        closeMetricsMenu();
+    });
     refreshMetrics();
     setInterval(refreshMetrics, 2500);
   }
@@ -2786,7 +3355,12 @@
   // web/src/selbar.js
   var status = $("#status");
   var statsEl = $("#sel-stats");
-  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages" };
+  var diffviewEl = $("#diffview");
+  var SEL_KEYS = { KeyC: "copy-ref", KeyA: "copy-agent", KeyU: "usages", KeyE: "agent-edit" };
+  var agentHandler = null;
+  function setAgentHandler(fn) {
+    agentHandler = fn;
+  }
   var current = null;
   var allText = null;
   var allInfo = null;
@@ -2800,6 +3374,9 @@
     if (!d)
       return null;
     const range = sel.getRangeAt(0);
+    if (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(range.commonAncestorContainer)) {
+      return diffSelection(range, d);
+    }
     if (!vp.contains(range.commonAncestorContainer))
       return null;
     const text = sel.toString().trim();
@@ -2825,20 +3402,60 @@
     }
     return { text, l1, l2, path: d.path };
   }
-  var refOf = ({ path, l1, l2 }) => path + ":" + (l1 === l2 ? l1 : l1 + "-" + l2);
+  function diffSelection(range, d) {
+    let l1 = Infinity, l2 = -Infinity, at1 = Infinity, at2 = -Infinity;
+    const parts = [];
+    const seen = new Set;
+    for (const el of diffviewEl.querySelectorAll("[data-l], [data-at]")) {
+      if (!range.intersectsNode(el))
+        continue;
+      const code = el.querySelector(".diff-code");
+      if (el.dataset.l !== undefined) {
+        const n = +el.dataset.l;
+        if (n < l1)
+          l1 = n;
+        if (n > l2)
+          l2 = n;
+        if (seen.has(n))
+          continue;
+        seen.add(n);
+      } else {
+        const n = +el.dataset.at;
+        if (n < at1)
+          at1 = n;
+        if (n > at2)
+          at2 = n;
+      }
+      parts.push(code ? code.textContent : "");
+    }
+    if (!parts.length)
+      return null;
+    if (l1 === Infinity) {
+      const last = Math.max(1, d.total || 1);
+      l1 = Math.min(last, Math.max(1, at1 - 1));
+      l2 = Math.max(l1, Math.min(last, at2));
+    }
+    const text = parts.join(`
+`).trim();
+    if (!text)
+      return null;
+    return { text, l1, l2, path: d.path, fromDiff: true };
+  }
+  var selectionRef = ({ path, l1, l2 }) => path + ":" + (l1 === l2 ? l1 : l1 + "-" + l2);
   function showSelectionBar(info) {
     current = info;
-    const ref = refOf(info);
     const lines = info.l2 - info.l1 + 1;
-    statsEl.title = ref;
     statsEl.textContent = (lines === 1 ? "1 line" : lines + " lines") + " · " + info.text.length.toLocaleString() + " chars";
     status.classList.add("selecting");
     fitStatus();
   }
   function hideSelectionBar() {
+    closeSelMenu();
     if (!current)
       return;
     current = null;
+    if (statsEl)
+      statsEl.textContent = "";
     status.classList.remove("selecting");
     fitStatus();
   }
@@ -2891,16 +3508,32 @@
     return true;
   }
   function runSelectionAction(act) {
-    if (!current)
+    if (!current) {
+      if (act === "agent-edit") {
+        const d = doc_();
+        if (d && agentHandler) {
+          const line = d.cur || 1;
+          const text2 = d.lines && d.lines[line - 1] || "";
+          agentHandler({ text: text2, l1: line, l2: line, path: d.path });
+          return true;
+        }
+      }
       return false;
+    }
     const { text, path } = current;
-    const ref = refOf(current);
+    const ref = selectionRef(current);
     if (act === "copy-ref") {
-      copyToClipboard(ref, "Copied " + ref);
+      copyToClipboard(ref, "Copied");
     } else if (act === "copy-agent") {
       const ext = path.split(".").pop() || "";
-      copyToClipboard("### Reference: " + ref + "\n```" + ext + `
-` + text + "\n```", "Copied snippet for Agent (" + ref + ")");
+      const lineStr = current.l1 === current.l2 ? "line " + current.l1 : "lines " + current.l1 + "-" + current.l2;
+      const snippet = "@" + path + " " + lineStr + "\n```" + ext + `
+` + text + "\n```";
+      copyToClipboard(snippet, "Copied");
+    } else if (act === "agent-edit") {
+      if (!agentHandler)
+        return false;
+      agentHandler(current);
     } else if (act === "usages") {
       findReferences(text.split(/\s+/)[0] || text);
     } else {
@@ -2908,29 +3541,397 @@
     }
     return true;
   }
+  var menu = $("#sel-menu");
+  function closeSelMenu() {
+    if (menu && !menu.hidden)
+      menu.hidden = true;
+  }
+  var SEL_MENU_ITEMS = [
+    { sel: "copy-ref", label: "Copy Ref", keys: "Alt+C" },
+    { sel: "copy-agent", label: "Copy with Context", keys: "Alt+A" },
+    { sel: "agent-edit", label: "Edit Inline", keys: "Alt+E" },
+    { sel: "usages", label: "Find Usages", keys: "Alt+U" }
+  ];
+  function openSelMenu(x, y) {
+    menu.replaceChildren();
+    for (const item of SEL_MENU_ITEMS) {
+      const btn = document.createElement("button");
+      btn.className = "sel-menu-item";
+      btn.dataset.sel = item.sel;
+      btn.setAttribute("role", "menuitem");
+      btn.title = item.label + (item.keys ? ` (${keyLabel(item.keys)})` : "");
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      btn.append(label);
+      const kbd = document.createElement("kbd");
+      kbd.className = "footer-kbd";
+      kbd.textContent = keyLabel(item.keys);
+      btn.append(kbd);
+      menu.append(btn);
+    }
+    menu.hidden = false;
+    const { offsetWidth: w, offsetHeight: h } = menu;
+    menu.style.left = Math.max(4, x + w > innerWidth - 4 ? x - w : x) + "px";
+    menu.style.top = Math.max(4, y + h > innerHeight - 4 ? y - h : y) + "px";
+  }
+  var bar = () => $("#footer-sel");
   function initSelectionBar() {
     document.addEventListener("mouseup", () => setTimeout(updateSelectionBar, 20));
     vp.addEventListener("keyup", (e) => {
       if (e.shiftKey)
         setTimeout(updateSelectionBar, 20);
     });
-    document.addEventListener("selectionchange", () => {
-      if (current)
-        updateSelectionBar();
-    });
+    document.addEventListener("selectionchange", () => updateSelectionBar());
     document.addEventListener("mousedown", (e) => {
-      if (!S2.selAll || e.target.closest?.("#footer-sel"))
+      if (!S2.selAll || e.button === 2 || e.target.closest?.("#footer-sel, #sel-menu"))
         return;
       if (e.target === vp && (e.offsetX >= vp.clientWidth || e.offsetY >= vp.clientHeight))
         return;
       clearSelectAll();
     }, true);
-    const bar = $("#footer-sel");
-    bar.addEventListener("mousedown", (e) => e.preventDefault());
-    bar.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-sel]");
-      if (btn)
+    for (const el of [bar(), menu]) {
+      if (!el)
+        continue;
+      el.addEventListener("mousedown", (e) => e.preventDefault());
+      el.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-sel]");
+        if (!btn)
+          return;
+        closeSelMenu();
         runSelectionAction(btn.dataset.sel);
+      });
+    }
+    if (!menu)
+      return;
+    document.addEventListener("contextmenu", (e) => {
+      if (menu.contains(e.target)) {
+        e.preventDefault();
+        return;
+      }
+      const inCode = vp.contains(e.target) || diffviewEl && !diffviewEl.hidden && diffviewEl.contains(e.target);
+      if (!inCode) {
+        closeSelMenu();
+        return;
+      }
+      updateSelectionBar();
+      if (!current) {
+        closeSelMenu();
+        return;
+      }
+      e.preventDefault();
+      openSelMenu(e.clientX, e.clientY);
+    });
+    document.addEventListener("mousedown", (e) => {
+      if (!menu.hidden && !menu.contains(e.target))
+        closeSelMenu();
+    }, true);
+    addEventListener("keydown", (e) => {
+      if (e.key === "Escape")
+        closeSelMenu();
+    });
+    addEventListener("resize", closeSelMenu);
+    addEventListener("blur", closeSelMenu);
+    document.addEventListener("scroll", closeSelMenu, true);
+  }
+
+  // web/src/imageview.js
+  var ivInit = false;
+  var isPanning = false;
+  var panStart = { x: 0, y: 0 };
+  var panOrigin = { x: 0, y: 0 };
+  function isImageViewing(d = doc_()) {
+    return !!(d && d.isImage);
+  }
+  function syncImageView() {
+    const d = doc_();
+    const imgView = $("#imgview");
+    if (!imgView)
+      return;
+    if (isImageViewing(d)) {
+      $("#empty").hidden = true;
+      imgView.hidden = false;
+      renderImageView(d);
+    } else {
+      imgView.hidden = true;
+    }
+  }
+  function renderImageView(d) {
+    if (!ivInit)
+      initImageViewer();
+    const img = $("#imgview-img");
+    const canvas = $("#imgview-canvas");
+    if (!img || !canvas)
+      return;
+    const rawUrl = "/api/raw?path=" + encodeURIComponent(d.path);
+    if (img.dataset.curPath !== d.path) {
+      img.dataset.curPath = d.path;
+      img.src = rawUrl;
+    }
+    if (d.imageFit === undefined)
+      d.imageFit = true;
+    if (d.imageScale === undefined)
+      d.imageScale = 1;
+    if (d.imagePanX === undefined)
+      d.imagePanX = 0;
+    if (d.imagePanY === undefined)
+      d.imagePanY = 0;
+    if (d.imageBg === undefined)
+      d.imageBg = "checker";
+    if (d.imagePixelated === undefined) {
+      d.imagePixelated = d.imageMeta ? d.imageMeta.width <= 64 && d.imageMeta.height <= 64 : false;
+    }
+    const onLoaded = () => {
+      d.imageMeta = {
+        width: img.naturalWidth,
+        height: img.naturalHeight
+      };
+      if (d.imagePixelated === undefined) {
+        d.imagePixelated = d.imageMeta.width <= 64 && d.imageMeta.height <= 64;
+      }
+      applyImageTransform(d);
+    };
+    if (img.complete && img.naturalWidth > 0) {
+      onLoaded();
+    } else {
+      img.onload = onLoaded;
+    }
+    applyImageTransform(d);
+  }
+  function applyImageTransform(d = doc_()) {
+    if (!d || !d.isImage)
+      return;
+    const canvas = $("#imgview-canvas");
+    const img = $("#imgview-img");
+    const vp2 = $("#imgview-viewport");
+    if (!canvas || !img || !vp2)
+      return;
+    const natW = d.imageMeta?.width || img.naturalWidth || 100;
+    const natH = d.imageMeta?.height || img.naturalHeight || 100;
+    let currentScale = d.imageScale || 1;
+    if (d.imageFit) {
+      const vpW = Math.max(100, vp2.clientWidth - 64);
+      const vpH = Math.max(100, vp2.clientHeight - 64);
+      const fitScale = Math.min(vpW / natW, vpH / natH);
+      currentScale = natW <= vpW && natH <= vpH ? 1 : fitScale;
+      d.imageScale = currentScale;
+      d.imagePanX = 0;
+      d.imagePanY = 0;
+    }
+    canvas.style.transform = `translate(${d.imagePanX || 0}px, ${d.imagePanY || 0}px) scale(${currentScale})`;
+    canvas.className = "bg-" + (d.imageBg || "checker");
+    img.classList.toggle("render-pixelated", !!d.imagePixelated);
+    img.classList.toggle("render-smooth", !d.imagePixelated);
+    const zoomLabel = $("#iv-zoom-label");
+    if (zoomLabel) {
+      zoomLabel.textContent = d.imageFit ? `Fit (${Math.round(currentScale * 100)}%)` : `${Math.round(currentScale * 100)}%`;
+    }
+    const bgBtn = $("#iv-bg");
+    if (bgBtn) {
+      bgBtn.textContent = d.imageBg === "dark" ? "Dark" : d.imageBg === "light" ? "Light" : "Checker";
+    }
+    const pixelBtn = $("#iv-pixel");
+    if (pixelBtn) {
+      pixelBtn.textContent = d.imagePixelated ? "Pixelated" : "Smooth";
+      pixelBtn.classList.toggle("active", !!d.imagePixelated);
+    }
+    const metaEl = $("#iv-meta");
+    if (metaEl) {
+      metaEl.textContent = `${natW} × ${natH} px · ${fmtBytes(d.size || 0)}`;
+    }
+    updateStatus();
+  }
+  function zoomImage(delta, factor = 1.25) {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    d.imageFit = false;
+    if (delta > 0) {
+      d.imageScale = Math.min(32, (d.imageScale || 1) * factor);
+    } else {
+      d.imageScale = Math.max(0.05, (d.imageScale || 1) / factor);
+    }
+    applyImageTransform(d);
+  }
+  function fitImage() {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    d.imageFit = true;
+    d.imagePanX = 0;
+    d.imagePanY = 0;
+    applyImageTransform(d);
+  }
+  function actualSizeImage() {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    d.imageFit = false;
+    d.imageScale = 1;
+    d.imagePanX = 0;
+    d.imagePanY = 0;
+    applyImageTransform(d);
+  }
+  function cycleImageBg() {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    const modes = ["checker", "dark", "light"];
+    const curIdx = modes.indexOf(d.imageBg || "checker");
+    d.imageBg = modes[(curIdx + 1) % modes.length];
+    applyImageTransform(d);
+  }
+  function toggleImagePixelated() {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    d.imagePixelated = !d.imagePixelated;
+    applyImageTransform(d);
+  }
+  function panImage(dx, dy) {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return;
+    d.imageFit = false;
+    d.imagePanX = (d.imagePanX || 0) + dx;
+    d.imagePanY = (d.imagePanY || 0) + dy;
+    applyImageTransform(d);
+  }
+  function handleImageKey(e) {
+    const d = doc_();
+    if (!d || !d.isImage)
+      return false;
+    if (e.key === "+" || e.key === "=") {
+      zoomImage(1);
+      return true;
+    }
+    if (e.key === "-" || e.key === "_") {
+      zoomImage(-1);
+      return true;
+    }
+    if (e.key === "0") {
+      fitImage();
+      return true;
+    }
+    if (e.key === "1") {
+      actualSizeImage();
+      return true;
+    }
+    if (e.key === "b" || e.key === "B") {
+      cycleImageBg();
+      return true;
+    }
+    if (e.key === "p" || e.key === "P") {
+      toggleImagePixelated();
+      return true;
+    }
+    if (e.key === "ArrowUp") {
+      panImage(0, 40);
+      return true;
+    }
+    if (e.key === "ArrowDown") {
+      panImage(0, -40);
+      return true;
+    }
+    if (e.key === "ArrowLeft") {
+      panImage(40, 0);
+      return true;
+    }
+    if (e.key === "ArrowRight") {
+      panImage(-40, 0);
+      return true;
+    }
+    return false;
+  }
+  function initImageViewer() {
+    if (ivInit)
+      return;
+    ivInit = true;
+    const vp2 = $("#imgview-viewport");
+    const hud = $("#imgview-hud");
+    if (!vp2)
+      return;
+    $("#iv-zoom-in")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      zoomImage(1);
+    });
+    $("#iv-zoom-out")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      zoomImage(-1);
+    });
+    $("#iv-zoom-label")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const d = doc_();
+      if (d?.imageFit)
+        actualSizeImage();
+      else
+        fitImage();
+    });
+    $("#iv-fit")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fitImage();
+    });
+    $("#iv-100")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      actualSizeImage();
+    });
+    $("#iv-bg")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cycleImageBg();
+    });
+    $("#iv-pixel")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleImagePixelated();
+    });
+    vp2.addEventListener("mousedown", (e) => {
+      if (e.target.closest("#imgview-hud") || e.button !== 0)
+        return;
+      const d = doc_();
+      if (!d || !d.isImage)
+        return;
+      isPanning = true;
+      panStart = { x: e.clientX, y: e.clientY };
+      panOrigin = { x: d.imagePanX || 0, y: d.imagePanY || 0 };
+      vp2.classList.add("panning");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!isPanning)
+        return;
+      const d = doc_();
+      if (!d || !d.isImage)
+        return;
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        d.imageFit = false;
+      }
+      d.imagePanX = panOrigin.x + dx;
+      d.imagePanY = panOrigin.y + dy;
+      applyImageTransform(d);
+    });
+    window.addEventListener("mouseup", () => {
+      if (!isPanning)
+        return;
+      isPanning = false;
+      vp2.classList.remove("panning");
+    });
+    vp2.addEventListener("wheel", (e) => {
+      const d = doc_();
+      if (!d || !d.isImage)
+        return;
+      e.preventDefault();
+      const factor = e.ctrlKey || e.metaKey ? 1.15 : Math.abs(e.deltaY) > 50 ? 1.25 : 1.1;
+      if (e.deltaY < 0) {
+        zoomImage(1, factor);
+      } else {
+        zoomImage(-1, factor);
+      }
+    }, { passive: false });
+    window.addEventListener("resize", () => {
+      const d = doc_();
+      if (d?.isImage && d.imageFit) {
+        applyImageTransform(d);
+      }
     });
   }
 
@@ -2946,43 +3947,45 @@
       try {
         j = await api("/api/file", { path, start: start2, count: CHUNK });
       } catch (e) {
-        setStatusNote(path + ": " + e.message);
+        setStatusNote(path + ": " + e.message, 4000);
         return;
       }
-      if (j.image) {
-        showImage(path);
-        return;
-      }
-      const hasDiff = !!j.diffAvailable;
+      const isImg = !!j.image;
+      const hasDiff = !isImg && !!j.diffAvailable;
       const d2 = {
         path,
         name: path.split("/").pop(),
-        lang: j.lang,
-        total: j.total,
-        maxCols: j.maxCols,
+        lang: isImg ? "image" : j.lang,
+        total: isImg ? 0 : j.total,
+        maxCols: isImg ? 0 : j.maxCols,
         size: j.size,
-        lines: new Array(j.total),
-        chunks: new Set([start2 / CHUNK]),
+        lines: isImg ? [] : new Array(j.total),
+        chunks: new Set(isImg ? [] : [start2 / CHUNK]),
         pending: new Set,
         refining: new Set,
         scrollTop: 0,
         cur: line || 1,
         outline: null,
         gen: 0,
-        markdown: !!j.markdown,
+        markdown: !isImg && !!j.markdown,
+        isImage: isImg,
         gutter: null,
         diffMode: hasDiff ? layoutPref() || "split" : null,
         diffAvailable: hasDiff,
-        diffDismissed: false
+        diffDismissed: false,
+        openedInDiffView: hasDiff
       };
-      for (let i = 0;i < j.lines.length; i++)
-        d2.lines[j.start + i] = j.lines[i];
-      d2.lsp = j.lsp || { state: "off", server: "" };
+      if (!isImg) {
+        for (let i = 0;i < j.lines.length; i++)
+          d2.lines[j.start + i] = j.lines[i];
+      }
+      d2.lsp = !isImg && j.lsp || { state: "off", server: "" };
       S2.tabs.push(d2);
       idx = S2.tabs.length - 1;
-      if (j.refine)
+      if (!isImg && j.refine)
         refineChunk(d2, start2 / CHUNK);
-      loadGutter(d2);
+      if (!isImg)
+        loadGutter(d2);
     }
     const prev = doc_();
     if (prev && prev !== S2.tabs[idx])
@@ -2993,8 +3996,13 @@
     }
     S2.active = idx;
     const d = S2.tabs[idx];
+    if (d && d.diffAvailable && (treeEl?.classList.contains("changed-only") || !d.diffDismissed && d.diffMode === null)) {
+      d.diffMode = layoutPref() || "split";
+      d.diffDismissed = false;
+      d.openedInDiffView = true;
+    }
     $("#empty").hidden = true;
-    hideImage();
+    syncImageView();
     syncPreview();
     syncDiffView();
     if (!S2.at || S2.at.path !== d.path)
@@ -3017,32 +4025,38 @@
       loadOutline();
     if (push)
       pushHistory(path, line || d.cur, col);
+    saveWorkspaceState();
   }
-  function loadGutter(d) {
+  async function loadGutter(d) {
     if (!S2.meta?.git)
       return;
-    api("/api/gutter", { path: d.path }).then((j) => {
+    try {
+      const j = await api("/api/gutter", { path: d.path });
       d.diffAvailable = !!j.available;
       if (j.available && d.diffMode === null && !d.diffDismissed) {
         d.diffMode = layoutPref() || "split";
+        d.openedInDiffView = true;
         if (doc_() === d) {
           syncDiffView();
           syncPreview();
         }
       }
-      if (doc_() === d)
+      if (!j.available) {
+        d.gutter = null;
+      } else {
+        const marks = new Map;
+        for (const n of j.modified)
+          marks.set(n, "mod");
+        for (const n of j.added)
+          marks.set(n, "add");
+        d.gutter = { marks, dels: new Set(j.deleted) };
+      }
+      if (doc_() === d) {
         updateStatus();
-      if (!j.available)
-        return;
-      const marks = new Map;
-      for (const n of j.modified)
-        marks.set(n, "mod");
-      for (const n of j.added)
-        marks.set(n, "add");
-      d.gutter = { marks, dels: new Set(j.deleted) };
-      if (doc_() === d)
         render();
-    }).catch(() => {});
+      }
+      drawTabs();
+    } catch {}
   }
   async function reloadOpenTabs() {
     if (S2.tabs.length === 0)
@@ -3071,26 +4085,19 @@
         continue;
       if (res.status !== "fulfilled") {
         if (idx === S2.active) {
-          setStatusNote(tgt.path + ": " + (res.reason?.message || "failed to load"));
+          setStatusNote(tgt.path + ": " + (res.reason?.message || "failed to load"), 4000);
         }
         continue;
       }
       const j = res.value;
-      if (j.image)
+      if (j.image) {
+        tgt.oldDoc.size = j.size;
         continue;
+      }
       const keep = tgt.oldDoc;
       const hasDiff = !!j.diffAvailable;
       const newCur = Math.max(1, Math.min(keep.cur || 1, j.total));
-      let diffMode = null;
-      if (hasDiff) {
-        if (keep.diffDismissed) {
-          diffMode = null;
-        } else if (keep.diffMode) {
-          diffMode = keep.diffMode;
-        } else {
-          diffMode = layoutPref() || "split";
-        }
-      }
+      const diffMode = hasDiff ? keep.diffMode || null : null;
       const d2 = {
         path: tgt.path,
         name: tgt.path.split("/").pop(),
@@ -3112,7 +4119,9 @@
         gutter: null,
         diffMode,
         diffAvailable: hasDiff,
-        diffDismissed: !!keep.diffDismissed
+        diffDismissed: !!keep.diffDismissed || !keep.diffMode,
+        openedInDiffView: !!keep.openedInDiffView || !!keep.diffMode,
+        diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0
       };
       for (let k = 0;k < j.lines.length; k++) {
         d2.lines[j.start + k] = j.lines[k];
@@ -3121,16 +4130,17 @@
       S2.tabs[idx] = d2;
       if (j.refine)
         refineChunk(d2, tgt.start / CHUNK);
-      loadGutter(d2);
     }
+    await Promise.allSettled(S2.tabs.filter((t) => !t.isImage).map((t) => loadGutter(t)));
     const d = doc_();
     if (d) {
       S2.lsp.state = d.lsp && d.lsp.state || "off";
       S2.lsp.server = d.lsp && d.lsp.server || "";
       S2.lsp.missing = d.lsp && d.lsp.missing || "";
       warmLSP(d);
+      syncImageView();
       syncPreview();
-      syncDiffView();
+      syncDiffView(true);
       layout();
       vp.scrollTop = d.scrollTop;
       render();
@@ -3140,13 +4150,14 @@
     drawTabs();
     drawCrumbs();
     updateStatus();
+    saveWorkspaceState();
   }
   function centerLine(n) {
     if (previewing()) {
       previewLine(n);
       return;
     }
-    const y = (n - 1) * LH - Math.max(0, vp.clientHeight / 2 - LH * 2);
+    const y = (n - 1) * LH2 - Math.max(0, vp.clientHeight / 2 - LH2 * 2);
     vp.scrollTop = Math.max(0, y);
   }
   function closeTab(i) {
@@ -3168,6 +4179,7 @@
     }
     if (S2.tabs.length === 0) {
       S2.active = -1;
+      syncImageView();
       syncPreview();
       syncDiffView();
       rowsEl.innerHTML = "";
@@ -3176,10 +4188,16 @@
       drawCrumbs();
       drawTabs();
       updateStatus();
+      saveWorkspaceState();
       return;
     }
-    S2.active = Math.min(i, S2.tabs.length - 1);
+    if (i < S2.active) {
+      S2.active--;
+    } else if (i === S2.active) {
+      S2.active = Math.min(i, S2.tabs.length - 1);
+    }
     const d = doc_();
+    syncImageView();
     syncPreview();
     syncDiffView();
     drawTabs();
@@ -3188,6 +4206,7 @@
     vp.scrollTop = d.scrollTop;
     render();
     updateStatus();
+    saveWorkspaceState();
   }
   async function reopenClosedTab() {
     while (closedTabs.length) {
@@ -3204,7 +4223,7 @@
     }
   }
   function drawTabs() {
-    $("#tabs").innerHTML = S2.tabs.map((t, i) => '<div class="tab' + (i === S2.active ? " active" : "") + '" data-i="' + i + '" title="' + esc(t.path) + '">' + '<span class="tn">' + esc(t.name) + '</span><span class="x" data-close="' + i + '" title="' + withKeys("Close tab ({Alt+W})") + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join("");
+    $("#tabs").innerHTML = S2.tabs.map((t, i) => '<div class="tab' + (i === S2.active ? " active" : "") + (t.isImage ? " tab-image" : "") + (t.diffAvailable ? " git-modified" : "") + '" data-i="' + i + '" title="' + esc2(t.path) + '">' + (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : "") + '<span class="tn">' + esc2(t.name) + "</span>" + (t.diffAvailable ? '<span class="tab-git-dot" title="Modified in git">●</span>' : "") + '<span class="x" data-close="' + i + '" title="' + withKeys("Close tab ({Alt+W})") + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join("");
     const act = $("#tabs .tab.active");
     if (act)
       act.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -3217,6 +4236,13 @@
     if (prev)
       prev.scrollTop = vp.scrollTop;
     S2.active = i;
+    const curDoc = S2.tabs[i];
+    if (curDoc && curDoc.diffAvailable && (treeEl?.classList.contains("changed-only") || !curDoc.diffDismissed && curDoc.diffMode === null)) {
+      curDoc.diffMode = layoutPref() || "split";
+      curDoc.diffDismissed = false;
+      curDoc.openedInDiffView = true;
+    }
+    syncImageView();
     syncPreview();
     syncDiffView();
     clearFind();
@@ -3235,24 +4261,38 @@
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);
+    saveWorkspaceState();
+  }
+  function saveWorkspaceState() {
+    try {
+      const tabs = S2.tabs.map((t) => ({ path: t.path, cur: t.cur }));
+      sessionStorage.setItem("px0.tabs", JSON.stringify({ tabs, active: S2.active }));
+    } catch {}
+  }
+  async function restoreWorkspaceTabs() {
+    try {
+      const saved = sessionStorage.getItem("px0.tabs");
+      if (!saved)
+        return false;
+      const { tabs, active } = JSON.parse(saved);
+      if (!Array.isArray(tabs) || tabs.length === 0)
+        return false;
+      for (const t of tabs) {
+        if (t.path)
+          await openFile(t.path, { line: t.cur, push: false });
+      }
+      if (typeof active === "number" && active >= 0 && active < S2.tabs.length) {
+        switchTab(active);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
   function drawCrumbs() {
     const el = $("#crumbs");
     if (el)
       el.innerHTML = "";
-  }
-  function showImage(path) {
-    hideImage();
-    const box = document.createElement("div");
-    box.id = "imgview";
-    box.innerHTML = '<img src="/api/raw?path=' + encodeURIComponent(path) + '" alt="">';
-    editor.appendChild(box);
-    $("#empty").hidden = true;
-  }
-  function hideImage() {
-    const b = $("#imgview");
-    if (b)
-      b.remove();
   }
   function initTabs() {
     $("#tabs").addEventListener("click", (e) => {
@@ -3286,6 +4326,7 @@
 
   // web/src/theme.js
   var KEY = "px0.theme";
+  var DEFAULT_THEME = "github-dark";
   var THEME_SELECTOR = /^(?::root|html)?\[data-theme=["']?([\w-]+)["']?\]$/;
   var themes = null;
   function listThemes() {
@@ -3355,23 +4396,2524 @@
     } catch {}
     if (saved && setTheme(saved, false))
       return;
+    if (setTheme(DEFAULT_THEME, false))
+      return;
     const all = listThemes();
     if (all.length && !all.some((t) => t.id === currentTheme()))
       setTheme(all[0].id, false);
   }
 
+  // web/src/vim.js
+  var vimEnabled = false;
+  var vimMode = "NORMAL";
+  var vimCount = "";
+  var vimPending = "";
+  var vimPendingTimer = null;
+  var WORD_RE = /[A-Za-z0-9_$]/;
+  function isVimEnabled() {
+    return vimEnabled;
+  }
+  function setVimModeEnabled(enabled, persist = true) {
+    vimEnabled = !!enabled;
+    if (!vimEnabled) {
+      exitVisualMode();
+      resetVimState();
+    }
+    document.body.classList.toggle("vim-mode-enabled", vimEnabled);
+    updateVimCaret();
+    updateVimStatus();
+    const chip = $("#st-vim");
+    if (chip)
+      chip.hidden = !vimEnabled;
+    const helpBtn = $("#btn-vim-help");
+    if (helpBtn)
+      helpBtn.hidden = !vimEnabled;
+    if (persist) {
+      try {
+        localStorage.setItem("px0.editor.vimMode", vimEnabled ? "true" : "false");
+      } catch {}
+      if (S2.settings)
+        S2.settings["editor.vimMode"] = vimEnabled;
+    }
+  }
+  function updateVimCaret() {
+    if (!vimEnabled) {
+      document.body.classList.remove("vim-normal-caret");
+      return;
+    }
+    document.body.classList.toggle("vim-normal-caret", vimMode === "NORMAL");
+  }
+  function resetVimState() {
+    vimCount = "";
+    vimPending = "";
+    if (vimPendingTimer) {
+      clearTimeout(vimPendingTimer);
+      vimPendingTimer = null;
+    }
+    updateVimStatus();
+  }
+  function setVimPending(key) {
+    vimPending = key;
+    if (vimPendingTimer)
+      clearTimeout(vimPendingTimer);
+    vimPendingTimer = setTimeout(() => {
+      resetVimState();
+    }, 1400);
+    updateVimStatus();
+  }
+  function getCount() {
+    const c = parseInt(vimCount, 10);
+    return isNaN(c) || c <= 0 ? 1 : c;
+  }
+  function updateVimStatus() {
+    const chip = $("#st-vim");
+    if (!chip)
+      return;
+    chip.hidden = !vimEnabled;
+    if (!vimEnabled)
+      return;
+    chip.className = "status-vim-chip";
+    let modeLabel = vimMode;
+    if (vimMode === "VISUAL_LINE") {
+      chip.classList.add("mode-visual-line");
+      modeLabel = "V-LINE";
+    } else if (vimMode === "VISUAL") {
+      chip.classList.add("mode-visual");
+      modeLabel = "VISUAL";
+    } else {
+      chip.classList.add("mode-normal");
+      modeLabel = "NORMAL";
+    }
+    let extra = "";
+    if (vimCount)
+      extra += vimCount;
+    if (vimPending)
+      extra += vimPending;
+    if (extra) {
+      chip.innerHTML = esc2(modeLabel) + ' <span class="status-vim-pending">' + esc2(extra) + "</span>";
+    } else {
+      chip.textContent = modeLabel;
+    }
+  }
+  function wordAtCaret() {
+    const d = doc_();
+    if (!d)
+      return null;
+    const row = rowFor(d.cur);
+    if (!row)
+      return S2.at || null;
+    const code = row.querySelector(".c");
+    if (!code)
+      return S2.at || null;
+    const full = code.textContent;
+    let col = Math.min(d.col === Infinity ? full.length : d.col || 0, full.length);
+    if (col >= full.length && col > 0)
+      col = full.length - 1;
+    let a = col, b = col;
+    if (full[a] && WORD_RE.test(full[a])) {
+      while (a > 0 && WORD_RE.test(full[a - 1]))
+        a--;
+      while (b < full.length && WORD_RE.test(full[b]))
+        b++;
+      if (a < b)
+        return { word: full.slice(a, b), line: d.cur, col: a, path: d.path };
+    }
+    return S2.at || null;
+  }
+  function showHoverForCaret() {
+    const at = wordAtCaret();
+    if (!at)
+      return;
+    const caret = $("#caret");
+    let x = 120, y = 120;
+    if (caret) {
+      const r = caret.getBoundingClientRect();
+      x = Math.max(16, r.left);
+      y = r.bottom + 4;
+    }
+    showHover(at, x, y);
+  }
+  function enterVisualMode(lineWise = false) {
+    const d = doc_();
+    if (!d)
+      return;
+    vimMode = lineWise ? "VISUAL_LINE" : "VISUAL";
+    const row = rowFor(d.cur);
+    const len = row ? row.querySelector(".c")?.textContent.length || 0 : 0;
+    if (lineWise) {
+      d.selAnchor = { line: d.cur, col: 0 };
+      d.col = len;
+    } else {
+      if (!d.selAnchor) {
+        const col = d.col === Infinity ? len : d.col || 0;
+        d.selAnchor = { line: d.cur, col };
+      }
+    }
+    placeCaret();
+    updateDomSelection();
+    updateVimCaret();
+    updateVimStatus();
+  }
+  function exitVisualMode() {
+    const d = doc_();
+    vimMode = "NORMAL";
+    if (d)
+      clearSelection(d);
+    resetVimState();
+    updateVimCaret();
+    updateVimStatus();
+  }
+  function ensureLineSelection() {
+    const d = doc_();
+    if (!d || vimMode !== "VISUAL_LINE")
+      return;
+    if (!d.selAnchor)
+      d.selAnchor = { line: d.cur, col: 0 };
+    const row = rowFor(d.cur);
+    d.col = row ? row.querySelector(".c")?.textContent.length || 0 : 0;
+    placeCaret();
+    updateDomSelection();
+  }
+  function handleVimKeyDown(e) {
+    if (!vimEnabled)
+      return false;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) {
+      return false;
+    }
+    if (e.key === "Escape") {
+      if (vimMode !== "NORMAL") {
+        e.preventDefault();
+        exitVisualMode();
+        return true;
+      }
+      if (vimPending || vimCount) {
+        e.preventDefault();
+        resetVimState();
+        return true;
+      }
+      return false;
+    }
+    const d = doc_();
+    if (!d)
+      return false;
+    const isVisual = vimMode === "VISUAL" || vimMode === "VISUAL_LINE";
+    if (e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.key === "d") {
+        e.preventDefault();
+        const half = Math.max(1, Math.floor(vp.clientHeight / LH / 2)) * getCount();
+        moveCursor(half, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      if (e.key === "u") {
+        e.preventDefault();
+        const half = Math.max(1, Math.floor(vp.clientHeight / LH / 2)) * getCount();
+        moveCursor(-half, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      if (e.key === "f") {
+        e.preventDefault();
+        const page = Math.max(1, Math.floor(vp.clientHeight / LH) - 2) * getCount();
+        moveCursor(page, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      if (e.key === "b") {
+        e.preventDefault();
+        const page = Math.max(1, Math.floor(vp.clientHeight / LH) - 2) * getCount();
+        moveCursor(-page, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      if (e.key === "o") {
+        e.preventDefault();
+        go(-getCount());
+        resetVimState();
+        return true;
+      }
+      if (e.key === "i") {
+        e.preventDefault();
+        go(getCount());
+        resetVimState();
+        return true;
+      }
+    }
+    if (e.metaKey || e.altKey)
+      return false;
+    if (isVisual) {
+      if (e.key === "v" && !e.shiftKey) {
+        e.preventDefault();
+        if (vimMode === "VISUAL")
+          exitVisualMode();
+        else
+          enterVisualMode(false);
+        return true;
+      }
+      if (e.key === "V") {
+        e.preventDefault();
+        if (vimMode === "VISUAL_LINE")
+          exitVisualMode();
+        else
+          enterVisualMode(true);
+        return true;
+      }
+      if (e.key === "y") {
+        e.preventDefault();
+        const info = getSelectedRangeInfo();
+        if (info && info.text) {
+          const lineCount = info.l2 - info.l1 + 1;
+          copyToClipboard(info.text, "Yanked " + (lineCount === 1 ? "1 line" : lineCount + " lines"));
+        }
+        exitVisualMode();
+        return true;
+      }
+      if (e.key === "Y") {
+        e.preventDefault();
+        runSelectionAction("copy-ref");
+        exitVisualMode();
+        return true;
+      }
+      if (e.key === "e" || e.key === "c") {
+        e.preventDefault();
+        runSelectionAction("agent-edit");
+        exitVisualMode();
+        return true;
+      }
+      if (e.key === "u") {
+        e.preventDefault();
+        runSelectionAction("usages");
+        exitVisualMode();
+        return true;
+      }
+    }
+    if (!vimPending && /^[0-9]$/.test(e.key)) {
+      if (e.key === "0" && !vimCount) {} else {
+        e.preventDefault();
+        vimCount += e.key;
+        updateVimStatus();
+        return true;
+      }
+    }
+    if (vimPending === "g") {
+      e.preventDefault();
+      if (e.key === "g") {
+        const count2 = parseInt(vimCount, 10);
+        if (!isNaN(count2) && count2 > 0) {
+          d.cur = Math.max(1, Math.min(d.total, count2));
+          d.col = 0;
+          const y = (d.cur - 1) * LH;
+          vp.scrollTop = Math.max(0, y - LH * 3);
+          render();
+          updateStatus();
+        } else {
+          vp.scrollTop = 0;
+          d.cur = 1;
+          d.col = 0;
+          render();
+          updateStatus();
+        }
+        if (isVisual) {
+          placeCaret();
+          updateDomSelection();
+          if (vimMode === "VISUAL_LINE")
+            ensureLineSelection();
+        }
+      } else if (e.key === "d") {
+        const w = wordAtCaret();
+        if (w) {
+          pushHistory(d.path, d.cur);
+          gotoDefinition(w);
+        }
+      } else if (e.key === "r") {
+        findReferences();
+      } else if (e.key === "h") {
+        showCalls();
+      } else if (e.key === "t") {
+        const count2 = parseInt(vimCount, 10);
+        if (!isNaN(count2) && count2 > 0 && count2 <= S2.tabs.length) {
+          switchTab(count2 - 1);
+        } else if (S2.tabs.length > 1) {
+          switchTab((S2.active + 1) % S2.tabs.length);
+        }
+      } else if (e.key === "T") {
+        if (S2.tabs.length > 1) {
+          switchTab((S2.active - 1 + S2.tabs.length) % S2.tabs.length);
+        }
+      }
+      resetVimState();
+      return true;
+    }
+    if (vimPending === "z") {
+      e.preventDefault();
+      if (e.key === "z") {
+        vp.scrollTop = Math.max(0, (d.cur - 1) * LH - (vp.clientHeight - LH) / 2);
+        render();
+        updateStatus();
+      } else if (e.key === "t") {
+        vp.scrollTop = Math.max(0, (d.cur - 1) * LH);
+        render();
+        updateStatus();
+      } else if (e.key === "b") {
+        vp.scrollTop = Math.max(0, (d.cur - 1) * LH - vp.clientHeight + LH * 2);
+        render();
+        updateStatus();
+      }
+      resetVimState();
+      return true;
+    }
+    const count = getCount();
+    switch (e.key) {
+      case "h": {
+        e.preventDefault();
+        moveCol(-count, isVisual);
+        resetVimState();
+        return true;
+      }
+      case "l": {
+        e.preventDefault();
+        moveCol(count, isVisual);
+        resetVimState();
+        return true;
+      }
+      case "j": {
+        e.preventDefault();
+        moveCursor(count, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      case "k": {
+        e.preventDefault();
+        moveCursor(-count, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      case "w": {
+        e.preventDefault();
+        moveWord(count, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      case "b": {
+        e.preventDefault();
+        moveWord(-count, isVisual);
+        if (vimMode === "VISUAL_LINE")
+          ensureLineSelection();
+        resetVimState();
+        return true;
+      }
+      case "0": {
+        e.preventDefault();
+        caretToEdge(false, isVisual);
+        resetVimState();
+        return true;
+      }
+      case "$": {
+        e.preventDefault();
+        caretToEdge(true, isVisual);
+        resetVimState();
+        return true;
+      }
+      case "^": {
+        e.preventDefault();
+        const row = rowFor(d.cur);
+        const text = row ? row.querySelector(".c")?.textContent || "" : "";
+        const idx = text.search(/\S/);
+        d.col = idx >= 0 ? idx : 0;
+        revealCaretX(placeCaret());
+        if (isVisual)
+          updateDomSelection();
+        resetVimState();
+        return true;
+      }
+      case "G": {
+        e.preventDefault();
+        const targetLine = vimCount ? parseInt(vimCount, 10) : d.total;
+        d.cur = Math.max(1, Math.min(d.total, targetLine));
+        d.col = 0;
+        const y = (d.cur - 1) * LH;
+        vp.scrollTop = Math.max(0, y - LH * 3);
+        render();
+        updateStatus();
+        if (isVisual) {
+          placeCaret();
+          updateDomSelection();
+          if (vimMode === "VISUAL_LINE")
+            ensureLineSelection();
+        }
+        resetVimState();
+        return true;
+      }
+      case "g": {
+        e.preventDefault();
+        setVimPending("g");
+        return true;
+      }
+      case "z": {
+        e.preventDefault();
+        setVimPending("z");
+        return true;
+      }
+      case "H": {
+        e.preventDefault();
+        const topL = Math.floor(vp.scrollTop / LH) + 1;
+        d.cur = Math.max(1, Math.min(d.total, topL));
+        render();
+        updateStatus();
+        if (isVisual) {
+          placeCaret();
+          updateDomSelection();
+          if (vimMode === "VISUAL_LINE")
+            ensureLineSelection();
+        }
+        resetVimState();
+        return true;
+      }
+      case "M": {
+        e.preventDefault();
+        const midL = Math.floor((vp.scrollTop + vp.clientHeight / 2) / LH) + 1;
+        d.cur = Math.max(1, Math.min(d.total, midL));
+        render();
+        updateStatus();
+        if (isVisual) {
+          placeCaret();
+          updateDomSelection();
+          if (vimMode === "VISUAL_LINE")
+            ensureLineSelection();
+        }
+        resetVimState();
+        return true;
+      }
+      case "L": {
+        e.preventDefault();
+        const botL = Math.floor((vp.scrollTop + vp.clientHeight - LH) / LH);
+        d.cur = Math.max(1, Math.min(d.total, botL));
+        render();
+        updateStatus();
+        if (isVisual) {
+          placeCaret();
+          updateDomSelection();
+          if (vimMode === "VISUAL_LINE")
+            ensureLineSelection();
+        }
+        resetVimState();
+        return true;
+      }
+      case "K": {
+        e.preventDefault();
+        showHoverForCaret();
+        resetVimState();
+        return true;
+      }
+      case "/": {
+        e.preventDefault();
+        openFind();
+        resetVimState();
+        return true;
+      }
+      case "?": {
+        e.preventDefault();
+        openFind();
+        findNextMatch(-1);
+        resetVimState();
+        return true;
+      }
+      case "n": {
+        e.preventDefault();
+        findNextMatch(1);
+        resetVimState();
+        return true;
+      }
+      case "N": {
+        e.preventDefault();
+        findNextMatch(-1);
+        resetVimState();
+        return true;
+      }
+      case "*": {
+        e.preventDefault();
+        const w = wordAtCaret();
+        if (w && w.word) {
+          S2.at = w;
+          S2.lastWord = w.word;
+          S2.occ = w.word;
+          paint();
+          openFind(w.word);
+          findNextMatch(1);
+        }
+        resetVimState();
+        return true;
+      }
+      case "#": {
+        e.preventDefault();
+        const w = wordAtCaret();
+        if (w && w.word) {
+          S2.at = w;
+          S2.lastWord = w.word;
+          S2.occ = w.word;
+          paint();
+          openFind(w.word);
+          findNextMatch(-1);
+        }
+        resetVimState();
+        return true;
+      }
+      case "v": {
+        e.preventDefault();
+        enterVisualMode(false);
+        resetVimState();
+        return true;
+      }
+      case "V": {
+        e.preventDefault();
+        enterVisualMode(true);
+        resetVimState();
+        return true;
+      }
+      case ":": {
+        e.preventDefault();
+        openPalette("command");
+        resetVimState();
+        return true;
+      }
+    }
+    return false;
+  }
+  var VIM_SHORTCUT_SECTIONS = [
+    {
+      title: "Modes & Motions",
+      items: [
+        [["h", "j", "k", "l"], "Move left, down, up, right"],
+        [["w", "b"], "Next / previous word boundary"],
+        [["0", "^", "$"], "Start of line / first non-blank / end of line"],
+        [["gg", "G"], "First line / last line (or [count]gg / [count]G)"],
+        [["Ctrl+d", "Ctrl+u"], "Scroll half-page down / up"],
+        [["Ctrl+f", "Ctrl+b"], "Scroll full-page down / up"],
+        [["zz", "zt", "zb"], "Center line / line to top / line to bottom"],
+        [["H", "M", "L"], "Move to top, middle, bottom visible line"]
+      ]
+    },
+    {
+      title: "Code Intelligence & LSP",
+      items: [
+        [["gd"], "Go to Definition (replaces F12)"],
+        [["gr"], "Find References across workspace (replaces Shift+F12)"],
+        [["K"], "Show hover documentation & signatures"],
+        [["gh"], "Call Trail (callers / callees)"],
+        [["Ctrl+o", "Ctrl+i"], "Jump back / forward in navigation history"]
+      ]
+    },
+    {
+      title: "Search & Occurrences",
+      items: [
+        [["/"], "Find in file (forward)"],
+        [["?"], "Find in file (backward)"],
+        [["n", "N"], "Next / previous match"],
+        [["*", "#"], "Search current word under cursor forward / backward"],
+        [["Esc"], "Clear highlights, search, and occurrences"]
+      ]
+    },
+    {
+      title: "Visual Mode & AI Agent Actions",
+      items: [
+        [["v"], "Character-wise visual selection"],
+        [["V"], "Line-wise visual selection"],
+        [["e", "c"], "Edit selection inline with AI coding agent"],
+        [["y"], "Yank (copy) code to clipboard"],
+        [["Y"], "Yank reference (file:line-range)"],
+        [["u"], "Find usages of selected symbol"],
+        [["Esc"], "Cancel selection and return to Normal mode"]
+      ]
+    },
+    {
+      title: "Tabs & Commands",
+      items: [
+        [["gt", "gT"], "Next tab / previous tab"],
+        [["[N]gt"], "Switch to tab N"],
+        [[":"], "Open Command Palette"]
+      ]
+    }
+  ];
+  function showVimHelp() {
+    let modal = $("#vim-helpsheet");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "vim-helpsheet";
+      document.body.appendChild(modal);
+    }
+    const isChecked = vimEnabled ? "checked" : "";
+    modal.innerHTML = `
+    <div class="help-card vim-help-card">
+      <div class="help-header vim-help-header">
+        <div class="vim-help-title">
+          <h2>Vim Keybindings</h2>
+          <span class="help-version">Modal Navigation</span>
+        </div>
+        <div class="vim-toggle-row">
+          <label class="vim-switch-label">
+            <input type="checkbox" id="vim-toggle-input" ${isChecked}>
+            <span class="vim-switch-slider"></span>
+            <span class="vim-switch-text">${vimEnabled ? "Enabled" : "Disabled"}</span>
+          </label>
+          <button id="btn-close-vim-help" class="mini" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="vim-help-content">
+        ${VIM_SHORTCUT_SECTIONS.map((sec) => `
+          <div class="vim-help-section">
+            <div class="vim-sec-title">${esc2(sec.title)}</div>
+            <dl class="help-grid vim-help-grid">
+              ${sec.items.map(([combos, v]) => `
+                <dt>${combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>')}</dt>
+                <dd>${esc2(v)}</dd>
+              `).join("")}
+            </dl>
+          </div>
+        `).join("")}
+      </div>
+      <div class="vim-help-footer">
+        <button id="btn-switch-to-std-help" class="settings-btn-link" title="View Standard Shortcuts (?)">View Standard Shortcuts (?)</button>
+        <span class="agent-hint">Press Esc or click outside to dismiss</span>
+      </div>
+    </div>
+  `;
+    modal.hidden = false;
+    const toggleInput = modal.querySelector("#vim-toggle-input");
+    if (toggleInput) {
+      toggleInput.addEventListener("change", (e) => {
+        const active = e.target.checked;
+        setVimModeEnabled(active, true);
+        const txt = modal.querySelector(".vim-switch-text");
+        if (txt)
+          txt.textContent = active ? "Enabled" : "Disabled";
+        showToast("✓", active ? "Vim mode enabled" : "Vim mode disabled");
+      });
+    }
+    modal.querySelector("#btn-close-vim-help")?.addEventListener("click", closeVimHelp);
+    modal.querySelector("#btn-switch-to-std-help")?.addEventListener("click", () => {
+      closeVimHelp();
+      showHelp();
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal)
+        closeVimHelp();
+    });
+  }
+  function closeVimHelp() {
+    const modal = $("#vim-helpsheet");
+    if (modal)
+      modal.hidden = true;
+  }
+  function initVim() {
+    let initial = false;
+    try {
+      const val = localStorage.getItem("px0.editor.vimMode");
+      if (val === "true")
+        initial = true;
+    } catch {}
+    if (S2.settings && S2.settings["editor.vimMode"] !== undefined) {
+      initial = S2.settings["editor.vimMode"] === true || S2.settings["editor.vimMode"] === "true";
+    }
+    setVimModeEnabled(initial, false);
+    const chip = $("#st-vim");
+    if (chip) {
+      chip.addEventListener("click", () => {
+        showVimHelp();
+      });
+    }
+    const helpBtn = $("#btn-vim-help");
+    if (helpBtn) {
+      helpBtn.addEventListener("click", () => {
+        showVimHelp();
+      });
+    }
+  }
+
+  // web/src/settings.js
+  var settingsModalEl = null;
+  var BUILTIN_SCHEMA = [
+    {
+      key: "editor.fontSize",
+      title: "Font Size",
+      description: "Controls the font size in pixels for the code viewer.",
+      category: "Text Editor",
+      type: "number",
+      default: 13.5,
+      min: 9,
+      max: 32,
+      step: 0.5
+    },
+    {
+      key: "editor.fontFamily",
+      title: "Font Family",
+      description: "Controls the font family used in the code viewer.",
+      category: "Text Editor",
+      type: "string",
+      default: '"JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Menlo, Consolas, ui-monospace, monospace'
+    },
+    {
+      key: "editor.lineHeight",
+      title: "Line Height",
+      description: "Controls the line height in pixels for the code viewer.",
+      category: "Text Editor",
+      type: "number",
+      default: 21,
+      min: 14,
+      max: 48,
+      step: 1
+    },
+    {
+      key: "editor.tabSize",
+      title: "Tab Size",
+      description: "The number of spaces a tab is equal to.",
+      category: "Text Editor",
+      type: "select",
+      default: 4,
+      options: ["2", "4", "8"]
+    },
+    {
+      key: "editor.wordWrap",
+      title: "Word Wrap",
+      description: "Controls whether lines should wrap around or scroll horizontally.",
+      category: "Text Editor",
+      type: "select",
+      default: "on",
+      options: ["on", "off"]
+    },
+    {
+      key: "editor.lineNumbers",
+      title: "Line Numbers",
+      description: "Controls the display of line numbers in the gutter.",
+      category: "Text Editor",
+      type: "select",
+      default: "on",
+      options: ["on", "off"]
+    },
+    {
+      key: "editor.vimMode",
+      title: "Vim Keybindings",
+      description: "Enable Vim modal navigation (Normal mode, Visual mode, motions, search, and LSP shortcuts).",
+      category: "Text Editor",
+      type: "boolean",
+      default: false
+    },
+    {
+      key: "editor.cursorStyle",
+      title: "Cursor Style",
+      description: "Controls the cursor style in the code viewer.",
+      category: "Text Editor",
+      type: "select",
+      default: "line",
+      options: ["line", "block", "underline"]
+    },
+    {
+      key: "editor.cursorBlinking",
+      title: "Cursor Blinking",
+      description: "Controls the cursor animation style.",
+      category: "Text Editor",
+      type: "select",
+      default: "smooth",
+      options: ["blink", "smooth", "solid"]
+    },
+    {
+      key: "editor.renderLineHighlight",
+      title: "Render Line Highlight",
+      description: "Controls how the editor should render the current line highlight.",
+      category: "Text Editor",
+      type: "select",
+      default: "line",
+      options: ["line", "none"]
+    },
+    {
+      key: "editor.occurrencesHighlight",
+      title: "Occurrences Highlight",
+      description: "Controls whether the editor should highlight occurrences of the selected word.",
+      category: "Text Editor",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "editor.scrollBeyondLastLine",
+      title: "Scroll Beyond Last Line",
+      description: "Controls whether the editor will scroll beyond the last line of the file.",
+      category: "Text Editor",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "editor.bracketPairColorization",
+      title: "Bracket Pair Colorization",
+      description: "Controls whether bracket pair colorization and matching is enabled.",
+      category: "Text Editor",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "editor.renderWhitespace",
+      title: "Render Whitespace",
+      description: "Controls how whitespace characters are rendered in the viewer.",
+      category: "Text Editor",
+      type: "select",
+      default: "selection",
+      options: ["none", "boundary", "selection", "all"]
+    },
+    {
+      key: "editor.minimap.enabled",
+      title: "Minimap Hits",
+      description: "Controls whether search hit indicators are shown in the scroll minimap gutter.",
+      category: "Text Editor",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "workbench.colorTheme",
+      title: "Color Theme",
+      description: "Specifies the color theme used in the workbench.",
+      category: "Workbench",
+      type: "select",
+      default: "github-dark",
+      options: [
+        "github-dark",
+        "dark",
+        "light",
+        "catppuccin-mocha",
+        "catppuccin-latte",
+        "dracula",
+        "gruvbox-dark",
+        "gruvbox-light",
+        "monokai",
+        "nord",
+        "one-dark",
+        "rose-pine",
+        "solarized-dark",
+        "solarized-light"
+      ]
+    },
+    {
+      key: "diffEditor.renderSideBySide",
+      title: "Diff Side By Side",
+      description: "Controls whether the diff editor shows changes in split (side-by-side) or unified mode.",
+      category: "Workbench",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "diffEditor.ignoreTrimWhitespace",
+      title: "Diff: Ignore Trim Whitespace",
+      description: "Controls whether the diff viewer ignores changes in leading or trailing whitespace.",
+      category: "Git & Diff",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "git.gutterIndicators",
+      title: "Git Gutter Indicators",
+      description: "Controls whether changed line indicators are shown in the editor gutter.",
+      category: "Git & Diff",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "markdown.preview.open",
+      title: "Markdown Preview",
+      description: "Controls whether Markdown files open in rendered preview by default.",
+      category: "Workbench",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "explorer.compactFolders",
+      title: "Compact Folders",
+      description: "Controls whether the file tree renders single-child directory chains compactly.",
+      category: "Files & Explorer",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "explorer.autoReveal",
+      title: "Auto Reveal Active File",
+      description: "Controls whether the file explorer automatically scrolls to and reveals active tabs.",
+      category: "Files & Explorer",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "files.exclude",
+      title: "Files Exclude Patterns",
+      description: "Configure glob patterns for excluding files and folders from search and trees.",
+      category: "Files & Explorer",
+      type: "string",
+      default: "**/.git, **/node_modules, **/target, **/.DS_Store"
+    },
+    {
+      key: "search.smartCase",
+      title: "Smart Case Search",
+      description: "Searches case-insensitively when query is lowercase, and case-sensitively when uppercase characters exist.",
+      category: "Search",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "search.maxResults",
+      title: "Max Search Results",
+      description: "Controls the maximum number of results returned in workspace-wide searches.",
+      category: "Search",
+      type: "number",
+      default: 1000,
+      min: 50,
+      max: 1e4,
+      step: 50
+    },
+    {
+      key: "lsp.enabled",
+      title: "Language Server Protocol (LSP)",
+      description: "Master switch for language server integrations (definitions, references, diagnostics).",
+      category: "LSP & Intelligence",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "lsp.hover.enabled",
+      title: "Hover Documentation",
+      description: "Controls whether hovercards with documentation and type signatures appear on hover.",
+      category: "LSP & Intelligence",
+      type: "boolean",
+      default: true
+    },
+    {
+      key: "agent.harness",
+      title: "Coding Harness",
+      description: "Coding agent harness invoked for code edits (e.g. claude, gemini, cursor-agent, agy, opencode, codex, aider, goose).",
+      category: "Agent / AI",
+      type: "string",
+      default: ""
+    },
+    {
+      key: "agent.timeoutSeconds",
+      title: "Agent Timeout (Seconds)",
+      description: "Controls the maximum execution time in seconds for agent edits before canceling.",
+      category: "Agent / AI",
+      type: "number",
+      default: 120,
+      min: 10,
+      max: 600,
+      step: 10
+    },
+    {
+      key: "agent.autoAcceptEdits",
+      title: "Auto Accept Agent Edits",
+      description: "Controls whether agent-generated code diffs are accepted without manual confirmation.",
+      category: "Agent / AI",
+      type: "boolean",
+      default: false
+    }
+  ];
+  var settingsData = {
+    settings: {},
+    defaults: Object.fromEntries(BUILTIN_SCHEMA.map((s) => [s.key, s.default])),
+    schema: BUILTIN_SCHEMA,
+    raw: `{
+}
+`,
+    path: "~/.px0/settings.json"
+  };
+  var activeSettingsCategory = "Commonly Used";
+  var settingsViewMode = "ui";
+  var settingsFilterQuery = "";
+  var COMMONLY_USED_KEYS = new Set([
+    "editor.fontSize",
+    "workbench.colorTheme",
+    "editor.wordWrap",
+    "editor.lineNumbers",
+    "editor.vimMode",
+    "editor.tabSize",
+    "diffEditor.renderSideBySide",
+    "editor.cursorStyle",
+    "explorer.autoReveal",
+    "search.smartCase",
+    "lsp.hover.enabled",
+    "agent.harness"
+  ]);
+  async function loadSettings() {
+    try {
+      const data = await api("/api/settings");
+      if (data && data.schema && data.schema.length > 0) {
+        settingsData = data;
+      } else if (data) {
+        settingsData.settings = data.settings || {};
+        settingsData.raw = data.raw || settingsData.raw;
+        settingsData.path = data.path || settingsData.path;
+        if (data.defaults)
+          settingsData.defaults = { ...settingsData.defaults, ...data.defaults };
+      }
+      S2.settings = settingsData.settings || {};
+      return settingsData;
+    } catch (err) {
+      console.warn("Using built-in settings schema (offline/fallback):", err);
+      return settingsData;
+    }
+  }
+  function applySettingLive(key, val) {
+    if (!S2.settings)
+      S2.settings = {};
+    S2.settings[key] = val;
+    switch (key) {
+      case "editor.fontSize":
+      case "editor.fontFamily":
+      case "editor.lineHeight":
+      case "editor.tabSize": {
+        const fs = parseFloat(S2.settings["editor.fontSize"]) || 13.5;
+        const ff = S2.settings["editor.fontFamily"] || "";
+        const lh = parseFloat(S2.settings["editor.lineHeight"]) || 21;
+        const ts = parseInt(S2.settings["editor.tabSize"], 10) || 4;
+        applyEditorTypography(fs, ff, lh, ts);
+        break;
+      }
+      case "editor.wordWrap": {
+        const on = val === "on" || val === true;
+        toggleWordWrap(on);
+        break;
+      }
+      case "editor.lineNumbers": {
+        const on = val === "on" || val === true;
+        toggleLineNumbers(on);
+        break;
+      }
+      case "editor.cursorStyle": {
+        document.body.classList.remove("cursor-block", "cursor-underline");
+        if (val === "block")
+          document.body.classList.add("cursor-block");
+        else if (val === "underline")
+          document.body.classList.add("cursor-underline");
+        break;
+      }
+      case "editor.cursorBlinking": {
+        document.body.classList.remove("cursor-blink-smooth", "cursor-blink-solid", "cursor-blink-blink");
+        if (val === "solid")
+          document.body.classList.add("cursor-blink-solid");
+        else if (val === "blink")
+          document.body.classList.add("cursor-blink-blink");
+        else
+          document.body.classList.add("cursor-blink-smooth");
+        break;
+      }
+      case "editor.renderLineHighlight": {
+        document.body.classList.toggle("no-line-highlight", val === "none");
+        break;
+      }
+      case "editor.scrollBeyondLastLine": {
+        document.body.classList.toggle("no-scroll-beyond", val === false || val === "false");
+        break;
+      }
+      case "git.gutterIndicators": {
+        document.body.classList.toggle("hide-git-gutter", val === false || val === "false");
+        break;
+      }
+      case "editor.minimap.enabled": {
+        const minimap = $("#minimap-hits");
+        if (minimap)
+          minimap.style.display = val === false || val === "false" ? "none" : "";
+        break;
+      }
+      case "workbench.colorTheme": {
+        if (val)
+          setTheme(val, true);
+        break;
+      }
+      case "diffEditor.renderSideBySide": {
+        const split = val === true || val === "true";
+        setLayoutPref(split ? "split" : "unified");
+        break;
+      }
+      case "markdown.preview.open": {
+        S2.mdPreview = val === true || val === "true";
+        try {
+          localStorage.setItem("px0.mdPreview", S2.mdPreview ? "true" : "false");
+        } catch {}
+        break;
+      }
+      case "editor.vimMode": {
+        setVimModeEnabled(val === true || val === "true", false);
+        break;
+      }
+    }
+  }
+  function applyAllSettingsLive() {
+    if (!S2.settings)
+      return;
+    for (const [k, v] of Object.entries(S2.settings)) {
+      applySettingLive(k, v);
+    }
+  }
+  function openSettings(mode = "ui") {
+    if (!settingsModalEl)
+      initSettingsDOM();
+    settingsViewMode = mode === "json" ? "json" : "ui";
+    settingsModalEl.hidden = false;
+    updateSettingsHeader();
+    if (settingsViewMode === "json") {
+      showSettingsJSONView();
+    } else {
+      showSettingsUIView();
+    }
+    loadSettings().then(() => {
+      updateSettingsHeader();
+      if (settingsViewMode === "json") {
+        showSettingsJSONView();
+      } else {
+        showSettingsUIView();
+      }
+    });
+    const searchInput = $("#settings-search");
+    if (searchInput && settingsViewMode === "ui") {
+      setTimeout(() => searchInput.focus(), 50);
+    }
+  }
+  function closeSettings() {
+    if (settingsModalEl)
+      settingsModalEl.hidden = true;
+  }
+  function isSettingsOpen() {
+    return settingsModalEl && !settingsModalEl.hidden;
+  }
+  function updateSettingsHeader() {
+    const pathEl = $("#settings-path");
+    if (pathEl && settingsData.path) {
+      pathEl.textContent = settingsData.path;
+      pathEl.title = "Click to copy path: " + settingsData.path;
+    }
+    const btnUI = $("#settings-mode-ui");
+    const btnJSON = $("#settings-mode-json");
+    if (btnUI && btnJSON) {
+      btnUI.classList.toggle("active", settingsViewMode === "ui");
+      btnJSON.classList.toggle("active", settingsViewMode === "json");
+    }
+  }
+  function showSettingsUIView() {
+    settingsViewMode = "ui";
+    updateSettingsHeader();
+    $("#settings-ui-container").hidden = false;
+    $("#settings-json-container").hidden = true;
+    $("#settings-search-bar").hidden = false;
+    renderSettingsNav();
+    renderSettingsList();
+  }
+  function showSettingsJSONView() {
+    settingsViewMode = "json";
+    updateSettingsHeader();
+    $("#settings-ui-container").hidden = true;
+    $("#settings-json-container").hidden = false;
+    $("#settings-search-bar").hidden = true;
+    const rawEditor = $("#settings-raw-editor");
+    if (rawEditor) {
+      rawEditor.value = settingsData.raw || `{
+}
+`;
+      rawEditor.focus();
+    }
+    const errEl = $("#settings-raw-error");
+    if (errEl)
+      errEl.hidden = true;
+  }
+  function getSettingCategories() {
+    const cats = ["Commonly Used"];
+    const seen = new Set(cats);
+    for (const item of settingsData.schema || []) {
+      const cat = item.category || item.Category;
+      if (cat && !seen.has(cat)) {
+        cats.push(cat);
+        seen.add(cat);
+      }
+    }
+    return cats;
+  }
+  function renderSettingsNav() {
+    const nav = $("#settings-nav");
+    if (!nav)
+      return;
+    const cats = getSettingCategories();
+    nav.innerHTML = cats.map((cat) => {
+      const active = cat === activeSettingsCategory ? " active" : "";
+      return `<button class="settings-nav-item${active}" data-cat="${esc2(cat)}">${esc2(cat)}</button>`;
+    }).join("");
+  }
+  function isSettingModified(key, val, defVal) {
+    if (val === undefined || val === null)
+      return false;
+    if (defVal === undefined || defVal === null)
+      return val !== "";
+    if (typeof defVal === "number") {
+      return parseFloat(val) !== parseFloat(defVal);
+    }
+    if (typeof defVal === "boolean") {
+      return Boolean(val) !== Boolean(defVal);
+    }
+    return String(val) !== String(defVal);
+  }
+  function renderSettingsList() {
+    const container = $("#settings-list");
+    if (!container)
+      return;
+    const q = settingsFilterQuery.trim().toLowerCase();
+    const schema = settingsData.schema || [];
+    const currentSettings = settingsData.settings || {};
+    const defaults = settingsData.defaults || {};
+    let items = schema;
+    if (q) {
+      items = schema.filter((s) => {
+        const title = (s.title || s.Title || "").toLowerCase();
+        const key = (s.key || s.Key || "").toLowerCase();
+        const desc = (s.description || s.Description || "").toLowerCase();
+        const cat = (s.category || s.Category || "").toLowerCase();
+        return title.includes(q) || key.includes(q) || desc.includes(q) || cat.includes(q);
+      });
+    } else if (activeSettingsCategory === "Commonly Used") {
+      items = schema.filter((s) => COMMONLY_USED_KEYS.has(s.key || s.Key));
+    } else {
+      items = schema.filter((s) => (s.category || s.Category) === activeSettingsCategory);
+    }
+    if (items.length === 0) {
+      container.innerHTML = `<div class="settings-empty">No matching settings found for "${esc2(q || activeSettingsCategory)}".</div>`;
+      return;
+    }
+    const html = items.map((item) => {
+      const key = item.key || item.Key;
+      const title = item.title || item.Title || key;
+      const desc = item.description || item.Description || "";
+      const cat = item.category || item.Category || "General";
+      const type = item.type || item.Type || "string";
+      const itemDef = item.default !== undefined ? item.default : item.Default;
+      const def = defaults[key] !== undefined ? defaults[key] : itemDef;
+      const val = currentSettings[key] !== undefined ? currentSettings[key] : def;
+      const modified = isSettingModified(key, currentSettings[key], def);
+      const modClass = modified ? " is-modified" : "";
+      let controlHtml = "";
+      let aptValuesHtml = "";
+      if (type === "boolean") {
+        const checked = val === true || val === "true" ? "checked" : "";
+        controlHtml = `
+        <label class="settings-switch">
+          <input type="checkbox" data-key="${esc2(key)}" ${checked}>
+          <span class="settings-slider"></span>
+        </label>`;
+        const isT = val === true || val === "true";
+        aptValuesHtml = `
+        <div class="settings-apt-bar">
+          <span class="settings-apt-label">Allowed Values:</span>
+          <div class="settings-apt-pills">
+            <button type="button" class="settings-pill-tag${isT ? " active" : ""}" data-set-key="${esc2(key)}" data-set-val="true" title="Set to true">true</button>
+            <button type="button" class="settings-pill-tag${!isT ? " active" : ""}" data-set-key="${esc2(key)}" data-set-val="false" title="Set to false">false</button>
+          </div>
+        </div>`;
+      } else if (type === "select") {
+        const opts = item.options || item.Options || [];
+        const optHtml = opts.map((o) => {
+          const sel = String(o) === String(val) ? "selected" : "";
+          return `<option value="${esc2(o)}" ${sel}>${esc2(o)}</option>`;
+        }).join("");
+        controlHtml = `<select class="settings-select" data-key="${esc2(key)}">${optHtml}</select>`;
+        const pills = opts.map((o) => {
+          const isSel = String(o) === String(val);
+          return `<button type="button" class="settings-pill-tag${isSel ? " active" : ""}" data-set-key="${esc2(key)}" data-set-val="${esc2(String(o))}" title="Select ${esc2(String(o))}">${esc2(String(o))}</button>`;
+        }).join("");
+        aptValuesHtml = `
+        <div class="settings-apt-bar">
+          <span class="settings-apt-label">Options:</span>
+          <div class="settings-apt-pills">
+            ${pills}
+          </div>
+        </div>`;
+      } else if (type === "number") {
+        const min = item.min !== undefined ? item.min : item.Min;
+        const max = item.max !== undefined ? item.max : item.Max;
+        const step = item.step !== undefined ? item.step : item.Step;
+        const minAttr = min !== undefined ? `min="${min}"` : "";
+        const maxAttr = max !== undefined ? `max="${max}"` : "";
+        const stepAttr = step !== undefined ? `step="${step}"` : 'step="1"';
+        controlHtml = `<input type="number" class="settings-input settings-input-num" data-key="${esc2(key)}" value="${esc2(String(val))}" ${minAttr} ${maxAttr} ${stepAttr}>`;
+        let numberPresets = [];
+        if (key === "editor.fontSize")
+          numberPresets = [12, 13, 13.5, 14, 16, 18];
+        else if (key === "editor.lineHeight")
+          numberPresets = [18, 20, 21, 24, 28];
+        else if (key === "search.maxResults")
+          numberPresets = [200, 500, 1000, 5000];
+        else if (key === "agent.timeoutSeconds")
+          numberPresets = [60, 120, 180, 300];
+        const presetPills = numberPresets.length ? `
+        <span class="settings-apt-label">Presets:</span>
+        <div class="settings-apt-pills">
+          ${numberPresets.map((n) => {
+          const isSel = Number(val) === n;
+          return `<button type="button" class="settings-pill-tag${isSel ? " active" : ""}" data-set-key="${esc2(key)}" data-set-val="${n}">${n}</button>`;
+        }).join("")}
+        </div>` : "";
+        aptValuesHtml = `
+        <div class="settings-apt-bar">
+          <span class="settings-tag tag-range">Min: <b>${min !== undefined ? min : "—"}</b></span>
+          <span class="settings-tag tag-range">Max: <b>${max !== undefined ? max : "—"}</b></span>
+          ${step !== undefined ? `<span class="settings-tag tag-step">Step: <b>${step}</b></span>` : ""}
+          ${presetPills}
+        </div>`;
+      } else {
+        controlHtml = `<input type="text" class="settings-input" data-key="${esc2(key)}" value="${esc2(String(val || ""))}">`;
+        let stringPresets = [];
+        if (key === "agent.harness") {
+          stringPresets = ["claude", "gemini", "cursor-agent", "agy", "aider"];
+        }
+        const presetPills = stringPresets.length ? `
+        <div class="settings-apt-bar">
+          <span class="settings-apt-label">Suggestions:</span>
+          <div class="settings-apt-pills">
+            ${stringPresets.map((s) => {
+          const isSel = String(val) === s;
+          return `<button type="button" class="settings-pill-tag${isSel ? " active" : ""}" data-set-key="${esc2(key)}" data-set-val="${esc2(s)}">${esc2(s)}</button>`;
+        }).join("")}
+          </div>
+        </div>` : "";
+        aptValuesHtml = presetPills;
+      }
+      const resetBtn = modified ? `<button class="settings-reset-btn" data-reset="${esc2(key)}" title="Reset to default (${esc2(String(def))})">Reset</button>` : "";
+      const extraAction = key === "editor.vimMode" ? `
+      <div style="margin: 6px 0 2px;">
+        <button type="button" class="settings-btn-link btn-vim-cheatsheet-trigger" style="cursor:pointer;font-size:11.5px;display:inline-flex;align-items:center;gap:4px;color:var(--accent-fg);">
+          <span>View Vim Keybindings Cheat Sheet</span><kbd class="footer-kbd" style="font-size:10px;">?</kbd>
+        </button>
+      </div>` : "";
+      return `
+      <div class="settings-card${modClass}" data-setting="${esc2(key)}">
+        <div class="settings-card-left">
+          <div class="settings-card-header">
+            <span class="settings-card-title">${esc2(title)}</span>
+            <span class="settings-card-key">${esc2(key)}</span>
+            <span class="settings-tag tag-cat">${esc2(cat)}</span>
+            <span class="settings-tag tag-type">${esc2(type)}</span>
+          </div>
+          <div class="settings-card-desc">${esc2(desc)}</div>
+          ${aptValuesHtml}
+          ${extraAction}
+          <div class="settings-card-meta">
+            <span class="settings-tag tag-current">Current: <b>${esc2(String(val))}</b></span>
+            <span class="settings-tag tag-default">Default: <code>${esc2(String(def))}</code></span>
+            ${modified ? `<span class="settings-tag tag-modified">Modified</span>` : ""}
+            ${resetBtn}
+          </div>
+        </div>
+        <div class="settings-card-right">
+          ${controlHtml}
+        </div>
+      </div>
+    `;
+    }).join("");
+    container.innerHTML = html;
+  }
+  async function handleSettingChange(key, value) {
+    if (!settingsData.settings)
+      settingsData.settings = {};
+    settingsData.settings[key] = value;
+    applySettingLive(key, value);
+    renderSettingsList();
+    try {
+      const res = await apiPost("/api/settings", { [key]: value });
+      if (res.raw)
+        settingsData.raw = res.raw;
+    } catch (err) {
+      console.error(`Failed to save setting ${key}:`, err);
+    }
+  }
+  async function handleResetSetting(key) {
+    const def = settingsData.defaults ? settingsData.defaults[key] : undefined;
+    if (def !== undefined) {
+      await handleSettingChange(key, def);
+    }
+  }
+  async function handleSaveRawSettings() {
+    const rawEditor = $("#settings-raw-editor");
+    const errEl = $("#settings-raw-error");
+    if (!rawEditor)
+      return;
+    const rawText = rawEditor.value;
+    try {
+      JSON.parse(rawText);
+      if (errEl)
+        errEl.hidden = true;
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = "JSON Syntax Error: " + err.message;
+        errEl.hidden = false;
+      }
+      return;
+    }
+    try {
+      const res = await apiPost("/api/settings", { raw: rawText });
+      if (res.settings) {
+        settingsData.settings = res.settings;
+        S2.settings = res.settings;
+        applyAllSettingsLive();
+      }
+      if (res.raw)
+        settingsData.raw = res.raw;
+      if (errEl) {
+        errEl.textContent = "Settings saved successfully.";
+        errEl.hidden = false;
+        errEl.classList.add("success");
+        setTimeout(() => {
+          errEl.hidden = true;
+          errEl.classList.remove("success");
+        }, 2500);
+      }
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = "Failed to save: " + err.message;
+        errEl.hidden = false;
+      }
+    }
+  }
+  function initSettingsDOM() {
+    settingsModalEl = $("#settings-modal");
+    if (!settingsModalEl)
+      return;
+    $("#settings-close")?.addEventListener("click", closeSettings);
+    settingsModalEl.addEventListener("click", (e) => {
+      if (e.target === settingsModalEl)
+        closeSettings();
+    });
+    $("#settings-mode-ui")?.addEventListener("click", () => showSettingsUIView());
+    $("#settings-mode-json")?.addEventListener("click", () => showSettingsJSONView());
+    $("#settings-path")?.addEventListener("click", () => {
+      if (settingsData.path) {
+        navigator.clipboard.writeText(settingsData.path);
+        const toast = $("#toast");
+        if (toast) {
+          toast.textContent = "Copied settings path to clipboard";
+          toast.hidden = false;
+          setTimeout(() => {
+            toast.hidden = true;
+          }, 2000);
+        }
+      }
+    });
+    const searchInput = $("#settings-search");
+    if (searchInput) {
+      searchInput.addEventListener("input", (e) => {
+        settingsFilterQuery = e.target.value;
+        renderSettingsList();
+      });
+      $("#settings-search-clear")?.addEventListener("click", () => {
+        searchInput.value = "";
+        settingsFilterQuery = "";
+        renderSettingsList();
+        searchInput.focus();
+      });
+    }
+    $("#settings-nav")?.addEventListener("click", (e) => {
+      const btn = e.target.closest(".settings-nav-item");
+      if (!btn)
+        return;
+      activeSettingsCategory = btn.dataset.cat;
+      settingsFilterQuery = "";
+      if (searchInput)
+        searchInput.value = "";
+      renderSettingsNav();
+      renderSettingsList();
+    });
+    const listEl2 = $("#settings-list");
+    if (listEl2) {
+      listEl2.addEventListener("change", (e) => {
+        const target2 = e.target;
+        const key = target2.dataset.key;
+        if (!key)
+          return;
+        let value;
+        if (target2.type === "checkbox") {
+          value = target2.checked;
+        } else if (target2.type === "number") {
+          value = parseFloat(target2.value);
+        } else {
+          value = target2.value;
+        }
+        handleSettingChange(key, value);
+      });
+      listEl2.addEventListener("click", (e) => {
+        const pill = e.target.closest(".settings-pill-tag");
+        if (pill) {
+          const key = pill.dataset.setKey;
+          let value = pill.dataset.setVal;
+          if (value === "true")
+            value = true;
+          else if (value === "false")
+            value = false;
+          else if (!isNaN(Number(value)) && value.trim() !== "")
+            value = Number(value);
+          if (key)
+            handleSettingChange(key, value);
+          return;
+        }
+        const resetBtn = e.target.closest(".settings-reset-btn");
+        if (resetBtn) {
+          const key = resetBtn.dataset.reset;
+          if (key)
+            handleResetSetting(key);
+          return;
+        }
+        const vimHelpBtn = e.target.closest(".btn-vim-cheatsheet-trigger");
+        if (vimHelpBtn) {
+          showVimHelp();
+          return;
+        }
+      });
+    }
+    $("#btn-settings-save-raw")?.addEventListener("click", handleSaveRawSettings);
+    $("#btn-settings-reset-raw")?.addEventListener("click", () => {
+      const rawEditor = $("#settings-raw-editor");
+      if (rawEditor)
+        rawEditor.value = settingsData.raw || `{
+}
+`;
+      const errEl = $("#settings-raw-error");
+      if (errEl)
+        errEl.hidden = true;
+    });
+  }
+  function initSettings() {
+    initSettingsDOM();
+    loadSettings().then(() => {
+      applyAllSettingsLive();
+    });
+  }
+
+  // web/src/agent.js
+  var box = $("#agentbox");
+  var tpl = $("#agentbox-tpl");
+  var agentListEl = $("#agentbox-list");
+  var batchBar = $("#agent-batch-bar");
+  var batchCount = $("#agent-batch-count");
+  var batchClear = $("#agent-batch-clear");
+  var batchHarness = $("#agent-batch-harness");
+  var batchModel = $("#agent-batch-model");
+  var batchHint = $("#agent-batch-hint");
+  var batchApply = $("#agent-batch-apply");
+  var batchCancel = $("#agent-batch-cancel");
+  var batchErr = $("#agent-batch-err");
+  var sessions = new Map;
+  var agentSeq = 0;
+  var batchTimer = null;
+  var batchJobId = null;
+  var batchElapsed = "";
+  var activeBatchTargets = null;
+  var installed = () => (S2.meta?.agents || []).filter((h) => h.installed);
+  var chosen = () => S2.meta && S2.meta.agent || "";
+  var chosenModel = () => S2.meta && S2.meta.agentModel || "";
+  var targetRef = ({ path, l1, l2 }) => path + ":" + (l1 === l2 ? l1 : l1 + "-" + l2);
+  var rangesOverlap = (a, b) => a.path === b.path && a.l1 <= b.l2 && b.l1 <= a.l2;
+  function applyAgentMeta() {
+    for (const session of sessions.values()) {
+      updateSessionMeta(session);
+    }
+    syncBatchMeta();
+  }
+  function updateSessionMeta(session) {
+    if (!session.harnessSelect || !session.modelSelect)
+      return;
+    const ready = (S2.meta?.agents || []).filter((h) => h.installed);
+    const currentHarness = chosen();
+    const currentModel = chosenModel();
+    session.harnessSelect.innerHTML = "";
+    if (!ready.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "no harness";
+      session.harnessSelect.appendChild(opt);
+      session.harnessSelect.disabled = true;
+      session.modelSelect.innerHTML = "";
+      session.modelSelect.hidden = true;
+      return;
+    }
+    for (const h of ready) {
+      const opt = document.createElement("option");
+      opt.value = h.name;
+      opt.textContent = h.name;
+      if (h.name === currentHarness)
+        opt.selected = true;
+      session.harnessSelect.appendChild(opt);
+    }
+    const isBusy = session.el.classList.contains("busy");
+    session.harnessSelect.disabled = isBusy || !!(S2.meta && S2.meta.agentPinned);
+    session.harnessSelect.title = S2.meta && S2.meta.agentPinned ? "Fixed for this run by -agent" : "Change the coding harness";
+    const activeH = ready.find((h) => h.name === (session.harnessSelect.value || currentHarness)) || ready[0];
+    session.modelSelect.innerHTML = "";
+    const models = activeH?.models || [];
+    if (models.length > 0) {
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        if (m === currentModel)
+          opt.selected = true;
+        session.modelSelect.appendChild(opt);
+      }
+      session.modelSelect.hidden = false;
+      session.modelSelect.disabled = isBusy;
+      session.modelSelect.title = "Model for " + activeH.name;
+    } else {
+      session.modelSelect.hidden = true;
+    }
+  }
+  async function loadAgentAsync() {
+    try {
+      const j = await api("/api/agent/harnesses");
+      S2.meta.agents = j.harnesses || [];
+      S2.meta.agent = j.selected || S2.meta.agent || "";
+      S2.meta.agentModel = j.model || S2.meta.agentModel || "";
+      S2.meta.agentPinned = !!j.pinned;
+      applyAgentMeta();
+    } catch {}
+  }
+  function syncBatchMeta() {
+    if (!batchHarness || !batchModel)
+      return;
+    const ready = installed();
+    const currentHarness = chosen();
+    const currentModel = chosenModel();
+    batchHarness.innerHTML = "";
+    if (!ready.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "no harness";
+      batchHarness.appendChild(opt);
+      batchHarness.disabled = true;
+      batchModel.innerHTML = "";
+      batchModel.hidden = true;
+      return;
+    }
+    for (const h of ready) {
+      const opt = document.createElement("option");
+      opt.value = h.name;
+      opt.textContent = h.name;
+      if (h.name === currentHarness)
+        opt.selected = true;
+      batchHarness.appendChild(opt);
+    }
+    const isBusy = !!batchJobId;
+    batchHarness.disabled = isBusy || !!(S2.meta && S2.meta.agentPinned);
+    batchHarness.title = S2.meta && S2.meta.agentPinned ? "Fixed for this run by -agent" : "Change the coding harness";
+    const activeH = ready.find((h) => h.name === (batchHarness.value || currentHarness)) || ready[0];
+    batchModel.innerHTML = "";
+    const models = activeH?.models || [];
+    if (models.length > 0) {
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        if (m === currentModel)
+          opt.selected = true;
+        batchModel.appendChild(opt);
+      }
+      batchModel.hidden = false;
+      batchModel.disabled = isBusy;
+      batchModel.title = "Model for " + activeH.name;
+    } else {
+      batchModel.hidden = true;
+    }
+  }
+  function getReadySessions() {
+    return [...sessions.values()].filter((s) => !s.timer && !s.jobId);
+  }
+  function syncBatchBar() {
+    if (!batchBar)
+      return;
+    const total = sessions.size;
+    const ready = getReadySessions();
+    const readyCount = ready.length;
+    const runningCount = total - readyCount;
+    box.classList.toggle("has-batch", total >= 2);
+    if (total >= 2 || batchJobId) {
+      batchBar.hidden = false;
+      if (batchJobId) {
+        if (batchCount) {
+          batchCount.textContent = readyCount > 0 ? readyCount + " remaining (" + (activeBatchTargets?.length || 0) + " in batch)" : (activeBatchTargets?.length || 0) + " in batch";
+        }
+        if (batchApply)
+          batchApply.hidden = true;
+        if (batchCancel)
+          batchCancel.hidden = false;
+      } else {
+        if (batchCount) {
+          if (runningCount > 0) {
+            batchCount.textContent = readyCount + " remaining (" + runningCount + " running)";
+          } else {
+            batchCount.textContent = readyCount + " comments";
+          }
+        }
+        if (batchApply) {
+          batchApply.hidden = false;
+          batchApply.disabled = readyCount === 0;
+          const btnLabel = runningCount > 0 ? "Apply Remaining (" + readyCount + ")" : "Apply All (" + readyCount + ")";
+          batchApply.textContent = btnLabel;
+          batchApply.title = btnLabel + " (" + keyLabel("Mod+Enter") + ")";
+        }
+        if (batchCancel)
+          batchCancel.hidden = true;
+        if (batchHint) {
+          batchHint.textContent = readyCount > 0 ? keyLabel("Mod+Enter") + " to apply " + (runningCount > 0 ? "remaining" : "all") : runningCount > 0 ? runningCount + " running..." : "";
+        }
+      }
+      syncBatchMeta();
+    } else {
+      batchBar.hidden = true;
+    }
+  }
+  function anyInFlight() {
+    if (batchTimer || batchJobId)
+      return true;
+    for (const s of sessions.values())
+      if (s.timer || s.jobId)
+        return true;
+    return false;
+  }
+  function syncBoxVisibility() {
+    box.hidden = sessions.size === 0;
+    syncBatchBar();
+  }
+  function openAgentEdit(info) {
+    if (!info)
+      return;
+    for (const s of sessions.values()) {
+      if (rangesOverlap(s.target, info)) {
+        showToast("!", "Overlaps the edit already open on " + targetRef(s.target));
+        return;
+      }
+    }
+    const session = createSession(info);
+    sessions.set(session.id, session);
+    syncAgentTargets();
+    applyAgentMeta();
+    syncBoxVisibility();
+    if (chosen() && installed().some((h) => h.name === chosen())) {
+      showCompose(session);
+    } else {
+      showPicker(session);
+    }
+  }
+  function syncAgentTargets() {
+    S2.agentTargets = [...sessions.values()].map((s) => ({
+      id: s.id,
+      path: s.target.path,
+      l1: s.target.l1,
+      l2: s.target.l2
+    }));
+    render();
+    syncDiffAgentTargets();
+  }
+  function createSession(info) {
+    const el = tpl.content.firstElementChild.cloneNode(true);
+    const parent = agentListEl || box;
+    const existing = [...parent.children];
+    let inserted = false;
+    for (const child of existing) {
+      const s = [...sessions.values()].find((sess) => sess.el === child);
+      if (s && s.target) {
+        if (s.target.path === info.path && s.target.l1 > info.l1) {
+          parent.insertBefore(el, child);
+          inserted = true;
+          break;
+        }
+      }
+    }
+    if (!inserted) {
+      parent.appendChild(el);
+    }
+    const session = {
+      id: ++agentSeq,
+      target: info,
+      timer: null,
+      jobId: null,
+      harness: "",
+      el,
+      refEl: el.querySelector(".agent-ref"),
+      metaEl: el.querySelector(".agent-meta"),
+      harnessSelect: el.querySelector(".agent-harness-select"),
+      modelSelect: el.querySelector(".agent-model-select"),
+      closeBtn: el.querySelector(".agent-close"),
+      pickEl: el.querySelector(".agent-pick"),
+      composeEl: el.querySelector(".agent-compose"),
+      input: el.querySelector(".agent-input"),
+      sendBtn: el.querySelector(".agent-send"),
+      cancelBtn: el.querySelector(".agent-cancel"),
+      hintEl: el.querySelector(".agent-hint"),
+      errEl: el.querySelector(".agent-err")
+    };
+    wireSession(session);
+    refreshRef(session);
+    setBusy(session, false);
+    resetHint(session);
+    clearErr(session);
+    session.input.value = "";
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    session.input.focus();
+    return session;
+  }
+  function wireSession(session) {
+    session.sendBtn.addEventListener("click", () => submit(session));
+    session.cancelBtn?.addEventListener("click", () => cancelSession(session));
+    session.closeBtn.addEventListener("click", () => closeAgentEdit(session));
+    if (session.refEl) {
+      session.refEl.addEventListener("click", () => {
+        openFile(session.target.path, { line: session.target.l1 });
+      });
+    }
+    if (session.harnessSelect) {
+      session.harnessSelect.addEventListener("change", async () => {
+        const hName = session.harnessSelect.value;
+        if (!hName)
+          return;
+        await select(hName, (msg) => showErr(session, msg));
+        session.input.focus();
+      });
+    }
+    if (session.modelSelect) {
+      session.modelSelect.addEventListener("change", async () => {
+        const hName = session.harnessSelect?.value || chosen();
+        const mName = session.modelSelect.value;
+        await select(hName, mName, (msg) => showErr(session, msg));
+        session.input.focus();
+      });
+    }
+    session.el.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (session.timer || session.jobId) {
+          cancelSession(session);
+        } else {
+          closeAgentEdit(session);
+        }
+      } else if ((e[MOD] || e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        submitBatch();
+      } else if (e.key === "Enter" && !e.shiftKey && !session.composeEl.hidden && !session.timer && !session.jobId) {
+        e.preventDefault();
+        submit(session);
+      }
+    });
+  }
+  async function cancelSession(session) {
+    if (!session.timer && !session.jobId)
+      return;
+    if (session.timer) {
+      clearTimeout(session.timer);
+      session.timer = null;
+    }
+    const jobId = session.jobId;
+    session.jobId = null;
+    setBusy(session, false);
+    resetHint(session);
+    syncBatchBar();
+    refreshStatusNote();
+    showToast("!", "Cancelled edit on " + targetRef(session.target));
+    if (jobId) {
+      try {
+        await apiPost("/api/agent/cancel", { id: jobId });
+      } catch {}
+    }
+    session.input.focus();
+  }
+  function closeAgentEdit(session) {
+    if (session.timer || session.jobId) {
+      cancelSession(session);
+    }
+    sessions.delete(session.id);
+    session.el.remove();
+    syncBoxVisibility();
+    syncAgentTargets();
+  }
+  function refreshRef(session) {
+    const ref = targetRef(session.target);
+    session.refEl.textContent = ref;
+    session.refEl.title = ref + " (click to jump)";
+  }
+  function clearErr(session) {
+    const errEl = session.errEl;
+    if (!errEl)
+      return;
+    errEl.textContent = "";
+    errEl.hidden = true;
+  }
+  function attachAlreadyRunningCancel(errContainer) {
+    const row = document.createElement("div");
+    row.className = "agent-err-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "agent-err-cancel-btn";
+    btn.textContent = "Cancel in-flight edit";
+    btn.title = "Stop and cancel running edits on the server";
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.disabled = true;
+      btn.textContent = "Cancelling...";
+      try {
+        await apiPost("/api/agent/cancel", { id: 0 });
+        showToast("✓", "Cancelled running edit");
+        errContainer.hidden = true;
+      } catch (err) {
+        showToast("!", "Failed to cancel: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "Cancel in-flight edit";
+      }
+    };
+    row.appendChild(btn);
+    errContainer.appendChild(row);
+  }
+  function showErr(session, msg, streams = []) {
+    const errEl = session.errEl;
+    if (!errEl)
+      return;
+    errEl.textContent = "";
+    const head = document.createElement("div");
+    head.className = "agent-err-msg";
+    head.textContent = msg;
+    errEl.appendChild(head);
+    if (msg && msg.includes("already running")) {
+      attachAlreadyRunningCancel(errEl);
+    }
+    for (const [label, text] of streams) {
+      if (!text)
+        continue;
+      const name = document.createElement("div");
+      name.className = "agent-err-label";
+      name.textContent = label;
+      const pre = document.createElement("pre");
+      pre.className = "agent-err-out";
+      pre.textContent = text;
+      errEl.append(name, pre);
+    }
+    errEl.hidden = false;
+  }
+  function resetHint(session) {
+    if (!session.hintEl)
+      return;
+    session.hintEl.textContent = "Enter to send, " + keyLabel("Mod+Enter") + " all, Esc to cancel";
+  }
+  function setBusy(session, busy, msg) {
+    session.el.classList.toggle("busy", busy);
+    session.input.disabled = busy;
+    if (session.sendBtn)
+      session.sendBtn.hidden = busy;
+    if (session.cancelBtn)
+      session.cancelBtn.hidden = !busy;
+    session.closeBtn.disabled = false;
+    if (session.harnessSelect)
+      session.harnessSelect.disabled = busy || !!(S2.meta && S2.meta.agentPinned);
+    if (session.modelSelect)
+      session.modelSelect.disabled = busy;
+    if (session.hintEl && msg)
+      session.hintEl.textContent = msg;
+  }
+  function showCompose(session) {
+    session.pickEl.hidden = true;
+    if (session.metaEl)
+      session.metaEl.hidden = false;
+    session.composeEl.hidden = false;
+    session.input.focus();
+  }
+  async function showPicker(session) {
+    session.composeEl.hidden = true;
+    if (session.metaEl)
+      session.metaEl.hidden = true;
+    session.pickEl.hidden = false;
+    session.pickEl.innerHTML = '<div class="hint">Looking for coding harnesses…</div>';
+    let list = S2.meta?.agents || [];
+    let settingsPath = "";
+    try {
+      const j = await api("/api/agent/harnesses");
+      list = j.harnesses || [];
+      settingsPath = j.settings || "";
+      S2.meta.agents = list;
+      S2.meta.agent = j.selected || "";
+      S2.meta.agentModel = j.model || "";
+      S2.meta.agentPinned = !!j.pinned;
+    } catch (e) {
+      session.pickEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc2(e.message) + "</div>";
+      return;
+    }
+    const ready = list.filter((h) => h.installed);
+    if (!ready.length) {
+      showToast("!", "Could not find any coding harness like Claude Code, OpenCode, Codex, Antigravity, Aider, etc. Install one and restart px0.", 6000);
+      session.pickEl.innerHTML = '<div class="hint" style="line-height: 1.5; padding: 4px 2px;">' + "Could not find any coding harness like <b>Claude Code</b>, <b>OpenCode</b>, <b>Codex</b>, <b>Antigravity</b> (<code>agy</code>), <b>Aider</b>, <b>Goose</b>, <b>Gemini CLI</b>, or <b>Cursor Agent</b>.<br><br>" + "Please install a coding harness, make sure it is on your <code>PATH</code>, and restart px0 after that.</div>";
+      return;
+    }
+    session.pickEl.innerHTML = '<div class="hint">This harness will edit files in this workspace.</div>' + optionsHtml(ready, settingsPath);
+    session.pickEl.querySelectorAll("[data-pick]").forEach((b) => {
+      b.addEventListener("click", () => pick(session, b.dataset.pick));
+    });
+    session.pickEl.querySelectorAll(".agent-model-select").forEach((sel) => {
+      sel.addEventListener("change", async (e) => {
+        e.stopPropagation();
+        await select(sel.dataset.harness, sel.value, (msg) => showErr(session, msg));
+        showPicker(session);
+      });
+    });
+  }
+  function optionsHtml(ready, settingsPath) {
+    let html = "";
+    for (const h of ready) {
+      const isSelected = h.name === chosen();
+      html += '<div class="agent-opt-wrap">' + '<button class="agent-opt' + (isSelected ? " on" : "") + '" data-pick="' + esc2(h.name) + '">' + '<span class="agent-opt-name">' + esc2(h.name) + "</span>" + '<code class="agent-opt-cmd">' + esc2(h.cmd) + "</code></button>";
+      if (isSelected && h.models && h.models.length > 0) {
+        html += '<div class="agent-model-row">' + '<span class="agent-model-label">Model:</span>' + '<select class="agent-model-select" data-harness="' + esc2(h.name) + '">';
+        for (const m of h.models) {
+          const sel = m === (h.model || chosenModel()) ? " selected" : "";
+          html += '<option value="' + esc2(m) + '"' + sel + ">" + esc2(m) + "</option>";
+        }
+        html += "</select></div>";
+      }
+      html += "</div>";
+    }
+    if (settingsPath)
+      html += '<div class="agent-note">Remembered in ' + esc2(settingsPath) + "</div>";
+    return html;
+  }
+  async function pick(session, name) {
+    if (await select(name, (msg) => showErr(session, msg)))
+      showCompose(session);
+  }
+  async function select(name, model, onError) {
+    if (typeof model === "function") {
+      onError = model;
+      model = "";
+    }
+    try {
+      const params = { name };
+      if (model)
+        params.model = model;
+      const j = await apiPost("/api/agent/select", params);
+      S2.meta.agent = j.selected || "";
+      S2.meta.agentModel = j.model || "";
+      S2.meta.agents = j.harnesses || S2.meta.agents;
+      S2.meta.agentPinned = !!j.pinned;
+    } catch (e) {
+      if (onError)
+        onError(e.message);
+      return false;
+    }
+    applyAgentMeta();
+    return true;
+  }
+  async function submit(session) {
+    if (session.timer)
+      return;
+    clearErr(session);
+    const instruction = session.input.value.trim();
+    if (!instruction || !session.target)
+      return;
+    const params = { path: session.target.path, l1: session.target.l1, l2: session.target.l2, instruction };
+    let job2;
+    try {
+      job2 = await apiPost("/api/agent/edit", params);
+    } catch (e) {
+      showErr(session, e.message);
+      return;
+    }
+    session.jobId = job2.id;
+    session.harness = job2.harness;
+    hideSelectionBar();
+    const initialNote = "Editing with " + (chosenModel() ? chosen() + " (" + chosenModel() + ")" : chosen()) + "...";
+    setBusy(session, true, initialNote);
+    syncBatchBar();
+    refreshStatusNote();
+    session.timer = setTimeout(() => tick(session), 400);
+  }
+  async function tick(session) {
+    if (!session.jobId)
+      return;
+    let j;
+    try {
+      j = await api("/api/agent/job?id=" + session.jobId);
+    } catch (e) {
+      if (!session.jobId)
+        return;
+      session.timer = null;
+      if (e.body && "running" in e.body) {
+        await finish(session, e.body);
+        refreshStatusNote();
+        return;
+      }
+      setBusy(session, false);
+      resetHint(session);
+      syncBatchBar();
+      refreshStatusNote();
+      showErr(session, e.message);
+      return;
+    }
+    if (!session.jobId)
+      return;
+    if (j.running) {
+      session.harness = j.harness;
+      session.elapsed = Math.round((j.ms || 0) / 1000) + "s";
+      setBusy(session, true, "Editing with " + j.harness + "... " + session.elapsed);
+      refreshStatusNote();
+      session.timer = setTimeout(() => tick(session), 600);
+      return;
+    }
+    session.timer = null;
+    await finish(session, j);
+    refreshStatusNote();
+  }
+  function setBatchBusy(busy, msg) {
+    if (!batchBar)
+      return;
+    batchBar.classList.toggle("busy", busy);
+    if (batchApply)
+      batchApply.hidden = busy;
+    if (batchCancel)
+      batchCancel.hidden = !busy;
+    if (batchClear)
+      batchClear.disabled = busy;
+    if (batchHarness)
+      batchHarness.disabled = busy || !!(S2.meta && S2.meta.agentPinned);
+    if (batchModel)
+      batchModel.disabled = busy;
+    if (batchHint) {
+      if (msg)
+        batchHint.textContent = msg;
+      else
+        batchHint.textContent = keyLabel("Mod+Enter") + " to apply all";
+    }
+  }
+  function clearBatchErr() {
+    if (!batchErr)
+      return;
+    batchErr.textContent = "";
+    batchErr.hidden = true;
+  }
+  function showBatchErr(msg, streams = []) {
+    if (!batchErr)
+      return;
+    batchErr.textContent = "";
+    const head = document.createElement("div");
+    head.className = "agent-err-msg";
+    head.textContent = msg;
+    batchErr.appendChild(head);
+    if (msg && msg.includes("already running")) {
+      attachAlreadyRunningCancel(batchErr);
+    }
+    for (const [label, text] of streams) {
+      if (!text)
+        continue;
+      const name = document.createElement("div");
+      name.className = "agent-err-label";
+      name.textContent = label;
+      const pre = document.createElement("pre");
+      pre.className = "agent-err-out";
+      pre.textContent = text;
+      batchErr.append(name, pre);
+    }
+    batchErr.hidden = false;
+  }
+  async function submitBatch() {
+    if (batchTimer || batchJobId)
+      return;
+    clearBatchErr();
+    const ready = getReadySessions();
+    const targets = [];
+    for (const s of ready) {
+      const ins = s.input.value.trim();
+      if (ins && s.target) {
+        targets.push({ session: s, item: { path: s.target.path, l1: s.target.l1, l2: s.target.l2, instruction: ins } });
+      }
+    }
+    if (!targets.length) {
+      if (ready.length > 0) {
+        showToast("!", "Please enter an instruction for the remaining comment(s)");
+        ready[0].input.focus();
+      } else {
+        showToast("!", "All open edits are already in progress");
+      }
+      return;
+    }
+    if (targets.length === 1) {
+      submit(targets[0].session);
+      return;
+    }
+    const harnessName = chosen();
+    if (!harnessName) {
+      showToast("!", "Please select a coding harness first");
+      return;
+    }
+    let job2;
+    try {
+      job2 = await apiPostJson("/api/agent/batch", { edits: targets.map((t) => t.item) });
+    } catch (e) {
+      showBatchErr(e.message);
+      return;
+    }
+    batchJobId = job2.id;
+    activeBatchTargets = targets;
+    batchElapsed = "";
+    hideSelectionBar();
+    const initialNote = "Batch editing " + targets.length + " items with " + (chosenModel() ? chosen() + " (" + chosenModel() + ")" : chosen()) + "...";
+    setBatchBusy(true, initialNote);
+    for (const t of targets) {
+      setBusy(t.session, true, "Applying in batch...");
+    }
+    syncBatchBar();
+    refreshStatusNote();
+    batchTimer = setTimeout(() => tickBatch(targets), 400);
+  }
+  async function tickBatch(targets) {
+    if (!batchJobId)
+      return;
+    let j;
+    try {
+      j = await api("/api/agent/job?id=" + batchJobId);
+    } catch (e) {
+      if (!batchJobId)
+        return;
+      batchTimer = null;
+      if (e.body && "running" in e.body) {
+        await finishBatch(targets, e.body);
+        refreshStatusNote();
+        return;
+      }
+      setBatchBusy(false);
+      for (const t of targets) {
+        setBusy(t.session, false);
+        resetHint(t.session);
+      }
+      syncBatchBar();
+      refreshStatusNote();
+      showBatchErr(e.message);
+      return;
+    }
+    if (!batchJobId)
+      return;
+    if (j.running) {
+      batchElapsed = Math.round((j.ms || 0) / 1000) + "s";
+      setBatchBusy(true, "Applying " + targets.length + " edits with " + j.harness + "... " + batchElapsed);
+      refreshStatusNote();
+      batchTimer = setTimeout(() => tickBatch(targets), 600);
+      return;
+    }
+    batchTimer = null;
+    await finishBatch(targets, j);
+    refreshStatusNote();
+  }
+  async function finishBatch(targets, j) {
+    const currentTargets = targets;
+    batchJobId = null;
+    batchElapsed = "";
+    activeBatchTargets = null;
+    setBatchBusy(false);
+    if (j.error) {
+      for (const t of currentTargets) {
+        setBusy(t.session, false);
+        resetHint(t.session);
+      }
+      syncBatchBar();
+      showBatchErr((j.harness || "agent") + ": " + j.error, [
+        ["stderr", (j.stderr || "").trim()],
+        ["stdout", (j.stdout || j.log || "").trim()]
+      ]);
+      if (j.changed?.length)
+        reloadWorkspace(null);
+      return;
+    }
+    for (const t of currentTargets) {
+      sessions.delete(t.session.id);
+      t.session.el.remove();
+    }
+    syncBoxVisibility();
+    syncAgentTargets();
+    const changed = j.changed || [];
+    if (!changed.length && j.tracked !== false) {
+      showToast("✓", "Finished batch edit with no file changes");
+      return;
+    }
+    const focusTarget = currentTargets[0]?.session?.target;
+    if (!await reloadWorkspace(focusTarget, "Batch edited"))
+      return;
+    showToast("✓", !changed.length ? "Reloaded workspace" : changed.length === 1 ? "Updated " + changed[0] + " (" + currentTargets.length + " edits)" : "Updated " + changed.length + " files across " + currentTargets.length + " edits");
+  }
+  async function cancelBatch() {
+    if (!batchTimer && !batchJobId)
+      return;
+    if (batchTimer) {
+      clearTimeout(batchTimer);
+      batchTimer = null;
+    }
+    const id = batchJobId;
+    batchJobId = null;
+    batchElapsed = "";
+    setBatchBusy(false);
+    if (activeBatchTargets) {
+      for (const t of activeBatchTargets) {
+        setBusy(t.session, false);
+        resetHint(t.session);
+      }
+    }
+    activeBatchTargets = null;
+    syncBatchBar();
+    refreshStatusNote();
+    showToast("!", "Cancelled batch edit");
+    if (id) {
+      try {
+        await apiPost("/api/agent/cancel", { id });
+      } catch {}
+    }
+  }
+  function clearAllEdits() {
+    if (batchJobId)
+      cancelBatch();
+    for (const s of [...sessions.values()]) {
+      closeAgentEdit(s);
+    }
+  }
+  function refreshStatusNote() {
+    const busySessions = [...sessions.values()].filter((s) => s.timer || s.jobId);
+    const batchCount2 = batchJobId ? activeBatchTargets?.length || 0 : 0;
+    const individualBusy = busySessions.filter((s) => !activeBatchTargets?.some((t) => t.session === s));
+    if (batchJobId && individualBusy.length > 0) {
+      setStatusNote("Batch editing " + batchCount2 + " items + " + individualBusy.length + " edit running... " + (batchElapsed || ""));
+    } else if (batchJobId) {
+      setStatusNote("Batch editing " + batchCount2 + " items with " + chosen() + "... " + (batchElapsed || ""));
+    } else if (!individualBusy.length) {
+      setStatusNote("");
+    } else if (individualBusy.length === 1) {
+      const s = individualBusy[0];
+      setStatusNote("Editing with " + (s.harness || chosen()) + "... " + (s.elapsed || ""));
+    } else {
+      setStatusNote(individualBusy.length + " edits running...");
+    }
+  }
+  async function finish(session, j) {
+    const editTarget = session.target;
+    if (j.error) {
+      setBusy(session, false);
+      resetHint(session);
+      showErr(session, (j.harness || "agent") + ": " + j.error, [
+        ["stderr", (j.stderr || "").trim()],
+        ["stdout", (j.stdout || j.log || "").trim()]
+      ]);
+      if (j.changed?.length)
+        reloadWorkspace(null);
+      return;
+    }
+    sessions.delete(session.id);
+    session.el.remove();
+    syncBoxVisibility();
+    syncAgentTargets();
+    const changed = j.changed || [];
+    if (!changed.length && j.tracked !== false) {
+      showToast("✓", "Finished with no file changes");
+      return;
+    }
+    if (!await reloadWorkspace(editTarget, "Edited"))
+      return;
+    showToast("✓", !changed.length ? "Reloaded the workspace" : changed.length === 1 ? "Updated " + changed[0] : "Updated " + changed.length + " files");
+  }
+  var reloadChain = Promise.resolve();
+  function reloadWorkspace(focus, what = "Changed") {
+    const run = async () => {
+      try {
+        await api("/api/reindex");
+        await reloadOpenTabs();
+        if (focus?.path) {
+          await openFile(focus.path, { line: focus.l1, push: false });
+        }
+        await refreshTree();
+      } catch (e) {
+        showToast("!", what + ", but the reload failed: " + e.message);
+        return false;
+      }
+      return true;
+    };
+    const result = reloadChain.then(run, run);
+    reloadChain = result.then(() => {}, () => {});
+    return result;
+  }
+  function initAgent() {
+    if (!box || !tpl)
+      return;
+    setAgentHandler(openAgentEdit);
+    if (batchApply)
+      batchApply.addEventListener("click", () => submitBatch());
+    if (batchCancel)
+      batchCancel.addEventListener("click", () => cancelBatch());
+    if (batchClear)
+      batchClear.addEventListener("click", () => clearAllEdits());
+    if (batchHarness) {
+      batchHarness.addEventListener("change", async () => {
+        const hName = batchHarness.value;
+        if (!hName)
+          return;
+        await select(hName, (msg) => showBatchErr(msg));
+      });
+    }
+    if (batchModel) {
+      batchModel.addEventListener("change", async () => {
+        const hName = batchHarness?.value || chosen();
+        const mName = batchModel.value;
+        await select(hName, mName, (msg) => showBatchErr(msg));
+      });
+    }
+    document.addEventListener("click", (e) => {
+      const row = e.target.closest(".row.agent-sel, .row.agent-anchor, .diff-row.agent-sel, .diff-row.agent-anchor, .diff-side.agent-sel, .diff-side.agent-anchor");
+      if (!row)
+        return;
+      const line = +row.dataset.l;
+      const d = S2.docs[S2.active];
+      if (!d)
+        return;
+      for (const s of sessions.values()) {
+        if (s.target.path === d.path && line >= s.target.l1 && line <= s.target.l2) {
+          s.input.focus();
+          s.el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          break;
+        }
+      }
+    });
+    addEventListener("beforeunload", (e) => {
+      if (!anyInFlight())
+        return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
+    api("/api/agent/job?id=0").then((j) => {
+      if (j && j.running) {
+        setStatusNote("In-flight edit running on " + (j.path || "workspace") + " (" + (j.harness || "agent") + ")", 6000);
+      }
+    }).catch(() => {});
+  }
+
   // web/src/shortcuts.js
   var SHORTCUTS = [
+    [["Mod+,"], "Open settings"],
     [["Mod+K"], "Quick search / palette"],
     [["Mod+P"], "Go to file"],
     [["Mod+Shift+P"], "Command palette"],
     [["Mod+Shift+O"], "Go to symbol"],
     [["Mod+Shift+F"], "Search in files"],
+    [["Mod+Shift+R"], "Refresh workspace"],
     [["Mod+F"], "Find in file"],
     [["Mod+G"], "Go to line"],
     [["Mod+D"], "Toggle diff view (git)"],
     [["Alt+Z"], "Toggle word wrap"],
-    [["Alt+L"], "Toggle line numbers"],
     [["Alt+M"], "Toggle Markdown preview"],
     [["Enter", "Shift+Enter"], "Next / previous match"],
     [["F12", "Mod+Click"], "Go to definition"],
@@ -3386,8 +6928,10 @@
     [["Alt+1…9"], "Select tab"],
     [["Double click"], "Highlight all occurrences"],
     [["Mod+A"], "Select whole file"],
-    [["Alt+C", "Alt+A"], "Copy selection ref / for agent"],
+    [["Alt+C", "Alt+A"], "Copy selection ref / with context"],
     [["Alt+U"], "Find usages of selection"],
+    [["Alt+E"], "Edit selection inline"],
+    [["Right click"], "Selection actions at the pointer"],
     [["Mod+Home|Mod+Up", "Mod+End|Mod+Down"], "Top / bottom of file"],
     [["Home|Mod+Left", "End|Mod+Right"], "Start / end of line"],
     [["Left", "Right"], "Move caret along the line"],
@@ -3395,13 +6939,19 @@
   ];
   function showHelp() {
     const h = $("#helpsheet");
-    const ver = S2.meta?.version ? ` <span class="help-version">v${esc(S2.meta.version)}</span>` : "";
-    h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver + '</div><dl class="help-grid">' + SHORTCUTS.map(([combos, v]) => "<dt>" + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + "</dt>" + "<dd>" + esc(v) + "</dd>").join("") + "</dl></div>";
+    const ver = S2.meta?.version ? ` <span class="help-version">v${esc2(S2.meta.version)}</span>` : "";
+    h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver + '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;" title="View Vim Keybindings">View Vim Keybindings</button></div><dl class="help-grid">' + SHORTCUTS.map(([combos, v]) => "<dt>" + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + "</dt>" + "<dd>" + esc2(v) + "</dd>").join("") + "</dl></div>";
     h.hidden = false;
+    h.querySelector("#btn-switch-to-vim-help")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      h.hidden = true;
+      showVimHelp();
+    });
   }
   var inField = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
   function initShortcuts() {
     $("#btn-theme")?.addEventListener("click", cycleTheme);
+    $("#btn-settings")?.addEventListener("click", () => openSettings("ui"));
     $("#btn-help")?.addEventListener("click", showHelp);
     $("#st-ver")?.addEventListener("click", showHelp);
     $("#helpsheet").addEventListener("click", () => {
@@ -3425,18 +6975,33 @@
         openPalette("line");
       else if (act === "wrap")
         toggleWordWrap();
-      else if (act === "line-numbers")
-        toggleLineNumbers();
       else if (act === "md-preview")
         togglePreview();
       else if (act === "palette")
         openPalette("command");
+      else if (act === "settings")
+        openSettings("ui");
+      else if (act === "vim-help")
+        showVimHelp();
       else if (act === "help")
         showHelp();
     });
     addEventListener("keydown", (e) => {
       const mod = e[MOD];
       if (e.key === "Escape") {
+        const lb = $("#img-lightbox");
+        if (lb && !lb.hidden) {
+          lb.hidden = true;
+          return;
+        }
+        if (!$("#vim-helpsheet")?.hidden) {
+          closeVimHelp();
+          return;
+        }
+        if (isSettingsOpen()) {
+          closeSettings();
+          return;
+        }
         if (!overlay.hidden) {
           closePalette();
           return;
@@ -3470,6 +7035,11 @@
           document.activeElement.blur();
         return;
       }
+      if (mod && (e.key === "," || e.key === "<")) {
+        e.preventDefault();
+        openSettings("ui");
+        return;
+      }
       if (mod && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         openPalette(e.shiftKey ? "command" : "file");
@@ -3497,6 +7067,11 @@
         e.preventDefault();
         showRightInspector("search");
         $("#q")?.select();
+        return;
+      }
+      if (mod && e.shiftKey && (e.key === "R" || e.key === "r")) {
+        e.preventDefault();
+        reindexWorkspace();
         return;
       }
       if (mod && !e.shiftKey && (e.key === "p" || e.key === "P")) {
@@ -3583,15 +7158,18 @@
         toggleWordWrap();
         return;
       }
-      if (e.altKey && e.code === "KeyL") {
-        e.preventDefault();
-        toggleLineNumbers();
-        return;
-      }
       if (e.altKey && !mod && !e.shiftKey && e.code === "KeyM") {
         e.preventDefault();
         togglePreview();
         return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && e.key === "Enter") {
+        const b = $("#agentbox");
+        if (b && !b.hidden) {
+          e.preventDefault();
+          submitBatch();
+          return;
+        }
       }
       if (inField(document.activeElement))
         return;
@@ -3608,6 +7186,8 @@
         e.preventDefault();
         return;
       }
+      if (handleVimKeyDown(e))
+        return;
       if (e.key === "?") {
         e.preventDefault();
         showHelp();
@@ -3616,6 +7196,11 @@
       const d = doc_();
       if (!d)
         return;
+      if (d.isImage) {
+        if (handleImageKey(e))
+          e.preventDefault();
+        return;
+      }
       if (previewing(d)) {
         if (previewKey(e))
           e.preventDefault();
@@ -3633,14 +7218,21 @@
         render();
         updateStatus();
       };
+      const shift = e.shiftKey;
       if (mod && e.key === "Home") {
         e.preventDefault();
-        toTop();
+        if (shift)
+          caretToEdge(false, true);
+        else
+          toTop();
         return;
       }
       if (mod && e.key === "End") {
         e.preventDefault();
-        toBottom();
+        if (shift)
+          caretToEdge(true, true);
+        else
+          toBottom();
         return;
       }
       if (isMac && mod && e.key === "ArrowUp") {
@@ -3655,42 +7247,52 @@
       }
       if (isMac && mod && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        caretToEdge(e.key === "ArrowRight");
+        caretToEdge(e.key === "ArrowRight", shift);
         return;
       }
-      if (e.key === "ArrowDown" || e.key === "j") {
+      if (mod && !isMac && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        moveCursor(1);
+        moveWord(e.key === "ArrowRight" ? 1 : -1, shift);
         return;
       }
-      if (e.key === "ArrowUp" || e.key === "k") {
+      if (isMac && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
-        moveCursor(-1);
+        moveWord(e.key === "ArrowRight" ? 1 : -1, shift);
+        return;
+      }
+      if (!mod && (e.key === "ArrowDown" || e.key === "j")) {
+        e.preventDefault();
+        moveCursor(1, shift);
+        return;
+      }
+      if (!mod && (e.key === "ArrowUp" || e.key === "k")) {
+        e.preventDefault();
+        moveCursor(-1, shift);
         return;
       }
       if (!mod && !e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
-        moveCol(-1);
+        moveCol(-1, shift);
         return;
       }
       if (!mod && !e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        moveCol(1);
+        moveCol(1, shift);
         return;
       }
       if (!mod && (e.key === "Home" || e.key === "End")) {
         e.preventDefault();
-        caretToEdge(e.key === "End");
+        caretToEdge(e.key === "End", shift);
         return;
       }
       if (e.key === "PageDown") {
         e.preventDefault();
-        moveCursor(Math.floor(vp.clientHeight / LH) - 2);
+        moveCursor(Math.floor(vp.clientHeight / LH2) - 2, shift);
         return;
       }
       if (e.key === "PageUp") {
         e.preventDefault();
-        moveCursor(-(Math.floor(vp.clientHeight / LH) - 2));
+        moveCursor(-(Math.floor(vp.clientHeight / LH2) - 2), shift);
         return;
       }
     }, { capture: true });
@@ -3702,6 +7304,8 @@
   var palList = $("#pal-list");
   var pal = null;
   var COMMANDS = [
+    { name: withKeys("Preferences: Open Settings (UI) ({Mod+,})"), run: () => openSettings("ui") },
+    { name: "Preferences: Open Settings (JSON)", run: () => openSettings("json") },
     { name: "Go to File…", run: () => openPalette("file") },
     { name: "Go to Symbol in File…", run: () => openPalette("symbol") },
     { name: "Go to Line…", run: () => openPalette("line") },
@@ -3726,7 +7330,6 @@
       }
     } },
     { name: withKeys("Toggle Word Wrap ({Alt+Z})"), run: () => toggleWordWrap() },
-    { name: withKeys("Toggle Line Numbers ({Alt+L})"), run: () => toggleLineNumbers() },
     { name: withKeys("Toggle Markdown Preview ({Alt+M})"), run: () => togglePreview() },
     { name: withKeys("Toggle Sidebar ({Mod+B})"), run: () => document.body.classList.toggle("side-hidden") },
     { name: "Select Theme…", run: () => openPalette("theme") },
@@ -3741,6 +7344,8 @@
         closeTab(0);
     } },
     { name: withKeys("Reopen Closed Tab ({Alt+Shift+T})"), run: () => reopenClosedTab() },
+    { name: "Preferences: Toggle Vim Keybindings", run: () => setVimModeEnabled(!isVimEnabled(), true) },
+    { name: "Help: Vim Keybindings Cheat Sheet", run: showVimHelp },
     { name: "Keyboard Shortcuts", run: showHelp }
   ];
   var PAL_MODES = {
@@ -3829,7 +7434,7 @@
   }, 40);
   function fuzzyHTML(text, pos) {
     if (!pos || !pos.length)
-      return esc(text);
+      return esc2(text);
     const set = new Set(pos);
     let out = "", open = false;
     for (let i = 0;i < text.length; i++) {
@@ -3842,7 +7447,7 @@
         out += "</b>";
         open = false;
       }
-      out += esc(text[i]);
+      out += esc2(text[i]);
     }
     return out + (open ? "</b>" : "");
   }
@@ -3853,7 +7458,7 @@
       palList.innerHTML = '<div class="pi"><span class="pp">No matches</span></div>';
       return;
     }
-    palList.innerHTML = pal.items.map((it, i) => '<div class="pi' + (i === pal.sel ? " sel" : "") + '" data-i="' + i + '">' + '<span class="pn">' + (it.raw ? it.label : esc(it.label)) + "</span>" + '<span class="pp">' + (it.raw ? it.sub : esc(it.sub || "")) + "</span>" + (it.right ? '<span class="pr">' + esc(it.right) + "</span>" : "") + "</div>").join("");
+    palList.innerHTML = pal.items.map((it, i) => '<div class="pi' + (i === pal.sel ? " sel" : "") + '" data-i="' + i + '">' + '<span class="pn">' + (it.raw ? it.label : esc2(it.label)) + "</span>" + '<span class="pp">' + (it.raw ? it.sub : esc2(it.sub || "")) + "</span>" + (it.right ? '<span class="pr">' + esc2(it.right) + "</span>" : "") + "</div>").join("");
     const s = palList.children[pal.sel];
     if (s)
       s.scrollIntoView({ block: "nearest" });
@@ -3922,6 +7527,122 @@
     });
   }
 
+  // web/src/gitstream.js
+  var eventSource = null;
+  var reconnectTimer = null;
+  function initGitStream() {
+    if (!S2.meta?.git)
+      return;
+    connect();
+    window.addEventListener("focus", () => {
+      if (document.visibilityState === "visible") {
+        if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+          connect();
+        }
+        triggerRefresh();
+      }
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        disconnect();
+      } else {
+        connect();
+        triggerRefresh();
+      }
+    });
+  }
+  async function triggerRefresh() {
+    if (!S2.meta?.git)
+      return;
+    try {
+      const data = await apiPost("/api/git/refresh");
+      await handleGitStatus(data);
+    } catch (e) {}
+  }
+  function connect() {
+    if (eventSource && eventSource.readyState !== EventSource.CLOSED)
+      return;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    try {
+      eventSource = new EventSource("/api/git/stream");
+      eventSource.addEventListener("git-status", async (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          await handleGitStatus(data);
+        } catch (err) {}
+      });
+      eventSource.onerror = () => {
+        disconnect();
+        if (document.visibilityState === "visible") {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+    } catch (err) {}
+  }
+  function disconnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  }
+  async function handleGitStatus(data) {
+    if (!data)
+      return;
+    if (data.gitChanges !== undefined)
+      S2.meta.gitChanges = data.gitChanges;
+    if (data.gitFiles !== undefined)
+      S2.meta.gitFiles = data.gitFiles;
+    updateSidebarToggleState();
+    if (treeEl?.classList.contains("changed-only") && (!S2.meta?.gitChanges || S2.meta.gitChanges <= 0)) {
+      await setSidebarMode("files");
+    }
+    const statuses = data.statuses || {};
+    const dirtyDirs = data.dirtyDirs || {};
+    await patchTreeGitStatus(statuses, dirtyDirs);
+    for (let i = S2.tabs.length - 1;i >= 0; i--) {
+      const t = S2.tabs[i];
+      const code = statuses[t.path];
+      const isDiff = !!code && code !== "U";
+      const wasDiff = !!(t.diffMode || t.openedInDiffView);
+      if (wasDiff && (t.diffAvailable || t.diffMode) && !isDiff) {
+        closeTab(i);
+      }
+    }
+    let tabsChanged = false;
+    for (const t of S2.tabs) {
+      const code = statuses[t.path];
+      const isDiff = !!code && code !== "U";
+      if (t.diffAvailable !== isDiff) {
+        t.diffAvailable = isDiff;
+        tabsChanged = true;
+      }
+    }
+    if (tabsChanged) {
+      drawTabs();
+    }
+    const curDoc = doc_();
+    if (curDoc) {
+      const curCode = statuses[curDoc.path];
+      const hasDiff = !!curCode && curCode !== "U";
+      if (curDoc.diffAvailable !== hasDiff || curCode) {
+        curDoc.diffAvailable = hasDiff;
+        await loadGutter(curDoc);
+        render();
+        if (curDoc.diffMode) {
+          syncDiffView(true);
+        }
+        updateStatus();
+      }
+    }
+  }
+
   // web/src/main.js
   initRenderer();
   initTabs();
@@ -3939,17 +7660,20 @@
   initShortcuts();
   initMarkdown();
   initDiff();
+  initAgent();
   initMetrics();
   initStatusFit();
+  initSettings();
+  initVim();
+  initImageViewer();
   (async function boot() {
     try {
       initTheme();
       const wrapPref = localStorage.getItem("px0.wrap");
       S2.wrap = wrapPref !== null ? wrapPref === "true" : true;
       document.body.classList.toggle("word-wrap", S2.wrap);
-      const linesPref = localStorage.getItem("px0.lineNumbers");
-      S2.lineNumbers = linesPref !== null ? linesPref === "true" : true;
-      document.body.classList.toggle("hide-lines", !S2.lineNumbers);
+      S2.lineNumbers = true;
+      document.body.classList.remove("hide-lines");
       const mdPref = localStorage.getItem("px0.mdPreview");
       S2.mdPreview = mdPref !== null ? mdPref === "true" : true;
       updateEditorOptionControls();
@@ -3959,11 +7683,8 @@
     S2.meta = await api("/api/meta");
     if (S2.meta.metrics)
       updateMetricsDisplay(S2.meta.metrics);
-    if (S2.meta.git) {
-      const b = $("#btn-changed");
-      if (b)
-        b.hidden = false;
-    }
+    updateSidebarToggleState();
+    applyAgentMeta();
     document.title = S2.meta.name + " - px0";
     $("#root-name").textContent = S2.meta.name;
     $("#root-name").title = S2.meta.root;
@@ -3972,8 +7693,18 @@
       if (emptyVerEl)
         emptyVerEl.textContent = "v" + S2.meta.version;
     }
-    updateStatus();
-    await drawTree("", treeEl, 0);
+    try {
+      const savedDirs = JSON.parse(sessionStorage.getItem("px0.openDirs") || "[]");
+      restoreOpenDirs(savedDirs);
+    } catch {}
+    await refreshTree();
+    initGitStream();
+    const hasGitChanges = !!(S2.meta?.git && S2.meta.gitChanges > 0);
+    if (hasGitChanges) {
+      await setSidebarMode("git");
+    } else {
+      setSidebarMode("files");
+    }
     const params = new URLSearchParams(window.location.search);
     const initialPath = params.get("path");
     const initialLine = parseInt(params.get("line"), 10) || undefined;
@@ -3988,6 +7719,20 @@
         const cleanUrl = u.pathname + (cleanSearch ? "?" + cleanSearch : "") + u.hash;
         window.history.replaceState({}, "", cleanUrl);
       } catch {}
+    } else {
+      const restored = await restoreWorkspaceTabs();
+      if (hasGitChanges) {
+        const hasActiveDiff = S2.tabs[S2.active]?.diffAvailable;
+        if (!hasActiveDiff) {
+          const changedTabIdx = S2.tabs.findIndex((t) => t.diffAvailable);
+          if (changedTabIdx >= 0) {
+            switchTab(changedTabIdx);
+          } else if (S2.meta.gitFiles && S2.meta.gitFiles.length > 0) {
+            await openFile(S2.meta.gitFiles[0]);
+            await revealFile(S2.meta.gitFiles[0]);
+          }
+        }
+      }
     }
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
@@ -4010,5 +7755,6 @@
         }
       }, 150);
     }
+    loadAgentAsync();
   })();
 })();

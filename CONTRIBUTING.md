@@ -6,7 +6,7 @@ Thank you for your interest in improving px0.
 
 px0 is built and maintained entirely using AI coding agents.
 
-Because all implementation, architecture refactoring, and code changes are written by AI agents guided by our core design principles (zero config, zero runtime dependencies, lean memory footprint, single binary, read-only focus), we generally do not accept unsolicited pull requests containing manual or disparate code patches.
+Because all implementation, architecture refactoring, and code changes are written by AI agents guided by our core design principles (zero config, zero runtime dependencies, lean memory footprint, single binary, reads-first focus with edits delegated to coding agents), we generally do not accept unsolicited pull requests containing manual or disparate code patches.
 
 Instead, the most valuable contribution you can provide is a clear, detailed bug report or a well-reasoned feature idea.
 
@@ -24,7 +24,7 @@ If you encounter unexpected behavior, memory leaks, navigation bugs, or performa
 Have an idea to make reading and navigating code faster or smoother?
 
 - Open a new issue using our [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md).
-- Explain the motivation: what problem does this solve, why would it benefit users, and how would it fit px0's read-only, minimal-footprint philosophy?
+- Explain the motivation: what problem does this solve, why would it benefit users, and how would it fit px0's reads-first, minimal-footprint philosophy?
 
 ## Review and Implementation Process
 

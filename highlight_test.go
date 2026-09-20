@@ -251,3 +251,36 @@ func TestEvictRemovesDocument(t *testing.T) {
 		t.Fatalf("expected second Evict to return false")
 	}
 }
+
+func TestEvictAllClearsCache(t *testing.T) {
+	tmp1 := filepath.Join(t.TempDir(), "a.go")
+	tmp2 := filepath.Join(t.TempDir(), "b.go")
+	if err := os.WriteFile(tmp1, []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp2, []byte("package b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(tmp1, "a.go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(tmp2, "b.go"); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	countBefore := len(cache.items)
+	cache.mu.Unlock()
+	if countBefore == 0 {
+		t.Fatalf("expected items in cache")
+	}
+
+	EvictAll()
+
+	cache.mu.Lock()
+	countAfter := len(cache.items)
+	usedAfter := cache.used
+	cache.mu.Unlock()
+	if countAfter != 0 || usedAfter != 0 {
+		t.Fatalf("expected empty cache after EvictAll, got count=%d used=%d", countAfter, usedAfter)
+	}
+}

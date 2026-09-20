@@ -166,14 +166,25 @@ function mdLocal(ref, base) {
 }
 
 function mdSetImage(img, src, base) {
+  img.setAttribute('loading', 'lazy');
+  img.setAttribute('decoding', 'async');
+  img.classList.add('md-zoomable');
   const m = MD_SCHEME.exec(src);
   if (m) {
-    if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src)) img.setAttribute('src', src);
+    if (/^https?$/i.test(m[1]) || /^data:image\//i.test(src)) {
+      img.setAttribute('src', src);
+      img.dataset.origSrc = src;
+    }
   } else if (src.startsWith('//')) {
     img.setAttribute('src', src);
+    img.dataset.origSrc = src;
   } else if (src) {
     const t = mdLocal(src, base);
-    if (t) img.setAttribute('src', '/api/raw?path=' + encodeURIComponent(t.path));
+    if (t) {
+      img.setAttribute('src', '/api/raw?path=' + encodeURIComponent(t.path));
+      img.dataset.rawPath = t.path;
+      img.dataset.origSrc = src;
+    }
   }
 }
 
@@ -410,10 +421,89 @@ export function initMarkdown() {
   mdArticle.addEventListener('click', e => {
     const copy = e.target.closest('.md-copy');
     if (copy) { copyToClipboard($('pre', copy.parentElement).textContent, 'Copied code block'); return; }
+
+    // Standalone image click opens interactive lightbox
+    const img = e.target.closest('img.md-zoomable');
     const a = e.target.closest('a');
+    if (img && !a && e.button === 0 && !e[MOD] && !e.shiftKey) {
+      e.preventDefault();
+      openLightbox(img);
+      return;
+    }
+
     // Modified clicks keep the browser's behaviour: the href opens the raw file.
     if (!a || e.button !== 0 || e[MOD] || e.shiftKey) return;
     if ('path' in a.dataset) { e.preventDefault(); mdFollow(a.dataset.path, a.dataset.anchor || ''); }
     else if ('anchor' in a.dataset) { e.preventDefault(); mdJump(a.dataset.anchor); }
   });
+
+  // Gracefully handle broken / 404 images in markdown
+  mdArticle.addEventListener('error', e => {
+    if (e.target && e.target.localName === 'img') {
+      const img = e.target;
+      const path = img.dataset.rawPath || img.dataset.origSrc || img.getAttribute('src') || 'image';
+      const fallback = document.createElement('div');
+      fallback.className = 'md-img-broken';
+      fallback.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 14l5-5 3 3 4-4"/><circle cx="5.5" cy="5.5" r="1.5"/><line x1="2" y1="2" x2="14" y2="14"/></svg><span>Image not found: ' + esc(path) + '</span>';
+      img.replaceWith(fallback);
+    }
+  }, true);
+
+  // Lightbox backdrop & close button
+  const lb = $('#img-lightbox');
+  if (lb) {
+    lb.addEventListener('click', e => {
+      if (e.target.closest('.lightbox-close') || e.target.classList.contains('lightbox-backdrop')) {
+        lb.hidden = true;
+      }
+    });
+  }
+}
+
+export function openLightbox(img) {
+  const lb = $('#img-lightbox');
+  if (!lb) return;
+
+  const lbImg = $('#lb-img');
+  const lbTitle = $('#lb-title');
+  const lbMeta = $('#lb-meta');
+  const lbOpenTab = $('#lb-open-tab');
+  const lbCopyPath = $('#lb-copy-path');
+
+  const src = img.getAttribute('src');
+  const rawPath = img.dataset.rawPath || '';
+  const alt = img.getAttribute('alt') || '';
+  const displayTitle = rawPath || alt || src.split('/').pop() || 'Image Preview';
+
+  lbImg.src = src;
+  lbTitle.textContent = displayTitle;
+  lbTitle.title = displayTitle;
+
+  const updateMeta = () => {
+    if (lbImg.naturalWidth) {
+      lbMeta.textContent = `${lbImg.naturalWidth} × ${lbImg.naturalHeight} px`;
+    } else {
+      lbMeta.textContent = '';
+    }
+  };
+  if (lbImg.complete && lbImg.naturalWidth) updateMeta(); else lbImg.onload = updateMeta;
+
+  if (rawPath) {
+    lbOpenTab.hidden = false;
+    lbOpenTab.onclick = () => {
+      lb.hidden = true;
+      openFile(rawPath);
+    };
+    lbCopyPath.hidden = false;
+    lbCopyPath.onclick = () => {
+      copyToClipboard(rawPath, 'Copied image path');
+    };
+  } else {
+    lbOpenTab.hidden = true;
+    lbCopyPath.onclick = () => {
+      copyToClipboard(src, 'Copied image URL');
+    };
+  }
+
+  lb.hidden = false;
 }

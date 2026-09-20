@@ -18,7 +18,7 @@
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index">&#8635;</button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
     <div class="panel-body" id="tree"></div>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
@@ -30,14 +30,11 @@
       <a class="mini" href="https://github.com/px0-ai/px0" target="_blank" rel="noopener" title="px0 on GitHub" aria-label="px0 on GitHub">
         <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
-      <a class="mini" href="https://github.com/px0-ai/px0/issues/new?template=feature_request.md" target="_blank" rel="noopener" title="Request a feature" aria-label="Request a feature">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>
-      </a>
-      <a class="mini" href="https://github.com/px0-ai/px0/issues/new?template=bug_report.md" target="_blank" rel="noopener" title="Report a bug" aria-label="Report a bug">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M9.5 6a2.5 2.5 0 0 1 5 0M12 11v9M8 13H4M20 13h-4M8 9 5 7M16 9l3-2M8 17l-3 2M16 17l3 2"/></svg>
-      </a>
-      <button class="mini" id="btn-theme" title="Next theme (pick one: Command Palette > Select Theme)">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13a8 8 0 1 1-9-9 6.5 6.5 0 0 0 9 9z"/></svg>
+      <button class="mini" id="btn-theme" title="Cycle theme (pick one: Command Palette > Select Theme)" aria-label="Cycle theme">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+      </button>
+      <button class="mini" id="btn-settings" title="Settings ({Mod+,})" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
       </span>
     </footer>
@@ -59,14 +56,16 @@
       </div>
       <!-- Modified files in a git repo only: view the file's diff against HEAD -->
       <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
-        <button id="diff-btn" title="Toggle diff ({Mod+D})">
+        <button id="diff-source" data-diff-opt="source" title="Show the file ({Mod+D})">Source</button>
+        <div class="diff-seg">
+        <button id="diff-btn" title="Show changes against HEAD ({Mod+D})">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="diff-btn-icon"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
           <span class="diff-btn-label">Diff</span>
           <svg viewBox="0 0 10 10" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="diff-caret"><path d="M2 3.5L5 6.5L8 3.5"/></svg>
         </button>
         <div id="diff-menu" class="diff-menu" role="menu">
           <div class="diff-menu-header">Diff View Mode</div>
-          <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem">
+          <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem" title="Side-by-side split diff view">
             <span class="diff-item-check" aria-hidden="true">✓</span>
             <div class="diff-item-content">
               <span class="diff-item-title">Split</span>
@@ -74,13 +73,14 @@
             </div>
             <span class="diff-item-badge">Default</span>
           </button>
-          <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem">
+          <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem" title="Inline unified diff view">
             <span class="diff-item-check" aria-hidden="true">✓</span>
             <div class="diff-item-content">
               <span class="diff-item-title">Unified</span>
               <span class="diff-item-desc">Inline unified</span>
             </div>
           </button>
+        </div>
         </div>
       </div>
     </div>
@@ -95,6 +95,33 @@
       <div id="mdview" hidden><article id="md" class="md"></article></div>
       <!-- Diff view: covers the code view while a diff layout is active (Mod+D toggles) -->
       <div id="diffview" hidden><div id="diffcontent"></div></div>
+      <!-- Image viewer: covers the code view for an image tab -->
+      <div id="imgview" hidden>
+        <div id="imgview-viewport">
+          <div id="imgview-canvas" class="bg-checker">
+            <img id="imgview-img" src="" alt="">
+          </div>
+        </div>
+        <div id="imgview-hud">
+          <div class="imgview-hud-group">
+            <button id="iv-zoom-out" class="iv-btn" title="Zoom out (-)" aria-label="Zoom out">−</button>
+            <button id="iv-zoom-label" class="iv-btn iv-btn-text" title="Reset zoom (0 to fit, 1 for 100%)">Fit</button>
+            <button id="iv-zoom-in" class="iv-btn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          </div>
+          <span class="iv-sep"></span>
+          <div class="imgview-hud-group">
+            <button id="iv-fit" class="iv-btn" title="Fit to window (0)">Fit</button>
+            <button id="iv-100" class="iv-btn" title="Actual size 1:1 (1)">1:1</button>
+          </div>
+          <span class="iv-sep"></span>
+          <div class="imgview-hud-group">
+            <button id="iv-bg" class="iv-btn" title="Toggle background (b)">Checker</button>
+            <button id="iv-pixel" class="iv-btn" title="Toggle smooth / pixelated (p)">Smooth</button>
+          </div>
+          <span class="iv-sep"></span>
+          <span id="iv-meta" class="iv-meta"></span>
+        </div>
+      </div>
       <div id="minimap-hits"></div>
 
       <!-- Welcome / Empty State Screen -->
@@ -115,6 +142,7 @@
             <dt data-caps="F12"></dt><dd>go to definition</dd>
             <dt data-caps="Shift+F12"></dt><dd>find all references</dd>
             <dt>hover</dt><dd>type and docs</dd>
+            <dt data-caps="Mod+,"></dt><dd>settings</dd>
             <dt data-caps="?"></dt><dd>all shortcuts</dd>
           </dl>
         </div>
@@ -131,40 +159,98 @@
         <button id="find-next" title="Next ({Enter})">&#8595;</button>
         <button id="find-close" title="Close ({Esc})">&#10005;</button>
       </div>
+
+      <!-- Instruction composers: stacked box per edit in flight or being composed.
+           When multiple edits exist, #agent-batch-bar provides unified controls to apply all. -->
+      <div id="agentbox" hidden>
+        <div id="agent-batch-bar" class="agent-batch-bar" hidden>
+          <div class="agent-batch-header">
+            <div class="agent-batch-title-row">
+              <span class="agent-batch-badge">Batch Edit</span>
+              <span id="agent-batch-count" class="agent-batch-count">0 comments</span>
+              <span class="grow"></span>
+              <button id="agent-batch-clear" class="agent-batch-clear" title="Clear all comments">Clear All</button>
+            </div>
+            <div class="agent-batch-meta">
+              <span class="agent-meta-label">Model</span>
+              <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness"></select>
+              <select id="agent-batch-model" class="agent-model-select" title="Model"></select>
+            </div>
+          </div>
+          <div class="agent-batch-actions">
+            <span id="agent-batch-hint" class="agent-hint">Mod+Enter to apply all</span>
+            <button id="agent-batch-cancel" class="agent-cancel" title="Cancel in-flight batch edits" hidden>Cancel</button>
+            <button id="agent-batch-apply" class="agent-send agent-batch-apply" title="Apply all comments ({Mod+Enter})">Apply All</button>
+          </div>
+          <div id="agent-batch-err" class="agent-err" hidden></div>
+        </div>
+        <div id="agentbox-list" class="agentbox-list"></div>
+      </div>
+      <template id="agentbox-tpl">
+        <div class="agent-box">
+          <div class="agent-head">
+            <span class="sel-chip">Comment</span>
+            <span class="agent-ref" role="button" tabindex="0" title="Click to jump to code"></span>
+            <span class="grow"></span>
+            <button class="agent-close" title="Close ({Esc})">&#10005;</button>
+          </div>
+          <div class="agent-meta">
+            <span class="agent-meta-label">Model</span>
+            <select class="agent-harness-select" title="Coding harness"></select>
+            <select class="agent-model-select" title="Model"></select>
+          </div>
+          <!-- Shown until a harness has been picked, and whenever one is changed -->
+          <div class="agent-pick" hidden></div>
+          <div class="agent-compose">
+            <textarea class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Edit comment / instruction... (Mod+Enter to apply all)"></textarea>
+            <div class="agent-err" hidden></div>
+            <div class="agent-foot">
+              <span class="agent-hint">Enter to send, Esc to cancel</span>
+              <button class="agent-cancel" title="Cancel in-flight edit" hidden>Cancel</button>
+              <button class="agent-send" title="Send edit instruction ({Mod+Enter})">Send</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Floating Copy Toast Notification -->
     <div id="toast" hidden></div>
+
+    <!-- Selection context menu: the footer's selection actions, at the pointer -->
+    <div id="sel-menu" role="menu" hidden></div>
+
+    <!-- Metrics menu, opened from CPU/RAM status bar -->
+    <div id="metrics-menu" role="menu" hidden></div>
 
     <!-- Bottom Status Bar -->
     <footer id="status">
       <!-- Selection actions: replace the buttons and size below while code is selected -->
       <div id="footer-sel">
         <span class="sel-chip">Selection</span>
-        <span id="sel-stats"></span>
-        <span class="status-sep"></span>
         <button class="footer-btn" data-sel="copy-ref" title="Copy file and line reference ({Alt+C})"><span class="footer-btn-label">Copy Ref</span><kbd class="footer-kbd" data-keys="Alt+C"></kbd></button>
-        <button class="footer-btn" data-sel="copy-agent" title="Copy snippet with file path for an AI agent ({Alt+A})"><span class="footer-btn-label">Copy for Agent</span><kbd class="footer-kbd" data-keys="Alt+A"></kbd></button>
-        <button class="footer-btn" data-sel="usages" title="Find usages across the workspace ({Alt+U})"><span class="footer-btn-label">Find Usages</span><kbd class="footer-kbd" data-keys="Alt+U"></kbd></button>
+        <button class="footer-btn" data-sel="copy-agent" title="Copy snippet with file path and line numbers ({Alt+A})"><span class="footer-btn-label">Copy with Context</span><kbd class="footer-kbd" data-keys="Alt+A"></kbd></button>
+        <button class="footer-btn" data-sel="agent-edit" title="Edit this selection inline ({Alt+E})"><span class="footer-btn-label">Edit Inline</span><kbd class="footer-kbd" data-keys="Alt+E"></kbd></button>
       </div>
       <div id="footer-actions">
         <button class="footer-btn" data-action="quick-open" title="Go to File ({Mod+P})"><span class="footer-btn-label">Files</span><kbd class="footer-kbd" data-keys="Mod+P"></kbd></button>
         <button class="footer-btn" data-action="search" title="Search in Files ({Mod+Shift+F})"><span class="footer-btn-label">Search</span><kbd class="footer-kbd" data-keys="Mod+Shift+F"></kbd></button>
-        <button class="footer-btn" data-action="symbols" title="Go to Symbol ({Mod+Shift+O})"><span class="footer-btn-label">Symbols</span><kbd class="footer-kbd" data-keys="Mod+Shift+O"></kbd></button>
-        <button class="footer-btn" data-action="find" title="Find in File ({Mod+F})"><span class="footer-btn-label">Find</span><kbd class="footer-kbd" data-keys="Mod+F"></kbd></button>
+        <button class="footer-btn" data-action="find" title="Find in File ({Mod+F})"><span class="footer-btn-label">Find in File</span><kbd class="footer-kbd" data-keys="Mod+F"></kbd></button>
         <button class="footer-btn" data-action="goto" title="Go to Line ({Mod+G})"><span class="footer-btn-label">Go to</span><kbd class="footer-kbd" data-keys="Mod+G"></kbd></button>
         <button class="footer-btn" data-action="md-preview" title="Toggle Markdown Preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
-        <button class="footer-btn" data-action="line-numbers" title="Toggle Line Numbers ({Alt+L})"><span class="footer-btn-label">Lines</span><kbd class="footer-kbd" data-keys="Alt+L"></kbd></button>
+        <button class="footer-btn" id="btn-vim-help" data-action="vim-help" title="Vim Keybindings" hidden><span class="footer-btn-label">Vim Keys</span><kbd class="footer-kbd">?</kbd></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>
       </div>
       <span class="status-sep"></span>
+      <span id="st-vim" class="status-vim-chip" hidden role="button" tabindex="0" title="Vim Mode (Click for shortcuts)">NORMAL</span>
       <span id="st-size"></span>
+      <span id="st-pos"></span>
       <span class="grow"></span>
       <span id="st-lsp"></span>
-      <span id="st-index" title="Indexing latency: time taken to index all workspace files"></span>
+      <span id="sel-stats"></span>
       <span class="status-sep"></span>
-      <span id="st-metrics" class="status-metrics" title="Process metrics as seen by the OS">
+      <span id="st-metrics" class="status-metrics" role="button" tabindex="0">
         <span class="metric"><span class="metric-label">CPU</span> <span id="st-cpu">--%</span></span>
         <span class="metric-divider">·</span>
         <span class="metric"><span class="metric-label">RAM</span> <span id="st-ram">-- MB</span></span>
@@ -251,6 +337,73 @@
 
 <!-- SECTION: Keyboard Shortcuts Cheat Sheet Overlay (?) -->
 <div id="helpsheet" hidden></div>
+<div id="vim-helpsheet" hidden></div>
+
+<!-- SECTION: Settings Modal (Cmd+, / Ctrl+,) -->
+<div id="settings-modal" class="modal-overlay" hidden>
+  <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header class="settings-header">
+      <div class="settings-title-group">
+        <h2 id="settings-title">Settings</h2>
+        <span id="settings-path" class="settings-path-badge" title="Click to copy path">~/.px0/settings.json</span>
+      </div>
+      <div class="settings-header-actions">
+        <div class="settings-mode-switch" role="group" aria-label="Settings View Mode">
+          <button type="button" id="settings-mode-ui" class="active" title="Settings UI">UI</button>
+          <button type="button" id="settings-mode-json" title="Open Settings (JSON)">JSON</button>
+        </div>
+        <button id="settings-close" class="mini settings-close-btn" title="Close (Esc)">&#10005;</button>
+      </div>
+    </header>
+
+    <!-- Search bar for filtering settings -->
+    <div id="settings-search-bar" class="settings-search-bar">
+      <svg class="settings-search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="settings-search" placeholder="Search settings..." autocomplete="off" spellcheck="false">
+      <button id="settings-search-clear" class="mini" title="Clear search">&#10005;</button>
+    </div>
+
+    <!-- UI View Mode -->
+    <div id="settings-ui-container" class="settings-body">
+      <nav id="settings-nav" class="settings-nav" aria-label="Settings categories"></nav>
+      <section id="settings-list" class="settings-list" aria-label="Settings list"></section>
+    </div>
+
+    <!-- JSON View Mode -->
+    <div id="settings-json-container" class="settings-json-body" hidden>
+      <div class="settings-json-toolbar">
+        <span class="settings-json-hint">Edit settings.json directly. Changes apply immediately upon saving.</span>
+        <div class="settings-json-actions">
+          <button id="btn-settings-reset-raw" class="settings-btn-secondary" title="Discard unsaved changes">Discard</button>
+          <button id="btn-settings-save-raw" class="settings-btn-primary" title="Save changes to settings.json ({Mod+S})">Save</button>
+        </div>
+      </div>
+      <div id="settings-raw-error" class="settings-error-banner" hidden></div>
+      <textarea id="settings-raw-editor" spellcheck="false" autocomplete="off" wrap="off"></textarea>
+    </div>
+  </div>
+</div>
+
+<!-- Markdown Image Lightbox Overlay -->
+<div id="img-lightbox" hidden>
+  <div class="lightbox-backdrop"></div>
+  <div class="lightbox-dialog">
+    <header class="lightbox-header">
+      <span class="lightbox-title" id="lb-title"></span>
+      <span class="lightbox-meta" id="lb-meta"></span>
+      <div class="lightbox-actions">
+        <button id="lb-open-tab" class="lightbox-btn" title="Open image in dedicated tab">Open in Tab</button>
+        <button id="lb-copy-path" class="lightbox-btn" title="Copy image path">Copy Path</button>
+        <button id="lb-close" class="lightbox-btn lightbox-close" title="Close (Esc)">&#10005;</button>
+      </div>
+    </header>
+    <div class="lightbox-body">
+      <div class="lightbox-canvas bg-checker" id="lb-canvas">
+        <img id="lb-img" src="" alt="">
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Invisible text node to measure font metrics in DOM -->
 <span id="measure">0</span>

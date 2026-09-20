@@ -264,6 +264,8 @@ func lspBinDirs() []string {
 		add(home, "go", "bin")     // go install, default GOPATH
 		add(home, ".cargo", "bin") // rustup, cargo install
 		add(home, ".local", "bin") // pipx
+		add(home, ".opencode", "bin")
+		add(home, ".codex", "bin")
 	}
 	// npm puts global packages beside its own executable unless the prefix was moved.
 	if npm, err := exec.LookPath("npm"); err == nil {

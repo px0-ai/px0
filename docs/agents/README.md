@@ -4,9 +4,9 @@ This document defines critical instructions, architectural principles, and docum
 
 ## 1. Core Architectural Tenets
 
-1. Read-Only by Design: px0 is exclusively a code navigation and exploration tool. It does not write, edit, format, or mutate project files on disk. Do not introduce file modification or editor save APIs.
+1. Edits Go Through a Harness, Never Through px0: px0 does not author, format, or save changes to project files, and reads stay its hot path. The optional agent flow ([`agent.go`](../../agent.go)) composes an instruction anchored to a line range and hands it to a coding harness already installed on the machine; that harness performs the write, and px0 reloads what moved once it exits. Several harnesses can be dispatched at once, one per non-overlapping line range: `agentManager` refuses a dispatch that overlaps a range still running. Do not introduce file modification or editor save APIs that take content from the client.
 1. Zero Runtime and Single Binary Footprint: Any change must compile into a single static binary (`go:embed` for web assets). Do not introduce runtime dependencies (no Node.js/npm runtime requirement, no external database, no CGO dependencies).
-1. Stateless on Disk: px0 leaves zero configuration or temporary cache artifacts on the user filesystem (no local `.px0/` folders or cache files). Keep working trees untouched.
+1. Stateless on Disk: px0 leaves zero configuration or temporary cache artifacts on the user filesystem (no local `.px0/` folders or cache files). Edit instructions are held in memory for the life of the process and are never persisted, so there is no review or comment store to migrate. The only writes to a working tree are those made by a dispatched harness.
 1. Performance Budgets: Indexing must complete in milliseconds using bounded concurrency (`NumCPU * 4`). File open must remain $O(1)$ relative to file length using windowed chunking (`hlChunk = 1000`) and browser DOM virtualization. Maintain explicit memory reclamation (`debug.FreeOSMemory()` on idle).
 
 ## 2. Mandatory Documentation Maintenance Protocol
@@ -24,10 +24,12 @@ Whenever modifying, adding, or refactoring code in this repository, you must aud
 | Syntax Highlighting & Lexing         | `highlight.go`                                                   | [`docs/internals/syntax-highlighting.md`](../internals/syntax-highlighting.md), [`README.md`](../../README.md)   |
 | Language Servers (LSP)               | `lsp.go`, `lspnav.go`, `lspservers.go`, `lspsetup.go`, `calls.go`| [`docs/internals/lsp-and-intelligence.md`](../internals/lsp-and-intelligence.md), [`README.md`](../../README.md)|
 | Git Integration & Diffing            | `git.go`                                                         | [`docs/internals/git-integration.md`](../internals/git-integration.md)                                           |
+| Harness Editing / Agent Dispatch     | `agent.go`, `settings.go`, `web/src/agent.js`, `web/src/selbar.js` | [`docs/internals/agent-editing.md`](../internals/agent-editing.md), [`README.md`](../../README.md)                |
 | Frontend UI / Virtualization         | `web/app.js`, `web/index.html`, `web/style.css`                  | [`docs/internals/editor-virtualization.md`](../internals/editor-virtualization.md), [`README.md`](../../README.md)|
 | Markdown Preview                     | `markdown.go`, `web/src/markdown.js`                             | [`docs/internals/markdown.md`](../internals/markdown.md), [`docs/internals/styling-and-themes.md`](../internals/styling-and-themes.md) |
 | Themes / Colour Tokens               | `web/themes/*.css`, `web/style.css`, `web/src/theme.js`          | [`docs/internals/styling-and-themes.md`](../internals/styling-and-themes.md)                                    |
-| CLI Flags / Configuration            | `main.go`                                                        | [`README.md`](../../README.md)                                                                                  |
+| User-Facing Features / Workflows    | All features, UX, and controls                                   | [`docs/features/README.md`](../features/README.md)                                                               |
+| CLI Flags / Configuration            | `main.go`, `settings.go`                                         | [`docs/features/settings-and-configuration.md`](../features/settings-and-configuration.md), [`README.md`](../../README.md)|
 | Performance Metrics / Scripts        | `benchmark.sh`                                                   | [`BENCHMARKS.md`](../../BENCHMARKS.md)                                                                           |
 | Release Workflow                     | `Makefile`, `build.sh`, `scripts/build-web.js`                   | [`PUBLISHING.md`](../../PUBLISHING.md)                                                                           |
 
@@ -40,7 +42,17 @@ Whenever modifying, adding, or refactoring code in this repository, you must aud
 - Flag & Shortcut Sync: Any new keyboard shortcut, UI behavior, or CLI flag is reflected in [`README.md`](../../README.md).
 - Benchmark Alignment: If search, highlight, or index performance characteristics change, verify whether [`BENCHMARKS.md`](../../BENCHMARKS.md) requires updated notes or numbers.
 
-## 4. Frontend Architecture & Code Map for Agents
+## 4. Version Bump & Release Verification Protocol
+
+When committing a version bump (triggered after the user updates the `VERSION` file):
+1. **Verify Release Pipeline First**: Before creating the version bump commit, verify that all GitHub release scripts and build workflows are working cleanly without errors:
+   - Frontend bundling: Verify `node ./scripts/build-web.js` passes with zero identifier collisions under both Bun and Node fallback.
+   - Build & Cross-Compilation: Verify `go test ./...` passes and target builds in `build.sh` / `.github/workflows/release.yml` compile cleanly.
+   - Release Configuration: Verify checksums, release workflow definitions, and installer compatibility.
+2. **Commit Release Fixes First**: If any release scripts, bundlers, or workflow configurations need updates or fixes, make those changes and commit them in a separate commit first.
+3. **Commit Version Bump**: Finally, create the version bump commit staging `VERSION` with the updated version number that the user started with (following the `ape-commit` format).
+
+## 5. Frontend Architecture & Code Map for Agents
 
 To quickly locate and modify UI features, refer to this structured section index of [`web/index.html`](../../web/index.html) and `web/app.js`:
 
@@ -57,8 +69,11 @@ To quickly locate and modify UI features, refer to this structured section index
 | `<div id="empty">`           | Welcome / splash screen shown when no files are open.                                                                                                                                                                                                                                |
 | `<div id="hovercard">`       | Floating LSP type signature, doc preview, and quick reference buttons.                                                                                                                                                                                                              |
 | `<div id="findbar">`         | In-file search overlay (Ctrl+F).                                                                                                                                                                                                                                                     |
-| `<div id="toast">`           | Floating bottom notification toast confirming clipboard actions.                                                                                                                                                                                                                     |
-| `<footer id="status">`       | Bottom status bar: language, lines, size, cursor pos, LSP status, and index time. While code is selected, `#footer-sel` (Copy Ref, Copy for Agent, Find Usages) replaces the left-side buttons. Never wraps: `fitStatus()` in `status.js` adds cumulative `fit-1`..`fit-6` classes to hide detail as width runs out. |
+| `<div id="agentbox">`        | Stacking container of instruction composers for Edit with Agent, one `.agent-box` per edit in flight or being composed (cloned from `<template id="agentbox-tpl">`), each with its own anchor (`.agent-ref`), metadata row with harness and model selectors (`.agent-meta`), picker (`.agent-pick`), instruction (`.agent-input`), and inline failure output with stdout / stderr (`.agent-err`). Overlapping line ranges are refused before a second box opens. |
+| `<div id="sel-menu">`        | Right-click menu on a selection, offering Copy Ref, Copy with Context, Edit Inline, and Find Usages.                                                                                                                                                                                |
+| `<div id="toast">`           | Floating bottom notification toast confirming actions.                                                                                                                                                                                                                               |
+| `<div id="metrics-menu">`    | Process metrics modal opened from CPU/RAM in the status bar.                                                                                                                                                                                                                          |
+| `<footer id="status">`       | Bottom status bar: language, lines, size, cursor pos, and LSP status. While code is selected, `#footer-sel` (Copy Ref, Copy with Context, Edit Inline) replaces the left-side buttons and selection stats appear on the right. Never wraps: `fitStatus()` in `status.js` adds cumulative `fit-1`..`fit-6` classes to hide detail as width runs out. |
 | `<div id="overlay">`         | Modal overlay hosting Quick Open and Command Palette (`#palette`).                                                                                                                                                                                                                   |
 | `<div id="helpsheet">`       | Keyboard shortcuts cheat-sheet modal overlay.                                                                                                                                                                                                                                        |
 
@@ -76,7 +91,7 @@ The frontend is modularized into clean ES modules under `web/src/` and bundled i
 | `web/src/status.js`    | `updateStatus()`, `initMetrics()`, `updateMetricsDisplay()`, `setStatusNote()`, `fmtBytes()`, `setLspState()`, `drawLspStatus()`.                                                          |
 | `web/src/cursor.js`    | `wordAtPoint()`, `moveCursor()`, click / double-click selection, occurrence highlight.                                                                                                       |
 | `web/src/hover.js`     | `onMove()`, `hoverAt()`, `showHover()`, `hideHover()`, token link modifier handling.                                                                                                        |
-| `web/src/selbar.js`    | Status bar selection mode: `updateSelectionBar()`, `hideSelectionBar()`, `runSelectionAction()`. Whole-file selection: `selectAll()`, `clearSelectAll()`, `copySelectAll()`.                  |
+| `web/src/selbar.js`    | Status bar selection mode: `updateSelectionBar()`, `hideSelectionBar()`, `runSelectionAction()`. Whole-file selection: `selectAll()`, `clearSelectAll()`, `copySelectAll()`. Diff-view selections, on either side of a split and including deleted lines, resolve to working-tree line numbers via `diffSelection()`. Right-click menu: `closeSelMenu()`.                  |
 | `web/src/lsp.js`       | `gotoDefinition()`, `findReferences()`, `warmLSP()`, `lspCall()`, hit formatting.                                                                                                            |
 | `web/src/tree.js`      | `drawTree()`, `fileKind()`, `revealDir()`, `revealFile()`, explorer tree click handlers.                                                                                                    |
 | `web/src/search.js`    | `runSearch()`, `renderResults()`, `displayPath()`, workspace search panel.                                                                                                                   |
@@ -90,4 +105,5 @@ The frontend is modularized into clean ES modules under `web/src/` and bundled i
 | `web/src/palette.js`   | `openPalette()`, `refreshPalette()`, `COMMANDS`, fuzzy file/symbol/command finder.                                                                                                           |
 | `web/src/shortcuts.js` | `showHelp()`, Alt+Z word wrap toggle, keyboard shortcuts listener.                                                                                                                          |
 | `web/src/theme.js`     | `listThemes()`, `setTheme()`, `cycleTheme()`, `initTheme()`: theme discovery from loaded CSS and persistence.                                                                                |
+| `web/src/agent.js`     | `initAgent()`, `openAgentEdit()`, `applyAgentMeta()`: one instruction-composer session per edit in flight or being composed, each polling its own job by id; a client-side overlap check refuses a range that collides with an open session before it reaches the server; a `beforeunload` guard while any session is in flight; the footer harness menu; and the reload after a run (reindex, `reloadOpenTabs()`, tree redraw), queued so concurrent finishes don't interleave. |
 | `web/src/main.js`      | Module initializations and application `boot()` sequence.                                                                                                                                    |

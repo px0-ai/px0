@@ -16,7 +16,7 @@ let shown = null; // doc the diff view is currently showing, null while hidden
 // d.diffMode is 'split' | 'unified' | null (off), per tab. The layout last
 // picked (split vs unified) is remembered globally as the default for the
 // next file entering diff view.
-function setLayoutPref(mode) {
+export function setLayoutPref(mode) {
   try { localStorage.setItem('px0.diffLayout', mode); } catch {}
 }
 
@@ -32,37 +32,47 @@ function diffMode(d = doc_()) {
    the layout (split/unified) changes while already showing the same doc --
    switching layout doesn't change which doc is "shown", so that alone can't
    be the signal to redraw. Call whenever either might have changed. */
-export function syncDiffView() {
+export function syncDiffView(force = false) {
   const d = doc_();
   const want = (d && d.diffMode) ? d : null;
-  if (want !== shown) {
+  if (force && want) {
+    want.diffText = undefined;
+    want.diffHunks = undefined;
+  }
+  if (want !== shown || force) {
     shown = want;
     diffview.hidden = !want;
-    if (want) drawDiff(want);
+    if (want) drawDiff(want, force);
     else diffContent.replaceChildren();
   } else if (want && want.diffHunks !== undefined) {
     renderDiff(want);
   }
 }
 
+// Read by a reload, which swaps the doc and so redraws the diff from the top.
+export function diffScrollTop() {
+  return diffview.hidden ? 0 : diffview.scrollTop;
+}
+
 export async function toggleDiff() {
   if (!S.meta?.git) return;
   const d = doc_();
   if (!d) return;
-  if (!d.diffMode && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
+  if (!d.diffMode && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo', 4000); return; }
   setDiffMode(d.diffMode ? 'source' : (layoutPref() || 'split'));
 }
 
 export async function setDiffMode(mode) {
   const d = doc_();
   if (!d) return;
-  if (mode !== 'source' && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo'); return; }
+  if (mode !== 'source' && !d.diffAvailable) { setStatusNote('No diff — clean file or not a git repo', 4000); return; }
   if (mode === 'source') {
     d.diffMode = null;
     d.diffDismissed = true;
   } else {
     d.diffMode = mode;
     d.diffDismissed = false;
+    d.openedInDiffView = true;
     setLayoutPref(mode);
   }
   syncPreview(); // markdown preview and diff view are mutually exclusive
@@ -70,24 +80,28 @@ export async function setDiffMode(mode) {
   updateStatus();
 }
 
-async function drawDiff(d) {
-  if (d.diffText === undefined) {
+async function drawDiff(d, force = false) {
+  if (force || d.diffText === undefined) {
     diffContent.replaceChildren();
     try {
-      d.diffReq = d.diffReq || api('/api/diff', { path: d.path });
+      d.diffReq = api('/api/diff', { path: d.path });
       const j = await d.diffReq;
       d.diffText = j.diff || '';
       d.diffHunks = parseDiff(d.diffText);
     } catch (e) {
       d.diffText = '';
       d.diffHunks = [];
-      setStatusNote('No diff: ' + e.message);
+      setStatusNote('No diff: ' + e.message, 4000);
     } finally {
       d.diffReq = null;
     }
     if (shown !== d) return;
   }
   renderDiff(d);
+  if (d.diffScroll) {
+    diffview.scrollTop = d.diffScroll;
+    d.diffScroll = 0;
+  }
 }
 
 function renderDiff(d) {
@@ -105,12 +119,27 @@ function renderDiff(d) {
     frag.append(d.diffMode === 'unified' ? unifiedTable(hunk) : splitTable(hunk));
   }
   diffContent.append(frag);
+  syncDiffAgentTargets();
+}
+
+export function syncDiffAgentTargets() {
+  if (!diffview || diffview.hidden) return;
+  const d = doc_();
+  if (!d) return;
+  const ranges = (S.agentTargets || []).filter(t => t.path === d.path);
+  for (const el of diffview.querySelectorAll('[data-l]')) {
+    const l = +el.dataset.l;
+    const inAgent = ranges.some(r => l >= r.l1 && l <= r.l2);
+    const isAnchor = ranges.some(r => l === r.l1);
+    el.classList.toggle('agent-sel', inAgent);
+    el.classList.toggle('agent-anchor', isAnchor);
+  }
 }
 
 function hunkHeader(hunk) {
   const el = document.createElement('div');
   el.className = 'diff-hunk-head';
-  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@' + (hunk.section ? ' ' + hunk.section : '');
+  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@';
   return el;
 }
 
@@ -138,7 +167,8 @@ function parseDiff(text) {
     if (!cur || line === '' || line.startsWith('\\')) continue; // trailing split artifact, pre-hunk header, or "\ No newline..."
     const c = line[0], body = line.slice(1);
     if (c === '+') cur.rows.push({ type: 'add', newLine: newLine++, text: body });
-    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, text: body });
+    // A deletion has no line on disk; at is the working-tree line it sat before.
+    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, at: newLine, text: body });
     else cur.rows.push({ type: 'ctx', oldLine: oldLine++, newLine: newLine++, text: body });
   }
   return hunks;
@@ -152,6 +182,7 @@ function unifiedTable(hunk) {
   for (const row of hunk.rows) {
     const r = document.createElement('div');
     r.className = 'diff-row diff-' + row.type;
+    anchor(r, row);
     r.append(
       lineCell(row.type === 'add' ? '' : row.oldLine),
       lineCell(row.type === 'del' ? '' : row.newLine),
@@ -200,8 +231,18 @@ function splitSide(row, side) {
   el.className = 'diff-side diff-side-' + side + (row ? ' diff-' + row.type : ' diff-blank');
   if (!row) { el.append(lineCell(''), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
+  anchor(el, row);
   el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
   return el;
+}
+
+/* Stamps where a row points in the working tree, so a selection on it can be
+   edited. Context and added lines have a line on disk (data-l), which a context
+   line shares across both sides of the split. A deleted line has none, only the
+   place it used to be (data-at). */
+function anchor(el, row) {
+  if (row.newLine !== undefined) el.dataset.l = row.newLine;
+  else if (row.at !== undefined) el.dataset.at = row.at;
 }
 
 function lineCell(n) {
@@ -233,13 +274,17 @@ export function initDiff() {
   sw.addEventListener('mousedown', e => {
     if (!e.target.closest('button')) e.preventDefault();
   });
-  const btn = $('#diff-btn');
-  if (btn) {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      toggleDiff();
-    });
-  }
+  // Each half of the switch names a view, so a click shows that view rather than toggling.
+  $('#diff-source')?.addEventListener('click', e => {
+    e.stopPropagation();
+    setDiffMode('source');
+  });
+  $('#diff-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    const d = doc_();
+    if (!d || !d.diffAvailable) return;
+    setDiffMode(d.diffMode || layoutPref());
+  });
   const menu = $('#diff-menu');
   if (menu) {
     menu.addEventListener('click', e => {

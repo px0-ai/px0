@@ -15,6 +15,7 @@ var gitDisabled bool
 type gitInfo struct {
 	ok       bool
 	toplevel string // repo root as git reports it (symlinks resolved)
+	gitdir   string // absolute path to .git directory or file
 }
 
 var (
@@ -26,6 +27,9 @@ var (
 // working tree. Memoized per root: detection shells out once. Fails quiet -- no
 // git, no repo, or -no-git all yield false, never an error.
 func gitAvailable(root string) bool { return gitProbe(root).ok }
+
+// gitDir returns the absolute path to the repository's .git directory.
+func gitDir(root string) string { return gitProbe(root).gitdir }
 
 func gitProbe(root string) gitInfo {
 	if gitDisabled {
@@ -39,7 +43,17 @@ func gitProbe(root string) gitInfo {
 	var info gitInfo
 	if _, err := exec.LookPath("git"); err == nil {
 		if out, err := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel").Output(); err == nil {
-			info = gitInfo{ok: true, toplevel: strings.TrimSpace(string(out))}
+			top := strings.TrimSpace(string(out))
+			gd := filepath.Join(top, ".git")
+			if gdOut, err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Output(); err == nil {
+				rawGd := strings.TrimSpace(string(gdOut))
+				if filepath.IsAbs(rawGd) {
+					gd = rawGd
+				} else {
+					gd = filepath.Join(top, rawGd)
+				}
+			}
+			info = gitInfo{ok: true, toplevel: top, gitdir: gd}
 		}
 	}
 	gitCache[root] = info
@@ -54,7 +68,7 @@ func gitStatus(root string) map[string]string {
 	if !info.ok {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v2", "-z").Output()
+	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v2", "-z", "-uall").Output()
 	if err != nil {
 		return nil
 	}

@@ -95,7 +95,7 @@ Four progressive elevation steps radiating from the editor viewport outward:
 | ------------------ | -------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `--fg`             | Yes      | -             | Primary text, active file tab, current line number, unstyled identifiers.                                             |
 | `--dim`            | Yes      | -             | Secondary text: inactive tabs, explorer file names, hovercard docs, Markdown blockquotes and footnotes.              |
-| `--faint`          | Yes      | -             | Line numbers, keyboard hints, tree chevrons, close buttons at rest, read-only header badge, inactive LSP indicator.   |
+| `--faint`          | Yes      | -             | Line numbers, keyboard hints, tree chevrons, close buttons at rest, inactive LSP indicator.                         |
 | `--on-accent`      | No       | `#fff`        | Text rendered on top of an `--accent` background.                                                                     |
 | `--on-badge`       | No       | `var(--bg)`   | Text rendered inside colored badges (symbol kinds, file extensions).                                                  |
 | `--on-mark-active` | No       | `var(--bg)`   | Text of current search/find hit on top of `--mark-active`.                                                             |
