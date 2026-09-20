@@ -87,6 +87,7 @@ The frontend is modularized into clean ES modules under `web/src/` and bundled i
 | `web/src/ui.js`        | DOM references (`vp`, `sizer`, `rowsEl`, `editor`, `toastEl`), `showToast()`, `copyToClipboard()`.                                                                                         |
 | `web/src/renderer.js`  | `measure()`, `layout()`, `render()`, `paint()`, `toggleWordWrap()`, `toggleLineNumbers()`, on-demand chunk fetching.                                                                        |
 | `web/src/tabs.js`      | `openFile()`, `closeTab()`, `switchTab()`, `drawTabs()`, `drawCrumbs()`, `showImage()`, `reloadOpenTabs()` (in-place tab refresh on reindex), `reopenClosedTab()` (Alt+Shift+T).          |
+| `web/src/breadcrumbs.js` | `breadcrumbParts()`: splits workspace and external file paths for breadcrumbs. |
 | `web/src/history.js`   | `pushHistory()`, `go()`: jump history back/forward (Alt+Left, Alt+Right).                                                                                                                   |
 | `web/src/status.js`    | `updateStatus()`, `initMetrics()`, `updateMetricsDisplay()`, `setStatusNote()`, `fmtBytes()`, `setLspState()`, `drawLspStatus()`.                                                          |
 | `web/src/cursor.js`    | `wordAtPoint()`, `moveCursor()`, click / double-click selection, occurrence highlight.                                                                                                       |

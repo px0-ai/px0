@@ -3352,6 +3352,12 @@
     document.fonts?.ready.then(fitStatus);
   }
 
+  // web/src/breadcrumbs.js
+  function breadcrumbParts(path) {
+    const parts = path.split("/").filter(Boolean);
+    return { external: /^(?:\/|[A-Za-z]:\/)/.test(path), dirs: parts.slice(0, -1), name: parts[parts.length - 1] || "" };
+  }
+
   // web/src/selbar.js
   var status = $("#status");
   var statsEl = $("#sel-stats");
@@ -4291,8 +4297,20 @@
   }
   function drawCrumbs() {
     const el = $("#crumbs");
-    if (el)
+    if (!el)
+      return;
+    const d = doc_();
+    el.hidden = !d;
+    if (!d) {
       el.innerHTML = "";
+      return;
+    }
+    const { external, dirs, name } = breadcrumbParts(d.path);
+    el.innerHTML = dirs.map((part, i) => {
+      const path = dirs.slice(0, i + 1).join("/");
+      const item = external ? '<span class="crumb">' + esc2(part) + "</span>" : '<button type="button" class="crumb" data-dir="' + esc2(path) + '" title="Reveal ' + esc2(path) + '">' + esc2(part) + "</button>";
+      return item + '<span class="crumb-sep" aria-hidden="true">›</span>';
+    }).join("") + '<span class="crumb crumb-file"><span class="ic" data-t="' + fileKind(name) + '"></span>' + esc2(name) + "</span>";
   }
   function initTabs() {
     $("#tabs").addEventListener("click", (e) => {
@@ -4314,12 +4332,16 @@
     });
     const crumbsEl = $("#crumbs");
     if (crumbsEl) {
-      crumbsEl.addEventListener("click", (e) => {
+      crumbsEl.addEventListener("click", async (e) => {
         const c = e.target.closest("[data-dir]");
-        if (c) {
-          showPanel("files");
-          revealDir(c.dataset.dir);
-        }
+        if (!c)
+          return;
+        showPanel("files");
+        await revealDir(c.dataset.dir);
+        $$(".tr.sel", treeEl).forEach((x) => {
+          x.classList.remove("sel");
+        });
+        treeEl.querySelector('[data-dir="' + CSS.escape(c.dataset.dir) + '"]')?.classList.add("sel");
       });
     }
   }

@@ -1,5 +1,5 @@
 // web/src/tabs.js
-import { $, esc, S, doc_, api, LH, CHUNK, withKeys } from './state.js';
+import { $, $$, esc, S, doc_, api, LH, CHUNK, withKeys } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 import { render, layout, refineChunk } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
@@ -7,7 +7,8 @@ import { pushHistory } from './history.js';
 import { warmLSP } from './lsp.js';
 import { loadOutline } from './outline.js';
 import { showPanel } from './panels.js';
-import { revealDir, treeEl } from './tree.js';
+import { fileKind, revealDir, treeEl } from './tree.js';
+import { breadcrumbParts } from './breadcrumbs.js';
 import { clearLink } from './hover.js';
 import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
@@ -364,7 +365,19 @@ export async function restoreWorkspaceTabs() {
 
 export function drawCrumbs() {
   const el = $('#crumbs');
-  if (el) el.innerHTML = '';
+  if (!el) return;
+  const d = doc_();
+  el.hidden = !d;
+  if (!d) { el.innerHTML = ''; return; }
+  const { external, dirs, name } = breadcrumbParts(d.path);
+  el.innerHTML = dirs.map((part, i) => {
+    const path = dirs.slice(0, i + 1).join('/');
+    const item = external
+      ? '<span class="crumb">' + esc(part) + '</span>'
+      : '<button type="button" class="crumb" data-dir="' + esc(path) + '" title="Reveal ' + esc(path) + '">' + esc(part) + '</button>';
+    return item + '<span class="crumb-sep" aria-hidden="true">›</span>';
+  }).join('') +
+    '<span class="crumb crumb-file"><span class="ic" data-t="' + fileKind(name) + '"></span>' + esc(name) + '</span>';
 }
 
 export function showImage(path) {
@@ -389,9 +402,13 @@ export function initTabs() {
   });
   const crumbsEl = $('#crumbs');
   if (crumbsEl) {
-    crumbsEl.addEventListener('click', e => {
+    crumbsEl.addEventListener('click', async e => {
       const c = e.target.closest('[data-dir]');
-      if (c) { showPanel('files'); revealDir(c.dataset.dir); }
+      if (!c) return;
+      showPanel('files');
+      await revealDir(c.dataset.dir);
+      $$('.tr.sel', treeEl).forEach(x => { x.classList.remove('sel'); });
+      treeEl.querySelector('[data-dir="' + CSS.escape(c.dataset.dir) + '"]')?.classList.add('sel');
     });
   }
 }

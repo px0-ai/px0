@@ -131,12 +131,12 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
   border: 4px solid transparent; border-left-color: var(--faint); border-right-width: 0;
 }
 .tr.open > .ar { transform: rotate(90deg); }
-.tr .ic { width: 7px; height: 7px; flex: none; border-radius: 2px; background: var(--faint); opacity: .75; }
-.tr .ic[data-t="code"] { background: var(--nf); }
-.tr .ic[data-t="data"] { background: var(--kt); }
-.tr .ic[data-t="doc"]  { background: var(--dim); }
-.tr .ic[data-t="web"]  { background: var(--nt); }
-.tr .ic[data-t="img"]  { background: var(--nc); }
+.tr .ic, #crumbs .ic { width: 7px; height: 7px; flex: none; border-radius: 2px; background: var(--faint); opacity: .75; }
+.tr .ic[data-t="code"], #crumbs .ic[data-t="code"] { background: var(--nf); }
+.tr .ic[data-t="data"], #crumbs .ic[data-t="data"] { background: var(--kt); }
+.tr .ic[data-t="doc"], #crumbs .ic[data-t="doc"]  { background: var(--dim); }
+.tr .ic[data-t="web"], #crumbs .ic[data-t="web"]  { background: var(--nt); }
+.tr .ic[data-t="img"], #crumbs .ic[data-t="img"]  { background: var(--nc); }
 .tr .nm { overflow: hidden; text-overflow: ellipsis; }
 .tr.dir .nm { color: var(--fg); }
 .tr.file .nm { color: var(--dim); }
@@ -380,7 +380,14 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
   display: inline-block;
 }
 
-#crumbs { display: none !important; }
+#crumbs { display: flex; align-items: center; gap: 7px; height: 25px; min-height: 25px; padding: 0 10px; overflow-x: auto; overflow-y: hidden; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); white-space: nowrap; scrollbar-width: none; font-size: 11.5px; }
+#crumbs[hidden] { display: none; }
+#crumbs::-webkit-scrollbar { display: none; }
+#crumbs .crumb { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font: inherit; }
+#crumbs button.crumb { padding: 0; border: 0; background: none; cursor: pointer; }
+#crumbs button.crumb:hover { color: var(--fg); text-decoration: underline; }
+#crumbs .crumb-file { color: var(--fg); }
+#crumbs .crumb-sep { color: var(--faint); }
 
 /* ---------- the editor surface ---------- */
 #editor { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
@@ -1782,4 +1789,3 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   resize: none;
   tab-size: 2;
 }
-
