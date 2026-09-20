@@ -30,9 +30,23 @@ import (
 // and it is remembered in the settings file rather than a flag.
 
 const (
-	agentTimeout  = 10 * time.Minute
-	agentLogBytes = 32 << 10
+	defaultAgentTimeout = 2 * time.Minute
+	minAgentTimeout     = 10 * time.Second
+	maxAgentTimeout     = 10 * time.Minute
+	agentLogBytes       = 32 << 10
 )
+
+func configuredAgentTimeout() time.Duration {
+	seconds := readSettings().AgentTimeoutSeconds
+	if seconds == nil {
+		return defaultAgentTimeout
+	}
+	timeout := time.Duration(*seconds * float64(time.Second))
+	if timeout < minAgentTimeout || timeout > maxAgentTimeout {
+		return defaultAgentTimeout
+	}
+	return timeout
+}
 
 // agentPreset is a harness px0 knows and the argv that runs it headless. Each
 // of these starts an interactive session by default and would sit forever
@@ -814,6 +828,7 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 		}
 		prepared[i] = itemWithSnippet{item: it, snippet: snippet}
 	}
+	timeout := configuredAgentTimeout()
 
 	m.mu.Lock()
 	// Re-check under lock: another dispatch may have raced between the check
@@ -828,7 +843,7 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 		}
 	}
 	m.seq++
-	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
 	ranges := make([]agentRange, len(items))
 	for i, it := range items {
@@ -901,11 +916,11 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 		prompt = agentBatchPrompt(prepared)
 	}
 
-	go m.run(ctx, cancel, job, args, prompt)
+	go m.run(ctx, cancel, job, args, prompt, timeout)
 	return m.Job(job.ID), nil
 }
 
-func (m *agentManager) run(ctx context.Context, cancel context.CancelFunc, job *agentJob, template []string, prompt string) {
+func (m *agentManager) run(ctx context.Context, cancel context.CancelFunc, job *agentJob, template []string, prompt string, timeout time.Duration) {
 	defer cancel()
 	defer func() {
 		m.mu.Lock()
@@ -947,7 +962,7 @@ func (m *agentManager) run(ctx context.Context, cancel context.CancelFunc, job *
 		if errors.Is(ctx.Err(), context.Canceled) {
 			err = errors.New("cancelled")
 		} else {
-			err = fmt.Errorf("gave up after %s", agentTimeout)
+			err = fmt.Errorf("gave up after %s", timeout)
 		}
 	}
 

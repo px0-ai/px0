@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // px0 keeps no state inside a workspace. The user's preferences and choices
@@ -29,6 +30,7 @@ type settings struct {
 	DiffEditorRenderSideBySide *bool    `json:"diffEditor.renderSideBySide,omitempty"`
 	MarkdownPreviewOpen        *bool    `json:"markdown.preview.open,omitempty"`
 	TelemetryEnabled           *bool    `json:"telemetry.enabled,omitempty"`
+	AgentTimeoutSeconds        *float64 `json:"agent.timeoutSeconds,omitempty"`
 }
 
 var settingsMu sync.Mutex
@@ -315,9 +317,9 @@ var settingsSchema = []settingSchemaItem{
 		Description: "Controls the maximum execution time in seconds for agent edits before canceling.",
 		Category:    "Agent / AI",
 		Type:        "number",
-		Default:     120.0,
-		Min:         numPtr(10.0),
-		Max:         numPtr(600.0),
+		Default:     float64(defaultAgentTimeout / time.Second),
+		Min:         numPtr(float64(minAgentTimeout / time.Second)),
+		Max:         numPtr(float64(maxAgentTimeout / time.Second)),
 		Step:        numPtr(10.0),
 	},
 	{
