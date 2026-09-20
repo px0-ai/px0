@@ -9,7 +9,8 @@ Full-text search in px0 is built to scan hundreds of megabytes of source code in
 ```mermaid
 flowchart TD
     Req["Search Request /api/search?q=..."] --> Parse["Compile Literal or Regexp Pattern"]
-    Parse --> Dispatch["Partition Indexed Files to Worker Pool (NumCPU)"]
+    Parse --> Filter["Apply include then exclude path rules"]
+    Filter --> Dispatch["Partition Indexed Files to Worker Pool (NumCPU)"]
 
     subgraph Pool ["Worker Pool (sync.Pool Buffer Reuse)"]
         W1["Worker 1: Acquire workBuf"]
@@ -36,6 +37,8 @@ flowchart TD
 ```
 
 ## 2. Memory Optimization: `workBuf` Pooling
+
+Before workers read file contents, the searcher applies the optional include rule and every comma- or newline-separated exclude rule using the same compiled path matcher as workspace ignores. Include narrows the indexed candidate set; exclude removes exact paths, directory globs, and filename globs from it. This ordering prevents excluded files from consuming disk I/O or worker buffers.
 
 Reading thousands of files off disk can overwhelm Go's memory allocator if buffers are created per file. px0 eliminates per-file allocations using a `sync.Pool` of reusable worker buffers:
 

@@ -70,6 +70,7 @@ type SearchOpts struct {
 	Case      bool
 	Word      bool
 	Glob      string
+	Exclude   string
 	MaxFiles  int
 	MaxPerFil int
 	// classifyDefs marks hits whose line looks like a declaration of Query.
@@ -79,11 +80,12 @@ type SearchOpts struct {
 const searchFileCap = 8 << 20 // do not grep blobs
 
 type searcher struct {
-	opts   SearchOpts
-	re     *regexp.Regexp            // nil for the literal fast path
-	lit    []byte                    // literal needle, already case-folded if needed
-	glob   *rule                     // path filter, nil when every file is in scope
-	defRes map[string]*regexp.Regexp // ext -> declaration pattern for Query
+	opts    SearchOpts
+	re      *regexp.Regexp            // nil for the literal fast path
+	lit     []byte                    // literal needle, already case-folded if needed
+	glob    *rule                     // include filter, nil when every file is in scope
+	exclude []rule                    // exclusion filters, checked before file I/O
+	defRes  map[string]*regexp.Regexp // ext -> declaration pattern for Query
 }
 
 func newSearcher(o SearchOpts) (*searcher, error) {
@@ -93,6 +95,11 @@ func newSearcher(o SearchOpts) (*searcher, error) {
 		// "server.go" or "web/app.js" is answered without one at all.
 		if r, ok := compilePattern(o.Glob); ok {
 			s.glob = &r
+		}
+	}
+	for _, pattern := range strings.FieldsFunc(o.Exclude, func(r rune) bool { return r == ',' || r == '\n' }) {
+		if r, ok := compilePattern(strings.TrimSpace(pattern)); ok {
+			s.exclude = append(s.exclude, r)
 		}
 	}
 	if o.Regex || o.Word {
@@ -122,6 +129,15 @@ func newSearcher(o SearchOpts) (*searcher, error) {
 		s.defRes = declPatterns(o.Query)
 	}
 	return s, nil
+}
+
+func (s *searcher) excluded(path string) bool {
+	for i := range s.exclude {
+		if s.exclude[i].hit(path, false) {
+			return true
+		}
+	}
+	return false
 }
 
 // workBuf holds the per-worker scratch that lets a search read and fold a whole
@@ -318,6 +334,9 @@ func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches,
 					continue
 				}
 				if s.glob != nil && !s.glob.hit(f.Path, false) {
+					continue
+				}
+				if s.excluded(f.Path) {
 					continue
 				}
 				if int(atomic.LoadInt32(&hit)) >= o.MaxFiles {
