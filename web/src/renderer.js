@@ -63,7 +63,11 @@ export function render() {
 
 export function paint() {
   const d = doc_();
-  if (!d) { const c = $('#caret'); if (c) c.hidden = true; return; }
+  if (!d) {
+    const c = $('#caret'); if (c) c.hidden = true;
+    updateStickySymbol(null);
+    return;
+  }
   const top = vp.scrollTop;
   const first = Math.max(0, Math.floor(top / LH) - OVERSCAN);
   const count = Math.ceil(vp.clientHeight / LH) + OVERSCAN * 2;
@@ -95,6 +99,173 @@ export function paint() {
   decorate(first, last);
   if (sel) restoreSelection(sel);
   placeCaret();
+  updateStickySymbol(d);
+}
+
+const stickyKind = {
+  func: 'fn', method: 'fn', fn: 'fn', def: 'fn', defp: 'fn', defmacro: 'mac',
+  class: 'cls', struct: 'str', interface: 'int', trait: 'trt', impl: 'impl',
+  type: 'typ', typealias: 'typ', enum: 'enm', record: 'rec', object: 'obj',
+  const: 'cst', var: 'var', let: 'var', val: 'var', module: 'mod', mod: 'mod',
+  namespace: 'ns', package: 'pkg', macro: 'mac', extension: 'ext', protocol: 'int',
+  union: 'uni', heading: 'h', sym: '·',
+};
+const stickyFunctions = new Set(['func', 'method', 'fn', 'def', 'defp', 'defmacro']);
+
+// Outline symbols carry indentation but not explicit end lines. Reconstruct the
+// active declaration stack so a function stops owning the viewport at the next
+// same-or-less-indented declaration, rather than remaining "nearest" forever.
+function enclosingFunction(outline, line) {
+  const scopes = [];
+  for (const symbol of outline) {
+    if (symbol.line > line) break;
+    while (scopes.length && symbol.indent <= scopes[scopes.length - 1].indent) scopes.pop();
+    scopes.push(symbol);
+  }
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    if (stickyFunctions.has(scopes[i].kind)) return scopes[i];
+  }
+  return null;
+}
+
+function codeLine(line) {
+  return (line || '')
+    .replace(/<i class=c>[\s\S]*?<\/i>/g, '')
+    .replace(/<i class="c">[\s\S]*?<\/i>/g, '')
+    .replace(/<span class="c">[\s\S]*?<\/span>/g, '')
+    .replace(/<[^>]*>/g, '');
+}
+
+function commentOrBlank(line) {
+  return !codeLine(line).trim();
+}
+
+function functionEndLine(lines, symbol) {
+  const declaration = codeLine(lines[symbol.line - 1]);
+  const arrowFunction = symbol.kind === 'func' && /\b(?:const|let|var)\b/.test(declaration);
+  let parenDepth = 0;
+  let bodyDepth = 0;
+  let bodyStarted = false;
+  let paramsStarted = false;
+  let paramsClosed = false;
+  let arrowSeen = false;
+  let quote = '';
+  let escaped = false;
+
+  for (let n = symbol.line; n <= lines.length; n++) {
+    const raw = lines[n - 1];
+    if (raw == null) return null;
+    const text = codeLine(raw);
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === '\'' || ch === '"' || ch === '`') {
+        quote = ch;
+        continue;
+      }
+      if (ch === '(') {
+        paramsStarted = true;
+        parenDepth++;
+        continue;
+      }
+      if (ch === ')') {
+        parenDepth = Math.max(0, parenDepth - 1);
+        if (paramsStarted && parenDepth === 0) paramsClosed = true;
+        continue;
+      }
+      if (arrowFunction && ch === '=' && text[i + 1] === '>') {
+        arrowSeen = true;
+        i++;
+        continue;
+      }
+      if (ch === '{') {
+        if (!bodyStarted && parenDepth === 0 && (paramsClosed || arrowSeen)) bodyStarted = true;
+        if (bodyStarted) bodyDepth++;
+        continue;
+      }
+      if (ch === '}' && bodyStarted) {
+        bodyDepth--;
+        if (bodyDepth === 0) return n;
+      }
+    }
+  }
+  return null;
+}
+
+function functionEndFor(d, symbol) {
+  if (!d.stickyFunctionEnds) d.stickyFunctionEnds = new Map();
+  if (d.stickyFunctionEnds.has(symbol.line)) return d.stickyFunctionEnds.get(symbol.line);
+  const end = functionEndLine(d.lines, symbol);
+  d.stickyFunctionEnds.set(symbol.line, end);
+  return end;
+}
+
+// Leading blank/comment-only lines belong to the declaration below them. This
+// check runs before the enclosing stack so comments between two functions do
+// not inherit the function above them. A local declaration inside a function
+// does not end that function's scope, so only a same-level non-function blocks
+// the current header.
+function resolveFunction(d, line) {
+  const { outline, lines } = d;
+  let current = enclosingFunction(outline, line);
+  if (current) {
+    const end = functionEndFor(d, current);
+    if (end && line > end) current = null;
+  }
+  const next = outline.find(symbol => symbol.line > line);
+  if (!next) return current;
+
+  let prelude = true;
+  for (let n = line; n < next.line; n++) {
+    if (!commentOrBlank(lines[n - 1])) { prelude = false; break; }
+  }
+  if (prelude && stickyFunctions.has(next.kind)) return next;
+  if (prelude && (!current || next.indent <= current.indent)) return null;
+  return current;
+}
+
+function updateStickySymbol(d) {
+  const el = $('#sticky-symbol');
+  if (!el) return;
+  const md = $('#mdview');
+  const diff = $('#diffview');
+  if (!d || (md && !md.hidden) || (diff && !diff.hidden) || vp.scrollTop < LH || !d.outline?.length) {
+    el.hidden = true;
+    delete el.dataset.line;
+    return;
+  }
+
+  // Fixed-height rows make this O(1); with wrapping, use the live row geometry
+  // so a tall wrapped line does not make the sticky symbol jump early.
+  let topLine = Math.floor(vp.scrollTop / LH) + 1;
+  if (document.body.classList.contains('word-wrap')) {
+    const top = vp.getBoundingClientRect().top;
+    for (const row of rowsEl.children) {
+      if (row.getBoundingClientRect().bottom > top + 1) {
+        topLine = +row.dataset.l;
+        break;
+      }
+    }
+  }
+
+  const current = resolveFunction(d, topLine);
+  if (!current) {
+    el.hidden = true;
+    delete el.dataset.line;
+    return;
+  }
+
+  el.dataset.line = current.line;
+  $('.sticky-line', el).textContent = current.line;
+  $('.sticky-kind', el).textContent = stickyKind[current.kind] || String(current.kind || 'sym').slice(0, 3);
+  $('.sticky-name', el).textContent = current.name;
+  el.title = current.name + ' · line ' + current.line;
+  el.hidden = false;
 }
 
 let caretKey = '';
@@ -296,6 +467,7 @@ export function ensureChunks(d, first, last) {
       .then(j => {
         if (gen !== d.gen) return; // superseded by a background highlight swap
         for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
+        d.stickyFunctionEnds?.clear();
         d.chunks.add(c); d.pending.delete(c);
         if (doc_() === d) render();
         if (j.refine) refineChunk(d, c);
@@ -324,11 +496,18 @@ export function refineChunk(d, c, delay = 800, tries = 0) {
     for (let i = 0; i < j.lines.length; i++) {
       if (d.lines[j.start + i] !== j.lines[i]) { d.lines[j.start + i] = j.lines[i]; changed = true; }
     }
+    if (changed) d.stickyFunctionEnds?.clear();
     if (changed && doc_() === d) render();
   }, delay);
 }
 
 export function initRenderer() {
   vp.addEventListener('scroll', render, { passive: true });
+  $('#sticky-symbol')?.addEventListener('click', () => {
+    const line = Number($('#sticky-symbol').dataset.line);
+    if (!line) return;
+    vp.scrollTo({ top: Math.max(0, (line - 1) * LH), behavior: 'smooth' });
+    render();
+  });
   new ResizeObserver(() => { layout(); render(); }).observe(editor);
 }

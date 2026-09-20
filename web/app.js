@@ -213,6 +213,7 @@
       const c = $("#caret");
       if (c)
         c.hidden = true;
+      updateStickySymbol(null);
       return;
     }
     const top = vp.scrollTop;
@@ -250,6 +251,167 @@
     if (sel)
       restoreSelection(sel);
     placeCaret();
+    updateStickySymbol(d);
+  }
+  const stickyKind = {
+    func: "fn", method: "fn", fn: "fn", def: "fn", defp: "fn", defmacro: "mac",
+    class: "cls", struct: "str", interface: "int", trait: "trt", impl: "impl",
+    type: "typ", typealias: "typ", enum: "enm", record: "rec", object: "obj",
+    const: "cst", var: "var", let: "var", val: "var", module: "mod", mod: "mod",
+    namespace: "ns", package: "pkg", macro: "mac", extension: "ext", protocol: "int",
+    union: "uni", heading: "h", sym: "·"
+  };
+  const stickyFunctions = new Set(["func", "method", "fn", "def", "defp", "defmacro"]);
+  function enclosingFunction(outline, line) {
+    const scopes = [];
+    for (const symbol of outline) {
+      if (symbol.line > line)
+        break;
+      while (scopes.length && symbol.indent <= scopes[scopes.length - 1].indent)
+        scopes.pop();
+      scopes.push(symbol);
+    }
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      if (stickyFunctions.has(scopes[i].kind))
+        return scopes[i];
+    }
+    return null;
+  }
+  function codeLine(line) {
+    return (line || "").replace(/<i class=c>[\s\S]*?<\/i>/g, "").replace(/<i class="c">[\s\S]*?<\/i>/g, "").replace(/<span class="c">[\s\S]*?<\/span>/g, "").replace(/<[^>]*>/g, "");
+  }
+  function commentOrBlank(line) {
+    return !codeLine(line).trim();
+  }
+  function functionEndLine(lines, symbol) {
+    const declaration = codeLine(lines[symbol.line - 1]);
+    const arrowFunction = symbol.kind === "func" && /\b(?:const|let|var)\b/.test(declaration);
+    let parenDepth = 0;
+    let bodyDepth = 0;
+    let bodyStarted = false;
+    let paramsStarted = false;
+    let paramsClosed = false;
+    let arrowSeen = false;
+    let quote = "";
+    let escaped = false;
+    for (let n = symbol.line; n <= lines.length; n++) {
+      const raw = lines[n - 1];
+      if (raw == null)
+        return null;
+      const text2 = codeLine(raw);
+      for (let i = 0; i < text2.length; i++) {
+        const ch = text2[i];
+        if (quote) {
+          if (escaped)
+            escaped = false;
+          else if (ch === "\\")
+            escaped = true;
+          else if (ch === quote)
+            quote = "";
+          continue;
+        }
+        if (ch === "'" || ch === '"' || ch === "`") {
+          quote = ch;
+          continue;
+        }
+        if (ch === "(") {
+          paramsStarted = true;
+          parenDepth++;
+          continue;
+        }
+        if (ch === ")") {
+          parenDepth = Math.max(0, parenDepth - 1);
+          if (paramsStarted && parenDepth === 0)
+            paramsClosed = true;
+          continue;
+        }
+        if (arrowFunction && ch === "=" && text2[i + 1] === ">") {
+          arrowSeen = true;
+          i++;
+          continue;
+        }
+        if (ch === "{") {
+          if (!bodyStarted && parenDepth === 0 && (paramsClosed || arrowSeen))
+            bodyStarted = true;
+          if (bodyStarted)
+            bodyDepth++;
+          continue;
+        }
+        if (ch === "}" && bodyStarted) {
+          bodyDepth--;
+          if (bodyDepth === 0)
+            return n;
+        }
+      }
+    }
+    return null;
+  }
+  function functionEndFor(d, symbol) {
+    if (!d.stickyFunctionEnds)
+      d.stickyFunctionEnds = new Map();
+    if (d.stickyFunctionEnds.has(symbol.line))
+      return d.stickyFunctionEnds.get(symbol.line);
+    const end = functionEndLine(d.lines, symbol);
+    d.stickyFunctionEnds.set(symbol.line, end);
+    return end;
+  }
+  function resolveFunction(d, line) {
+    const { outline, lines } = d;
+    let current = enclosingFunction(outline, line);
+    if (current) {
+      const end = functionEndFor(d, current);
+      if (end && line > end)
+        current = null;
+    }
+    const next = outline.find((symbol) => symbol.line > line);
+    if (!next)
+      return current;
+    let prelude = true;
+    for (let n = line; n < next.line; n++) {
+      if (!commentOrBlank(lines[n - 1])) {
+        prelude = false;
+        break;
+      }
+    }
+    if (prelude && stickyFunctions.has(next.kind))
+      return next;
+    if (prelude && (!current || next.indent <= current.indent))
+      return null;
+    return current;
+  }
+  function updateStickySymbol(d) {
+    const el = $("#sticky-symbol");
+    if (!el)
+      return;
+    const md = $("#mdview");
+    const diff = $("#diffview");
+    if (!d || md && !md.hidden || diff && !diff.hidden || vp.scrollTop < LH || !d.outline?.length) {
+      el.hidden = true;
+      delete el.dataset.line;
+      return;
+    }
+    let topLine = Math.floor(vp.scrollTop / LH) + 1;
+    if (document.body.classList.contains("word-wrap")) {
+      const top = vp.getBoundingClientRect().top;
+      for (const row of rowsEl.children) {
+        if (row.getBoundingClientRect().bottom > top + 1) {
+          topLine = +row.dataset.l;
+          break;
+        }
+      }
+    }
+    const current = resolveFunction(d, topLine);
+    if (!current) {
+      el.hidden = true;
+      delete el.dataset.line;
+      return;
+    }
+    el.dataset.line = current.line;
+    $(".sticky-line", el).textContent = current.line;
+    $(".sticky-kind", el).textContent = stickyKind[current.kind] || String(current.kind || "sym").slice(0, 3);
+    $(".sticky-name", el).textContent = current.name;
+    el.title = current.name + " · line " + current.line;
+    el.hidden = false;
   }
   var caretKey = "";
   function placeCaret() {
@@ -455,6 +617,7 @@
           return;
         for (let i = 0;i < j.lines.length; i++)
           d.lines[j.start + i] = j.lines[i];
+        d.stickyFunctionEnds?.clear();
         d.chunks.add(c);
         d.pending.delete(c);
         if (doc_() === d)
@@ -498,12 +661,21 @@
           changed = true;
         }
       }
+      if (changed)
+        d.stickyFunctionEnds?.clear();
       if (changed && doc_() === d)
         render();
     }, delay);
   }
   function initRenderer() {
     vp.addEventListener("scroll", render, { passive: true });
+    $("#sticky-symbol")?.addEventListener("click", () => {
+      const line = Number($("#sticky-symbol").dataset.line);
+      if (!line)
+        return;
+      vp.scrollTo({ top: Math.max(0, (line - 1) * LH), behavior: "smooth" });
+      render();
+    });
     new ResizeObserver(() => {
       layout();
       render();
@@ -531,23 +703,39 @@
   }
 
   // web/src/outline.js
-  async function loadOutline() {
-    const d = doc_();
+  async function loadOutline(target = doc_()) {
+    const d = target;
     const el = $("#outline");
     if (!d) {
       if (el)
         el.innerHTML = '<div class="hint">No file open.</div>';
       return;
     }
+    d.outlineScheduled = false;
     if (!d.outline) {
-      try {
-        d.outline = (await api("/api/outline", { path: d.path })).symbols || [];
-      } catch {
-        d.outline = [];
-      }
+      if (!d.outlinePromise)
+        d.outlinePromise = api("/api/outline", { path: d.path }).then((j) => j.symbols || []).catch(() => []);
+      d.outline = await d.outlinePromise;
     }
-    drawOutline();
+    if (doc_() === d) {
+      drawOutline();
+      render();
+    }
     upgradeOutline(d);
+  }
+  function scheduleOutline(d) {
+    if (!d || d.outline || d.outlinePromise || d.outlineScheduled)
+      return;
+    d.outlineScheduled = true;
+    const run = () => {
+      d.outlineScheduled = false;
+      if (doc_() === d)
+        void loadOutline(d);
+    };
+    if (typeof window.requestIdleCallback === "function")
+      window.requestIdleCallback(run, { timeout: 1e3 });
+    else
+      setTimeout(run, 250);
   }
   async function upgradeOutline(d) {
     if (d.outlineLSP || S2.lsp.state === "off" || S2.lsp.state === "failed")
@@ -560,15 +748,21 @@
       d.outlineLSP = false;
       return;
     }
-    setLspState(j);
+    d.lsp = { state: j.state || "off", server: j.server || "", missing: j.missing || "" };
+    if (doc_() === d)
+      setLspState(j);
     if (!j.symbols || !j.symbols.length) {
       d.outlineLSP = false;
       return;
     }
     d.outline = j.symbols;
+    d.stickyFunctionEnds?.clear();
     d.outlineSource = j.server;
-    if (doc_() === d && $("#panel-outline")?.classList.contains("active"))
-      drawOutline();
+    if (doc_() === d) {
+      if ($("#panel-outline")?.classList.contains("active"))
+        drawOutline();
+      render();
+    }
   }
   function drawOutline() {
     const d = doc_();
@@ -4014,6 +4208,7 @@
     drawTabs();
     drawCrumbs();
     layout();
+    scheduleOutline(d);
     if (line) {
       d.cur = line;
       centerLine(line);
@@ -4144,6 +4339,7 @@
       layout();
       vp.scrollTop = d.scrollTop;
       render();
+      scheduleOutline(d);
       if ($("#panel-outline")?.classList.contains("active"))
         loadOutline();
     }
@@ -4258,6 +4454,7 @@
     vp.scrollTop = S2.tabs[i].scrollTop;
     render();
     updateStatus();
+    scheduleOutline(S2.tabs[i]);
     if ($("#panel-outline")?.classList.contains("active"))
       loadOutline();
     pushHistory(S2.tabs[i].path, S2.tabs[i].cur);

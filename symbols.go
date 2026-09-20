@@ -114,8 +114,8 @@ var outlineRules = map[string][]symRule{
 		r("class", 1, `^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([\w$]+)`),
 		r("type", 2, `^\s*(?:export\s+)?(?:declare\s+)?(interface|type|enum|namespace)\s+([\w$]+)`),
 		r("func", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function|\([^)]*\)\s*(?::[^=]*)?=>|[\w$]+\s*=>)`),
-		r("const", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=`),
-		r("method", 2, `^\s{2,}(?:(?:public|private|protected|static|readonly|async|get|set)\s+)*([\w$]*\s*)?([\w$]+)\s*\([^)]*\)\s*(?::[^{;]+)?\{`),
+		r("const", 1, `^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?\s*=`),
+		r("method", 1, `^\s{2,}(?:(?:public|private|protected|static|readonly|async|get|set)\s+)*([\w$]+)\s*\([^)]*\)\s*(?::[^{;]+)?\{`),
 	},
 	"rust": {
 		r("func", 1, `^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|async\s+|unsafe\s+|extern\s+"[^"]*"\s+)*fn\s+([\w]+)`),
@@ -157,6 +157,73 @@ var outlineRules = map[string][]symRule{
 }
 
 var markdownHeading = regexp.MustCompile(`^(#{1,6})\s+(.+?)\s*#*$`)
+var jsMultilineArrowStart = regexp.MustCompile(`^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?=\s*(?:async\s*)?\(`)
+
+func jsMultilineArrowNames(lines []string) map[int]string {
+	out := map[int]string{}
+	for i, line := range lines {
+		m := jsMultilineArrowStart.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		depth := 0
+		quote := byte(0)
+		escaped := false
+		blockComment := false
+		for j := i; j < len(lines) && j < i+256; j++ {
+			text := lines[j]
+			for k := 0; k < len(text); k++ {
+				ch := text[k]
+				if blockComment {
+					if ch == '*' && k+1 < len(text) && text[k+1] == '/' {
+						blockComment = false
+						k++
+					}
+					continue
+				}
+				if quote != 0 {
+					if escaped {
+						escaped = false
+					} else if ch == '\\' {
+						escaped = true
+					} else if ch == quote {
+						quote = 0
+					}
+					continue
+				}
+				if ch == '/' && k+1 < len(text) && text[k+1] == '/' {
+					break
+				}
+				if ch == '/' && k+1 < len(text) && text[k+1] == '*' {
+					blockComment = true
+					k++
+					continue
+				}
+				if ch == '\'' || ch == '"' || ch == '`' {
+					quote = ch
+					continue
+				}
+				if ch == '(' {
+					depth++
+				} else if ch == ')' {
+					if depth > 0 {
+						depth--
+					}
+				} else if ch == '=' && k+1 < len(text) && text[k+1] == '>' && depth == 0 {
+					out[i+1] = m[1]
+					break
+				}
+			}
+			if _, ok := out[i+1]; ok {
+				break
+			}
+			if j > i && depth == 0 && strings.Contains(text, ";") {
+				break
+			}
+		}
+	}
+	return out
+}
 
 // Outline extracts a symbol list from a file with per-language regexps. This is
 // deliberately approximate: it never blocks, never needs a compiler, and is
@@ -172,20 +239,37 @@ func Outline(abs, rel string) ([]Symbol, error) {
 	var out []Symbol
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-
-	if ext == ".md" || ext == ".markdown" {
-		for line := 1; sc.Scan(); line++ {
-			if m := markdownHeading.FindStringSubmatch(sc.Text()); m != nil {
-				out = append(out, Symbol{Name: m[2], Kind: "heading", Line: line, Indent: len(m[1]) - 1})
-			}
-		}
-		return out, sc.Err()
+	var lines []string
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
 	}
 
-	rules := outlineRules[familyFor(ext)]
-	for line := 1; sc.Scan(); line++ {
-		text := sc.Text()
+	if ext == ".md" || ext == ".markdown" {
+		for line, text := range lines {
+			if m := markdownHeading.FindStringSubmatch(text); m != nil {
+				out = append(out, Symbol{Name: m[2], Kind: "heading", Line: line + 1, Indent: len(m[1]) - 1})
+			}
+		}
+		return out, nil
+	}
+
+	family := familyFor(ext)
+	rules := outlineRules[family]
+	multilineFuncs := map[int]string{}
+	if family == "js" {
+		multilineFuncs = jsMultilineArrowNames(lines)
+	}
+	for line, text := range lines {
 		if text == "" || len(text) > 500 {
+			continue
+		}
+		lineNo := line + 1
+		if name, ok := multilineFuncs[lineNo]; ok {
+			indent := len(text) - len(strings.TrimLeft(text, " \t"))
+			out = append(out, Symbol{Name: name, Kind: "func", Line: lineNo, Indent: indent})
 			continue
 		}
 		for _, ru := range rules {
@@ -207,11 +291,11 @@ func Outline(abs, rel string) ([]Symbol, error) {
 				}
 			}
 			indent := len(text) - len(strings.TrimLeft(text, " \t"))
-			out = append(out, Symbol{Name: name, Kind: kind, Line: line, Indent: indent})
+			out = append(out, Symbol{Name: name, Kind: kind, Line: lineNo, Indent: indent})
 			break
 		}
 	}
-	return out, sc.Err()
+	return out, nil
 }
 
 var noise = map[string]bool{

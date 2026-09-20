@@ -91,6 +91,12 @@
       <div id="viewport">
         <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
       </div>
+      <!-- Sticky symbol header: shows the declaration owning the first visible line. -->
+      <div id="sticky-symbol" hidden aria-live="polite">
+        <span class="sticky-line"></span>
+        <span class="sticky-kind"></span>
+        <span class="sticky-name"></span>
+      </div>
       <!-- Markdown preview: covers the code view for a Markdown tab (Alt+M toggles) -->
       <div id="mdview" hidden><article id="md" class="md"></article></div>
       <!-- Diff view: covers the code view while a diff layout is active (Mod+D toggles) -->
