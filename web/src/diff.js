@@ -4,7 +4,8 @@
 // side-by-side split layout (default) or a single-column unified layout.
 // Unlike the code viewport this is not virtualized -- a file's own diff is
 // bounded in size, so a plain DOM render is simple and fast enough.
-import { $, S, doc_, esc, api } from './state.js';
+import { $, S, doc_, api } from './state.js';
+import { intralineDiff } from './intraline.js';
 import { syncPreview } from './markdown.js';
 import { setStatusNote, updateStatus } from './status.js';
 
@@ -171,7 +172,28 @@ function parseDiff(text) {
     else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, at: newLine, text: body });
     else cur.rows.push({ type: 'ctx', oldLine: oldLine++, newLine: newLine++, text: body });
   }
+  for (const hunk of hunks) markIntraline(hunk.rows);
   return hunks;
+}
+
+// Only equal-sized replacement runs receive intraline marks. Split layout
+// still pairs uneven runs for alignment, but those pairs are a line-to-block
+// edit rather than a meaningful replacement comparison.
+function markIntraline(rows) {
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].type === 'ctx') { i++; continue; }
+    const dels = [], adds = [];
+    while (i < rows.length && rows[i].type === 'del') dels.push(rows[i++]);
+    while (i < rows.length && rows[i].type === 'add') adds.push(rows[i++]);
+    if (!dels.length || dels.length !== adds.length) continue;
+    for (let k = 0; k < dels.length; k++) {
+      const diff = intralineDiff(dels[k].text, adds[k].text);
+      if (!diff) continue;
+      dels[k].parts = diff.oldParts;
+      adds[k].parts = diff.newParts;
+    }
+  }
 }
 
 /* ---------- unified layout: one row per diff line ---------- */
@@ -187,7 +209,7 @@ function unifiedTable(hunk) {
       lineCell(row.type === 'add' ? '' : row.oldLine),
       lineCell(row.type === 'del' ? '' : row.newLine),
       markerCell(row.type),
-      codeCell(row.text),
+      codeCell(row.text, row.parts),
     );
     table.append(r);
   }
@@ -232,7 +254,7 @@ function splitSide(row, side) {
   if (!row) { el.append(lineCell(''), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
   anchor(el, row);
-  el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
+  el.append(lineCell(ln), markerCell(row.type), codeCell(row.text, row.parts));
   return el;
 }
 
@@ -261,10 +283,21 @@ function markerCell(type) {
   return el;
 }
 
-function codeCell(text) {
+function codeCell(text, parts) {
   const el = document.createElement('div');
   el.className = 'diff-code';
-  el.innerHTML = esc(text || '') || '&nbsp;';
+  if (parts) {
+    for (const part of parts) {
+      if (part.type === 'equal') el.append(document.createTextNode(part.text));
+      else {
+        const span = document.createElement('span');
+        span.className = 'diff-inner-' + part.type;
+        span.textContent = part.text;
+        el.append(span);
+      }
+    }
+  }
+  if (!el.childNodes.length) el.textContent = text || '\u00a0';
   return el;
 }
 
