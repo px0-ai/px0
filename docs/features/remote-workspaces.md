@@ -12,6 +12,22 @@ px0 simplifies remote code inspection into a single shell command. Because the e
 
 ---
 
+## SSH Workspace Targets
+
+px0 can also inspect a remote tree over SSH from the local machine:
+
+```bash
+px0 user@host:/srv/app
+px0 host:/srv/app
+px0 ssh://host/srv/app
+```
+
+SSH workspaces are read-only. px0 shells out to the executable named by `PX0_SSH_BIN` when that variable is set, otherwise it resolves `ssh` from `PATH`. Every remote filesystem operation runs through the remote user's POSIX shell after first changing into the selected root with `cd -- '<root>'`; roots and file paths are POSIX-single-quoted so shell metacharacters remain path data. The explorer, quick-open, file view, raw assets, Markdown preview, regex outline, and workspace search operate against the remote tree while preserving the normal `.gitignore` behavior and hiding VCS internals.
+
+Because px0 is not running on the remote machine in this mode, local-only features that would be misleading are disabled: Git status and diffs, local language-server navigation, and agent editing are not advertised or executed. SSH failures are returned as ordinary request errors and the server remains available for diagnostics.
+
+---
+
 ## Key Capabilities
 
 - **Zero Remote Daemons**: No Node.js runtime, no npm packages, no Electron layers, and no background extension churn on the remote machine.

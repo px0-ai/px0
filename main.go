@@ -84,7 +84,12 @@ func main() {
 	if flag.NArg() > 0 {
 		target = flag.Arg(0)
 	}
-	root, initialFile, initialLine, err := resolveTarget(target)
+	var remote remoteTarget
+	remoteMode := false
+	var root, initialFile string
+	var initialLine int
+	var err error
+	root, initialFile, initialLine, remote, remoteMode, err = resolveLaunchTarget(target)
 	if err != nil {
 		fatal(err)
 	}
@@ -95,6 +100,12 @@ func main() {
 	}
 
 	ix := NewIndex(root)
+	if remoteMode {
+		ix = NewRemoteIndex(remote)
+		*noLSP = true
+		*noAgent = true
+		gitDisabled = true
+	}
 	lsp := newLSPManager(root, !*noLSP)
 	tel := NewTelemetryService(*noTelemetry)
 	defer tel.Close("normal")
@@ -178,7 +189,9 @@ func main() {
 
 	err = srv.Serve(ln)
 	lsp.Close()
-	agent.Close()
+	if agent != nil {
+		agent.Close()
+	}
 
 	if interrupted {
 		tel.Close("interrupted")
@@ -189,6 +202,20 @@ func main() {
 	if err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
+}
+
+func resolveLaunchTarget(target string) (root, initialFile string, initialLine int, remote remoteTarget, remoteMode bool, err error) {
+	if rt, ok := parseRemoteTarget(target); ok && !localTargetExists(target) {
+		return rt.Host + ":" + rt.Path, "", 0, rt, true, nil
+	}
+	root, initialFile, initialLine, err = resolveTarget(target)
+	return root, initialFile, initialLine, remoteTarget{}, false, err
+}
+
+func localTargetExists(target string) bool {
+	path, _ := splitTargetLine(target)
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // resolveTarget turns a directory or file into a workspace root, along with an optional

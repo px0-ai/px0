@@ -29,9 +29,9 @@ export const COMMANDS = [
   { name: 'Go to Line…', run: () => openPalette('line') },
   { name: 'Search in Files', run: () => showRightInspector('search') },
   { name: 'Find in Current File', run: () => openFind(S.lastWord) },
-  { name: 'Go to Definition', run: () => gotoDefinition() },
-  { name: 'Find All References (Right Panel)', run: () => findReferences() },
-  { name: withKeys('Show Call Trail: Callers / Callees ({Alt+Shift+H})'), run: () => showCalls() },
+  { name: 'Go to Definition', localOnly: true, run: () => gotoDefinition() },
+  { name: 'Find All References (Right Panel)', localOnly: true, run: () => findReferences() },
+  { name: withKeys('Show Call Trail: Callers / Callees ({Alt+Shift+H})'), localOnly: true, run: () => showCalls() },
   { name: 'Set Up Language Server…', run: () => openLspSetup() },
   { name: 'Toggle Right Inspector (Symbols & References)', run: () => {
     if (document.body.classList.contains('right-hidden')) showRightInspector('refs');
@@ -97,7 +97,9 @@ export const refreshPalette = debounce(async () => {
     pal.items = (d && n > 0) ? [{ kind: 'line', n: Math.min(n, d.total), label: 'Line ' + Math.min(n, d.total), sub: d.path }] : [];
   } else if (mode === 'command') {
     const lq = q.toLowerCase();
-    pal.items = COMMANDS.filter(c => c.name.toLowerCase().includes(lq)).map(c => ({ kind: 'cmd', cmd: c, label: c.name, sub: '' }));
+    pal.items = COMMANDS
+      .filter(c => (!S.meta?.remote || (!c.localOnly && c.run !== openLspSetup)) && c.name.toLowerCase().includes(lq))
+      .map(c => ({ kind: 'cmd', cmd: c, label: c.name, sub: '' }));
   } else if (mode === 'symbol') {
     const d = doc_();
     if (d && !d.outline) { try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; } catch { d.outline = []; } }

@@ -4,13 +4,13 @@ import { vp, sizer, copyToClipboard, showToast } from './ui.js';
 import { render, paint, rowFor, placeCaret } from './renderer.js';
 import { moveCursor, moveCol, moveWord, caretToEdge, updateDomSelection, clearSelection, revealCaretX } from './cursor.js';
 import { updateStatus } from './status.js';
-import { gotoDefinition, findReferences } from './lsp.js';
+import { gotoDefinition, findReferences, localLspNavigationAvailable } from './lsp.js';
 import { go, pushHistory } from './history.js';
 import { openFind, findNextMatch, clearFind } from './find.js';
 import { showHover } from './hover.js';
 import { showCalls } from './calls.js';
 import { switchTab, closeTab } from './tabs.js';
-import { getSelectedRangeInfo, runSelectionAction } from './selbar.js';
+import { agentEditingAvailable, getSelectedRangeInfo, runSelectionAction } from './selbar.js';
 import { openPalette } from './palette.js';
 import { showHelp } from './shortcuts.js';
 
@@ -296,7 +296,7 @@ export function handleVimKeyDown(e) {
       exitVisualMode();
       return true;
     }
-    if (e.key === 'e' || e.key === 'c') {
+    if ((e.key === 'e' || e.key === 'c') && agentEditingAvailable()) {
       e.preventDefault();
       runSelectionAction('agent-edit');
       exitVisualMode();
@@ -347,17 +347,17 @@ export function handleVimKeyDown(e) {
       }
     } else if (e.key === 'd') {
       // gd: Go to definition
-      const w = wordAtCaret();
+      const w = localLspNavigationAvailable() ? wordAtCaret() : null;
       if (w) {
         pushHistory(d.path, d.cur);
         gotoDefinition(w);
       }
     } else if (e.key === 'r') {
       // gr: Find references
-      findReferences();
+      if (localLspNavigationAvailable()) findReferences();
     } else if (e.key === 'h') {
       // gh: Call trail
-      showCalls();
+      if (localLspNavigationAvailable()) showCalls();
     } else if (e.key === 't') {
       // gt: Next tab
       const count = parseInt(vimCount, 10);
@@ -516,6 +516,7 @@ export function handleVimKeyDown(e) {
       return true;
     }
     case 'K': {
+      if (!localLspNavigationAvailable()) return false;
       e.preventDefault();
       showHoverForCaret();
       resetVimState();
@@ -614,10 +615,10 @@ export const VIM_SHORTCUT_SECTIONS = [
   {
     title: 'Code Intelligence & LSP',
     items: [
-      [['gd'], 'Go to Definition (replaces F12)'],
-      [['gr'], 'Find References across workspace (replaces Shift+F12)'],
-      [['K'], 'Show hover documentation & signatures'],
-      [['gh'], 'Call Trail (callers / callees)'],
+      [['gd'], 'Go to Definition (replaces F12)', localLspNavigationAvailable],
+      [['gr'], 'Find References across workspace (replaces Shift+F12)', localLspNavigationAvailable],
+      [['K'], 'Show hover documentation & signatures', localLspNavigationAvailable],
+      [['gh'], 'Call Trail (callers / callees)', localLspNavigationAvailable],
       [['Ctrl+o', 'Ctrl+i'], 'Jump back / forward in navigation history'],
     ]
   },
@@ -636,7 +637,7 @@ export const VIM_SHORTCUT_SECTIONS = [
     items: [
       [['v'], 'Character-wise visual selection'],
       [['V'], 'Line-wise visual selection'],
-      [['e', 'c'], 'Edit selection inline with AI coding agent'],
+      [['e', 'c'], 'Edit selection inline with AI coding agent', agentEditingAvailable],
       [['y'], 'Yank (copy) code to clipboard'],
       [['Y'], 'Yank reference (file:line-range)'],
       [['u'], 'Find usages of selected symbol'],
@@ -684,7 +685,7 @@ export function showVimHelp() {
           <div class="vim-help-section">
             <div class="vim-sec-title">${esc(sec.title)}</div>
             <dl class="help-grid vim-help-grid">
-              ${sec.items.map(([combos, v]) => `
+              ${sec.items.filter(item => !item[2] || item[2]()).map(([combos, v]) => `
                 <dt>${combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>')}</dt>
                 <dd>${esc(v)}</dd>
               `).join('')}

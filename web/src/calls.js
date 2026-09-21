@@ -3,7 +3,7 @@ import { $, $$, esc, S, doc_, api, keyLabel } from './state.js';
 import { updateStatus, setStatusNote, setLspState } from './status.js';
 import { openFile } from './tabs.js';
 import { showRightInspector } from './inspector.js';
-import { positionNow, flashFind } from './lsp.js';
+import { positionNow, flashFind, localLspNavigationAvailable } from './lsp.js';
 import { renderLspSetup, cancelLspSetup } from './lspsetup.js';
 
 /* Call trail: the language server's call hierarchy, grown one level at a time
@@ -40,6 +40,7 @@ function target(node) {
 }
 
 export async function showCalls(arg) {
+  if (!localLspNavigationAvailable()) return;
   const d = doc_();
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   showRightInspector('calls');
@@ -135,6 +136,7 @@ function draw() {
 
 // Opens the setup panel whatever the server's state, for the palette command.
 export function openLspSetup() {
+  if (!localLspNavigationAvailable()) return;
   showRightInspector('calls');
   T = null;
   renderLspSetup(listEl(), () => showCalls(S.at));
@@ -147,12 +149,12 @@ export function initCalls() {
   });
 
   $('.inspector-tab[data-itab="calls"]')?.addEventListener('click', () => {
-    if (!T && (S.at || S.lsp.state === 'off' || S.lsp.state === 'failed')) showCalls(S.at);
+    if (localLspNavigationAvailable() && !T && (S.at || S.lsp.state === 'off' || S.lsp.state === 'failed')) showCalls(S.at);
   });
 
   // The status bar names a missing or failed server; clicking it goes to the fix.
   $('#st-lsp')?.addEventListener('click', () => {
-    if (S.lsp.missing || S.lsp.state === 'failed') openLspSetup();
+    if (localLspNavigationAvailable() && (S.lsp.missing || S.lsp.state === 'failed')) openLspSetup();
   });
 
   listEl()?.addEventListener('click', async e => {

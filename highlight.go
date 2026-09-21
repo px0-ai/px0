@@ -3,6 +3,7 @@ package main
 import (
 	"container/list"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -565,5 +566,24 @@ func Open(abs, rel string) (*Doc, error) {
 	d := newDoc(strings.ReplaceAll(string(data), "\r\n", "\n"), rel)
 	d.key = key
 	cache.put(key, d)
+	return d, nil
+}
+
+func OpenData(key, rel string, data []byte, modTime, size int64) (*Doc, error) {
+	if size > maxFileBytes {
+		return nil, fmt.Errorf("file too large (%d bytes)", size)
+	}
+	h := fnv.New64a()
+	_, _ = h.Write(data)
+	cacheKey := fmt.Sprintf("%s|%d|%d|%x", key, modTime, size, h.Sum64())
+	if d := cache.get(cacheKey); d != nil {
+		return d, nil
+	}
+	if isBinary(data) {
+		return nil, fmt.Errorf("binary file")
+	}
+	d := newDoc(strings.ReplaceAll(string(data), "\r\n", "\n"), rel)
+	d.key = cacheKey
+	cache.put(cacheKey, d)
 	return d, nil
 }

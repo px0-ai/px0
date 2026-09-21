@@ -204,19 +204,30 @@ func (s *Server) handleMarkdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, err := os.Stat(abs)
-	if err != nil {
-		fail(w, 404, err.Error())
-		return
+	var size int64
+	if s.ix.Remote() {
+		f, ok := s.ix.File(rel)
+		if !ok {
+			fail(w, 404, "not indexed: "+rel)
+			return
+		}
+		size = f.Size
+	} else {
+		if err != nil {
+			fail(w, 404, err.Error())
+			return
+		}
+		if st.IsDir() {
+			fail(w, 415, "is a directory")
+			return
+		}
+		size = st.Size()
 	}
-	if st.IsDir() {
-		fail(w, 415, "is a directory")
-		return
-	}
-	if st.Size() > maxMarkdownBytes {
+	if size > maxMarkdownBytes {
 		fail(w, 413, "too large to preview")
 		return
 	}
-	data, err := os.ReadFile(abs)
+	data, err := s.ix.ReadFileLimit(r.Context(), rel, maxMarkdownBytes)
 	if err != nil {
 		fail(w, 404, err.Error())
 		return

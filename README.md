@@ -219,6 +219,7 @@ px0                     # view current workspace
 px0 ~/src/kernel        # view another repository
 px0 web/src/main.js     # view a file in its project workspace
 px0 main.go:42          # open directly to a line number
+px0 devbox:/srv/app     # browse a read-only SSH workspace
 ```
 
 ### Remote & Cloud Workspaces
@@ -235,6 +236,16 @@ px0 -no-open -port 8080 /workspace
 # In Docker / CI runner
 docker run -p 7777:7777 -v $(pwd):/src px0:latest
 ```
+
+You can also browse a remote filesystem over SSH without installing px0 on the remote host:
+
+```bash
+px0 user@host:/srv/app
+px0 host:/srv/app
+px0 ssh://host/srv/app
+```
+
+SSH workspaces are read-only. px0 uses `PX0_SSH_BIN` when set, otherwise `ssh` on `PATH`, runs remote commands through the remote POSIX shell after `cd -- '<root>'`, and keeps client paths confined to the selected root. File tree, quick-open, file view, raw assets, Markdown, outline, and workspace search work against the remote tree. Local-only features that cannot truthfully operate there yet, including Git status/diffs, language-server navigation, and agent editing, are disabled.
 
 Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel with zero remote setup overhead and sandboxing (path traversal protection & DNS rebinding checks). Anyone who can reach px0 can dispatch agent edits when it is opened by IP address (for example over Tailscale), so bind to a private network. Opened through a hostname, such as a reverse proxy or tunnel domain, editing is refused.
 

@@ -4,7 +4,7 @@ import { measure, layout, render, initRenderer, updateEditorOptionControls } fro
 import { initTabs, openFile, restoreWorkspaceTabs, switchTab } from './tabs.js';
 import { initCursor } from './cursor.js';
 import { initHover } from './hover.js';
-import { initSelectionBar } from './selbar.js';
+import { initSelectionBar, setAgentHandler } from './selbar.js';
 import { drawTree, treeEl, initTree, revealFile, refreshTree, restoreOpenDirs, setSidebarMode, updateSidebarToggleState } from './tree.js';
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
@@ -17,12 +17,19 @@ import { initShortcuts } from './shortcuts.js';
 import { initTheme } from './theme.js';
 import { initMarkdown } from './markdown.js';
 import { initDiff } from './diff.js';
-import { initAgent, applyAgentMeta, loadAgentAsync } from './agent.js';
+import { initAgent, applyAgentMeta, loadAgentAsync, openAgentEdit } from './agent.js';
 import { initMetrics, initStatusFit, updateMetricsDisplay, updateStatus } from './status.js';
 import { initSettings } from './settings.js';
 import { initVim } from './vim.js';
 import { initImageViewer } from './imageview.js';
 import { initGitStream } from './gitstream.js';
+
+function applyWorkspaceCapabilities() {
+  if (!S.meta || !S.meta.remote) return;
+  $('.inspector-tab[data-itab="calls"]')?.setAttribute('hidden', '');
+  $('#pane-right-calls')?.setAttribute('hidden', '');
+  $('#st-lsp')?.setAttribute('hidden', '');
+}
 
 // Initialize all subsystems
 initRenderer();
@@ -73,9 +80,12 @@ initImageViewer();
 
   measure();
   S.meta = await api('/api/meta');
+  applyWorkspaceCapabilities();
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
-  updateSidebarToggleState();
-  applyAgentMeta();
+ updateSidebarToggleState();
+ if (S.meta.git) { const b = $('#btn-changed'); if (b) b.hidden = false; }
+ if (!S.meta.remote) setAgentHandler(openAgentEdit);
+ applyAgentMeta();
   document.title = S.meta.name + ' - px0';
   $('#root-name').textContent = S.meta.name;
   $('#root-name').title = S.meta.root;
@@ -140,6 +150,7 @@ initImageViewer();
         if (m.ready) {
           clearInterval(timer);
           S.meta = m;
+          await refreshTree();
           updateStatus();
         }
       } catch {
@@ -149,5 +160,5 @@ initImageViewer();
   }
 
   // Load harnesses and models asynchronously after the browser is loaded.
-  loadAgentAsync();
+  if (!S.meta.remote) loadAgentAsync();
 })();

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -266,8 +267,12 @@ func readGitignore(dir, relDir string) []string {
 		return nil
 	}
 	defer f.Close()
+	return parseGitignore(f, relDir)
+}
+
+func parseGitignore(r io.Reader, relDir string) []string {
 	var out []string
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {

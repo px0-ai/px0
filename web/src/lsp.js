@@ -24,13 +24,18 @@ export function positionNow(word) {
 }
 
 export function canAskServer(at) {
-  return !at.imprecise && (S.lsp.state === 'ready' || S.lsp.state === 'indexing');
+  return localLspNavigationAvailable() && !at.imprecise && (S.lsp.state === 'ready' || S.lsp.state === 'indexing');
+}
+
+export function localLspNavigationAvailable() {
+  return !(S.meta && S.meta.remote);
 }
 
 /* Opening a file starts its language server, if there is one, and follows it
    until it is up. Without this the first hover would find the server still
    "starting" and quietly do nothing, with no way for the state to advance. */
 export async function warmLSP(d, tries = 0) {
+  if (!localLspNavigationAvailable()) return;
   if (!d.lsp || d.lsp.state === 'off' || d.lsp.state === 'ready' || d.lsp.state === 'failed') return;
   if (tries > 20) return;
   let j;
@@ -45,6 +50,7 @@ export async function warmLSP(d, tries = 0) {
 }
 
 export async function lspCall(kind, at, waitMs) {
+  if (!localLspNavigationAvailable()) return null;
   const d = doc_();
   if (!d) return null;
   try {
@@ -55,6 +61,7 @@ export async function lspCall(kind, at, waitMs) {
 }
 
 export async function gotoDefinition(arg) {
+  if (!localLspNavigationAvailable()) return;
   const d = doc_();
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   if (!d || !at) return;
