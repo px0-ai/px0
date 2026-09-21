@@ -249,7 +249,7 @@ const BUILTIN_SCHEMA = [
   {
     key: "agent.harness",
     title: "Coding Harness",
-    description: "Coding agent harness invoked for code edits (e.g. claude, gemini, cursor-agent, agy, opencode, codex, aider, goose).",
+    description: "Coding agent harness invoked for code edits (e.g. claude, gemini, cursor-agent, agy, opencode, codex, aider, goose, kiro-cli).",
     category: "Agent / AI",
     type: "string",
     default: ""
@@ -629,7 +629,7 @@ function renderSettingsList() {
       controlHtml = `<input type="text" class="settings-input" data-key="${esc(key)}" value="${esc(String(val || ''))}">`;
       let stringPresets = [];
       if (key === 'agent.harness') {
-        stringPresets = ['claude', 'gemini', 'cursor-agent', 'agy', 'aider'];
+        stringPresets = ['claude', 'gemini', 'cursor-agent', 'agy', 'aider', 'kiro-cli'];
       }
       const presetPills = stringPresets.length ? `
         <div class="settings-apt-bar">

@@ -160,6 +160,26 @@ var agentPresets = []agentPreset{
 			"gemini-2.5-flash",
 		},
 	},
+	{
+		Name:         "kiro-cli",
+		Args:         []string{"kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "{prompt}"},
+		ModelFlag:    "--model",
+		DefaultModel: "auto",
+		Models: []string{
+			"auto",
+			"claude-opus-4.6",
+			"claude-sonnet-4.6",
+			"claude-opus-4.5",
+			"claude-sonnet-4.5",
+			"claude-sonnet-4",
+			"claude-haiku-4.5",
+			"deepseek-3.2",
+			"minimax-m2.5",
+			"minimax-m2.1",
+			"glm-5",
+			"qwen3-coder-next",
+		},
+	},
 }
 
 var (
@@ -309,6 +329,51 @@ func runModelDiscovery(name, bin string, staticModels []string) {
 					}
 				}
 				models = reordered
+			}
+		}
+	case "kiro-cli":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "chat", "--list-models", "--format", "json").Output()
+		cancel()
+		if err == nil {
+			var payload struct {
+				Models []struct {
+					ModelID   string `json:"model_id"`
+					ModelName string `json:"model_name"`
+				} `json:"models"`
+				DefaultModel string `json:"default_model"`
+			}
+			if json.Unmarshal(out, &payload) == nil && len(payload.Models) > 0 {
+				def := payload.DefaultModel
+				if def == "" {
+					def = "auto"
+				}
+				var list []string
+				for _, m := range payload.Models {
+					id := m.ModelID
+					if id == "" {
+						id = m.ModelName
+					}
+					if id != "" {
+						list = append(list, id)
+					}
+				}
+				if len(list) > 0 {
+					// Keep the CLI's own default first, preserving live order
+					// otherwise. When the default marker is absent (an
+					// entitlement-filtered list), trust live order as-is.
+					rest := []string{}
+					for _, m := range list {
+						if m != def {
+							rest = append(rest, m)
+						}
+					}
+					if len(rest) != len(list) {
+						models = append([]string{def}, rest...)
+					} else {
+						models = list
+					}
+				}
 			}
 		}
 	}

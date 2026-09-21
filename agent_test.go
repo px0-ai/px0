@@ -447,6 +447,37 @@ func TestClaudeModelDiscovery(t *testing.T) {
 	}
 }
 
+func TestKiroModelDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	fakeKiro := filepath.Join(dir, "kiro-cli")
+	payload := `{"models":[{"model_id":"auto"},{"model_id":"claude-opus-4.6"},{"model_id":"qwen3-coder-next"}],"default_model":"auto"}`
+	script := "#!/bin/sh\nprintf '%s' '" + payload + "'\n"
+	if err := os.WriteFile(fakeKiro, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	discoveredModelsMu.Lock()
+	delete(discoveredModels, "kiro-cli")
+	delete(discoveringModels, "kiro-cli")
+	discoveredModelsMu.Unlock()
+
+	runModelDiscovery("kiro-cli", fakeKiro, []string{"auto", "claude-haiku-4.5"})
+
+	discoveredModelsMu.Lock()
+	models := discoveredModels["kiro-cli"]
+	discoveredModelsMu.Unlock()
+
+	want := []string{"auto", "claude-opus-4.6", "qwen3-coder-next"}
+	if len(models) != len(want) {
+		t.Fatalf("discovered models = %v, want %v", models, want)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Fatalf("discovered models = %v, want %v", models, want)
+		}
+	}
+}
+
 // Editing in the diff view means editing a file that is already modified. Its
 // git status reads M before and after, so the change has to be seen some other way.
 func TestAgentReportsEditToAlreadyModifiedFile(t *testing.T) {
