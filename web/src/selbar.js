@@ -11,8 +11,10 @@ import { fitStatus } from './status.js';
 
 const status = $('#status');
 const statsEl = $('#sel-stats');
-// Queried rather than imported from diff.js, to keep the modules independent.
+// Queried rather than imported from diff.js and markdown.js, to keep the
+// modules independent.
 const diffviewEl = $('#diffview');
+const mdviewEl = $('#mdview');
 
 // e.code, not e.key: Option+letter types a symbol on macOS.
 export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', KeyE: 'agent-edit' };
@@ -37,6 +39,9 @@ export function getSelectedRangeInfo() {
   const range = sel.getRangeAt(0);
   if (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(range.commonAncestorContainer)) {
     return diffSelection(range, d);
+  }
+  if (mdviewEl && !mdviewEl.hidden && mdviewEl.contains(range.commonAncestorContainer)) {
+    return previewSelection(range, d);
   }
   if (!vp.contains(range.commonAncestorContainer)) return null;
 
@@ -95,6 +100,27 @@ function diffSelection(range, d) {
   const text = parts.join('\n').trim();
   if (!text) return null;
   return { text, l1, l2, path: d.path, fromDiff: true };
+}
+
+/* A markdown preview selection is anchored to the source lines of the blocks
+   it covers. Every rendered block carries the line it starts on (data-line),
+   so what a reader highlights maps back to the same instruction range the
+   source view would produce. A block is the smallest anchor the preview keeps,
+   which is as precise as this view can be. */
+function previewSelection(range, d) {
+  const text = window.getSelection().toString().trim();
+  if (!text) return null;
+  let l1 = Infinity, l2 = -Infinity;
+  for (const el of mdviewEl.querySelectorAll('[data-line]')) {
+    if (!range.intersectsNode(el)) continue;
+    const n = +el.dataset.line;
+    if (n < l1) l1 = n;
+    if (n > l2) l2 = n;
+  }
+  if (l1 === Infinity) {
+    l1 = l2 = d.cur || 1;
+  }
+  return { text, l1, l2, path: d.path };
 }
 
 const selectionRef = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
@@ -271,7 +297,9 @@ export function initSelectionBar() {
      keeps its own menu, which is what a right click on plain code expects. */
   document.addEventListener('contextmenu', e => {
     if (menu.contains(e.target)) { e.preventDefault(); return; }
-    const inCode = vp.contains(e.target) || (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(e.target));
+    const inCode = vp.contains(e.target) ||
+      (diffviewEl && !diffviewEl.hidden && diffviewEl.contains(e.target)) ||
+      (mdviewEl && !mdviewEl.hidden && mdviewEl.contains(e.target));
     if (!inCode) { closeSelMenu(); return; }
     updateSelectionBar();
     if (!current) { closeSelMenu(); return; }

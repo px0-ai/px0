@@ -48,7 +48,7 @@ make dist
 - **Remote-First, Zero SSH Hassle**: Spin up on any remote server, cloud instance, or runner in < 1 ms. Inspect remote code in your local browser over a single port (Tailscale, WireGuard, reverse proxy, or tunnel) without SSH key setups, port forwarding churn, or remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
 - **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
-- **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, or Cursor Agent on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
+- **Edit with Your Coding Agent**: Select code in the source view, diff view, or rendered Markdown preview, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, or Cursor Agent on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (GitHub Dark, Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, Solarized, and more).
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
@@ -97,7 +97,7 @@ By default, px0 selects the least capable (fastest and most economical) model fo
 
 ### How an Edit Works
 
-1. Select code in the source view or the git diff view (split or unified, either side).
+1. Select code in the source view, the git diff view (split or unified, either side), or the rendered Markdown preview.
 1. Pick **Edit with Agent** from the right-click menu, the footer selection bar, or press `Alt+E`.
 1. The first time, choose a harness (and optional model). The choice is remembered in `~/.px0/settings.json` (or `$XDG_CONFIG_HOME/px0/settings.json`), never inside your repository.
 1. Type what should change and press `Enter`. px0 sends the harness the instruction, the file and line range, and the selected lines.

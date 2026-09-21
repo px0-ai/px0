@@ -45,6 +45,12 @@ px0 automatically normalizes diff selections:
 
 ---
 
+## Selecting in the Rendered Markdown Preview
+
+The rendered Markdown preview is a reader's view, not the source, so selections made there are mapped back to the source before an action runs. Every rendered block knows the line it starts on, and a selection resolves to the first and last of those lines. Copy Reference and Edit with Agent therefore point at real source lines, Alt+E opens the composer against them, and prose you highlight in a README or design doc can be handed to a coding agent without switching to the source view.
+
+---
+
 ## Keyboard Shortcuts & Interaction Matrix
 
 | Action | Shortcut | Context Menu | Status Bar Button | Description |
