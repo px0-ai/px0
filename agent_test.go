@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,6 +38,20 @@ func isolateSettings(t *testing.T) string {
 func agentPost(t *testing.T, s *Server, url string) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, url, nil)
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	var m map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &m)
+	return rec.Code, m
+}
+
+func agentPostJSON(t *testing.T, s *Server, url string, body any) (int, map[string]any) {
+	t.Helper()
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
 	req.Host = "127.0.0.1:7777"
 	req.Header.Set("Origin", "http://127.0.0.1:7777")
 	rec := httptest.NewRecorder()
@@ -670,3 +685,213 @@ func TestAllPresetArgvFormatting(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentBatchPromptFormatting(t *testing.T) {
+	items := []itemWithSnippet{
+		{
+			item: agentBatchItem{
+				Path:        "a/b.go",
+				L1:          10,
+				L2:          12,
+				Instruction: "rename foo to bar",
+			},
+			snippet: "func foo() {\n\treturn\n}",
+		},
+		{
+			item: agentBatchItem{
+				Path:        "c/d.go",
+				L1:          5,
+				L2:          5,
+				Instruction: "add doc comment",
+			},
+			snippet: "type User struct{}",
+		},
+	}
+
+	got := agentBatchPrompt(items)
+	if !strings.Contains(got, "Batch Edit Request:") {
+		t.Errorf("prompt missing batch header: %s", got)
+	}
+	if !strings.Contains(got, "### Edit 1: @a/b.go lines 10-12") {
+		t.Errorf("prompt missing edit 1 header: %s", got)
+	}
+	if !strings.Contains(got, "**Instruction**: rename foo to bar") {
+		t.Errorf("prompt missing instruction 1: %s", got)
+	}
+	if !strings.Contains(got, "### Edit 2: @c/d.go line 5") {
+		t.Errorf("prompt missing edit 2 header: %s", got)
+	}
+	if !strings.Contains(got, "**Instruction**: add doc comment") {
+		t.Errorf("prompt missing instruction 2: %s", got)
+	}
+}
+
+func TestAgentBatchEditRejectsIntraBatchOverlap(t *testing.T) {
+	isolateSettings(t)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\nvar X = 1\nvar Y = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newAgentManager(root, "echo {prompt}", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Overlapping ranges on the same file: lines 1-2 and lines 2-3
+	items := []agentBatchItem{
+		{Abs: filepath.Join(root, "a.go"), Path: "a.go", L1: 1, L2: 2, Instruction: "edit 1"},
+		{Abs: filepath.Join(root, "a.go"), Path: "a.go", L1: 2, L2: 3, Instruction: "edit 2"},
+	}
+	if _, err := m.StartBatch(items, false); err == nil {
+		t.Fatal("expected overlapping batch edits on same file to be rejected, got nil error")
+	}
+
+	// Disjoint ranges on the same file: lines 1-1 and lines 3-3 (should succeed)
+	validItems := []agentBatchItem{
+		{Abs: filepath.Join(root, "a.go"), Path: "a.go", L1: 1, L2: 1, Instruction: "edit 1"},
+		{Abs: filepath.Join(root, "a.go"), Path: "a.go", L1: 3, L2: 3, Instruction: "edit 2"},
+	}
+	job, err := m.StartBatch(validItems, false)
+	if err != nil {
+		t.Fatalf("expected disjoint batch edits to succeed, got %v", err)
+	}
+	if job.BatchCount != 2 {
+		t.Errorf("job.BatchCount = %d, want 2", job.BatchCount)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if j := m.Job(job.ID); j != nil && !j.Running {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAgentBatchEditRunsHarness(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+
+	s := agentServer(t, root, writeHarness(t,
+		`echo "// edited 1" >> keep.go
+echo "// edited 2" >> sub/mod.go
+`))
+
+	payload := map[string]any{
+		"edits": []map[string]any{
+			{"path": "keep.go", "l1": 1, "l2": 1, "instruction": "edit keep"},
+			{"path": "sub/mod.go", "l1": 1, "l2": 1, "instruction": "edit mod"},
+		},
+	}
+	code, body := agentPostJSON(t, s, "/api/agent/batch", payload)
+	if code != 200 {
+		t.Fatalf("batch edit = %d, want 200 (error: %v)", code, body["error"])
+	}
+	id := int64(body["id"].(float64))
+	j := waitIdleID(t, s, id)
+	if j.Error != "" {
+		t.Fatalf("batch job failed: %s", j.Error)
+	}
+	if len(j.Changed) != 2 {
+		t.Fatalf("changed = %v, want 2 files", j.Changed)
+	}
+}
+
+func TestAgentAllowsIndividualAndBatchEditsConcurrently(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+
+	s := agentServer(t, root, writeHarness(t,
+		`sleep 0.2
+echo "// edited" >> keep.go
+`))
+
+	// Start individual edit on keep.go line 1
+	code1, body1 := agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=one")
+	if code1 != 200 {
+		t.Fatalf("edit 1 = %d, want 200 (error: %v)", code1, body1["error"])
+	}
+	id1 := int64(body1["id"].(float64))
+
+	// Attempting an overlapping batch edit on keep.go:1-2 must be rejected
+	overlapPayload := map[string]any{
+		"edits": []map[string]any{
+			{"path": "keep.go", "l1": 1, "l2": 2, "instruction": "overlap"},
+		},
+	}
+	overlapCode, _ := agentPostJSON(t, s, "/api/agent/batch", overlapPayload)
+	if overlapCode != 409 {
+		t.Fatalf("overlapping batch edit = %d, want 409", overlapCode)
+	}
+
+	// Non-overlapping batch edit on keep.go:2-2 and sub/mod.go:1-1 must be accepted concurrently
+	batchPayload := map[string]any{
+		"edits": []map[string]any{
+			{"path": "keep.go", "l1": 2, "l2": 2, "instruction": "non-overlap keep"},
+			{"path": "sub/mod.go", "l1": 1, "l2": 1, "instruction": "non-overlap mod"},
+		},
+	}
+	code2, body2 := agentPostJSON(t, s, "/api/agent/batch", batchPayload)
+	if code2 != 200 {
+		t.Fatalf("batch edit 2 = %d, want 200 (error: %v)", code2, body2["error"])
+	}
+	id2 := int64(body2["id"].(float64))
+
+	j1 := waitIdleID(t, s, id1)
+	j2 := waitIdleID(t, s, id2)
+	if j1.Error != "" {
+		t.Fatalf("job 1 failed: %s", j1.Error)
+	}
+	if j2.Error != "" {
+		t.Fatalf("job 2 failed: %s", j2.Error)
+	}
+}
+
+func TestAgentBatchEditPayloadVariations(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	s := agentServer(t, root, writeHarness(t, "exit 0\n"))
+
+	// 1. Direct array JSON body
+	directArray := []map[string]any{
+		{"path": "keep.go", "l1": 1, "l2": 1, "instruction": "arr 1"},
+	}
+	c1, b1 := agentPostJSON(t, s, "/api/agent/batch", directArray)
+	if c1 != 200 {
+		t.Fatalf("direct array batch = %d, want 200 (err: %v)", c1, b1["error"])
+	}
+	waitIdleID(t, s, int64(b1["id"].(float64)))
+
+	// 2. Query parameter edits JSON string
+	c2, b2 := agentPost(t, s, "/api/agent/batch?edits=%5B%7B%22path%22%3A%22keep.go%22%2C%22l1%22%3A1%2C%22l2%22%3A1%2C%22instruction%22%3A%22query%22%7D%5D")
+	if c2 != 200 {
+		t.Fatalf("query param batch = %d, want 200 (err: %v)", c2, b2["error"])
+	}
+	waitIdleID(t, s, int64(b2["id"].(float64)))
+
+	// 3. Single edit object JSON body
+	singleObj := map[string]any{
+		"path": "keep.go", "l1": 1, "l2": 1, "instruction": "single",
+	}
+	c3, b3 := agentPostJSON(t, s, "/api/agent/batch", singleObj)
+	if c3 != 200 {
+		t.Fatalf("single obj batch = %d, want 200 (err: %v)", c3, b3["error"])
+	}
+	waitIdleID(t, s, int64(b3["id"].(float64)))
+
+	// 4. Empty payload -> 400
+	c4, b4 := agentPostJSON(t, s, "/api/agent/batch", map[string]any{"edits": []any{}})
+	if c4 != 400 {
+		t.Fatalf("empty batch = %d, want 400", c4)
+	}
+	if b4["error"] != "invalid or empty batch edits payload" {
+		t.Fatalf("empty batch error = %v", b4["error"])
+	}
+}
+
+

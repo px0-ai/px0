@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func gitInstalled() bool {
@@ -142,10 +147,62 @@ func TestGitDiff(t *testing.T) {
 		t.Errorf("clean file: available=%v diff=%q, want false/empty", body["available"], body["diff"])
 	}
 
-	// Meta reports git availability.
+	// Meta reports git availability and git changes.
 	_, meta := get(t, s, "/api/meta")
 	if meta["git"] != true {
 		t.Errorf("meta git = %v, want true", meta["git"])
+	}
+	if changes, ok := meta["gitChanges"].(float64); !ok || changes < 1 {
+		t.Errorf("meta gitChanges = %v, want >= 1", meta["gitChanges"])
+	}
+	files, ok := meta["gitFiles"].([]any)
+	found := false
+	for _, f := range files {
+		if f == "sub/mod.go" {
+			found = true
+			break
+		}
+	}
+	if !ok || !found {
+		t.Errorf("meta gitFiles = %v, want to contain sub/mod.go", meta["gitFiles"])
+	}
+}
+
+func TestGitCleanRepo(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	runCmd := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	runCmd("init")
+	runCmd("config", "user.email", "test@test.com")
+	runCmd("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(dir, "clean.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd("add", "clean.go")
+	runCmd("commit", "-m", "init")
+
+	ix := NewIndex(dir)
+	ix.Build()
+	s := NewServer(ix, nil)
+
+	_, meta := get(t, s, "/api/meta")
+	if meta["git"] != true {
+		t.Errorf("git = %v, want true", meta["git"])
+	}
+	if changes, ok := meta["gitChanges"].(float64); !ok || changes != 0 {
+		t.Errorf("gitChanges = %v, want 0", meta["gitChanges"])
+	}
+	files, ok := meta["gitFiles"].([]any)
+	if !ok || len(files) != 0 {
+		t.Errorf("gitFiles = %v, want []", meta["gitFiles"])
 	}
 }
 
@@ -179,6 +236,9 @@ func TestGitDisabled(t *testing.T) {
 	_, meta := get(t, s, "/api/meta")
 	if meta["git"] != false {
 		t.Errorf("meta git = %v with -no-git, want false", meta["git"])
+	}
+	if meta["gitChanges"].(float64) != 0 {
+		t.Errorf("meta gitChanges = %v with -no-git, want 0", meta["gitChanges"])
 	}
 }
 
@@ -284,5 +344,186 @@ func BenchmarkGitStatus(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		gitStatus(root)
+	}
+}
+
+func TestUpdateGitStatus(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	ix := NewIndex(root)
+	ix.Build()
+
+	count, files, changed, statuses, dirtyDirs := ix.UpdateGitStatus()
+	// Should be unchanged because Build() just ran
+	if changed {
+		t.Errorf("expected changed=false immediately after Build(), got true")
+	}
+	if count == 0 || len(files) == 0 {
+		t.Errorf("expected non-zero git changes, got count=%d, files=%v", count, files)
+	}
+	if !dirtyDirs["sub"] {
+		t.Errorf("expected 'sub' to be in dirtyDirs, got %v", dirtyDirs)
+	}
+	if statuses["add.go"] != "A" {
+		t.Errorf("expected add.go status 'A', got %q", statuses["add.go"])
+	}
+
+	// Now modify another file
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("modified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count2, _, changed2, statuses2, _ := ix.UpdateGitStatus()
+	if !changed2 {
+		t.Errorf("expected changed=true after modifying keep.go")
+	}
+	if count2 <= count {
+		t.Errorf("expected count to increase, got count2=%d vs count=%d", count2, count)
+	}
+	if statuses2["keep.go"] != "M" {
+		t.Errorf("expected keep.go to have status 'M', got %q", statuses2["keep.go"])
+	}
+
+	// Calling it again without changes should report changed=false
+	_, _, changed3, _, _ := ix.UpdateGitStatus()
+	if changed3 {
+		t.Errorf("expected changed=false when worktree has not changed")
+	}
+}
+
+func TestGitWatcherStreamAndRefresh(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	ix := NewIndex(root)
+	ix.Build()
+
+	s := NewServer(ix, nil)
+	ts := httptest.NewServer(s.mux)
+	defer ts.Close()
+
+	// 1. Connect to SSE stream
+	req, err := http.NewRequest("GET", ts.URL+"/api/git/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("expected text/event-stream, got %q", ct)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	readSSEEvent := func() (string, map[string]any) {
+		var eventName string
+		var data string
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				t.Fatalf("failed reading SSE stream: %v", err)
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if strings.HasPrefix(line, "event: ") {
+				eventName = strings.TrimPrefix(line, "event: ")
+			} else if strings.HasPrefix(line, "data: ") {
+				data = strings.TrimPrefix(line, "data: ")
+			} else if line == "" && data != "" {
+				var parsed map[string]any
+				if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+					t.Fatalf("malformed json in SSE event: %v", err)
+				}
+				return eventName, parsed
+			}
+		}
+	}
+
+	// Initial status should be sent immediately upon connection
+	evName, initialData := readSSEEvent()
+	if evName != "git-status" {
+		t.Errorf("expected event 'git-status', got %q", evName)
+	}
+	if initialData["git"] != true {
+		t.Errorf("expected git=true, got %v", initialData["git"])
+	}
+
+	// 2. Modify a file and call POST /api/git/refresh
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("streamed change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshResp, err := http.Post(ts.URL+"/api/git/refresh", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refreshData map[string]any
+	json.NewDecoder(refreshResp.Body).Decode(&refreshData)
+	refreshResp.Body.Close()
+
+	if refreshData["git"] != true {
+		t.Errorf("refresh expected git=true, got %v", refreshData["git"])
+	}
+	statuses, ok := refreshData["statuses"].(map[string]any)
+	if !ok || statuses["keep.go"] != "M" {
+		t.Errorf("expected keep.go 'M' in refresh response, got %v", refreshData)
+	}
+
+	// 3. SSE stream must receive the broadcasted update
+	done := make(chan struct{})
+	var streamedEv string
+	var streamedData map[string]any
+	go func() {
+		streamedEv, streamedData = readSSEEvent()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if streamedEv != "git-status" {
+			t.Errorf("expected event 'git-status', got %q", streamedEv)
+		}
+		streamedStatuses, _ := streamedData["statuses"].(map[string]any)
+		if streamedStatuses["keep.go"] != "M" {
+			t.Errorf("expected keep.go 'M' on stream, got %v", streamedData)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for SSE update event")
+	}
+}
+
+func TestGitWatcherCLICommitDetection(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	ix := NewIndex(root)
+	ix.Build()
+
+	gw := NewGitWatcher(ix)
+	gitdir := gitDir(root)
+	if !gw.recordGitMeta(gitdir) {
+		// First recording initialized the metadata
+	}
+
+	// Commit existing changes via CLI
+	cmd := exec.Command("git", "commit", "-am", "commit all")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Watcher's metadata stat check should instantly see the index/HEAD modtime update
+	if !gw.recordGitMeta(gitdir) {
+		t.Errorf("expected recordGitMeta to report changed=true after CLI commit")
 	}
 }

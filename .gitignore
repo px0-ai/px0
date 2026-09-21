@@ -18,6 +18,7 @@ Thumbs.db
 
 # Build artifacts
 build/
+web/app.js
 
 # Logs
 *.log

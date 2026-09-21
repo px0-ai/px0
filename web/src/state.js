@@ -5,8 +5,24 @@ export const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', 
 
 const request = async (method, path, params, opts = {}) => {
   const u = new URL(path, location.origin);
-  for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== '') u.searchParams.set(k, v);
-  const r = await fetch(u, { method, ...opts });
+  const fetchOpts = { method, ...opts };
+  const isPost = method === 'POST' || method === 'PUT' || method === 'PATCH';
+
+  if (params) {
+    const hasComplex = typeof params === 'object' && params !== null && (
+      Array.isArray(params) || Object.values(params).some(v => typeof v === 'object' && v !== null)
+    );
+    if (isPost && (opts.json || hasComplex)) {
+      fetchOpts.headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      fetchOpts.body = JSON.stringify(params);
+    } else {
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== '') u.searchParams.set(k, v);
+      }
+    }
+  }
+
+  const r = await fetch(u, fetchOpts);
   const j = await r.json();
   // The body rides along: some replies, like a failed agent job, carry detail beyond the message.
   if (j.error) throw Object.assign(new Error(j.error), { body: j });
@@ -15,6 +31,7 @@ const request = async (method, path, params, opts = {}) => {
 export const api = (path, params, opts) => request('GET', path, params, opts);
 // For requests that change the machine; the server only accepts these as POST from this page.
 export const apiPost = (path, params, opts) => request('POST', path, params, opts);
+export const apiPostJson = (path, params, opts) => request('POST', path, params, { json: true, ...opts });
 
 export const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 // navigator.platform is deprecated but is still the only signal some browsers give.

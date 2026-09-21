@@ -80,5 +80,6 @@ The internal documentation is modularized into the following focused guides:
 
 ### Operations & Maintenance
 
+- [User Features Documentation](../features/README.md): High-level feature guides, practical workflows, and keyboard shortcuts for all px0 capabilities.
 - [AI Agent Operational Guidelines](../agents/README.md): Engineering principles for AI coding agents, mandatory documentation maintenance protocol, and frontend codebase index.
 - [Publishing & Release Guide](../../PUBLISHING.md): Step-by-step instructions for preparing, testing, and publishing new px0 releases.

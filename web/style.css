@@ -54,13 +54,54 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
   font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--dim);
 }
 .panel-head #root-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 2px; }
+.panel-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 4px; }
 .panel-actions .mini { margin-left: 0; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; }
 .panel-actions .mini svg { display: block; }
 .mini { margin-left: auto; color: var(--faint); font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
 .mini:hover { color: var(--fg); background: var(--bg3); }
-/* "Show changed files only" toggle: on while the tree is filtered to git changes. */
-#btn-changed.active { color: var(--accent-fg); background: var(--bg3); }
+
+/* Sidebar Explorer vs Git Changes segmented toggle */
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px;
+  gap: 1px;
+  height: 20px;
+}
+.sidebar-toggle .toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 16px;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease, opacity .12s ease;
+}
+.sidebar-toggle .toggle-btn svg { display: block; }
+.sidebar-toggle .toggle-btn:hover:not(:disabled) { color: var(--fg); }
+.sidebar-toggle .toggle-btn.active {
+  background: var(--bg);
+  color: var(--accent-fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.sidebar-toggle .toggle-btn:disabled,
+.sidebar-toggle .toggle-btn.disabled {
+  opacity: .32;
+  cursor: not-allowed;
+}
+.sidebar-toggle .toggle-btn:disabled:hover,
+.sidebar-toggle .toggle-btn.disabled:hover {
+  color: var(--dim);
+}
 .panel-body { flex: 1; overflow: auto; padding-bottom: 16px; }
 /* Version and theme, level with the status bar beside it. */
 .side-foot {
@@ -239,6 +280,17 @@ body.right-hidden #right-side, body.right-hidden #right-resizer { display: none;
 .view-switch button { padding: 0 9px; border-radius: 3px; font-size: 11px; line-height: 18px; color: var(--dim); }
 .view-switch button:hover { color: var(--fg); }
 .view-switch button.on { background: var(--bg); color: var(--accent-fg); font-weight: 600; }
+.view-switch button:disabled,
+.view-switch button.disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.diff-seg:has(#diff-btn:disabled) .diff-menu {
+  display: none !important;
+}
+.diff-seg:has(#diff-btn:disabled) .diff-caret {
+  opacity: .2;
+}
 
 /* Diff dropdown & view-mode menu */
 .diff-seg { position: relative; display: flex; }
@@ -317,8 +369,16 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
    it, which is below centre for x in most UI fonts. */
 .tab .x { width: 15px; height: 15px; border-radius: 3px; display: grid; place-items: center; color: var(--faint); flex: none; }
 .tab .x svg { width: 9px; height: 9px; display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
-.tab.active .x { color: var(--dim); }
 .tab .x:hover { background: var(--bg4); color: var(--fg); }
+.tab.git-modified .tn { color: var(--mark-mod, #d29922); }
+.tab.active.git-modified .tn { color: var(--mark-mod, #d29922); }
+.tab .tab-git-dot {
+  font-size: 7px;
+  color: var(--mark-mod, #d29922);
+  margin-left: 2px;
+  line-height: 1;
+  display: inline-block;
+}
 
 #crumbs { display: none !important; }
 
@@ -363,11 +423,35 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
 .row.agent-sel .g { color: var(--accent); font-weight: 600; }
 .row.agent-sel.cur,
 .row.agent-sel.cur .c { background: var(--sel); }
+.row.agent-anchor .g { position: relative; }
+.row.agent-anchor .g::after {
+  content: "✎";
+  position: absolute;
+  left: 2px;
+  top: 0;
+  font-size: 10px;
+  line-height: var(--lh);
+  color: var(--accent);
+  pointer-events: none;
+}
 
 .diff-row.agent-sel .diff-code,
 .diff-side.agent-sel .diff-code { background: var(--sel); }
 .diff-row.agent-sel .diff-ln,
 .diff-side.agent-sel .diff-ln { color: var(--accent); font-weight: 600; }
+.diff-row.agent-anchor .diff-ln,
+.diff-side.agent-anchor .diff-ln { position: relative; }
+.diff-row.agent-anchor .diff-ln::after,
+.diff-side.agent-anchor .diff-ln::after {
+  content: "✎";
+  position: absolute;
+  left: 2px;
+  top: 0;
+  font-size: 10px;
+  line-height: var(--lh);
+  color: var(--accent);
+  pointer-events: none;
+}
 .c i { font-style: normal; }
 
 /* Word wrap mode (Alt+Z) */
@@ -704,13 +788,49 @@ kbd {
 #findbar button:hover { background: var(--bg4); color: var(--fg); }
 
 /* ---------- agent edit composer ----------
-   #agentbox stacks one box per edit currently in flight or being composed,
-   newest closest to the corner it grows from. */
+   #agentbox stacks boxes from top to bottom,
+   with the batch bar at the top followed by comments. */
 #agentbox {
-  position: absolute; bottom: 10px; right: 22px; z-index: 22; width: 360px; max-width: calc(100% - 32px);
-  display: flex; flex-direction: column-reverse; gap: 8px;
+  position: absolute; top: 10px; right: 22px; z-index: 22; width: 380px; max-width: calc(100% - 32px);
+  display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 44px);
+}
+#editor:has(#findbar:not([hidden])) #agentbox {
+  top: 46px;
 }
 #agentbox[hidden] { display: none; }
+.agentbox-list {
+  display: flex; flex-direction: column; gap: 8px;
+  overflow-y: auto; max-height: calc(100vh - 160px);
+  padding: 2px 2px 2px 0;
+}
+.agent-batch-bar {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg2); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 8px 10px; box-shadow: var(--shadow);
+}
+.agent-batch-bar[hidden] { display: none; }
+.agent-batch-header { display: flex; flex-direction: column; gap: 4px; }
+.agent-batch-title-row { display: flex; align-items: center; gap: 6px; font: 11.5px var(--mono); }
+.agent-batch-badge {
+  font: 600 11px var(--ui); color: var(--accent); display: inline-flex; align-items: center; gap: 4px;
+}
+.agent-batch-count { font: 11px var(--mono); color: var(--fg); font-weight: 500; }
+.agent-batch-clear {
+  color: var(--faint); font: 11px var(--ui); background: transparent; border: none;
+  cursor: pointer; padding: 1px 5px; border-radius: 3px; transition: all .15s ease;
+}
+.agent-batch-clear:hover:not(:disabled) { background: var(--bg4); color: var(--err); }
+.agent-batch-clear:disabled { opacity: .4; cursor: default; }
+.agent-batch-meta { display: flex; align-items: center; gap: 6px; padding: 1px 0 2px; }
+.agent-batch-actions { display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--faint); }
+.agent-batch-actions .agent-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-batch-bar.busy .agent-hint {
+  display: inline-flex; align-items: center; gap: 6px; color: var(--accent-fg); font-weight: 500;
+}
+.agent-batch-bar.busy .agent-hint::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mark-active); animation: pulse 1.1s ease-in-out infinite; flex: none;
+}
 .agent-box {
   display: flex; flex-direction: column; gap: 6px;
   background: var(--bg3); border: 1px solid var(--line); border-radius: 6px;
@@ -719,7 +839,8 @@ kbd {
 .agent-head { display: flex; align-items: center; gap: 6px; font: 11.5px var(--mono); color: var(--fg); }
 .agent-foot { display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--faint); }
 .agent-head .grow { flex: 1; min-width: 0; }
-.agent-ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.agent-ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; cursor: pointer; }
+.agent-ref:hover { color: var(--accent); text-decoration: underline; }
 .agent-close { color: var(--faint); width: 18px; height: 18px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
 .agent-close:hover:not(:disabled) { background: var(--bg4); color: var(--fg); }
 .agent-close:disabled { opacity: .35; cursor: default; }
@@ -728,6 +849,9 @@ kbd {
 .agent-meta {
   display: flex; align-items: center; gap: 6px;
   padding: 1px 0 2px;
+}
+#agentbox.has-batch .agent-box .agent-meta {
+  display: none;
 }
 .agent-meta-label {
   font: 600 10px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase;
@@ -798,6 +922,22 @@ kbd {
 }
 .agent-err[hidden] { display: none; }
 .agent-err-msg { color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-err-actions { margin-top: 4px; display: flex; align-items: center; }
+.agent-err-cancel-btn {
+  font: 11px/18px var(--sans);
+  background: var(--bg3);
+  color: var(--err);
+  border: 1px solid var(--err);
+  border-radius: 3px;
+  padding: 1px 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background .12s ease, color .12s ease;
+}
+.agent-err-cancel-btn:hover {
+  background: var(--err);
+  color: #fff;
+}
 .agent-err-label { margin-top: 4px; font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .agent-err-out {
   margin: 0; font: inherit; color: var(--dim);
@@ -819,7 +959,8 @@ kbd {
   padding: 3px 10px; border-radius: 4px; font: 11px var(--ui); font-weight: 600;
   background: var(--accent); color: var(--bg);
 }
-.agent-send:hover { opacity: .88; }
+.agent-send:hover:not(:disabled) { opacity: .88; }
+.agent-send:disabled { opacity: .45; cursor: not-allowed; }
 .agent-cancel {
   padding: 3px 9px; border-radius: 4px; font: 11px var(--ui); font-weight: 600;
   background: transparent; border: 1px solid var(--err); color: var(--err);

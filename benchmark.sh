@@ -81,7 +81,10 @@ start_server() {
   local pid=$!
   local i
   for i in $(seq 100); do
-    curl -sf -o /dev/null "http://127.0.0.1:$port/api/meta" && { echo "$pid"; return 0; }
+    # The server answers before its index is built. Wait for ready, or Files
+    # and Index read 0 whenever the build (which includes the initial git
+    # status) outlasts the first poll.
+    curl -sf "http://127.0.0.1:$port/api/meta" | grep -q '"ready":true' && { echo "$pid"; return 0; }
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.3
   done

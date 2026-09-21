@@ -164,7 +164,18 @@ export function copySelectAll() {
 /* Runs one of the bar's actions on the current selection. Returns false when the
    bar is not showing, so a shortcut can fall through to the browser. */
 export function runSelectionAction(act) {
-  if (!current) return false;
+  if (!current) {
+    if (act === 'agent-edit') {
+      const d = doc_();
+      if (d && agentHandler) {
+        const line = d.cur || 1;
+        const text = (d.lines && d.lines[line - 1]) || '';
+        agentHandler({ text, l1: line, l2: line, path: d.path });
+        return true;
+      }
+    }
+    return false;
+  }
   const { text, path } = current;
   const ref = selectionRef(current);
   if (act === 'copy-ref') {
@@ -208,6 +219,7 @@ function openSelMenu(x, y) {
     btn.className = 'sel-menu-item';
     btn.dataset.sel = item.sel;
     btn.setAttribute('role', 'menuitem');
+    btn.title = item.label + (item.keys ? ` (${keyLabel(item.keys)})` : '');
     const label = document.createElement('span');
     label.textContent = item.label;
     btn.append(label);

@@ -1,9 +1,9 @@
 // web/src/agent.js
-import { $, esc, S, api, apiPost } from './state.js';
+import { $, esc, S, api, apiPost, apiPostJson, MOD, keyLabel } from './state.js';
 import { showToast } from './ui.js';
 import { setStatusNote } from './status.js';
 import { openFile, reloadOpenTabs } from './tabs.js';
-import { drawTree, treeEl } from './tree.js';
+import { refreshTree, treeEl } from './tree.js';
 import { setAgentHandler, hideSelectionBar } from './selbar.js';
 import { render } from './renderer.js';
 import { syncDiffAgentTargets } from './diff.js';
@@ -18,15 +18,33 @@ import { syncDiffAgentTargets } from './diff.js';
    overlaps one already open is refused before it ever reaches the server
    (which enforces the same rule for a race between two tabs).
 
+   Multiple edit comments can be added and dispatched together as a single
+   coordinated batch edit with Mod+Enter or the Apply All button.
+
    Harnesses are detected, not configured: the picker lists what is installed
    and the choice is remembered in the settings file. Detecting one is never
    enough to run it, so the first edit in a fresh install asks which to use. */
 
 const box = $('#agentbox');
 const tpl = $('#agentbox-tpl');
+const agentListEl = $('#agentbox-list');
+const batchBar = $('#agent-batch-bar');
+const batchCount = $('#agent-batch-count');
+const batchClear = $('#agent-batch-clear');
+const batchHarness = $('#agent-batch-harness');
+const batchModel = $('#agent-batch-model');
+const batchHint = $('#agent-batch-hint');
+const batchApply = $('#agent-batch-apply');
+const batchCancel = $('#agent-batch-cancel');
+const batchErr = $('#agent-batch-err');
 
 const sessions = new Map(); // local session id -> in-progress compose/edit
 let agentSeq = 0;
+
+let batchTimer = null;
+let batchJobId = null;
+let batchElapsed = '';
+let activeBatchTargets = null;
 
 const installed = () => (S.meta?.agents || []).filter(h => h.installed);
 const chosen = () => (S.meta && S.meta.agent) || '';
@@ -38,6 +56,7 @@ export function applyAgentMeta() {
   for (const session of sessions.values()) {
     updateSessionMeta(session);
   }
+  syncBatchMeta();
 }
 
 function updateSessionMeta(session) {
@@ -104,13 +123,115 @@ export async function loadAgentAsync() {
   } catch {}
 }
 
+function syncBatchMeta() {
+  if (!batchHarness || !batchModel) return;
+  const ready = installed();
+  const currentHarness = chosen();
+  const currentModel = chosenModel();
+
+  batchHarness.innerHTML = '';
+  if (!ready.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'no harness';
+    batchHarness.appendChild(opt);
+    batchHarness.disabled = true;
+    batchModel.innerHTML = '';
+    batchModel.hidden = true;
+    return;
+  }
+
+  for (const h of ready) {
+    const opt = document.createElement('option');
+    opt.value = h.name;
+    opt.textContent = h.name;
+    if (h.name === currentHarness) opt.selected = true;
+    batchHarness.appendChild(opt);
+  }
+  const isBusy = !!batchJobId;
+  batchHarness.disabled = isBusy || !!(S.meta && S.meta.agentPinned);
+  batchHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
+
+  const activeH = ready.find(h => h.name === (batchHarness.value || currentHarness)) || ready[0];
+  batchModel.innerHTML = '';
+  const models = activeH?.models || [];
+  if (models.length > 0) {
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      if (m === currentModel) opt.selected = true;
+      batchModel.appendChild(opt);
+    }
+    batchModel.hidden = false;
+    batchModel.disabled = isBusy;
+    batchModel.title = 'Model for ' + activeH.name;
+  } else {
+    batchModel.hidden = true;
+  }
+}
+
+function getReadySessions() {
+  return [...sessions.values()].filter(s => !s.timer && !s.jobId);
+}
+
+function syncBatchBar() {
+  if (!batchBar) return;
+  const total = sessions.size;
+  const ready = getReadySessions();
+  const readyCount = ready.length;
+  const runningCount = total - readyCount;
+
+  box.classList.toggle('has-batch', total >= 2);
+
+  if (total >= 2 || batchJobId) {
+    batchBar.hidden = false;
+
+    if (batchJobId) {
+      if (batchCount) {
+        batchCount.textContent = readyCount > 0
+          ? readyCount + ' remaining (' + (activeBatchTargets?.length || 0) + ' in batch)'
+          : (activeBatchTargets?.length || 0) + ' in batch';
+      }
+      if (batchApply) batchApply.hidden = true;
+      if (batchCancel) batchCancel.hidden = false;
+    } else {
+      if (batchCount) {
+        if (runningCount > 0) {
+          batchCount.textContent = readyCount + ' remaining (' + runningCount + ' running)';
+        } else {
+          batchCount.textContent = readyCount + ' comments';
+        }
+      }
+      if (batchApply) {
+        batchApply.hidden = false;
+        batchApply.disabled = readyCount === 0;
+        const btnLabel = runningCount > 0 ? 'Apply Remaining (' + readyCount + ')' : 'Apply All (' + readyCount + ')';
+        batchApply.textContent = btnLabel;
+        batchApply.title = btnLabel + ' (' + keyLabel('Mod+Enter') + ')';
+      }
+      if (batchCancel) batchCancel.hidden = true;
+      if (batchHint) {
+        batchHint.textContent = readyCount > 0
+          ? keyLabel('Mod+Enter') + ' to apply ' + (runningCount > 0 ? 'remaining' : 'all')
+          : (runningCount > 0 ? runningCount + ' running...' : '');
+      }
+    }
+    syncBatchMeta();
+  } else {
+    batchBar.hidden = true;
+  }
+}
+
 function anyInFlight() {
-  for (const s of sessions.values()) if (s.timer) return true;
+  if (batchTimer || batchJobId) return true;
+  for (const s of sessions.values()) if (s.timer || s.jobId) return true;
   return false;
 }
 
 function syncBoxVisibility() {
   box.hidden = sessions.size === 0;
+  syncBatchBar();
 }
 
 export function openAgentEdit(info) {
@@ -146,9 +267,23 @@ function syncAgentTargets() {
 
 function createSession(info) {
   const el = tpl.content.firstElementChild.cloneNode(true);
-  // Newest first in markup: #agentbox is column-reverse, so it lands closest
-  // to the corner the stack grows from, where a triggered action was aimed.
-  box.prepend(el);
+  // Stack into #agentbox-list inside #agentbox from top to bottom
+  const parent = agentListEl || box;
+  const existing = [...parent.children];
+  let inserted = false;
+  for (const child of existing) {
+    const s = [...sessions.values()].find(sess => sess.el === child);
+    if (s && s.target) {
+      if (s.target.path === info.path && s.target.l1 > info.l1) {
+        parent.insertBefore(el, child);
+        inserted = true;
+        break;
+      }
+    }
+  }
+  if (!inserted) {
+    parent.appendChild(el);
+  }
   const session = {
     id: ++agentSeq,
     target: info,
@@ -175,6 +310,7 @@ function createSession(info) {
   resetHint(session);
   clearErr(session);
   session.input.value = '';
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   session.input.focus();
   return session;
 }
@@ -183,6 +319,11 @@ function wireSession(session) {
   session.sendBtn.addEventListener('click', () => submit(session));
   session.cancelBtn?.addEventListener('click', () => cancelSession(session));
   session.closeBtn.addEventListener('click', () => closeAgentEdit(session));
+  if (session.refEl) {
+    session.refEl.addEventListener('click', () => {
+      openFile(session.target.path, { line: session.target.l1 });
+    });
+  }
   if (session.harnessSelect) {
     session.harnessSelect.addEventListener('change', async () => {
       const hName = session.harnessSelect.value;
@@ -210,7 +351,10 @@ function wireSession(session) {
       } else {
         closeAgentEdit(session);
       }
-    } else if (e.key === 'Enter' && !e.shiftKey && !session.composeEl.hidden && !session.timer) {
+    } else if ((e[MOD] || e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      submitBatch();
+    } else if (e.key === 'Enter' && !e.shiftKey && !session.composeEl.hidden && !session.timer && !session.jobId) {
       e.preventDefault();
       submit(session);
     }
@@ -227,6 +371,7 @@ async function cancelSession(session) {
   session.jobId = null;
   setBusy(session, false);
   resetHint(session);
+  syncBatchBar();
   refreshStatusNote();
   showToast('!', 'Cancelled edit on ' + targetRef(session.target));
   if (jobId) {
@@ -250,7 +395,7 @@ function closeAgentEdit(session) {
 function refreshRef(session) {
   const ref = targetRef(session.target);
   session.refEl.textContent = ref;
-  session.refEl.title = ref;
+  session.refEl.title = ref + ' (click to jump)';
 }
 
 function clearErr(session) {
@@ -258,6 +403,33 @@ function clearErr(session) {
   if (!errEl) return;
   errEl.textContent = '';
   errEl.hidden = true;
+}
+
+function attachAlreadyRunningCancel(errContainer) {
+  const row = document.createElement('div');
+  row.className = 'agent-err-actions';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'agent-err-cancel-btn';
+  btn.textContent = 'Cancel in-flight edit';
+  btn.title = 'Stop and cancel running edits on the server';
+  btn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    btn.disabled = true;
+    btn.textContent = 'Cancelling...';
+    try {
+      await apiPost('/api/agent/cancel', { id: 0 });
+      showToast('✓', 'Cancelled running edit');
+      errContainer.hidden = true;
+    } catch (err) {
+      showToast('!', 'Failed to cancel: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Cancel in-flight edit';
+    }
+  };
+  row.appendChild(btn);
+  errContainer.appendChild(row);
 }
 
 /* Renders a failure inline under the instruction. A harness run also carries
@@ -270,6 +442,9 @@ function showErr(session, msg, streams = []) {
   head.className = 'agent-err-msg';
   head.textContent = msg;
   errEl.appendChild(head);
+  if (msg && msg.includes('already running')) {
+    attachAlreadyRunningCancel(errEl);
+  }
   for (const [label, text] of streams) {
     if (!text) continue;
     const name = document.createElement('div');
@@ -285,7 +460,7 @@ function showErr(session, msg, streams = []) {
 
 function resetHint(session) {
   if (!session.hintEl) return;
-  session.hintEl.textContent = 'Enter to send, Esc to cancel';
+  session.hintEl.textContent = 'Enter to send, ' + keyLabel('Mod+Enter') + ' all, Esc to cancel';
 }
 
 function setBusy(session, busy, msg) {
@@ -422,6 +597,7 @@ async function submit(session) {
   hideSelectionBar();
   const initialNote = 'Editing with ' + (chosenModel() ? chosen() + ' (' + chosenModel() + ')' : chosen()) + '...';
   setBusy(session, true, initialNote);
+  syncBatchBar();
   refreshStatusNote();
   session.timer = setTimeout(() => tick(session), 400);
 }
@@ -443,6 +619,7 @@ async function tick(session) {
     }
     setBusy(session, false);
     resetHint(session);
+    syncBatchBar();
     refreshStatusNote();
     showErr(session, e.message);
     return;
@@ -463,18 +640,234 @@ async function tick(session) {
   refreshStatusNote();
 }
 
+function setBatchBusy(busy, msg) {
+  if (!batchBar) return;
+  batchBar.classList.toggle('busy', busy);
+  if (batchApply) batchApply.hidden = busy;
+  if (batchCancel) batchCancel.hidden = !busy;
+  if (batchClear) batchClear.disabled = busy;
+  if (batchHarness) batchHarness.disabled = busy || !!(S.meta && S.meta.agentPinned);
+  if (batchModel) batchModel.disabled = busy;
+  if (batchHint) {
+    if (msg) batchHint.textContent = msg;
+    else batchHint.textContent = keyLabel('Mod+Enter') + ' to apply all';
+  }
+}
+
+function clearBatchErr() {
+  if (!batchErr) return;
+  batchErr.textContent = '';
+  batchErr.hidden = true;
+}
+
+function showBatchErr(msg, streams = []) {
+  if (!batchErr) return;
+  batchErr.textContent = '';
+  const head = document.createElement('div');
+  head.className = 'agent-err-msg';
+  head.textContent = msg;
+  batchErr.appendChild(head);
+  if (msg && msg.includes('already running')) {
+    attachAlreadyRunningCancel(batchErr);
+  }
+  for (const [label, text] of streams) {
+    if (!text) continue;
+    const name = document.createElement('div');
+    name.className = 'agent-err-label';
+    name.textContent = label;
+    const pre = document.createElement('pre');
+    pre.className = 'agent-err-out';
+    pre.textContent = text;
+    batchErr.append(name, pre);
+  }
+  batchErr.hidden = false;
+}
+
+export async function submitBatch() {
+  if (batchTimer || batchJobId) return;
+  clearBatchErr();
+  const ready = getReadySessions();
+  const targets = [];
+  for (const s of ready) {
+    const ins = s.input.value.trim();
+    if (ins && s.target) {
+      targets.push({ session: s, item: { path: s.target.path, l1: s.target.l1, l2: s.target.l2, instruction: ins } });
+    }
+  }
+  if (!targets.length) {
+    if (ready.length > 0) {
+      showToast('!', 'Please enter an instruction for the remaining comment(s)');
+      ready[0].input.focus();
+    } else {
+      showToast('!', 'All open edits are already in progress');
+    }
+    return;
+  }
+  if (targets.length === 1) {
+    submit(targets[0].session);
+    return;
+  }
+
+  const harnessName = chosen();
+  if (!harnessName) {
+    showToast('!', 'Please select a coding harness first');
+    return;
+  }
+
+  let job;
+  try {
+    job = await apiPostJson('/api/agent/batch', { edits: targets.map(t => t.item) });
+  } catch (e) {
+    showBatchErr(e.message);
+    return;
+  }
+
+  batchJobId = job.id;
+  activeBatchTargets = targets;
+  batchElapsed = '';
+  hideSelectionBar();
+  const initialNote = 'Batch editing ' + targets.length + ' items with ' + (chosenModel() ? chosen() + ' (' + chosenModel() + ')' : chosen()) + '...';
+  setBatchBusy(true, initialNote);
+  for (const t of targets) {
+    setBusy(t.session, true, 'Applying in batch...');
+  }
+  syncBatchBar();
+  refreshStatusNote();
+  batchTimer = setTimeout(() => tickBatch(targets), 400);
+}
+
+async function tickBatch(targets) {
+  if (!batchJobId) return;
+  let j;
+  try {
+    j = await api('/api/agent/job?id=' + batchJobId);
+  } catch (e) {
+    if (!batchJobId) return;
+    batchTimer = null;
+    if (e.body && 'running' in e.body) {
+      await finishBatch(targets, e.body);
+      refreshStatusNote();
+      return;
+    }
+    setBatchBusy(false);
+    for (const t of targets) {
+      setBusy(t.session, false);
+      resetHint(t.session);
+    }
+    syncBatchBar();
+    refreshStatusNote();
+    showBatchErr(e.message);
+    return;
+  }
+
+  if (!batchJobId) return;
+  if (j.running) {
+    batchElapsed = Math.round((j.ms || 0) / 1000) + 's';
+    setBatchBusy(true, 'Applying ' + targets.length + ' edits with ' + j.harness + '... ' + batchElapsed);
+    refreshStatusNote();
+    batchTimer = setTimeout(() => tickBatch(targets), 600);
+    return;
+  }
+
+  batchTimer = null;
+  await finishBatch(targets, j);
+  refreshStatusNote();
+}
+
+async function finishBatch(targets, j) {
+  const currentTargets = targets;
+  batchJobId = null;
+  batchElapsed = '';
+  activeBatchTargets = null;
+  setBatchBusy(false);
+
+  if (j.error) {
+    for (const t of currentTargets) {
+      setBusy(t.session, false);
+      resetHint(t.session);
+    }
+    syncBatchBar();
+    showBatchErr((j.harness || 'agent') + ': ' + j.error, [
+      ['stderr', (j.stderr || '').trim()],
+      ['stdout', (j.stdout || j.log || '').trim()],
+    ]);
+    if (j.changed?.length) reloadWorkspace(null);
+    return;
+  }
+
+  for (const t of currentTargets) {
+    sessions.delete(t.session.id);
+    t.session.el.remove();
+  }
+  syncBoxVisibility();
+  syncAgentTargets();
+
+  const changed = j.changed || [];
+  if (!changed.length && j.tracked !== false) {
+    showToast('✓', 'Finished batch edit with no file changes');
+    return;
+  }
+
+  const focusTarget = currentTargets[0]?.session?.target;
+  if (!await reloadWorkspace(focusTarget, 'Batch edited')) return;
+  showToast('✓', !changed.length ? 'Reloaded workspace'
+    : changed.length === 1 ? 'Updated ' + changed[0] + ' (' + currentTargets.length + ' edits)'
+    : 'Updated ' + changed.length + ' files across ' + currentTargets.length + ' edits');
+}
+
+async function cancelBatch() {
+  if (!batchTimer && !batchJobId) return;
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+  const id = batchJobId;
+  batchJobId = null;
+  batchElapsed = '';
+  setBatchBusy(false);
+  if (activeBatchTargets) {
+    for (const t of activeBatchTargets) {
+      setBusy(t.session, false);
+      resetHint(t.session);
+    }
+  }
+  activeBatchTargets = null;
+  syncBatchBar();
+  refreshStatusNote();
+  showToast('!', 'Cancelled batch edit');
+  if (id) {
+    try {
+      await apiPost('/api/agent/cancel', { id });
+    } catch {}
+  }
+}
+
+function clearAllEdits() {
+  if (batchJobId) cancelBatch();
+  for (const s of [...sessions.values()]) {
+    closeAgentEdit(s);
+  }
+}
+
 /* The status bar has one shared note. With one edit running it names the
    harness and how long it has been going; with several, a count is all that
    fits without the bar fighting itself over whose turn it is to speak. */
 function refreshStatusNote() {
-  const busy = [...sessions.values()].filter(s => s.timer);
-  if (!busy.length) {
+  const busySessions = [...sessions.values()].filter(s => s.timer || s.jobId);
+  const batchCount = batchJobId ? (activeBatchTargets?.length || 0) : 0;
+  const individualBusy = busySessions.filter(s => !activeBatchTargets?.some(t => t.session === s));
+
+  if (batchJobId && individualBusy.length > 0) {
+    setStatusNote('Batch editing ' + batchCount + ' items + ' + individualBusy.length + ' edit running... ' + (batchElapsed || ''));
+  } else if (batchJobId) {
+    setStatusNote('Batch editing ' + batchCount + ' items with ' + (chosen()) + '... ' + (batchElapsed || ''));
+  } else if (!individualBusy.length) {
     setStatusNote('');
-  } else if (busy.length === 1) {
-    const s = busy[0];
+  } else if (individualBusy.length === 1) {
+    const s = individualBusy[0];
     setStatusNote('Editing with ' + (s.harness || chosen()) + '... ' + (s.elapsed || ''));
   } else {
-    setStatusNote(busy.length + ' edits running...');
+    setStatusNote(individualBusy.length + ' edits running...');
   }
 }
 
@@ -523,7 +916,7 @@ function reloadWorkspace(focus, what = 'Changed') {
       if (focus?.path) {
         await openFile(focus.path, { line: focus.l1, push: false });
       }
-      await drawTree('', treeEl, 0);
+      await refreshTree();
     } catch (e) {
       showToast('!', what + ', but the reload failed: ' + e.message);
       return false;
@@ -539,6 +932,39 @@ export function initAgent() {
   if (!box || !tpl) return;
   setAgentHandler(openAgentEdit);
 
+  if (batchApply) batchApply.addEventListener('click', () => submitBatch());
+  if (batchCancel) batchCancel.addEventListener('click', () => cancelBatch());
+  if (batchClear) batchClear.addEventListener('click', () => clearAllEdits());
+  if (batchHarness) {
+    batchHarness.addEventListener('change', async () => {
+      const hName = batchHarness.value;
+      if (!hName) return;
+      await select(hName, msg => showBatchErr(msg));
+    });
+  }
+  if (batchModel) {
+    batchModel.addEventListener('change', async () => {
+      const hName = batchHarness?.value || chosen();
+      const mName = batchModel.value;
+      await select(hName, mName, msg => showBatchErr(msg));
+    });
+  }
+
+  document.addEventListener('click', e => {
+    const row = e.target.closest('.row.agent-sel, .row.agent-anchor, .diff-row.agent-sel, .diff-row.agent-anchor, .diff-side.agent-sel, .diff-side.agent-anchor');
+    if (!row) return;
+    const line = +row.dataset.l;
+    const d = S.docs[S.active];
+    if (!d) return;
+    for (const s of sessions.values()) {
+      if (s.target.path === d.path && line >= s.target.l1 && line <= s.target.l2) {
+        s.input.focus();
+        s.el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        break;
+      }
+    }
+  });
+
   /* At least one harness is still writing to disk: leaving would abandon it
      with no way back to see how it went, so the tab asks first. */
   addEventListener('beforeunload', e => {
@@ -546,4 +972,11 @@ export function initAgent() {
     e.preventDefault();
     e.returnValue = '';
   });
+
+  // Probe if an in-flight job is already active on the server
+  api('/api/agent/job?id=0').then(j => {
+    if (j && j.running) {
+      setStatusNote('In-flight edit running on ' + (j.path || 'workspace') + ' (' + (j.harness || 'agent') + ')', 6000);
+    }
+  }).catch(() => {});
 }

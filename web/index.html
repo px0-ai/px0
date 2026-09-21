@@ -18,7 +18,7 @@
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><button id="btn-changed" class="mini" title="Show changed files only" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
     <div class="panel-body" id="tree"></div>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
@@ -65,7 +65,7 @@
         </button>
         <div id="diff-menu" class="diff-menu" role="menu">
           <div class="diff-menu-header">Diff View Mode</div>
-          <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem">
+          <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem" title="Side-by-side split diff view">
             <span class="diff-item-check" aria-hidden="true">✓</span>
             <div class="diff-item-content">
               <span class="diff-item-title">Split</span>
@@ -73,7 +73,7 @@
             </div>
             <span class="diff-item-badge">Default</span>
           </button>
-          <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem">
+          <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem" title="Inline unified diff view">
             <span class="diff-item-check" aria-hidden="true">✓</span>
             <div class="diff-item-content">
               <span class="diff-item-title">Unified</span>
@@ -160,15 +160,37 @@
         <button id="find-close" title="Close ({Esc})">&#10005;</button>
       </div>
 
-      <!-- Instruction composers: one stacked box per edit in flight or being
-           composed, cloned from #agentbox-tpl. Several can run at once as long
-           as their line ranges do not overlap. -->
-      <div id="agentbox" hidden></div>
+      <!-- Instruction composers: stacked box per edit in flight or being composed.
+           When multiple edits exist, #agent-batch-bar provides unified controls to apply all. -->
+      <div id="agentbox" hidden>
+        <div id="agent-batch-bar" class="agent-batch-bar" hidden>
+          <div class="agent-batch-header">
+            <div class="agent-batch-title-row">
+              <span class="agent-batch-badge">Batch Edit</span>
+              <span id="agent-batch-count" class="agent-batch-count">0 comments</span>
+              <span class="grow"></span>
+              <button id="agent-batch-clear" class="agent-batch-clear" title="Clear all comments">Clear All</button>
+            </div>
+            <div class="agent-batch-meta">
+              <span class="agent-meta-label">Model</span>
+              <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness"></select>
+              <select id="agent-batch-model" class="agent-model-select" title="Model"></select>
+            </div>
+          </div>
+          <div class="agent-batch-actions">
+            <span id="agent-batch-hint" class="agent-hint">Mod+Enter to apply all</span>
+            <button id="agent-batch-cancel" class="agent-cancel" title="Cancel in-flight batch edits" hidden>Cancel</button>
+            <button id="agent-batch-apply" class="agent-send agent-batch-apply" title="Apply all comments ({Mod+Enter})">Apply All</button>
+          </div>
+          <div id="agent-batch-err" class="agent-err" hidden></div>
+        </div>
+        <div id="agentbox-list" class="agentbox-list"></div>
+      </div>
       <template id="agentbox-tpl">
         <div class="agent-box">
           <div class="agent-head">
-            <span class="sel-chip">Edit</span>
-            <span class="agent-ref"></span>
+            <span class="sel-chip">Comment</span>
+            <span class="agent-ref" role="button" tabindex="0" title="Click to jump to code"></span>
             <span class="grow"></span>
             <button class="agent-close" title="Close ({Esc})">&#10005;</button>
           </div>
@@ -180,12 +202,12 @@
           <!-- Shown until a harness has been picked, and whenever one is changed -->
           <div class="agent-pick" hidden></div>
           <div class="agent-compose">
-            <textarea class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="What should change here?"></textarea>
+            <textarea class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Edit comment / instruction... (Mod+Enter to apply all)"></textarea>
             <div class="agent-err" hidden></div>
             <div class="agent-foot">
               <span class="agent-hint">Enter to send, Esc to cancel</span>
-              <button class="agent-cancel" hidden>Cancel</button>
-              <button class="agent-send">Send</button>
+              <button class="agent-cancel" title="Cancel in-flight edit" hidden>Cancel</button>
+              <button class="agent-send" title="Send edit instruction ({Mod+Enter})">Send</button>
             </div>
           </div>
         </div>
@@ -352,8 +374,8 @@
       <div class="settings-json-toolbar">
         <span class="settings-json-hint">Edit settings.json directly. Changes apply immediately upon saving.</span>
         <div class="settings-json-actions">
-          <button id="btn-settings-reset-raw" class="settings-btn-secondary">Discard</button>
-          <button id="btn-settings-save-raw" class="settings-btn-primary">Save</button>
+          <button id="btn-settings-reset-raw" class="settings-btn-secondary" title="Discard unsaved changes">Discard</button>
+          <button id="btn-settings-save-raw" class="settings-btn-primary" title="Save changes to settings.json ({Mod+S})">Save</button>
         </div>
       </div>
       <div id="settings-raw-error" class="settings-error-banner" hidden></div>

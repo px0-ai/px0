@@ -693,7 +693,7 @@ export function showVimHelp() {
         `).join('')}
       </div>
       <div class="vim-help-footer">
-        <button id="btn-switch-to-std-help" class="settings-btn-link">View Standard Shortcuts (?)</button>
+        <button id="btn-switch-to-std-help" class="settings-btn-link" title="View Standard Shortcuts (?)">View Standard Shortcuts (?)</button>
         <span class="agent-hint">Press Esc or click outside to dismiss</span>
       </div>
     </div>

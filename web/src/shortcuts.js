@@ -20,6 +20,8 @@ import { toggleDiff } from './diff.js';
 import { openSettings, closeSettings, isSettingsOpen } from './settings.js';
 import { handleVimKeyDown, showVimHelp, closeVimHelp } from './vim.js';
 import { handleImageKey } from './imageview.js';
+import { submitBatch } from './agent.js';
+import { reindexWorkspace } from './panels.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
    they show as ⌘/⌥/⇧ on a Mac and Ctrl/Alt/Shift elsewhere. Browsers keep
@@ -28,7 +30,7 @@ export const SHORTCUTS = [
   [['Mod+,'], 'Open settings'],
   [['Mod+K'], 'Quick search / palette'], [['Mod+P'], 'Go to file'],
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
-  [['Mod+Shift+F'], 'Search in files'], [['Mod+F'], 'Find in file'],
+  [['Mod+Shift+F'], 'Search in files'], [['Mod+Shift+R'], 'Refresh workspace'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
@@ -52,7 +54,7 @@ export function showHelp() {
   const h = $('#helpsheet');
   const ver = S.meta?.version ? ` <span class="help-version">v${esc(S.meta.version)}</span>` : '';
   h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver +
-    '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;">View Vim Keybindings</button></div><dl class="help-grid">' +
+    '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;" title="View Vim Keybindings">View Vim Keybindings</button></div><dl class="help-grid">' +
     SHORTCUTS.map(([combos, v]) =>
       '<dt>' + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
       '<dd>' + esc(v) + '</dd>').join('') + '</dl></div>';
@@ -133,6 +135,7 @@ export function initShortcuts() {
     if (mod && e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); openPalette('command'); return; }
     if (mod && e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); showRightInspector('symbols'); return; }
     if (mod && e.shiftKey && (e.key === 'F' || e.key === 'f')) { e.preventDefault(); showRightInspector('search'); $('#q')?.select(); return; }
+    if (mod && e.shiftKey && (e.key === 'R' || e.key === 'r')) { e.preventDefault(); reindexWorkspace(); return; }
     if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); openPalette('file'); return; }
     if (mod && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); openPalette('line'); return; }
     if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(S.lastWord); return; }
@@ -173,6 +176,15 @@ export function initShortcuts() {
       e.preventDefault();
       togglePreview();
       return;
+    }
+
+    if (mod && !e.shiftKey && !e.altKey && e.key === 'Enter') {
+      const b = $('#agentbox');
+      if (b && !b.hidden) {
+        e.preventDefault();
+        submitBatch();
+        return;
+      }
     }
 
     if (inField(document.activeElement)) return;

@@ -68,5 +68,5 @@ publish:
 	@echo "  git push origin master --tags"
 
 clean:
-	rm -f px0
+	rm -f px0 web/app.js
 	rm -rf dist/

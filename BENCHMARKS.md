@@ -1,7 +1,5 @@
 # Performance Benchmarks & Methodology
 
-This document outlines how px0 measures performance, documents its scores across real-world repositories, and breaks down comparative resource consumption against VS Code.
-
 ## 1. Requirements
 
 - Go 1.24+: To build the target binary.
@@ -11,11 +9,6 @@ This document outlines how px0 measures performance, documents its scores across
 - Memory Measurements: Read via `/proc`, supported natively on Linux (other metrics function cross-platform).
 
 ## 2. Running Benchmarks
-### 1. Build the binary
-
-```bash
-go build -o px0 .
-```
 
 ### 2. Fetch the standard corpus
 
@@ -79,14 +72,14 @@ Side-by-side comparison on identical Linux hardware across px0 and several other
 
 ### Multi-Editor Benchmark Matrix
 
-| Editor / Configuration | Memory (RSS) | Time to Open | Time to First Interaction | Process Architecture |
-| :--- | :--- | :--- | :--- | :--- |
-| **px0** | **~15 - 18 MB** | **~10 ms** | **~15 ms** | 1 process (native Go) |
-| **Vim** (clean terminal) | ~10 - 15 MB | ~15 ms | ~15 ms | 1 process |
-| **Neovim** (clean terminal) | ~10 - 20 MB | ~150 ms | ~150 ms | 1 process |
-| **Zed** (running workspace) | ~200 - 450 MB | *GUI dependent* | ~300 - 600 ms | 1-3 processes (Rust) |
-| **Sublime Text** (running) | ~100 - 250 MB | *GUI dependent* | ~250 - 500 ms | 2-4 processes (C++) |
-| **VS Code** (active extensions) | ~1,100 - 1,440 MB| ~3.0 - 5.0 s | ~6.0 - 10.0 s | 12 - 15+ processes |
+| Editor | Memory (RSS) | Time to Open |
+| :--- | :--- | :--- |
+| **px0** | **~15 - 18 MB** | **~10 ms** |
+| Vim | ~10 - 15 MB | ~15 ms |
+| Neovim | ~10 - 20 MB | ~150 ms |
+| Zed | ~200 - 450 MB | *GUI dependent* |
+| Sublime Text | ~100 - 250 MB | *GUI dependent* |
+| VS Code | ~1,100 - 1,440 MB| ~3.0 - 5.0 s |
 
 *Note: CLI editors (Vim/Neovim) do not provide inline LSP out-of-the-box (like px0 does) without extra processes. Zed and Sublime Text were evaluated as active running GUI configurations. px0 serves a full workspace complete with instantaneous indexing natively in sub-20 Megabytes.*
 

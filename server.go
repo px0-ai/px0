@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"embed"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,10 +41,11 @@ func useDiskAssets(dir string) error {
 }
 
 type Server struct {
-	ix    *Index
-	lsp   *lspManager
-	agent *agentManager // nil unless main wires editing for this session
-	mux   *http.ServeMux
+	ix         *Index
+	lsp        *lspManager
+	agent      *agentManager // nil unless main wires editing for this session
+	gitWatcher *GitWatcher
+	mux        *http.ServeMux
 
 	lastReq atomic.Int64 // unix nanos of the most recent request
 }
@@ -52,6 +55,8 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 		lsp = newLSPManager(ix.Root(), false)
 	}
 	s := &Server{ix: ix, lsp: lsp, mux: http.NewServeMux()}
+	s.gitWatcher = NewGitWatcher(ix)
+	s.gitWatcher.Start(context.Background())
 	sub, _ := fs.Sub(assets, "web")
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 	s.mux.HandleFunc("/static/themes.css", s.handleThemes)
@@ -66,6 +71,9 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
 	s.mux.HandleFunc("/api/diff", s.handleDiff)
 	s.mux.HandleFunc("/api/gutter", s.handleGutter)
+	s.mux.HandleFunc("/api/stream", s.handleEventStream)
+	s.mux.HandleFunc("/api/git/stream", s.handleEventStream)
+	s.mux.HandleFunc("/api/git/refresh", s.handleGitRefresh)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/outline", s.handleOutline)
 	s.mux.HandleFunc("/api/def", s.handleDef)
@@ -82,6 +90,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/agent/harnesses", s.handleAgentHarnesses)
 	s.mux.HandleFunc("/api/agent/select", s.handleAgentSelect)
 	s.mux.HandleFunc("/api/agent/edit", s.handleAgentEdit)
+	s.mux.HandleFunc("/api/agent/batch", s.handleAgentBatchEdit)
 	s.mux.HandleFunc("/api/agent/job", s.handleAgentJob)
 	s.mux.HandleFunc("/api/agent/cancel", s.handleAgentCancel)
 	s.mux.HandleFunc("/api/settings", s.handleSettings)
@@ -114,18 +123,52 @@ func (s *Server) scavenge() {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.lastReq.Store(time.Now().UnixNano())
-	w.Header().Set("Cache-Control", "no-store")
-	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		s.mux.ServeHTTP(w, r)
-		return
+	isSSE := r.URL.Path == "/api/stream" || r.URL.Path == "/api/git/stream" || r.Header.Get("Accept") == "text/event-stream"
+	if r.URL.Path != "/api/metrics" && !isSSE {
+		s.lastReq.Store(time.Now().UnixNano())
 	}
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Add("Vary", "Accept-Encoding")
-	gz := gzipPool.Get().(*gzip.Writer)
-	gz.Reset(w)
-	defer func() { gz.Close(); gzipPool.Put(gz) }()
-	s.mux.ServeHTTP(gzipWriter{ResponseWriter: w, w: gz}, r)
+	start := time.Now()
+
+	rec := &statusRecorder{ResponseWriter: w}
+	if uiVerbose {
+		defer func() {
+			dur := fmtDuration(time.Since(start))
+			status := rec.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			role := "info"
+			if status >= 500 {
+				role = "err"
+			} else if status >= 400 {
+				role = "warn"
+			}
+			uri := r.RequestURI
+			if uri == "" {
+				uri = r.URL.RequestURI()
+			}
+			if uri == "" {
+				uri = r.URL.Path
+			}
+			if uri == "" {
+				uri = "/"
+			}
+			uiStatus(role, "http", fmt.Sprintf("%s %s · %d  (%s)", r.Method, uri, status, dur), 0, os.Stdout)
+		}()
+	}
+
+	var out http.ResponseWriter = rec
+	w.Header().Set("Cache-Control", "no-store")
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && !isSSE {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := gzipPool.Get().(*gzip.Writer)
+		gz.Reset(rec)
+		defer func() { gz.Close(); gzipPool.Put(gz) }()
+		out = gzipWriter{ResponseWriter: rec, w: gz}
+	}
+
+	s.mux.ServeHTTP(out, r)
 }
 
 var gzipPool = sync.Pool{New: func() any {
@@ -139,6 +182,56 @@ type gzipWriter struct {
 }
 
 func (g gzipWriter) Write(b []byte) (int, error) { return g.w.Write(b) }
+
+func (g gzipWriter) Flush() {
+	_ = g.w.Flush()
+	if flusher, ok := g.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (g gzipWriter) Unwrap() http.ResponseWriter {
+	return g.ResponseWriter
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.bytes += int64(n)
+	return n, err
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, errors.New("hijack unsupported")
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
 
 // safePath resolves a client-supplied relative path inside the root, refusing
 // anything that escapes it.
@@ -191,7 +284,16 @@ func fail(w http.ResponseWriter, code int, msg string) {
 // SetAgent makes editing through a coding harness available. Unavailable
 // unless main wires it; available still means nothing runs until a harness is
 // picked, in the UI or with -agent.
-func (s *Server) SetAgent(a *agentManager) { s.agent = a }
+func (s *Server) SetAgent(a *agentManager) {
+	s.agent = a
+	if a != nil {
+		a.onEdit = func() {
+			if s.gitWatcher != nil {
+				s.gitWatcher.Trigger()
+			}
+		}
+	}
+}
 
 // agentHarnesses is the picker's list, empty when editing is unavailable.
 func (s *Server) agentHarnesses() []agentHarness {
@@ -240,6 +342,7 @@ func (s *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	n, at, ms := s.ix.Stats()
+	gitCount, gitFiles := s.ix.GitChanges()
 	writeJSON(w, map[string]any{
 		"root":        s.ix.Root(),
 		"name":        filepath.Base(s.ix.Root()),
@@ -248,6 +351,8 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"builtAt":     at,
 		"ready":       s.ix.Ready(),
 		"git":         gitAvailable(s.ix.Root()),
+		"gitChanges":  gitCount,
+		"gitFiles":    gitFiles,
 		"lspServers":  s.lsp.Available(),
 		"metrics":     getProcessMetrics(),
 		"version":     version,
@@ -633,6 +738,104 @@ func (s *Server) handleGutter(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleEventStream streams real-time workspace events (git status notifications and process metrics) via Server-Sent Events (SSE).
+func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	includeMetrics := r.URL.Path != "/api/git/stream"
+
+	// 1. Immediately send initial metrics on connection (for unified stream)
+	if includeMetrics {
+		if mBytes, err := json.Marshal(getProcessMetrics()); err == nil {
+			if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", mBytes); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+
+	// 2. Subscribe to git watcher if available
+	var gitCh <-chan []byte
+	if s.gitWatcher != nil {
+		var cancel func()
+		gitCh, cancel = s.gitWatcher.Subscribe()
+		defer cancel()
+	}
+
+	// 3. Periodic metrics ticker (2500ms) for unified stream
+	var metricsTicker *time.Ticker
+	var metricsC <-chan time.Time
+	if includeMetrics {
+		metricsTicker = time.NewTicker(2500 * time.Millisecond)
+		defer metricsTicker.Stop()
+		metricsC = metricsTicker.C
+	}
+
+	// 4. Heartbeat ticker (15s) in case gitWatcher is disabled or not ticking
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+
+		case msg, ok := <-gitCh:
+			if !ok {
+				return
+			}
+			if _, err := w.Write(msg); err != nil {
+				return
+			}
+			flusher.Flush()
+
+		case <-metricsC:
+			if mBytes, err := json.Marshal(getProcessMetrics()); err == nil {
+				if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", mBytes); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+
+		case <-heartbeatTicker.C:
+			if s.gitWatcher == nil {
+				if _, err := w.Write([]byte(": ping\n\n")); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// handleGitRefresh triggers an immediate git status check and returns the latest git summary.
+func (s *Server) handleGitRefresh(w http.ResponseWriter, r *http.Request) {
+	if s.gitWatcher != nil {
+		payload := s.gitWatcher.Refresh()
+		writeJSON(w, payload)
+		return
+	}
+	count, files := s.ix.GitChanges()
+	writeJSON(w, map[string]any{
+		"git":        gitAvailable(s.ix.Root()),
+		"gitChanges": count,
+		"gitFiles":   files,
+		"statuses":   s.ix.GitStatusMap(),
+	})
+}
+
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := r.URL.Query()
@@ -766,9 +969,14 @@ func (s *Server) handleDef(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
+	EvictAll()
 	s.ix.Build()
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
 	n, _, ms := s.ix.Stats()
-	writeJSON(w, map[string]any{"files": n, "indexMs": ms})
+	gitCount, gitFiles := s.ix.GitChanges()
+	writeJSON(w, map[string]any{"files": n, "indexMs": ms, "gitChanges": gitCount, "gitFiles": gitFiles})
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {

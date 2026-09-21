@@ -42,6 +42,8 @@ make dist
 
 ## Features
 
+> For in-depth guides and workflows for every feature, see the [Features Documentation](docs/features/README.md).
+
 - **Blazing Fast Navigation**: Fuzzy file search (`Cmd/Ctrl+P`), symbol outline (`Cmd/Ctrl+Shift+O`), and workspace regex search (`Cmd/Ctrl+Shift+F`) in milliseconds.
 - **Remote-First**: `px0 user@host:path` runs px0 on any machine you can ssh into and forwards the page to your local browser, installing px0 there first if needed; nothing is exposed on the remote's network. Or spin px0 up on a remote server, cloud instance, or runner yourself and reach it over a single port (Tailscale, WireGuard, reverse proxy, or tunnel), with no remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
@@ -277,6 +279,7 @@ px0 --update
 | `-no-agent`  | `false`     | Do not offer editing through a coding harness                   |
 | `-no-telemetry` | `false`  | Disable anonymous usage telemetry                               |
 | `-no-color`  | `false`     | Strip ANSI escape sequences from terminal output                |
+| `-verbose`   | `false`     | Log every HTTP request, searches, symbols, and agent prompts    |
 | `-quiet`     | `false`     | Suppress CLI narration (errors still print to stderr)           |
 | `-update`    | `false`     | Check for updates and install the latest version                |
 | `-version`   | `false`     | Print version and architecture and exit                         |

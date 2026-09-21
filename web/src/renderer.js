@@ -79,6 +79,7 @@ export function paint() {
     let rc = 'row', gc = 'g';
     if (n === d.cur) rc += ' cur';
     if (agentRanges.some(r => n >= r.l1 && n <= r.l2)) rc += ' agent-sel';
+    if (agentRanges.some(r => n === r.l1)) rc += ' agent-anchor';
     if (gut) {
       const m = gut.marks.get(n);
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';

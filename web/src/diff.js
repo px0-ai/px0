@@ -32,13 +32,17 @@ function diffMode(d = doc_()) {
    the layout (split/unified) changes while already showing the same doc --
    switching layout doesn't change which doc is "shown", so that alone can't
    be the signal to redraw. Call whenever either might have changed. */
-export function syncDiffView() {
+export function syncDiffView(force = false) {
   const d = doc_();
   const want = (d && d.diffMode) ? d : null;
-  if (want !== shown) {
+  if (force && want) {
+    want.diffText = undefined;
+    want.diffHunks = undefined;
+  }
+  if (want !== shown || force) {
     shown = want;
     diffview.hidden = !want;
-    if (want) drawDiff(want);
+    if (want) drawDiff(want, force);
     else diffContent.replaceChildren();
   } else if (want && want.diffHunks !== undefined) {
     renderDiff(want);
@@ -68,6 +72,7 @@ export async function setDiffMode(mode) {
   } else {
     d.diffMode = mode;
     d.diffDismissed = false;
+    d.openedInDiffView = true;
     setLayoutPref(mode);
   }
   syncPreview(); // markdown preview and diff view are mutually exclusive
@@ -75,11 +80,11 @@ export async function setDiffMode(mode) {
   updateStatus();
 }
 
-async function drawDiff(d) {
-  if (d.diffText === undefined) {
+async function drawDiff(d, force = false) {
+  if (force || d.diffText === undefined) {
     diffContent.replaceChildren();
     try {
-      d.diffReq = d.diffReq || api('/api/diff', { path: d.path });
+      d.diffReq = api('/api/diff', { path: d.path });
       const j = await d.diffReq;
       d.diffText = j.diff || '';
       d.diffHunks = parseDiff(d.diffText);
@@ -125,7 +130,9 @@ export function syncDiffAgentTargets() {
   for (const el of diffview.querySelectorAll('[data-l]')) {
     const l = +el.dataset.l;
     const inAgent = ranges.some(r => l >= r.l1 && l <= r.l2);
+    const isAnchor = ranges.some(r => l === r.l1);
     el.classList.toggle('agent-sel', inAgent);
+    el.classList.toggle('agent-anchor', isAnchor);
   }
 }
 
@@ -274,7 +281,9 @@ export function initDiff() {
   });
   $('#diff-btn')?.addEventListener('click', e => {
     e.stopPropagation();
-    setDiffMode(doc_()?.diffMode || layoutPref());
+    const d = doc_();
+    if (!d || !d.diffAvailable) return;
+    setDiffMode(d.diffMode || layoutPref());
   });
   const menu = $('#diff-menu');
   if (menu) {
