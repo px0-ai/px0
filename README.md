@@ -131,6 +131,21 @@ px0 provides a built-in Settings editor modeled after VS Code. Settings are stor
 - **Interactive Attribute Tags & Pills**: Every setting is tagged with its category, type, current active value, default value, and interactive pill buttons for allowed values (e.g. `[line]`, `[block]`, `[underline]` for cursor styles; `[true]`, `[false]` for toggles; numeric ranges and presets). Clicking any pill applies that value immediately.
 - **Live Preview Without Reload**: Font sizes, line heights, cursor animations, themes, word wrapping, diff layouts, and git gutter indicators apply in real time without refreshing the page.
 - **One-Click Reset**: Any modified setting displays a `Modified` badge and a `Reset` button to restore its factory default.
+### LSP Server Configuration
+
+You can provide arbitrary initialization options for any language server by adding a key in the format `lsp.<server-name>` to your `settings.json` (via the JSON settings editor). For example, to restrict the directories that gopls analyzes in a large workspace:
+
+```json
+{
+  "lsp.gopls": {
+    "directoryFilters": [
+      "-vendor",
+      "-generated"
+    ]
+  }
+}
+```
+These values will be recursively merged over the built-in defaults and passed directly to the language server as its `initializationOptions`.
 
 ### Key Configurable Settings
 
