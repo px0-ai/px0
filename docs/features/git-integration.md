@@ -34,6 +34,7 @@ px0 provides non-destructive, zero-latency Git awareness. It queries Git status 
 - **Side-by-Side & Unified Diff Modes**:
   - **Side-by-Side (Split)**: View original `HEAD` code on the left and active working-tree code on the right with synchronized scrolling.
   - **Unified**: View changes inline with consecutive additions and deletions.
+- **Intraline Highlights**: Paired replacement lines emphasize every changed token range. Short changed identifiers and numbers are refined to the exact character range, so small edits remain easy to scan in either layout.
 - **Whitespace Diff Filtering**: Toggle whitespace trimming to hide trivial indentation and trailing space differences when reviewing significant logic changes.
 - **Direct Agent Editing from Diffs**: Select any modified or added line in the diff view and trigger an AI agent edit (`Alt+E`) to refine or correct the change on the spot.
 - **Battery and Focus Awareness**: The live stream automatically suspends when the browser tab is hidden (`document.visibilityState === 'hidden'`), conserving CPU cycles and laptop battery. When you switch back to px0, it instantly reconnects and queries `/api/git/refresh` to catch any changes made while the window was in the background.

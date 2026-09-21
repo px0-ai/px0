@@ -12,6 +12,8 @@ General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are 
 
 Because px0 is a code inspection and navigation tool that never edits text in place (changes go through a coding harness), it bypasses heavy third-party editor runtimes entirely. Instead, it implements a custom, high-performance virtualized surface with a fixed DOM footprint (~60 active nodes) and sub-millisecond paint budgets.
 
+Git diffs are a separate, bounded overlay rather than part of this virtualized surface. Their paired replacement lines can contain small intraline spans, but the source editor's row count and recycling behavior are unchanged.
+
 ## 2. DOM Surface Hierarchy
 
 The editor surface is defined in [`web/index.html`](../../web/index.html):
