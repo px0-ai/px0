@@ -622,6 +622,8 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-row.diff-add .diff-code, .diff-side.diff-add .diff-mk { color: var(--gi); }
 .diff-row.diff-del, .diff-side.diff-del { background: var(--gd-bg); }
 .diff-row.diff-del .diff-code, .diff-side.diff-del .diff-mk { color: var(--gd); }
+.diff-inner-add { background: color-mix(in srgb, var(--gi) 36%, transparent); }
+.diff-inner-del { background: color-mix(in srgb, var(--gd) 36%, transparent); }
 .diff-side.diff-blank { background: var(--bg2); }
 /* Split: deletions and additions paired side by side, each half its own mini-row. */
 .diff-row-pair { display: flex; }
@@ -1782,4 +1784,3 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   resize: none;
   tab-size: 2;
 }
-
