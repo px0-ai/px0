@@ -45,7 +45,7 @@ make dist
 > For in-depth guides and workflows for every feature, see the [Features Documentation](docs/features/README.md).
 
 - **Blazing Fast Navigation**: Fuzzy file search (`Cmd/Ctrl+P`), symbol outline (`Cmd/Ctrl+Shift+O`), and workspace regex search (`Cmd/Ctrl+Shift+F`) in milliseconds.
-- **Remote-First, Zero SSH Hassle**: Spin up on any remote server, cloud instance, or runner in < 1 ms. Inspect remote code in your local browser over a single port (Tailscale, WireGuard, reverse proxy, or tunnel) without SSH key setups, port forwarding churn, or remote extension daemons.
+- **Remote-First**: `px0 user@host:path` runs px0 on any machine you can ssh into and forwards the page to your local browser, installing px0 there first if needed; nothing is exposed on the remote's network. Or spin px0 up on a remote server, cloud instance, or runner yourself and reach it over a single port (Tailscale, WireGuard, reverse proxy, or tunnel), with no remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
 - **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
 - **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, or Cursor Agent on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
@@ -223,7 +223,25 @@ px0 main.go:42          # open directly to a line number
 
 ### Remote & Cloud Workspaces
 
-Spin up on any remote server, VM, or container and view code directly in your local browser without SSH shell management, X11 forwarding, or remote extension daemons:
+#### One command over ssh
+
+Point px0 at a machine you can ssh into, the way you would with `scp`, and it runs px0 there and brings the page back to your local browser:
+
+```bash
+px0 vm:~/work/repo                    # ssh alias or hostname, path relative to the login directory
+px0 deploy@10.0.0.7:/srv/app          # user@host and an absolute path
+px0 build-box:repo/main.go:42         # a file and line, opened on arrival
+```
+
+Anything ssh itself needs, such as a non-standard port, an identity file or a jump host, goes in `~/.ssh/config` for that host.
+
+px0 starts on the remote bound to loopback and asks the ssh client to forward that port to `127.0.0.1` here (`-port` picks the local end, `7777` by default). Nothing is exposed on the remote's network, the authentication is whatever your ssh already does (keys, agents, `~/.ssh/config` aliases, jump hosts), and because the browser reaches the page by IP address, Edit with Agent keeps working: the coding harness runs on the remote, where the code is. Ctrl-C locally stops both ends; a dropped connection stops the remote px0 too.
+
+If px0 is not installed on the remote, you are asked before it is put in `~/.local/bin` there. The remote always receives the same version you are running: a copy of your own binary when the platforms match, otherwise that version's release for the remote's platform, downloaded here and checksum-verified, so the remote needs no internet access. `-no-lsp`, `-no-git`, `-agent`, `-no-agent`, `-no-telemetry` and `-verbose` are passed through to the remote px0. The remote needs a POSIX `sh`; the local side needs the `ssh` client on `PATH`. A target that exists locally is always opened locally, even if its name contains a colon.
+
+#### Serving on a network yourself
+
+Alternatively, bind px0 to an interface on the remote and reach it over a private network, reverse proxy or tunnel:
 
 ```bash
 # Bind all interfaces on a remote machine / cloud instance
@@ -252,8 +270,8 @@ px0 --update
 
 | Flag         | Default     | Description                                                     |
 | ------------ | ----------- | --------------------------------------------------------------- |
-| `-port N`    | `7777`      | Port to listen on (`0` picks an ephemeral free port)            |
-| `-host H`    | `127.0.0.1` | Local address to bind                                           |
+| `-port N`    | `7777`      | Port to listen on (`0` picks an ephemeral free port); for a remote target, the local end of the ssh forward |
+| `-host H`    | `127.0.0.1` | Local address to bind (ignored for a remote target, which is always reached through loopback) |
 | `-no-open`   | `false`     | Do not launch the web browser automatically                     |
 | `-no-lsp`    | `false`     | Disable language server discovery and use regex-based outline   |
 | `-no-git`    | `false`     | Disable git awareness (tree status badges and the diff view)    |

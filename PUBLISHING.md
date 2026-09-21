@@ -8,7 +8,7 @@ Before cutting a new release, ensure you have:
 
 - Git with push and tag permissions for `px0-ai/px0`.
 - Go (version 1.24+).
-- Node.js (v18+ or v20+) or Bun for bundling frontend assets.
+- Node.js 22.7+ or Bun for bundling frontend assets. The bundler is an ES module without a `package.json`, so older Node needs `node --experimental-detect-module ./scripts/build-web.js`. When `web/src/` is untouched, the committed `web/app.js` is current and `go build -o px0 .` alone is enough.
 - A clean working tree with all tests passing.
 
 ## 2. Pre-Release Verification

@@ -43,7 +43,7 @@ func main() {
 		noAgent      = flag.Bool("no-agent", false, "do not offer editing through a coding harness")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [file or directory]\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage: px0 [flags] [file or directory]\n       px0 [flags] [user@]host:path        (run on a remote machine over ssh)\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -83,6 +83,30 @@ func main() {
 	target := "."
 	if flag.NArg() > 0 {
 		target = flag.Arg(0)
+	}
+	if rt, ok := parseRemoteTarget(target); ok {
+		var passthrough []string
+		if *noLSP {
+			passthrough = append(passthrough, "-no-lsp")
+		}
+		if *noGit {
+			passthrough = append(passthrough, "-no-git")
+		}
+		if *noAgent {
+			passthrough = append(passthrough, "-no-agent")
+		}
+		if *agentCmd != "" {
+			passthrough = append(passthrough, "-agent", *agentCmd)
+		}
+		if *noTelemetry {
+			passthrough = append(passthrough, "-no-telemetry")
+		}
+		if *verbose {
+			passthrough = append(passthrough, "-verbose")
+		}
+		go checkDailyUpdate(version)
+		runRemoteMain(rt, remoteOptions{LocalPort: *port, NoOpen: *noOpen, Passthrough: passthrough})
+		return
 	}
 	root, initialFile, initialLine, err := resolveTarget(target)
 	if err != nil {
@@ -187,6 +211,32 @@ func main() {
 
 	tel.Close("normal")
 	if err != nil && err != http.ErrServerClosed {
+		fatal(err)
+	}
+}
+
+// runRemoteMain drives a remote session from the terminal: Ctrl-C ends it,
+// a second Ctrl-C forces the exit.
+func runRemoteMain(rt remoteTarget, opts remoteOptions) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	interrupted := false
+	go func() {
+		<-stop
+		interrupted = true
+		cancel()
+		fmt.Print("\r")
+		uiStatus("info", "px0 stopped", "", 0, os.Stderr)
+		<-stop
+		os.Exit(130)
+	}()
+	err := runRemote(ctx, rt, opts)
+	if interrupted {
+		os.Exit(130)
+	}
+	if err != nil {
 		fatal(err)
 	}
 }

@@ -41,7 +41,7 @@ sequenceDiagram
 
 ### Key Stages in [`main.go`](../../main.go)
 
-1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab.
+1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab. A target of the form `[user@]host:path` that does not exist locally is a remote target and takes the ssh path described in [Section 6](#6-remote-sessions-over-ssh) instead of the local pipeline.
 1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
 1. Non-Blocking Browser Launch: `go openBrowser(url)` spawns the platform-specific browser opener (`xdg-open` on Linux, `open` on macOS, `rundll32` on Windows) in a separate goroutine.
@@ -166,3 +166,53 @@ The `/api/lsp/install` and `/api/lsp/start` endpoints execute shell commands (e.
 ### Self-Update Integrity
 
 Before `px0 --update` executes or installs a release binary, it verifies the download against the SHA-256 digest in that release's `checksums.txt` asset. Missing, malformed, or mismatched checksum data aborts the update without replacing the current executable.
+
+## 6. Remote Sessions over ssh
+
+`px0 user@host:path` ([`remote.go`](../../remote.go)) runs px0 on another machine and forwards its port to the local browser. It is the remote-first story with the network setup removed: nothing on the remote is bound beyond loopback, and authentication is whatever the user's ssh client already does.
+
+### Target Recognition (`parseRemoteTarget`)
+
+A target is remote only when it does not exist locally and has the scp shape `[user@]host:path` (host limited to letters, digits, `.`, `-`, `_` and one `@`, never starting with `-` so it cannot be read as an ssh flag). URLs are not accepted; ssh options such as ports and identity files belong in `~/.ssh/config`. Two shapes are deliberately left local: `file.go:12` for a missing file, so the usual error is reported, and `host:8080`, where an all-digit remainder is a line number rather than a path. An empty path means the login directory; `~/x` expands on the remote.
+
+### Session Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Local as local px0
+    participant SSH as ssh -L 127.0.0.1:L:127.0.0.1:R
+    participant Launcher as remote sh launcher
+    participant Remote as remote px0 (loopback:R)
+    participant Browser
+
+    Local->>Local: reserve local port L (listen, close)
+    Local->>Local: pick random remote port R (20000-60000)
+    Local->>SSH: start, stdin held open, stdout parsed, stderr relayed
+    SSH->>Launcher: sh -c script
+    Launcher->>Launcher: locate px0 (PATH, ~/.local/bin, ~/bin, /usr/local/bin, /opt/homebrew/bin)
+    Launcher->>Remote: px0 -no-open -no-color -port R [passthrough] -- path
+    Remote-->>Local: banner with url http://127.0.0.1:R/...
+    Local->>Local: rewrite url to 127.0.0.1:L
+    Local->>Browser: openBrowser(local url)
+    Note over Local,Remote: narration relayed; edits work (page reached by IP)
+    Local->>SSH: Ctrl-C / exit closes stdin
+    Launcher->>Remote: watcher sees EOF, kill px0 (SIGTERM)
+    Remote-->>Launcher: exits, wait returns, session ends
+```
+
+- Port choice: the local end is reserved with `listen()` and released for ssh to bind (`ExitOnForwardFailure=yes` makes a lost race fatal and visible). The remote end is a random port; px0 walks forward when its port is busy, so the printed URL is checked against the requested port and the session is restarted with a new port on a mismatch.
+- Lifetime: the launcher duplicates the session's stdin onto fd 3 and runs `cat <&3` in a background watcher (a background list in a non-interactive shell would otherwise read `/dev/null`); EOF on it kills px0. `wait` on px0 ends the launcher when px0 exits on its own, so a failing start ends the session and the local side reports it. `ServerAliveInterval` makes a dead link end the session too.
+- Output: the remote's stdout passes through unchanged except for two lines: the `url:` line, whose address is rewritten to the local end, and the version heading, which gains the local version when the two differ. ssh's stderr is inherited. Password, passphrase and host-key prompts are unaffected: ssh reads those from the terminal, not stdin.
+- Flags: `-port` is the local end of the forward; `-host` and `-dev` do not apply; `-no-lsp`, `-no-git`, `-agent`, `-no-agent`, `-no-telemetry` and `-verbose` are repeated to the remote px0, quoted for `sh`.
+
+### Installing on the Remote
+
+When the launcher finds no px0 it prints `px0-remote: missing <uname -s> <uname -m>` and exits 3. The local side asks the user (no terminal on stdin means no) and then streams a binary over a second ssh session into `~/.local/bin/px0`. The remote always receives the local version: the running executable when GOOS/GOARCH match, otherwise the release asset for the remote's platform, downloaded locally and verified against the release's `checksums.txt` with the same helper `-update` uses. The remote therefore needs no network access, and both ends run the same code, which is what keeps flag and output compatibility a non-issue. A local build with no published release cannot install cross-platform and says so. The session is then started again; a second miss after an install is reported rather than retried.
+
+### Security Properties
+
+- The remote px0 binds `127.0.0.1` only. It is reachable solely through the ssh forward, whose local end is also loopback.
+- The browser's `Host` is `127.0.0.1:L`, an IP address, so `localPost` admits agent edits and language-server installs. Those run on the remote as the ssh user, which is the intended use: the harness runs where the code is. Anything that can reach the local forward port can dispatch them, the same trust boundary as a local px0.
+- The remote path is quoted for `sh` (`shellQuote`), with only a leading `~` expanded. Passthrough flags are quoted the same way. The ssh destination is passed after `--`.
+- Nothing is written on the remote except, with consent, the installed binary in `~/.local/bin`. Nothing is written locally.
