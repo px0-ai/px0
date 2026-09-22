@@ -636,6 +636,26 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-row.diff-del, .diff-side.diff-del { background: var(--gd-bg); }
 .diff-row.diff-del .diff-code, .diff-side.diff-del .diff-mk { color: var(--gd); }
 .diff-side.diff-blank { background: var(--bg2); }
+
+/* GitHub-style context expansion: a chevron row stands where the unchanged
+   lines git skipped between hunks would be, and expands them in steps. */
+.diff-expand {
+  display: flex; justify-content: center; align-items: center; gap: 6px;
+  padding: 2px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.diff-expand + .diff-hunk-head { border-top: none; }
+.diff-hunk-head + .diff-expand, .diff-table + .diff-expand { border-top: none; }
+.diff-expand-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px;
+  border-radius: 4px; border: 1px solid transparent;
+  background: none; color: var(--faint);
+  font: 10px/1 var(--ui); cursor: pointer;
+}
+.diff-expand-btn:hover { color: var(--accent-fg); border-color: var(--accent); background: var(--bg3); }
+.diff-expand-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.diff-expand.busy .diff-expand-btn { opacity: .4; pointer-events: none; }
+.diff-expand-btn svg { display: block; }
+
 /* Split: deletions and additions paired side by side, each half its own mini-row. */
 .diff-row-pair { display: flex; }
 .diff-side { flex: 1 1 50%; min-width: 0; }

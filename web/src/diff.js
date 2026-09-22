@@ -38,6 +38,10 @@ export function syncDiffView(force = false) {
   if (force && want) {
     want.diffText = undefined;
     want.diffHunks = undefined;
+    // The diff itself is being refetched, so any expansion of it is stale too.
+    want.diffExpand = null;
+    want.diffCtx = null;
+    want.diffPending = null;
   }
   if (want !== shown || force) {
     shown = want;
@@ -114,10 +118,22 @@ function renderDiff(d) {
     return;
   }
   const frag = document.createDocumentFragment();
-  for (const hunk of d.diffHunks) {
-    frag.append(hunkHeader(hunk));
-    frag.append(d.diffMode === 'unified' ? unifiedTable(hunk) : splitTable(hunk));
-  }
+  /* Hunks are stitched together with the unchanged lines git left out between
+     them: ranges the reader expanded render as context rows, each run still
+     hidden collapses into an expand button. lastNew/lastOld track where each
+     gap starts on both sides of the diff, so an expanded line can be stamped
+     with the base line it corresponds to. */
+  let lastNew = 0, lastOld = 0;
+  d.diffHunks.forEach((hunk, i) => {
+    frag.append(...gapElements(d, lastNew + 1, hunk.newStart - 1, lastOld, lastNew, i));
+    frag.append(hunkHeader(hunk, i));
+    frag.append(diffTable(d, hunk.rows));
+    for (const row of hunk.rows) {
+      if (row.newLine > lastNew) lastNew = row.newLine;
+      if (row.oldLine > lastOld) lastOld = row.oldLine;
+    }
+  });
+  frag.append(...gapElements(d, lastNew + 1, d.total || lastNew, lastOld, lastNew, -1));
   diffContent.append(frag);
   syncDiffAgentTargets();
   if (prSyncHandler) prSyncHandler();
@@ -143,9 +159,10 @@ export function syncDiffAgentTargets() {
   }
 }
 
-function hunkHeader(hunk) {
+function hunkHeader(hunk, i) {
   const el = document.createElement('div');
   el.className = 'diff-hunk-head';
+  el.dataset.hunk = i; // an expansion pins the viewport on the header below its gap
   el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@';
   return el;
 }
@@ -181,38 +198,150 @@ function parseDiff(text) {
   return hunks;
 }
 
-/* ---------- unified layout: one row per diff line ---------- */
+/* ---------- both layouts render a flat list of rows the same way ---------- */
 
-function unifiedTable(hunk) {
+function diffTable(d, rows) {
   const table = document.createElement('div');
-  table.className = 'diff-table diff-unified';
-  for (const row of hunk.rows) {
-    const r = document.createElement('div');
-    r.className = 'diff-row diff-' + row.type;
-    anchor(r, row);
-    r.append(
-      lineCell(row.type === 'add' ? '' : row.oldLine),
-      lineCell(row.type === 'del' ? '' : row.newLine),
-      markerCell(row.type),
-      codeCell(row.text),
-    );
-    table.append(r);
+  table.className = 'diff-table ' + (d.diffMode === 'unified' ? 'diff-unified' : 'diff-split');
+  if (d.diffMode === 'unified') {
+    for (const row of rows) {
+      const r = document.createElement('div');
+      r.className = 'diff-row diff-' + row.type;
+      anchor(r, row);
+      r.append(
+        lineCell(row.type === 'add' ? '' : row.oldLine),
+        lineCell(row.type === 'del' ? '' : row.newLine),
+        markerCell(row.type),
+        codeCellFor(row),
+      );
+      table.append(r);
+    }
+  } else {
+    for (const pair of pairRows(rows)) {
+      const r = document.createElement('div');
+      r.className = 'diff-row-pair';
+      r.append(splitSide(pair.left, 'left'), splitSide(pair.right, 'right'));
+      table.append(r);
+    }
   }
   return table;
 }
 
-/* ---------- split layout: deletions and additions paired side by side ---------- */
+/* ---------- expandable context between hunks ---------- */
 
-function splitTable(hunk) {
-  const table = document.createElement('div');
-  table.className = 'diff-table diff-split';
-  for (const pair of pairRows(hunk.rows)) {
-    const r = document.createElement('div');
-    r.className = 'diff-row-pair';
-    r.append(splitSide(pair.left, 'left'), splitSide(pair.right, 'right'));
-    table.append(r);
+const EXPAND_STEP = 20; // lines a side chevron reveals per click
+const EXPAND_MAX = 500; // ceiling on the middle chevron: the diff DOM is not virtualized
+
+/* The lines git skipped between hunks (and before the first / after the last).
+   Expanded ranges render as context rows; each run still hidden collapses into
+   an expand button. Everything in a gap is unchanged by definition, so oldOf
+   maps a new-file line onto the base line it corresponds to. */
+function gapElements(d, g1, g2, lastOld, lastNew, nextHunkIdx) {
+  if (g2 < g1) return [];
+  const out = [];
+  const oldOf = l => lastOld + (l - lastNew);
+  let cur = g1;
+  for (const r of d.diffExpand || []) {
+    if (r.e < g1 || r.s > g2) continue;
+    const s = Math.max(r.s, g1), e = Math.min(r.e, g2);
+    if (s > cur) out.push(expandRow(d, cur, s - 1, nextHunkIdx));
+    out.push(ctxTable(d, s, e, oldOf));
+    cur = e + 1;
   }
-  return table;
+  if (cur <= g2) out.push(expandRow(d, cur, g2, nextHunkIdx));
+  return out;
+}
+
+/* Highlighted rows come from /api/file's cache on the doc, keyed by line. */
+function ctxTable(d, s, e, oldOf) {
+  const cache = d.diffCtx || (d.diffCtx = new Map());
+  const rows = [];
+  for (let l = s; l <= e; l++) {
+    rows.push({ type: 'ctx', oldLine: oldOf(l), newLine: l, html: cache.get(l) || '&nbsp;' });
+  }
+  return diffTable(d, rows);
+}
+
+const chev = paths => '<svg viewBox="0 0 10 10" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + paths.map(p => '<path d="' + p + '"/>').join('') + '</svg>';
+const SVG_UP = chev(['M2 6.5L5 3.5L8 6.5']);
+const SVG_DOWN = chev(['M2 3.5L5 6.5L8 3.5']);
+const SVG_BOTH = chev(['M2 4.75L5 1.75L8 4.75', 'M2 8.25L5 5.25L8 8.25']);
+
+function expandRow(d, s, e, nextHunkIdx) {
+  const el = document.createElement('div');
+  el.className = 'diff-expand';
+  if (intersectsPending(d, s, e)) el.classList.add('busy');
+  const n = e - s + 1;
+  const mk = (from, to, title, svg) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'diff-expand-btn';
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.innerHTML = svg;
+    b.addEventListener('click', () => expandLines(d, from, to, el, nextHunkIdx));
+    el.append(b);
+  };
+  if (n <= EXPAND_STEP) {
+    mk(s, e, 'Expand ' + n + (n === 1 ? ' line' : ' lines'), SVG_BOTH);
+  } else {
+    mk(s, s + EXPAND_STEP - 1, 'Expand ' + EXPAND_STEP + ' lines above', SVG_UP);
+    const all = Math.min(n, EXPAND_MAX);
+    mk(s, s + all - 1, 'Expand up to ' + all + ' lines', SVG_BOTH);
+    mk(e - EXPAND_STEP + 1, e, 'Expand ' + EXPAND_STEP + ' lines below', SVG_DOWN);
+  }
+  return el;
+}
+
+/* Fetches the range from /api/file (already syntax-highlighted), caches it on
+   the doc, merges the range into the expansion state, and redraws. The hunk
+   header below the gap is pinned on screen: every new row lands above it. */
+async function expandLines(d, s, e, rowEl, nextHunkIdx) {
+  if (s > e || shown !== d || intersectsPending(d, s, e)) return;
+  const key = s + ':' + e;
+  (d.diffPending || (d.diffPending = new Set())).add(key);
+  const anchorSel = nextHunkIdx >= 0 ? '.diff-hunk-head[data-hunk="' + nextHunkIdx + '"]' : null;
+  const anchor = anchorSel ? diffContent.querySelector(anchorSel) : null;
+  const was = anchor ? anchor.offsetTop : 0;
+  rowEl.classList.add('busy');
+  try {
+    const j = await api('/api/file', { path: d.path, start: s - 1, count: e - s + 1 });
+    const cache = d.diffCtx || (d.diffCtx = new Map());
+    for (let i = 0; i < (j.lines || []).length; i++) cache.set(s + i, j.lines[i]);
+    mergeExpand(d, s, e);
+  } catch (err) {
+    setStatusNote('Expand failed: ' + err.message, 4000);
+  } finally {
+    d.diffPending.delete(key);
+  }
+  if (shown !== d) return;
+  renderDiff(d);
+  if (anchor) {
+    const nowEl = diffContent.querySelector(anchorSel);
+    if (nowEl) diffview.scrollTop += nowEl.offsetTop - was;
+  }
+}
+
+function mergeExpand(d, s, e) {
+  const list = d.diffExpand || (d.diffExpand = []);
+  list.push({ s, e });
+  list.sort((a, b) => a.s - b.s);
+  const merged = [];
+  for (const r of list) {
+    const last = merged[merged.length - 1];
+    if (last && r.s <= last.e + 1) last.e = Math.max(last.e, r.e);
+    else merged.push({ s: r.s, e: r.e });
+  }
+  d.diffExpand = merged;
+}
+
+function intersectsPending(d, s, e) {
+  for (const key of d.diffPending || []) {
+    const i = key.indexOf(':');
+    const ps = +key.slice(0, i), pe = +key.slice(i + 1);
+    if (ps <= e && pe >= s) return true;
+  }
+  return false;
 }
 
 // Walks a hunk's flat row list, pairing each run of deletions with the run of
@@ -239,7 +368,7 @@ function splitSide(row, side) {
   if (!row) { el.append(lineCell(''), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
   anchor(el, row);
-  el.append(lineCell(ln), markerCell(row.type), codeCell(row.text));
+  el.append(lineCell(ln), markerCell(row.type), codeCellFor(row));
   return el;
 }
 
@@ -281,6 +410,16 @@ function codeCell(text) {
   const el = document.createElement('div');
   el.className = 'diff-code';
   el.innerHTML = esc(text || '') || '&nbsp;';
+  return el;
+}
+
+/* An expanded context row carries highlighted HTML straight from /api/file,
+   the same markup the source viewport renders, so it skips the escaping. */
+function codeCellFor(row) {
+  if (row.html === undefined) return codeCell(row.text);
+  const el = document.createElement('div');
+  el.className = 'diff-code';
+  el.innerHTML = row.html || '&nbsp;';
   return el;
 }
 
