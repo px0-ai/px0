@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -293,11 +294,17 @@ func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches,
 	root := ix.Root()
 	// Ignored files are never indexed, but find-in-file on an open one names it
 	// exactly. Search that one file rather than finding nothing.
-	if f, ok := unindexedTarget(root, files, o.Glob); ok {
+	if ix.Remote() {
+		if f, ok := remoteUnindexedTarget(ix, files, o.Glob); ok {
+			files = []FileEntry{f}
+		}
+	} else if f, ok := unindexedTarget(root, files, o.Glob); ok {
 		files = []FileEntry{f}
 	}
 	var (
 		mu      sync.Mutex
+		errMu   sync.Mutex
+		readErr error
 		results []FileMatches
 		hit     int32
 		wg      sync.WaitGroup
@@ -323,8 +330,24 @@ func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches,
 				if int(atomic.LoadInt32(&hit)) >= o.MaxFiles {
 					continue
 				}
-				data, err := readInto(filepath.Join(root, filepath.FromSlash(f.Path)), &w.read, f.Size)
-				if err != nil || isBinary(data) {
+				var data []byte
+				var err error
+				if ix.Remote() {
+					data, err = ix.ReadFile(ctx, f.Path)
+				} else {
+					data, err = readInto(filepath.Join(root, filepath.FromSlash(f.Path)), &w.read, f.Size)
+				}
+				if err != nil {
+					if ix.Remote() {
+						errMu.Lock()
+						if readErr == nil {
+							readErr = fmt.Errorf("%s: %w", f.Path, err)
+						}
+						errMu.Unlock()
+					}
+					continue
+				}
+				if isBinary(data) {
 					continue
 				}
 				if ctx.Err() != nil {
@@ -357,6 +380,12 @@ func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches,
 	wg.Wait()
 
 	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	errMu.Lock()
+	err = readErr
+	errMu.Unlock()
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -395,4 +424,23 @@ func unindexedTarget(root string, files []FileEntry, glob string) (FileEntry, bo
 		Path: rel, Name: name, Size: st.Size(),
 		lower: strings.ToLower(rel), nameStart: len(rel) - len(name),
 	}, true
+}
+
+func remoteUnindexedTarget(ix *Index, files []FileEntry, glob string) (FileEntry, bool) {
+	if glob == "" || strings.ContainsAny(glob, "*?[!") || strings.HasSuffix(glob, "/") {
+		return FileEntry{}, false
+	}
+	rel, ok := remoteRel(glob)
+	if !ok || rel == "" {
+		return FileEntry{}, false
+	}
+	i := sort.Search(len(files), func(i int) bool { return files[i].Path >= rel })
+	if i < len(files) && files[i].Path == rel {
+		return FileEntry{}, false // indexed: the normal path handles it
+	}
+	f, ok := ix.File(rel)
+	if !ok {
+		return FileEntry{}, false
+	}
+	return f, true
 }

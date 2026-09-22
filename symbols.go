@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -167,10 +169,17 @@ func Outline(abs, rel string) ([]Symbol, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return outlineReader(f, rel)
+}
 
+func OutlineData(rel string, data []byte) ([]Symbol, error) {
+	return outlineReader(bytes.NewReader(data), rel)
+}
+
+func outlineReader(r io.Reader, rel string) ([]Symbol, error) {
 	ext := strings.ToLower(filepath.Ext(rel))
 	var out []Symbol
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
 	if ext == ".md" || ext == ".markdown" {

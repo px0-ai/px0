@@ -4,7 +4,7 @@ import { showToast } from './ui.js';
 import { setStatusNote } from './status.js';
 import { openFile, reloadOpenTabs } from './tabs.js';
 import { refreshTree, treeEl } from './tree.js';
-import { setAgentHandler, hideSelectionBar } from './selbar.js';
+import { hideSelectionBar } from './selbar.js';
 import { render } from './renderer.js';
 import { syncDiffAgentTargets } from './diff.js';
 
@@ -930,7 +930,6 @@ function reloadWorkspace(focus, what = 'Changed') {
 
 export function initAgent() {
   if (!box || !tpl) return;
-  setAgentHandler(openAgentEdit);
 
   if (batchApply) batchApply.addEventListener('click', () => submitBatch());
   if (batchCancel) batchCancel.addEventListener('click', () => cancelBatch());

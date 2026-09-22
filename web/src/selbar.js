@@ -22,6 +22,9 @@ export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', 
    a cycle; the button simply does nothing when no harness is configured. */
 let agentHandler = null;
 export function setAgentHandler(fn) { agentHandler = fn; }
+export function agentEditingAvailable() {
+  return !!agentHandler && !(S.meta && S.meta.remote);
+}
 
 let current = null;   // the selection the bar is showing, or null when it is not
 let allText = null;   // Ctrl+A: promise of the S.selAll file's full text
@@ -167,7 +170,7 @@ export function runSelectionAction(act) {
   if (!current) {
     if (act === 'agent-edit') {
       const d = doc_();
-      if (d && agentHandler) {
+      if (d && agentEditingAvailable()) {
         const line = d.cur || 1;
         const text = (d.lines && d.lines[line - 1]) || '';
         agentHandler({ text, l1: line, l2: line, path: d.path });
@@ -186,7 +189,7 @@ export function runSelectionAction(act) {
     const snippet = '@' + path + ' ' + lineStr + '\n```' + ext + '\n' + text + '\n```';
     copyToClipboard(snippet, 'Copied');
   } else if (act === 'agent-edit') {
-    if (!agentHandler) return false;
+    if (!agentEditingAvailable()) return false;
     agentHandler(current);
   } else if (act === 'usages') {
     findReferences(text.split(/\s+/)[0] || text);
@@ -215,6 +218,7 @@ const SEL_MENU_ITEMS = [
 function openSelMenu(x, y) {
   menu.replaceChildren();
   for (const item of SEL_MENU_ITEMS) {
+    if (item.sel === 'agent-edit' && !agentEditingAvailable()) continue;
     const btn = document.createElement('button');
     btn.className = 'sel-menu-item';
     btn.dataset.sel = item.sel;

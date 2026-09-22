@@ -3,7 +3,7 @@ import { $, S, doc_, MOD, LH } from './state.js';
 import { vp, rowsEl } from './ui.js';
 import { paint, render, rowFor, placeCaret, toPoint } from './renderer.js';
 import { updateStatus } from './status.js';
-import { gotoDefinition } from './lsp.js';
+import { gotoDefinition, localLspNavigationAvailable } from './lsp.js';
 import { pushHistory } from './history.js';
 
 export const WORD = /[A-Za-z0-9_$]/;
@@ -233,7 +233,7 @@ export function initCursor() {
     // The clicked identifier is what F12, Shift+F12 and Alt+Shift+H act on.
     S.at = w;
     if (w) S.lastWord = w.word;
-    if (e[MOD] && w) {
+    if (e[MOD] && w && localLspNavigationAvailable()) {
       e.preventDefault();
       S.at = w; S.lastWord = w.word;
       pushHistory(d.path, d.cur); // so Alt+Left returns to the call site

@@ -4,7 +4,7 @@ import { vp, editor, copyToClipboard } from './ui.js';
 import { paint } from './renderer.js';
 import { setLspState } from './status.js';
 import { wordAtPoint } from './cursor.js';
-import { findReferences } from './lsp.js';
+import { findReferences, localLspNavigationAvailable } from './lsp.js';
 import { showCalls } from './calls.js';
 
 export const hovercard = $('#hovercard');
@@ -20,6 +20,11 @@ const sameWord = (a, b) => !!a && !!b && a.line === b.line && a.col === b.col &&
    when the modifier is actually held, or once the pointer has come to rest and
    the card is about to open. Everything on the hot path below is arithmetic. */
 export function onMove({ x, y, mod }) {
+  if (!localLspNavigationAvailable()) {
+    if (S.link) { S.link = null; vp.classList.remove('linking'); paint(); }
+    hideHover();
+    return;
+  }
   if (mod) {
     const at = doc_() ? wordAtPoint(x, y) : null;
     if (!sameWord(at, S.link)) {
@@ -52,11 +57,13 @@ export function onMove({ x, y, mod }) {
 }
 
 export function hoverAt(x, y) {
+  if (!localLspNavigationAvailable()) return;
   const at = doc_() ? wordAtPoint(x, y) : null;
   if (at && at.word) showHover(at, x, y);
 }
 
 export async function showHover(at, x, y) {
+  if (!localLspNavigationAvailable()) return;
   const d = doc_();
   if (!d || at.path !== d.path) return;
   const seq = ++hoverSeq;

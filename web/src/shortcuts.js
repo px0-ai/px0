@@ -7,12 +7,12 @@ import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
 import { openFind, clearFind, findbar } from './find.js';
-import { gotoDefinition, findReferences } from './lsp.js';
+import { gotoDefinition, findReferences, localLspNavigationAvailable } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { overlay, openPalette, closePalette } from './palette.js';
 import { moveCursor, moveCol, moveWord, caretToEdge } from './cursor.js';
 import { showCalls } from './calls.js';
-import { SEL_KEYS, runSelectionAction, selectAll, clearSelectAll, copySelectAll } from './selbar.js';
+import { SEL_KEYS, agentEditingAvailable, runSelectionAction, selectAll, clearSelectAll, copySelectAll } from './selbar.js';
 
 import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
@@ -34,15 +34,15 @@ export const SHORTCUTS = [
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+M'], 'Toggle Markdown preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
-  [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
-  [['Alt+Shift+H'], 'Call trail (callers / callees)'],
+  [['F12', 'Mod+Click'], 'Go to definition', localLspNavigationAvailable], [['Shift+F12'], 'Find all references', localLspNavigationAvailable],
+  [['Alt+Shift+H'], 'Call trail (callers / callees)', localLspNavigationAvailable],
   [['Mod+J'], 'Toggle right inspector (Symbols/Refs)'],
   [['Alt+Left', 'Alt+Right'], 'Navigate back / forward'], [['Mod+B'], 'Toggle sidebar'],
   [['Alt+W'], 'Close tab'], [['Alt+Shift+T'], 'Reopen closed tab'], [['Ctrl+Tab'], 'Next tab'],
   [['Alt+1…9'], 'Select tab'], [['Double click'], 'Highlight all occurrences'],
   [['Mod+A'], 'Select whole file'],
   [['Alt+C', 'Alt+A'], 'Copy selection ref / with context'], [['Alt+U'], 'Find usages of selection'],
-  [['Alt+E'], 'Edit selection inline'],
+  [['Alt+E'], 'Edit selection inline', agentEditingAvailable],
   [['Right click'], 'Selection actions at the pointer'],
   [['Mod+Home|Mod+Up', 'Mod+End|Mod+Down'], 'Top / bottom of file'],
   [['Home|Mod+Left', 'End|Mod+Right'], 'Start / end of line'],
@@ -55,7 +55,7 @@ export function showHelp() {
   const ver = S.meta?.version ? ` <span class="help-version">v${esc(S.meta.version)}</span>` : '';
   h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver +
     '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;" title="View Vim Keybindings">View Vim Keybindings</button></div><dl class="help-grid">' +
-    SHORTCUTS.map(([combos, v]) =>
+    SHORTCUTS.filter(item => !item[2] || item[2]()).map(([combos, v]) =>
       '<dt>' + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
       '<dd>' + esc(v) + '</dd>').join('') + '</dl></div>';
   h.hidden = false;
@@ -152,6 +152,7 @@ export function initShortcuts() {
     }
     if (e.altKey && e.shiftKey && !mod && e.code === 'KeyT') { e.preventDefault(); reopenClosedTab(); return; }
     if (e.key === 'F12') {
+      if (!localLspNavigationAvailable()) return;
       e.preventDefault();
       if (e.shiftKey) findReferences(); else gotoDefinition();
       return;
@@ -163,7 +164,7 @@ export function initShortcuts() {
       if (S.tabs.length > 1) switchTab((S.active + (e.shiftKey ? -1 : 1) + S.tabs.length) % S.tabs.length);
       return;
     }
-    if (e.altKey && e.shiftKey && e.code === 'KeyH') { e.preventDefault(); showCalls(); return; }
+    if (e.altKey && e.shiftKey && e.code === 'KeyH') { if (localLspNavigationAvailable()) { e.preventDefault(); showCalls(); } return; }
     if (e.altKey && !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) { e.preventDefault(); switchTab(+e.code.slice(5) - 1); return; }
     // Selection actions, live only while the status bar is showing them.
     if (e.altKey && !mod && !e.shiftKey && SEL_KEYS[e.code] && runSelectionAction(SEL_KEYS[e.code])) { e.preventDefault(); return; }

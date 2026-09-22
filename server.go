@@ -236,6 +236,10 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 // safePath resolves a client-supplied relative path inside the root, refusing
 // anything that escapes it.
 func (s *Server) safePath(rel string) (string, string, bool) {
+	if s.ix.Remote() {
+		clean, ok := remoteRel(rel)
+		return "", clean, ok
+	}
 	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
 	clean := filepath.Clean(filepath.FromSlash(rel))
 	if clean == "." {
@@ -346,6 +350,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"root":        s.ix.Root(),
 		"name":        filepath.Base(s.ix.Root()),
+		"remote":      s.ix.Remote(),
 		"files":       n,
 		"indexMs":     ms,
 		"builtAt":     at,
@@ -569,6 +574,14 @@ func (s *Server) handleLSPSymbols(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	dir := strings.Trim(r.URL.Query().Get("dir"), "/")
+	if s.ix.Remote() {
+		var ok bool
+		dir, ok = remoteRel(r.URL.Query().Get("dir"))
+		if !ok {
+			fail(w, 400, "bad path")
+			return
+		}
+	}
 	kids, ok := s.ix.Children(dir)
 	if !ok && !s.ix.Ready() {
 		// If indexing is still in flight, wait up to 300ms for this directory to be scanned
@@ -583,6 +596,10 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if err := s.ix.BuildError(); err != nil {
+		fail(w, 502, err.Error())
+		return
+	}
 	if !ok {
 		fail(w, 404, "not indexed: "+dir)
 		return
@@ -596,6 +613,10 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if err := s.ix.BuildError(); err != nil {
+		fail(w, 502, err.Error())
+		return
 	}
 	res := FuzzyFind(s.ix.Files(), q, limit)
 	if res == nil {
@@ -621,19 +642,45 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, err := os.Stat(abs)
-	if err != nil {
-		fail(w, 404, err.Error())
-		return
+	var size int64
+	var modTime int64
+	if s.ix.Remote() {
+		f, ok := s.ix.File(rel)
+		if !ok {
+			fail(w, 404, "not indexed: "+rel)
+			return
+		}
+		size, modTime = f.Size, f.ModTime
+	} else {
+		if err != nil {
+			fail(w, 404, err.Error())
+			return
+		}
+		size, modTime = st.Size(), st.ModTime().UnixNano()
 	}
 	if imageExt[strings.ToLower(filepath.Ext(rel))] {
 		if uiVerbose {
-			uiStatus("info", "view", fmt.Sprintf("%s · image (%s)", rel, formatBytes(st.Size())), 0, os.Stdout)
+			uiStatus("info", "view", fmt.Sprintf("%s · image (%s)", rel, formatBytes(size)), 0, os.Stdout)
 		}
-		writeJSON(w, map[string]any{"path": rel, "image": true, "size": st.Size()})
+		writeJSON(w, map[string]any{"path": rel, "image": true, "size": size})
+		return
+	}
+	if s.ix.Remote() && size > maxFileBytes {
+		fail(w, 413, fmt.Sprintf("file too large (%d bytes)", size))
 		return
 	}
 
-	d, err := Open(abs, rel)
+	var d *Doc
+	if s.ix.Remote() {
+		data, readErr := s.ix.ReadFileLimit(r.Context(), rel, maxFileBytes)
+		if readErr != nil {
+			err = readErr
+		} else {
+			d, err = OpenData(s.ix.Root()+"/"+rel, rel, data, modTime, size)
+		}
+	} else {
+		d, err = Open(abs, rel)
+	}
 	if err != nil {
 		fail(w, 415, err.Error())
 		return
@@ -660,7 +707,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
-		"start": start, "lines": lines, "size": st.Size(),
+		"start": start, "lines": lines, "size": size,
 		"exact": exact, "refine": !exact && coming,
 		"markdown":      isMarkdown(rel),
 		"diffAvailable": diffAvail,
@@ -687,7 +734,25 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad path")
 		return
 	}
-	if ct := mime.TypeByExtension(filepath.Ext(rel)); ct != "" {
+	ct := mime.TypeByExtension(filepath.Ext(rel))
+	if s.ix.Remote() {
+		if _, ok := s.ix.File(rel); !ok {
+			fail(w, 404, "not indexed: "+rel)
+			return
+		}
+		f, cleanup, err := s.ix.spoolFile(r.Context(), rel)
+		if err != nil {
+			fail(w, 404, err.Error())
+			return
+		}
+		defer cleanup()
+		if ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		_, _ = io.Copy(w, f)
+		return
+	}
+	if ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	http.ServeFile(w, r, abs)
@@ -846,6 +911,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Word:  q.Get("word") == "1",
 		Glob:  q.Get("glob"),
 	}
+	if err := s.ix.BuildError(); err != nil {
+		fail(w, 502, err.Error())
+		return
+	}
 	res, truncated, err := SearchContext(r.Context(), s.ix, opts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
@@ -887,7 +956,21 @@ func (s *Server) handleOutline(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad path")
 		return
 	}
-	syms, err := Outline(abs, rel)
+	var syms []Symbol
+	var err error
+	if s.ix.Remote() {
+		if _, ok := s.ix.File(rel); !ok {
+			fail(w, 404, "not indexed: "+rel)
+			return
+		}
+		var data []byte
+		data, err = s.ix.ReadFileLimit(r.Context(), rel, maxFileBytes)
+		if err == nil {
+			syms, err = OutlineData(rel, data)
+		}
+	} else {
+		syms, err = Outline(abs, rel)
+	}
 	if err != nil {
 		fail(w, 404, err.Error())
 		return
@@ -908,6 +991,10 @@ func (s *Server) handleDef(w http.ResponseWriter, r *http.Request) {
 	sym := strings.TrimSpace(r.URL.Query().Get("sym"))
 	if sym == "" {
 		fail(w, 400, "no symbol")
+		return
+	}
+	if err := s.ix.BuildError(); err != nil {
+		fail(w, 502, err.Error())
 		return
 	}
 	res, _, err := SearchContext(r.Context(), s.ix, SearchOpts{
@@ -973,6 +1060,10 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	s.ix.Build()
 	if s.gitWatcher != nil {
 		s.gitWatcher.Trigger()
+	}
+	if err := s.ix.BuildError(); err != nil {
+		fail(w, 502, err.Error())
+		return
 	}
 	n, _, ms := s.ix.Stats()
 	gitCount, gitFiles := s.ix.GitChanges()
@@ -1042,4 +1133,3 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 405, "method not allowed")
 	}
 }
-
