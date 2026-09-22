@@ -33,7 +33,7 @@ By default, px0 selects fast and cost-effective models for each harness, but all
 
 ## How an Agent Edit Works
 
-1. **Select Code**: Highlight the lines of code you wish to change in either the source code viewer or the visual git diff view.
+1. **Select Code**: Highlight the lines of code you wish to change in the source code viewer, the visual git diff view, or the rendered Markdown preview.
 2. **Trigger Composer**: Press **`Alt+E`**, right-click to open the context menu, or click **Edit with Agent** in the footer selection bar.
 3. **Configure Harness (First Time)**: Choose your preferred coding harness and model. Your choice is saved globally in `~/.px0/settings.json`, never in your repository files.
 4. **Enter Instruction**: Type what needs to change (e.g., *"Handle nil pointer return in error check"* or *"Refactor to use sync.Once"*) and press `Enter`.

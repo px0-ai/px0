@@ -15,7 +15,7 @@ px0 does not author changes. No endpoint accepts file content; it composes a pro
 
 Editing works by delegation:
 
-1. The user selects a range, in the code view or the diff view, and writes an instruction anchored to it.
+1. The user selects a range, in the code view, the diff view, or the rendered Markdown preview, and writes an instruction anchored to it.
 2. px0 composes a prompt from that instruction plus the referenced source.
 3. px0 spawns a coding harness already installed on the machine, with the workspace as its working directory.
 4. The harness makes the change.
@@ -60,7 +60,7 @@ An edit always starts from a selection. The same actions are offered in three pl
 
 ### The Right-Click Menu
 
-The menu is rebuilt from the footer's own `[data-sel]` buttons every time it opens, so the two can never disagree about which actions exist or whether Edit with Agent is on offer (it is hidden when no harness is available). It takes over the browser's context menu only when the right click lands in the code view or the diff view and there is a selection. A right click on plain code keeps the browser's menu.
+The menu is rebuilt from the footer's own `[data-sel]` buttons every time it opens, so the two can never disagree about which actions exist or whether Edit with Agent is on offer (it is hidden when no harness is available). It takes over the browser's context menu only when the right click lands in the code view, the diff view, or the rendered Markdown preview and there is a selection. A right click on plain code keeps the browser's menu.
 
 Two details keep the selection alive through the right click:
 
@@ -77,6 +77,12 @@ Diff rows carry where they point in the working tree:
 - `data-at`: for a deleted row, which has no line on disk, the working-tree line it sat before.
 
 `diffSelection()` gathers the stamped rows the selection intersects. It anchors to the range of `data-l` values, and a context line shown on both sides of a split is counted once. A selection of deleted lines alone anchors to the lines either side of where they were, clamped to the file. The text comes from the `.diff-code` cells alone, so the line-number and `+`/`-` gutters never leak into a prompt. Only the anchor reaches the harness: the prompt carries the lines on disk, not the deleted text.
+
+### Selecting in the Markdown Preview
+
+The rendered preview is a separate overlay, so a selection in it never touches the code viewport. Every rendered block carries the source line it starts on (`data-line`), which is what keeps the preview in step with line-based navigation, so the same stamp anchors an action:
+
+`previewSelection()` gathers the blocks the selection intersects and anchors to the first and last source line they start on. A block is the smallest anchor the preview keeps, so a selection inside one paragraph resolves to that paragraph's opening line rather than the exact span. The text is the rendered text the reader highlighted, while the dispatch, as everywhere else, carries the source lines on disk into the prompt. `Alt+E` never needed this mapping: with no selection to read it falls back to the current line, which is why the composer could open from the preview before the footer actions did.
 
 ## 3. Discovery, Selection and the Settings File
 
