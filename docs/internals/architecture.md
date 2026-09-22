@@ -21,6 +21,7 @@ sequenceDiagram
     autonumber
     participant CLI as main() CLI Entrypoint
     participant Net as TCP Listener
+    participant OS as Network Interfaces
     participant Browser as Host Browser
     participant Srv as HTTP Server Router
     participant Index as Background Indexer
@@ -29,6 +30,11 @@ sequenceDiagram
     CLI->>Net: listen(host, port)
     Note over CLI,Net: Binds socket in <0.2ms
     CLI->>Srv: NewServer(Index, LSP)
+    opt host is 0.0.0.0
+        CLI->>OS: InterfaceAddrs()
+        OS-->>CLI: Interface addresses
+        CLI->>CLI: Print sorted non-loopback IPv4 URLs
+    end
     CLI->>Browser: go openBrowser(url) [Non-blocking]
     CLI->>Index: go ix.Build() [Background Goroutine]
     CLI->>LSP: go lsp.Available() [Background Goroutine]
@@ -43,6 +49,7 @@ sequenceDiagram
 
 1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab.
 1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
+1. Network URL Discovery: When the listener binds to `0.0.0.0`, `net.InterfaceAddrs()` supplies the host's interface addresses. px0 keeps unique non-loopback IPv4 addresses, sorts them for deterministic output, and prints each with the listener's final port. Initial file and line query parameters are preserved in every advertised URL.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
 1. Non-Blocking Browser Launch: `go openBrowser(url)` spawns the platform-specific browser opener (`xdg-open` on Linux, `open` on macOS, `rundll32` on Windows) in a separate goroutine.
 1. Concurrent Tree Walk & Git Status: Indexing runs inside a background goroutine. A dedicated goroutine runs `gitStatus(ix.root)` in parallel with the file walk so that subprocess overhead overlaps the walk rather than adding to it.

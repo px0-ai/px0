@@ -236,7 +236,21 @@ px0 -no-open -port 8080 /workspace
 docker run -p 7777:7777 -v $(pwd):/src px0:latest
 ```
 
-Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel with zero remote setup overhead and sandboxing (path traversal protection & DNS rebinding checks). Anyone who can reach px0 can dispatch agent edits when it is opened by IP address (for example over Tailscale), so bind to a private network. Opened through a hostname, such as a reverse proxy or tunnel domain, editing is refused.
+When px0 binds to `0.0.0.0`, it prints a `network` URL for every unique
+non-loopback IPv4 address on the machine, using the port selected by the
+listener:
+
+```text
+  url:        http://0.0.0.0:7777
+  network:    http://10.0.0.15:7777
+  network:    http://192.168.1.42:7777
+```
+
+Open the address that is reachable from your local machine. The list can
+include LAN, VPN, and container-network addresses, depending on the remote
+host's interfaces.
+
+Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel with zero remote setup overhead and strict read-only sandboxing (path traversal protection & DNS rebinding checks).
 
 ### Updating px0
 
