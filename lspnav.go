@@ -192,6 +192,13 @@ func (m *lspManager) References(ctx context.Context, abs, rel string, line, col 
 		map[string]any{"context": map[string]any{"includeDeclaration": true}})
 }
 
+// Implementation resolves an interface (or interface method) to the concrete
+// types that implement it. Unlike References, its results are jump targets, so
+// locate previews each hit (method != "textDocument/references").
+func (m *lspManager) Implementation(ctx context.Context, abs, rel string, line, col int) ([]NavHit, error) {
+	return m.locate(ctx, "textDocument/implementation", abs, rel, line, col, nil)
+}
+
 // Symbols returns the document outline, flattened with indentation that mirrors
 // the server's nesting.
 func (m *lspManager) Symbols(ctx context.Context, abs, rel string) ([]Symbol, error) {

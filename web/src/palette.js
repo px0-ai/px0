@@ -6,7 +6,7 @@ import { updateStatus } from './status.js';
 import { pushHistory } from './history.js';
 import { showPanel } from './panels.js';
 import { openFind } from './find.js';
-import { gotoDefinition, findReferences } from './lsp.js';
+import { gotoDefinition, findReferences, gotoImplementation } from './lsp.js';
 import { revealFile } from './tree.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { showCalls, openLspSetup } from './calls.js';
@@ -30,6 +30,7 @@ export const COMMANDS = [
   { name: 'Search in Files', run: () => showRightInspector('search') },
   { name: 'Find in Current File', run: () => openFind(S.lastWord) },
   { name: 'Go to Definition', run: () => gotoDefinition() },
+  { name: withKeys('Go to Implementation ({Mod+F12})'), run: () => gotoImplementation() },
   { name: 'Find All References (Right Panel)', run: () => findReferences() },
   { name: withKeys('Show Call Trail: Callers / Callees ({Alt+Shift+H})'), run: () => showCalls() },
   { name: 'Set Up Language Server…', run: () => openLspSetup() },

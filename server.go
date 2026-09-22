@@ -80,6 +80,7 @@ func NewServer(ix *Index, lsp *lspManager) *Server {
 	s.mux.HandleFunc("/api/reindex", s.handleReindex)
 	s.mux.HandleFunc("/api/lsp/def", s.handleLSPDef)
 	s.mux.HandleFunc("/api/lsp/refs", s.handleLSPRefs)
+	s.mux.HandleFunc("/api/lsp/impl", s.handleLSPImpl)
 	s.mux.HandleFunc("/api/lsp/calls", s.handleLSPCalls)
 	s.mux.HandleFunc("/api/lsp/symbols", s.handleLSPSymbols)
 	s.mux.HandleFunc("/api/lsp/hover", s.handleLSPHover)
@@ -455,6 +456,18 @@ func (s *Server) handleLSPRefs(w http.ResponseWriter, r *http.Request) {
 		}
 		uiStatus("info", "lsp refs", fmt.Sprintf("%s:%d:%d · %d refs in %d files  (%s)", rel, line, col, len(hits), len(files), dur), 0, os.Stdout)
 	}
+	s.lspRespond(w, rel, hits, err)
+}
+
+func (s *Server) handleLSPImpl(w http.ResponseWriter, r *http.Request) {
+	abs, rel, line, col, ok := s.lspPos(r)
+	if !ok {
+		fail(w, 400, "bad path")
+		return
+	}
+	ctx, cancel := lspCtx(r)
+	defer cancel()
+	hits, err := s.lsp.Implementation(ctx, abs, rel, line, col)
 	s.lspRespond(w, rel, hits, err)
 }
 

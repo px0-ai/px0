@@ -36,22 +36,26 @@ export function setRightInspectorTab(tab) {
   if (tab === 'search') $('#q')?.focus();
 }
 
-export function renderRightResults(word, hits, server, isExact) {
+export function renderRightResults(word, hits, server, isExact, noun = 'reference') {
   const targetEl = $('#right-ref-target');
   const badgeEl = $('#right-ref-badge');
   const listEl = $('#right-refs-list');
   if (!targetEl || !badgeEl || !listEl) return;
 
+  // The refs pane is shared with Go to Implementation; label the tab to match.
+  const tabBtn = $('.inspector-tab[data-itab="refs"]');
+  if (tabBtn) tabBtn.textContent = noun === 'implementation' ? 'Implementations' : 'References';
+
   targetEl.textContent = word;
   badgeEl.textContent = hits.length;
 
   if (!hits.length) {
-    listEl.innerHTML = '<div class="hint">No references found for "<b>' + esc(word) + '</b>".</div>';
+    listEl.innerHTML = '<div class="hint">No ' + noun + 's found for "<b>' + esc(word) + '</b>".</div>';
     return;
   }
 
   const grouped = groupHits(hits);
-  const head = hits.length + ' reference' + (hits.length === 1 ? '' : 's') +
+  const head = hits.length + ' ' + noun + (hits.length === 1 ? '' : 's') +
     (server ? ' · ' + esc(server) : ' · text search');
   let html = '<div class="hint">' + head + '</div>';
 
