@@ -282,8 +282,22 @@ function expandRow(d, s, e, nextHunkIdx) {
     b.addEventListener('click', () => expandLines(d, from, to, el, nextHunkIdx));
     el.append(b);
   };
-  if (n <= EXPAND_STEP) {
-    mk(s, e, 'Expand ' + n + (n === 1 ? ' line' : ' lines'), SVG_BOTH);
+  const whole = 'Expand ' + n + (n === 1 ? ' line' : ' lines');
+  /* The chevron points at where the new lines will appear, and the row always
+     lands on the boundary of what is still hidden -- so it travels with the
+     expansion instead of being left behind (GitHub's expandable rows). */
+  if (nextHunkIdx === -1) {
+    // After the last hunk only the file's tail is missing: reveal upward from
+    // the last line, the row staying above the lines it just revealed.
+    if (n <= EXPAND_STEP) mk(s, e, whole, SVG_UP);
+    else mk(e - EXPAND_STEP + 1, e, 'Expand ' + EXPAND_STEP + ' lines', SVG_UP);
+  } else if (nextHunkIdx === 0) {
+    // Before the first hunk only the file's start is missing: reveal downward
+    // from line 1, the row staying below the lines it just revealed.
+    if (n <= EXPAND_STEP) mk(s, e, whole, SVG_DOWN);
+    else mk(s, s + EXPAND_STEP - 1, 'Expand ' + EXPAND_STEP + ' lines', SVG_DOWN);
+  } else if (n <= EXPAND_STEP) {
+    mk(s, e, whole, SVG_BOTH);
   } else {
     mk(s, s + EXPAND_STEP - 1, 'Expand ' + EXPAND_STEP + ' lines above', SVG_UP);
     const all = Math.min(n, EXPAND_MAX);
@@ -300,7 +314,13 @@ async function expandLines(d, s, e, rowEl, nextHunkIdx) {
   if (s > e || shown !== d || intersectsPending(d, s, e)) return;
   const key = s + ':' + e;
   (d.diffPending || (d.diffPending = new Set())).add(key);
-  const anchorSel = nextHunkIdx >= 0 ? '.diff-hunk-head[data-hunk="' + nextHunkIdx + '"]' : null;
+  /* Mid gaps only: the lines appear above the hunk below, so pin that header
+     to keep the reader's place. At the file's top and tail the expansion grows
+     right where the reader is looking -- compensating the scroll there would
+     slide the fresh lines out of view instead of letting the row travel with
+     them. */
+  const pin = nextHunkIdx > 0;
+  const anchorSel = pin ? '.diff-hunk-head[data-hunk="' + nextHunkIdx + '"]' : null;
   const anchor = anchorSel ? diffContent.querySelector(anchorSel) : null;
   const was = anchor ? anchor.offsetTop : 0;
   rowEl.classList.add('busy');
