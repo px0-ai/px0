@@ -119,6 +119,7 @@ Every supported harness starts an interactive session by default and blocks on a
 | `codex` | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
 | `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+| `kiro-cli` | `auto` | `kiro-cli chat --no-interactive --model auto --trust-all-tools {prompt}` |
 
 By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list, while letting users choose any available model from the harness menu or picker.
 

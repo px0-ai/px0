@@ -48,7 +48,7 @@ make dist
 - **Remote-First, Zero SSH Hassle**: Spin up on any remote server, cloud instance, or runner in < 1 ms. Inspect remote code in your local browser over a single port (Tailscale, WireGuard, reverse proxy, or tunnel) without SSH key setups, port forwarding churn, or remote extension daemons.
 - **Rich Syntax Highlighting**: Native tokenization for ~280 languages via Chroma with windowed rendering.
 - **Git Awareness & Visual Diffs**: Status badges (`M`, `A`, `D`, `U`, `R`), dirty folder ancestry propagation, changed-files filter, and side-by-side / unified diffs vs `HEAD` (`Cmd/Ctrl+D`).
-- **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, or Cursor Agent on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
+- **Edit with Your Coding Agent**: Select code in the source or diff view, right-click (or `Alt+E`), and describe the change. px0 runs Claude Code, OpenCode, OpenAI Codex, Antigravity, Aider, Goose, Gemini CLI, Cursor Agent, or Kiro CLI on it, reloads what changed, and shows harness errors inline. Several edits can run at once, as long as their line ranges don't overlap.
 - **Rendered Markdown Preview**: Full GFM preview with Chroma-highlighted code fences; switch between preview and source with `Alt+M` while preserving scroll.
 - **Custom Themes**: 14 built-in themes (GitHub Dark, Tokyo Night, Catppuccin, Dracula, Gruvbox, Nord, Solarized, and more).
 - **Optional Language Server Protocol (LSP)**: Zero-config auto-detection (`gopls`, `rust-analyzer`, `pyright`, `typescript-language-server`, `clangd`) for Go-to-Definition (`F12`), Hover, references, and call trails. Falls back automatically to regex outlines.
@@ -92,6 +92,7 @@ px0 does not have a text editor. It hands changes to a coding agent already inst
 | OpenAI Codex | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
 | Aider | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | Goose | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+| Kiro CLI | `auto` | `kiro-cli chat --no-interactive --model auto --trust-all-tools {prompt}` |
 
 By default, px0 selects the least capable (fastest and most economical) model for each harness, and allows you to choose any available model from the harness menu.
 
@@ -257,7 +258,7 @@ px0 --update
 | `-no-open`   | `false`     | Do not launch the web browser automatically                     |
 | `-no-lsp`    | `false`     | Disable language server discovery and use regex-based outline   |
 | `-no-git`    | `false`     | Disable git awareness (tree status badges and the diff view)    |
-| `-agent H`   | none        | Pin the coding harness for edits: `claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`, or a command template containing `{prompt}` |
+| `-agent H`   | none        | Pin the coding harness for edits: `claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`, `kiro-cli`, or a command template containing `{prompt}` |
 | `-no-agent`  | `false`     | Do not offer editing through a coding harness                   |
 | `-no-telemetry` | `false`  | Disable anonymous usage telemetry                               |
 | `-no-color`  | `false`     | Strip ANSI escape sequences from terminal output                |
