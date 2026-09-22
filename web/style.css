@@ -623,6 +623,7 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
   font-size: 12px; white-space: pre;
 }
 .diff-hunk-head:first-child { border-top: none; }
+.diff-hunk-head { display: flex; align-items: stretch; }
 .diff-ln {
   position: relative;
   flex: none; width: 48px; padding: 0 10px 0 6px; text-align: right;
@@ -637,11 +638,12 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-row.diff-del .diff-code, .diff-side.diff-del .diff-mk { color: var(--gd); }
 .diff-side.diff-blank { background: var(--bg2); }
 
-/* GitHub-style context expansion: a chevron row stands where the unchanged
-   lines git skipped between hunks would be, and expands them in steps. */
+/* GitHub-style context expansion: skipped lines render as an ellipsis row
+   between hunks, and each hunk header carries a blue gutter cell that unfolds
+   the hidden lines above it, twenty at a time. */
 .diff-expand {
-  display: flex; justify-content: center; align-items: center; gap: 6px;
-  padding: 2px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; min-height: 22px;
+  padding: 1px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
 }
 .diff-expand + .diff-hunk-head { border-top: none; }
 .diff-hunk-head + .diff-expand, .diff-table + .diff-expand { border-top: none; }
@@ -655,6 +657,15 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-expand-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .diff-expand.busy .diff-expand-btn { opacity: .4; pointer-events: none; }
 .diff-expand-btn svg { display: block; }
+.diff-expand-dots { letter-spacing: 3px; font-size: 9px; line-height: 1; }
+/* The blue gutter cell a hunk header wears (matches GitHub's expander cells):
+   flush to the left edge, sized to the line-number column. */
+.diff-expand-cell {
+  height: 100%; min-height: 20px; margin: -4px 0; padding: 0 10px 0 6px;
+  width: 48px; flex: none; justify-content: center;
+  border-radius: 0; border-right: 1px solid var(--line);
+}
+.diff-hunk-head .diff-expand-cell { margin: -4px 6px -4px -12px; height: auto; align-self: stretch; }
 
 /* Split: deletions and additions paired side by side, each half its own mini-row. */
 .diff-row-pair { display: flex; }
