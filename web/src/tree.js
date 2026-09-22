@@ -254,7 +254,12 @@ export function initTree() {
     if (f) {
       $$('.tr.sel', treeEl).forEach(x => x.classList.remove('sel'));
       f.classList.add('sel');
-      openFile(f.dataset.file);
+      openFile(f.dataset.file, { preview: true });
     }
+  });
+
+  treeEl.addEventListener('dblclick', e => {
+    const f = e.target.closest('[data-file]');
+    if (f) openFile(f.dataset.file, { preview: false });
   });
 }

@@ -92,6 +92,8 @@ export const S = {
   wrap: true,        // word wrap (default ON)
   lineNumbers: true, // line numbers gutter (default ON)
   mdPreview: true,   // Markdown tabs open rendered (default ON)
+  previewTabsEnabled: false, // VSCode-style single reusable preview tab (default OFF)
+  previewTab: null,  // the tab-doc currently occupying the preview slot, if any
   settings: null,    // loaded from /api/settings
   agentTargets: [],  // [{ id, path, l1, l2 }, ...] ranges of open compose/edit sessions
 };

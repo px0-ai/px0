@@ -19,8 +19,18 @@ import { syncImageView } from './imageview.js';
 const closedTabs = [];
 const MAX_CLOSED = 20;
 
+// Releases a tab-doc's large fields to assist garbage collection when it's
+// being discarded (closed, or replaced in place as the preview tab).
+function releaseTabDoc(d) {
+  d.lines = null;
+  d.chunks?.clear?.();
+  d.pending?.clear?.();
+  d.refining?.clear?.();
+  d.outline = null;
+}
+
 export async function openFile(path, opts = {}) {
-  const { line, push = true, col } = opts;
+  const { line, push = true, col, preview = false } = opts;
   let idx = S.tabs.findIndex(t => t.path === path);
   if (idx < 0) {
     let j;
@@ -45,15 +55,39 @@ export async function openFile(path, opts = {}) {
       diffAvailable: hasDiff,
       diffDismissed: false,
       openedInDiffView: hasDiff,
+      preview: false,
     };
     if (!isImg) {
       for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
     }
     d.lsp = (!isImg && j.lsp) || { state: 'off', server: '' };
-    S.tabs.push(d);
-    idx = S.tabs.length - 1;
+    if (preview && S.previewTabsEnabled && S.previewTab) {
+      const pi = S.tabs.indexOf(S.previewTab);
+      if (pi >= 0) {
+        releaseTabDoc(S.previewTab);
+        d.preview = true;
+        S.tabs[pi] = d;
+        S.previewTab = d;
+        idx = pi;
+      }
+    }
+    if (idx < 0) {
+      if (preview && S.previewTabsEnabled) {
+        d.preview = true;
+        S.previewTab = d;
+      }
+      S.tabs.push(d);
+      idx = S.tabs.length - 1;
+    }
     if (!isImg && j.refine) refineChunk(d, start / CHUNK);
     if (!isImg) loadGutter(d);
+  } else if (!preview) {
+    // Persistent open (double-click, edit, etc.) pins an already-open tab.
+    const existing = S.tabs[idx];
+    if (existing.preview) {
+      existing.preview = false;
+      if (S.previewTab === existing) S.previewTab = null;
+    }
   }
   const prev = doc_();
   if (prev && prev !== S.tabs[idx]) prev.scrollTop = vp.scrollTop;
@@ -197,6 +231,7 @@ export async function reloadOpenTabs() {
       diffDismissed: !!keep.diffDismissed || !keep.diffMode,
       openedInDiffView: !!keep.openedInDiffView || !!keep.diffMode,
       diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0,
+      preview: !!keep.preview,
     };
 
     for (let k = 0; k < j.lines.length; k++) {
@@ -205,6 +240,7 @@ export async function reloadOpenTabs() {
     d.lsp = j.lsp || { state: 'off', server: '' };
 
     S.tabs[idx] = d;
+    if (S.previewTab === keep) S.previewTab = d;
     if (j.refine) refineChunk(d, tgt.start / CHUNK);
   }
 
@@ -251,12 +287,8 @@ export function closeTab(i) {
         .then(() => refreshMetrics())
         .catch(() => {});
     }
-    // Release large arrays to assist garbage collection
-    closed.lines = null;
-    closed.chunks?.clear?.();
-    closed.pending?.clear?.();
-    closed.refining?.clear?.();
-    closed.outline = null;
+    if (S.previewTab === closed) S.previewTab = null;
+    releaseTabDoc(closed);
   }
   if (S.tabs.length === 0) {
     S.active = -1;
@@ -298,7 +330,7 @@ export async function reopenClosedTab() {
 
 export function drawTabs() {
   $('#tabs').innerHTML = S.tabs.map((t, i) =>
-    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.diffAvailable ? ' git-modified' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
+    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.diffAvailable ? ' git-modified' : '') + (t.preview ? ' tab-preview' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
     (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
     '<span class="tn">' + esc(t.name) + '</span>' +
     (t.diffAvailable ? '<span class="tab-git-dot" title="Modified in git">●</span>' : '') +
@@ -339,7 +371,7 @@ export function switchTab(i) {
 
 export function saveWorkspaceState() {
   try {
-    const tabs = S.tabs.map(t => ({ path: t.path, cur: t.cur }));
+    const tabs = S.tabs.map(t => ({ path: t.path, cur: t.cur, preview: !!t.preview }));
     sessionStorage.setItem('px0.tabs', JSON.stringify({ tabs, active: S.active }));
   } catch {}
 }
@@ -351,7 +383,7 @@ export async function restoreWorkspaceTabs() {
     const { tabs, active } = JSON.parse(saved);
     if (!Array.isArray(tabs) || tabs.length === 0) return false;
     for (const t of tabs) {
-      if (t.path) await openFile(t.path, { line: t.cur, push: false });
+      if (t.path) await openFile(t.path, { line: t.cur, push: false, preview: !!t.preview });
     }
     if (typeof active === 'number' && active >= 0 && active < S.tabs.length) {
       switchTab(active);

@@ -365,6 +365,7 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
   box-shadow: none;
 }
 .tab .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab.tab-preview .tn { font-style: italic; }
 /* The close cross is drawn, not typed: a glyph's ink sits wherever the font puts
    it, which is below centre for x in most UI fonts. */
 .tab .x { width: 15px; height: 15px; border-radius: 3px; display: grid; place-items: center; color: var(--faint); flex: none; }

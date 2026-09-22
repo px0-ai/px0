@@ -40,6 +40,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `editor.bracketPairColorization` | Text Editor | `true` | `true`, `false` | Rainbow bracket pairs & matching |
 | `editor.vimMode` | Text Editor | `false` | `true`, `false` | Modal Vim navigation keybindings |
 | `workbench.colorTheme` | Workbench | `"github-dark"` | 14 built-in theme IDs | Active color theme |
+| `workbench.editor.enablePreviewTabs` | Workbench | `false` | `true`, `false` | Single-click opens a reusable preview tab; double-click pins it |
 | `diffEditor.renderSideBySide` | Diff Editor | `true` | `true`, `false` | Split vs. unified diff view default |
 | `diffEditor.ignoreTrimWhitespace` | Diff Editor | `true` | `true`, `false` | Ignore whitespace differences in diffs |
 | `git.gutterIndicators` | Git | `true` | `true`, `false` | Visual change markers in gutter |

@@ -178,6 +178,14 @@ var settingsSchema = []settingSchemaItem{
 		Default:     true,
 	},
 	{
+		Key:         "workbench.editor.enablePreviewTabs",
+		Title:       "Preview Tabs",
+		Description: "Controls whether single-clicking a file in the explorer opens it in a reusable preview tab (double-click or editing pins it).",
+		Category:    "Workbench",
+		Type:        "boolean",
+		Default:     false,
+	},
+	{
 		Key:         "editor.cursorStyle",
 		Title:       "Cursor Style",
 		Description: "Controls the cursor style in the code viewer.",
