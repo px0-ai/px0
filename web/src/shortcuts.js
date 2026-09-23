@@ -6,7 +6,7 @@ import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
-import { openFind, clearFind, findbar } from './find.js';
+import { openFind, clearFind, findbar, clearOcc } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { overlay, openPalette, closePalette } from './palette.js';
@@ -39,7 +39,7 @@ export const SHORTCUTS = [
   [['Mod+J'], 'Toggle right inspector (Symbols/Refs)'],
   [['Alt+Left', 'Alt+Right'], 'Navigate back / forward'], [['Mod+B'], 'Toggle sidebar'],
   [['Alt+W'], 'Close tab'], [['Alt+Shift+T'], 'Reopen closed tab'], [['Ctrl+Tab'], 'Next tab'],
-  [['Alt+1…9'], 'Select tab'], [['Double click'], 'Highlight all occurrences'],
+  [['Alt+1…9'], 'Select tab'], [['Double click'], 'Highlight all occurrences + minimap'],
   [['Mod+A'], 'Select whole file'],
   [['Alt+C', 'Alt+A'], 'Copy selection ref / with context'], [['Alt+U'], 'Find usages of selection'],
   [['Alt+E'], 'Edit selection inline'],
@@ -108,7 +108,7 @@ export function initShortcuts() {
       if (!findbar.hidden) { clearFind(); return; }
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
-      if (S.occ) { S.occ = null; paint(); return; }
+      if (S.occ) { clearOcc(); return; }
       if (inField(document.activeElement)) document.activeElement.blur();
       return;
     }

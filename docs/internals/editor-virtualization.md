@@ -159,6 +159,7 @@ Search match markers (`<mark>`), symbol occurrence markers (`.occ`), and definit
 - Applied exclusively to the ~60 active rows.
 - Uses `document.createTreeWalker(row, NodeFilter.SHOW_TEXT)` to inspect only text nodes within `.c`.
 - Matches are split and wrapped without destroying or invalidating surrounding syntax highlighting tags (`.k`, `.s`, etc.).
+- The double-clicked occurrence word additionally draws whole-file orange ticks (`i.occ`) in `#minimap-hits` via `refreshOccMinimap()` in [`web/src/find.js`](../../web/src/find.js), which resolves line numbers through `/api/search` and merges with find markers in `renderMinimap()`.
 
 ## 8. Dynamic Chunk Streaming & Whole-File Selection
 ### On-Demand Chunk Fetching (`ensureChunks`)

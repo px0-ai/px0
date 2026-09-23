@@ -80,6 +80,7 @@ export const S = {
   hist: [], histIdx: -1,
   find: null,         // {q, ci, hits:[{line,n}], active}
   occ: null,          // word to highlight everywhere
+  occHits: null,      // [{line}] whole-file lines for the occ minimap markers
   selAll: null,       // doc whose whole text is selected (Ctrl+A)
   lastWord: '',
   at: null,           // {word, line, col} of the last click in the code area

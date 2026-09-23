@@ -12,6 +12,7 @@
   --on-accent: #fff;
   --on-badge: var(--bg);
   --on-mark-active: var(--bg);
+  --occ: #f0883e;
   --scrim: rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
 
@@ -1467,6 +1468,9 @@ body.vim-normal-caret #caret {
 #minimap-hits { position: absolute; top: 0; right: 0; bottom: 0; width: 12px; pointer-events: auto; z-index: 6; }
 #minimap-hits:empty { pointer-events: none; }
 #minimap-hits i { position: absolute; right: 2px; width: 8px; height: 2px; background: var(--mark-active); border-radius: 1px; opacity: .85; }
+/* Occurrence markers for the double-clicked word: GitHub-style orange ticks.
+   Themes can override with --occ; the fallback is GitHub's orange. */
+#minimap-hits i.occ { background: var(--occ); opacity: .9; cursor: pointer; }
 
 body.hide-lines .g { display: none !important; }
 .c, .diff-code, .md pre code { tab-size: var(--tab-size, 4); }

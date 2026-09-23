@@ -17,7 +17,7 @@ Combined with dedicated line-jumping tools (`Cmd/Ctrl+G` or direct CLI opening l
 - **Active Find Bar (`Cmd/Ctrl+F`)**: Opens an unobtrusive search bar in the top-right corner of the editor.
 - **Selection Pre-Seeding**: If text is selected when pressing `Cmd/Ctrl+F`, that text is automatically copied into the search box, eliminating the need to retype identifier names.
 - **Instant Match Highlighting**: All matches in the active file are highlighted in real time. The active match is highlighted with a distinct high-contrast accent marker.
-- **Minimap & Scrollbar Markers**: Small vertical tick marks appear along the scrollbar track indicating the positions of all matches throughout the entire document, giving you an immediate sense of occurrence distribution.
+- **Minimap & Scrollbar Markers**: Small vertical tick marks appear along the scrollbar track indicating the positions of all matches throughout the entire document, giving you an immediate sense of occurrence distribution. Double-clicking a word shows the same GitHub-style orange ticks for its occurrences without opening Find.
 - **Regex & Case-Sensitivity Toggles**: Easily switch between literal and regular expression matching, or toggle case sensitivity to locate specific casing conventions.
 - **Match Counter & Cycling**: Displays the current match index and total match count (e.g., `4 of 27`). Pressing `Enter` or `F3` advances to the next match; `Shift+Enter` or `Shift+F3` navigates backward.
 - **Go to Line & Column (`Cmd/Ctrl+G`)**: A quick prompt that instantly scrolls to a specific line number (and optional column offset).

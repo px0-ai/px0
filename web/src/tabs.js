@@ -9,7 +9,7 @@ import { loadOutline } from './outline.js';
 import { showPanel } from './panels.js';
 import { revealDir, treeEl } from './tree.js';
 import { clearLink } from './hover.js';
-import { clearFind } from './find.js';
+import { clearFind, refreshOccMinimap, renderMinimap } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
 import { syncDiffView, layoutPref, diffScrollTop, setDiffMode, setSourceJumpHandler } from './diff.js';
@@ -60,6 +60,8 @@ export async function openFile(path, opts = {}) {
   if (prev !== S.tabs[idx]) { clearSelectAll(); clearFind(); }
   S.active = idx;
   const d = S.tabs[idx];
+  // The occurrence highlight is global; recompute its minimap markers for the new file.
+  if (S.occ) { S.occHits = null; renderMinimap(); refreshOccMinimap(); }
   if (d && d.diffAvailable && (treeEl?.classList.contains('changed-only') || (!d.diffDismissed && d.diffMode === null))) {
     d.diffMode = layoutPref() || 'split';
     d.diffDismissed = false;
@@ -229,6 +231,7 @@ export async function reloadOpenTabs() {
   drawTabs();
   drawCrumbs();
   updateStatus();
+  if (S.occ) { S.occHits = null; renderMinimap(); refreshOccMinimap(); }
   saveWorkspaceState();
 }
 
@@ -279,6 +282,7 @@ export function closeTab(i) {
     syncPreview();
     syncDiffView();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
+    renderMinimap();
     $('#empty').hidden = false; drawCrumbs();
     drawTabs(); updateStatus();
     saveWorkspaceState();
@@ -293,6 +297,7 @@ export function closeTab(i) {
   syncImageView();
   syncPreview();
   syncDiffView();
+  if (S.occ) { S.occHits = null; renderMinimap(); refreshOccMinimap(); }
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = d.scrollTop; render(); updateStatus();
   saveWorkspaceState();
@@ -339,6 +344,8 @@ export function switchTab(i) {
   clearFind();
   clearSelectAll();
   S.at = null;
+  // Recompute occurrence markers for the newly shown file.
+  if (S.occ) { S.occHits = null; renderMinimap(); refreshOccMinimap(); }
   S.lsp.state = (S.tabs[i].lsp && S.tabs[i].lsp.state) || 'off';
   S.lsp.server = (S.tabs[i].lsp && S.tabs[i].lsp.server) || '';
   S.lsp.missing = (S.tabs[i].lsp && S.tabs[i].lsp.missing) || '';

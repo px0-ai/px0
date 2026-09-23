@@ -5,6 +5,7 @@ import { paint, render, rowFor, placeCaret, toPoint } from './renderer.js';
 import { updateStatus } from './status.js';
 import { gotoDefinition } from './lsp.js';
 import { pushHistory } from './history.js';
+import { occEnabled, refreshOccMinimap } from './find.js';
 
 export const WORD = /[A-Za-z0-9_$]/;
 
@@ -247,7 +248,9 @@ export function initCursor() {
   vp.addEventListener('dblclick', e => {
     const w = wordAtPoint(e.clientX, e.clientY);
     if (w) { S.at = w; S.lastWord = w.word; }
-    S.occ = (w && w.word.length > 1) ? w.word : null;
+    S.occ = (w && w.word.length > 1 && occEnabled()) ? w.word : null;
+    S.occHits = null;
     paint();
+    refreshOccMinimap();
   });
 }

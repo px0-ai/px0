@@ -6,7 +6,7 @@ import { moveCursor, moveCol, moveWord, caretToEdge, updateDomSelection, clearSe
 import { updateStatus } from './status.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { go, pushHistory } from './history.js';
-import { openFind, findNextMatch, clearFind } from './find.js';
+import { openFind, findNextMatch, clearFind, refreshOccMinimap } from './find.js';
 import { showHover } from './hover.js';
 import { showCalls } from './calls.js';
 import { switchTab, closeTab } from './tabs.js';
@@ -553,7 +553,9 @@ export function handleVimKeyDown(e) {
         S.at = w;
         S.lastWord = w.word;
         S.occ = w.word;
+        S.occHits = null;
         paint();
+        refreshOccMinimap();
         openFind(w.word);
         findNextMatch(1);
       }
@@ -567,7 +569,9 @@ export function handleVimKeyDown(e) {
         S.at = w;
         S.lastWord = w.word;
         S.occ = w.word;
+        S.occHits = null;
         paint();
+        refreshOccMinimap();
         openFind(w.word);
         findNextMatch(-1);
       }

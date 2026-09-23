@@ -1,6 +1,6 @@
 // web/src/settings.js
 import { $, $$, esc, S, api, apiPost } from './state.js';
-import { applyEditorTypography, toggleWordWrap, toggleLineNumbers } from './renderer.js';
+import { applyEditorTypography, toggleWordWrap, toggleLineNumbers, paint } from './renderer.js';
 import { setTheme, listThemes } from './theme.js';
 import { setLayoutPref } from './diff.js';
 import { setVimModeEnabled, showVimHelp } from './vim.js';
@@ -374,6 +374,17 @@ export function applySettingLive(key, val) {
     case 'editor.minimap.enabled': {
       const minimap = $('#minimap-hits');
       if (minimap) minimap.style.display = (val === false || val === 'false') ? 'none' : '';
+      break;
+    }
+    case 'editor.occurrencesHighlight': {
+      const on = !(val === false || val === 'false');
+      if (!on && (S.occ || S.occHits)) {
+        S.occ = null;
+        S.occHits = null;
+        const mm = $('#minimap-hits');
+        if (mm) mm.querySelectorAll('i.occ').forEach(el => el.remove());
+        paint();
+      }
       break;
     }
     case 'workbench.colorTheme': {
