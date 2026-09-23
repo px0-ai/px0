@@ -62,6 +62,12 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
 .panel-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 4px; }
 .panel-actions .mini { margin-left: 0; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; }
 .panel-actions .mini svg { display: block; }
+.panel-actions .mini:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.panel-actions .mini.busy { color: var(--accent-fg); background: var(--bg3); }
+@media (prefers-reduced-motion: no-preference) {
+  .panel-actions .mini.busy svg { animation: explorer-progress 1s ease-in-out infinite; }
+}
+@keyframes explorer-progress { 50% { opacity: .45; } }
 .mini { margin-left: auto; color: var(--faint); font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: var(--r); }
 .mini:hover { color: var(--fg); background: var(--bg3); }
 
@@ -2269,5 +2275,4 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   border-color: var(--err); color: var(--err); font-weight: 600;
 }
 .pr-btn-request-changes:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 26%, transparent); }
-
 

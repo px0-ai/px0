@@ -44,9 +44,12 @@ sequenceDiagram
 1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab.
 1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
+
 1. Non-Blocking Browser Launch: `go openBrowser(url)` spawns the platform-specific browser opener (`xdg-open` on Linux, `open` on macOS, `rundll32` on Windows) in a separate goroutine.
 1. Concurrent Tree Walk & Git Status: Indexing runs inside a background goroutine. A dedicated goroutine runs `gitStatus(ix.root)` in parallel with the file walk so that subprocess overhead overlaps the walk rather than adding to it.
 1. Background Language Server Discovery: `lsp.Available()` checks `$PATH` using `exec.LookPath` across standard binary locations asynchronously.
+
+The explorer expands folders through `/api/tree` on demand. Expand All skips ignored subtrees, keeps at most four directory requests in flight, and marks the header control busy while it runs. Tree refreshes and user navigation invalidate older requests before they can redraw stale folders; Collapse All clears open state immediately.
 
 ## 3. HTTP Server & API Catalog
 

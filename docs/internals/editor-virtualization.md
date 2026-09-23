@@ -2,6 +2,8 @@
 
 This document provides a comprehensive technical breakdown of px0's bespoke virtualized code viewer, caret engine, and selection preservation system ([`web/src/renderer.js`](../../web/src/renderer.js), [`web/src/cursor.js`](../../web/src/cursor.js), and [`web/style.css`](../../web/style.css)).
 
+The sidebar file tree uses a separate on-demand rendering path in [`web/src/tree.js`](../../web/src/tree.js). Its Expand All control loads indexed directory children in batches of four requests, skips ignored subtrees, and can be cancelled without allowing late responses to reopen collapsed folders. The editor viewport virtualization described below runs independently of the sidebar tree state.
+
 ## 1. Why a Bespoke Virtualized Viewer?
 
 General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are engineered for bidirectional text editing, undo/redo trees, multi-cursor keystrokes, and complex grammar parsing inside the browser. Consequently:

@@ -18,6 +18,7 @@ px0's file explorer eliminates unnecessary clicks by automatically collapsing si
 - **Git Status Decorators**: Files with unstaged or staged modifications display color-coded status badges (`M`, `A`, `D`, `U`, `R`), with dirty status propagating up parent directory branches.
 - **Gitignore Awareness & Dimming**: Files and folders ignored by `.gitignore` rules (such as `dist/`, `build/`, `vendor/`, `node_modules`) are visually dimmed in the tree and excluded from background search indexes.
 - **Auto-Reveal Active File**: Opening a file via fuzzy search (`Cmd/Ctrl+P`) or Go to Definition (`F12`) automatically scrolls the sidebar tree to reveal and highlight the active file.
+- **Expand All / Collapse All**: The explorer header has buttons to open project folders or close every folder. Expand All shows a progress state while loading nested folders in small batches. Ignored folders stay closed to avoid bulk-loading generated trees; you can still open them individually. Collapse All can stop an expansion while it runs. The resulting folder state is remembered between launches.
 - **Collapsible Sidebar (`Cmd/Ctrl+B`)**: Quickly toggle the entire file explorer sidebar on or off to maximize reading space for wide diffs or code inspection.
 - **Multi-Tab Document Bar**:
   - Open multiple files side-by-side as tabs.
@@ -45,6 +46,7 @@ On laptops or split-screen terminal workflows:
 | Shortcut | Context | Action |
 | :--- | :--- | :--- |
 | `Cmd/Ctrl+B` | Global | Toggle File Explorer Sidebar |
+| Expand All / Collapse All buttons | Explorer header | Open project folders or close every folder |
 | `Alt+W` | Tab Bar | Close Active Tab |
 | `Ctrl+Tab` | Tab Bar | Switch to Next Tab |
 | `Alt+1` … `Alt+9` | Tab Bar | Switch to Tab by Position |

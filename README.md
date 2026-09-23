@@ -22,6 +22,7 @@ See full performance benchmarks and comparisons at [px0.ai/#bench](https://px0.a
 - GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
+- File explorer: Reveal active files and expand or collapse all folders from the sidebar header.
 - Remote-first: Run on any remote server, VM, or container and browse locally without SSH key setups or remote daemons.
 - Virtual rendering: Opens 400,000-line files smoothly by mounting only visible rows; frees memory back to the OS after 15 seconds of inactivity.
 - Rich code viewer: 14 built-in themes, rendered Markdown preview, image inspector, and optional zero-config LSP for Go-to-Definition and hover.

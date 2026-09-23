@@ -27,7 +27,7 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **Virtualized Scroller** | Automatic | Virtual DOM rendering ~60 rows with idle memory scavenging | [Editor Virtualization](editor-virtualization.md) |
 | **Remote Workspaces** | CLI flags | Zero-config remote browsing over Tailscale, SSH-free operation | [Remote Workspaces](remote-workspaces.md) |
 | **Vim Keybindings** | Toggle in Settings | Modal normal, visual, and motion modes for keyboard navigation | [Vim Mode](vim-mode.md) |
-| **File Explorer** | `Cmd/Ctrl+B` | High-density tree, compact folder chains, and tab management | [File Explorer](file-explorer.md) |
+| **File Explorer** | `Cmd/Ctrl+B` | High-density tree, expand/collapse-all controls, compact folder chains, and tab management | [File Explorer](file-explorer.md) |
 
 ---
 
@@ -86,7 +86,7 @@ px0 adapts to developer habits and viewing environments without requiring manual
 - **[Settings & Preferences System](settings-and-configuration.md)**: Comprehensive settings manager accessible via `Cmd/Ctrl+,`. Offers a VS Code-style graphical UI with interactive attribute pills alongside a raw JSON editor (`~/.px0/settings.json`) that updates themes, typography, diff layouts, and search behavior in real time without refreshing the browser.
 - **[Themes & Styling](themes-and-styling.md)**: 14 built-in dark and light themes crafted for high readability and visual consistency across all panels, diffs, and markdown documents.
 - **[Vim Keybindings & Modal Navigation](vim-mode.md)**: Full modal navigation emulation supporting Normal, Visual, and Motion modes for developers accustomed to Vim, Neovim, or Helix.
-- **[File Explorer & Workspace Management](file-explorer.md)**: Dense, clean file tree with single-child folder compacting, `.gitignore` dimming, and tab lifecycle controls (`Alt+1..9`, `Ctrl+Tab`, `Alt+W`).
+- **[File Explorer & Workspace Management](file-explorer.md)**: Dense, clean file tree with single-child folder compacting, `.gitignore` dimming, expand/collapse-all buttons, and tab lifecycle controls (`Alt+1..9`, `Ctrl+Tab`, `Alt+W`).
 
 ---
 
