@@ -216,8 +216,11 @@ func runModelDiscovery(name, bin string, staticModels []string) {
 			}
 		}
 	case "cursor-agent":
+		if !filepath.IsAbs(bin) || filepath.Base(bin) != "cursor-agent" {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, bin, "--list-models").Output()
+		out, err := exec.CommandContext(ctx, "cursor-agent", "--list-models").Output()
 		cancel()
 		if err == nil {
 			var list []string
