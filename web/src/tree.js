@@ -7,6 +7,14 @@ import { showToast } from './ui.js';
 export const treeEl = $('#tree');
 export const openDirs = new Set();
 
+const GIT_LAYOUT_KEY = 'px0.gitChangesLayout';
+let gitLayout = 'tree';
+let latestGitStatuses = {};
+let latestGitStaged = {};
+try {
+  if (localStorage.getItem(GIT_LAYOUT_KEY) === 'list') gitLayout = 'list';
+} catch {}
+
 /* git status letter -> CSS class + label. Empty/absent = clean, no badge. */
 const GIT_STATUS = {
   M: ['git-M', 'modified'], A: ['git-A', 'added'], D: ['git-D', 'deleted'],
@@ -57,7 +65,44 @@ export function fileKind(name) {
   return (i > 0 && FILE_KIND[name.slice(i + 1).toLowerCase()]) || 'other';
 }
 
+function flatChangeRow(path) {
+  const code = latestGitStatuses[path];
+  const g = GIT_STATUS[code];
+  const gc = g ? ' ' + g[0] : '';
+  const badge = g ? '<span class="gs" title="git: ' + g[1] + '">' + esc(code) + '</span>' : '';
+  const tick = g ? '<button class="stage-tick' + (latestGitStaged[path] ? ' staged' : '') + '" data-stage="' + esc(path) + '" title="' + (latestGitStaged[path] ? 'Unstage' : 'Stage') + '"></button>' : '';
+  return '<div class="tr file flat-change dirty' + gc + '" data-file="' + esc(path) + '" title="Open ' + esc(path) + '">' +
+    '<span class="ic" data-t="' + fileKind(path) + '"></span><span class="nm">' + esc(path) + '</span>' + badge + tick + '</div>';
+}
+
+function drawFlatChanges() {
+  const selected = treeEl.querySelector('.tr.file.sel')?.dataset.file;
+  treeEl.innerHTML = (S.meta?.gitFiles || []).map(flatChangeRow).join('');
+  if (selected) treeEl.querySelector('[data-file="' + CSS.escape(selected) + '"]')?.classList.add('sel');
+}
+
+function syncGitLayoutControl() {
+  $('#btn-git-tree')?.classList.toggle('active', gitLayout === 'tree');
+  $('#btn-git-list')?.classList.toggle('active', gitLayout === 'list');
+  $('#btn-git-tree')?.setAttribute('aria-pressed', gitLayout === 'tree' ? 'true' : 'false');
+  $('#btn-git-list')?.setAttribute('aria-pressed', gitLayout === 'list' ? 'true' : 'false');
+}
+
+async function setGitLayout(layout) {
+  gitLayout = layout === 'list' ? 'list' : 'tree';
+  try { localStorage.setItem(GIT_LAYOUT_KEY, gitLayout); } catch {}
+  syncGitLayoutControl();
+  if (!treeEl.classList.contains('changed-only')) return;
+  treeEl.classList.toggle('flat-changes', gitLayout === 'list');
+  if (gitLayout === 'list') drawFlatChanges();
+  else await refreshTree();
+}
+
 export async function refreshTree() {
+  if (treeEl.classList.contains('flat-changes')) {
+    drawFlatChanges();
+    return;
+  }
   await drawTree('', treeEl, 0);
   const dirs = Array.from(openDirs).sort((a, b) => a.split('/').length - b.split('/').length);
   for (const path of dirs) {
@@ -141,6 +186,13 @@ export async function expandDirtyDirs(container = treeEl) {
 }
 
 export async function patchTreeGitStatus(statuses = {}, dirtyDirs = {}, staged = {}) {
+  latestGitStatuses = { ...statuses };
+  latestGitStaged = { ...staged };
+  if (treeEl.classList.contains('flat-changes')) {
+    drawFlatChanges();
+    return;
+  }
+
   // 1. Update folder dirty classes
   const dirRows = treeEl.querySelectorAll('.tr.dir');
   for (const dirRow of dirRows) {
@@ -227,16 +279,28 @@ export async function setSidebarMode(mode) {
     treeEl.classList.add('changed-only');
     btnChanged?.classList.add('active');
     btnFiles?.classList.remove('active');
-    await expandDirtyDirs();
+    $('#git-layout-toggle').hidden = false;
+    syncGitLayoutControl();
+    treeEl.classList.toggle('flat-changes', gitLayout === 'list');
+    if (gitLayout === 'list') drawFlatChanges();
+    else await expandDirtyDirs();
   } else {
+    const wasFlat = treeEl.classList.contains('flat-changes');
     treeEl.classList.remove('changed-only');
+    treeEl.classList.remove('flat-changes');
     btnFiles?.classList.add('active');
     btnChanged?.classList.remove('active');
+    $('#git-layout-toggle').hidden = true;
+    if (wasFlat) await refreshTree();
   }
 }
 
 export function initTree() {
   updateSidebarToggleState();
+  syncGitLayoutControl();
+
+  $('#btn-git-tree')?.addEventListener('click', () => setGitLayout('tree'));
+  $('#btn-git-list')?.addEventListener('click', () => setGitLayout('list'));
 
   $('#btn-changed')?.addEventListener('click', async () => {
     const hasGitChanges = !!(S.meta?.git && S.meta.gitChanges > 0);

@@ -76,6 +76,7 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
   gap: 1px;
   height: 20px;
 }
+.sidebar-toggle[hidden] { display: none; }
 .sidebar-toggle .toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -182,6 +183,8 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
    authoritative dirty flag from the backend, so even collapsed ones are known). */
 #tree.changed-only .tr.file:not(.dirty) { display: none; }
 #tree.changed-only .tw:not(:has(.dirty)) { display: none; }
+#tree.flat-changes .flat-change { width: max-content; min-width: 100%; padding-left: 8px; }
+#tree.flat-changes .flat-change .nm { overflow: visible; text-overflow: clip; }
 
 /* ---------- git panel (sidebar: stage/commit/push/pull) ---------- */
 .git-panel {
@@ -2255,5 +2258,4 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   border-color: var(--err); color: var(--err); font-weight: 600;
 }
 .pr-btn-request-changes:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 26%, transparent); }
-
 

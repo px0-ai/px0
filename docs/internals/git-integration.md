@@ -76,6 +76,8 @@ for p := rel; p != ""; {
 
 This enables the file tree in the sidebar to visually highlight collapsed directories that contain modified descendants, allowing developers to immediately spot repository changes.
 
+The Git Changes view supports two client-side layouts over the same `gitFiles`, status, and staged maps. Tree layout filters the indexed hierarchy using dirty ancestor flags. List layout renders `gitFiles` directly as full relative paths, so every changed file is visible without loading or expanding intermediate directories. The preference is stored in `localStorage['px0.gitChangesLayout']`; live status events redraw the active layout and preserve the selected path.
+
 ## 4. Diffing: One Git Call, Two Consumers, Three Views
 
 Both the line gutter and the full diff view are read off the same shell-out, `gitDiff(root, relpath)`:
@@ -304,4 +306,3 @@ For a plain workspace, `handleGitPush` runs a bare `gitPush` (`git push`); if th
 | `/api/git/commit-message` | POST | Dispatch the selected harness to write a commit message for the staged diff. Returns an `agentJob`, polled via `/api/agent/job`. `400` if nothing is staged or no harness is selected. |
 
 Every write endpoint is guarded by `localPost` ([`lspsetup.go`](../../lspsetup.go)), the same POST-only, same-origin, IP-or-localhost check every other mutating px0 endpoint uses.
-

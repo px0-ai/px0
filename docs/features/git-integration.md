@@ -25,7 +25,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
   - `U` (Untracked): New file not yet tracked by Git.
   - `R` (Renamed): File renamed or moved.
 - **Dirty Ancestor Folder Propagation**: When a nested file is modified (e.g., `src/core/auth/token.go`), all parent directories in the tree (`auth/`, `core/`, `src/`) display a subtle dirty indicator badge. This allows you to spot modifications even when folder branches are collapsed.
-- **File Explorer vs. Git Changes Toggle**: A dedicated segmented toggle in the sidebar header allows you to switch between the full project directory tree and the Git changes view. In Git changes mode, px0 collapses untouched folders and presents only files with uncommitted additions, modifications, or deletions.
+- **File Explorer vs. Git Changes Toggle**: A dedicated segmented toggle in the sidebar header allows you to switch between the full project directory tree and the Git changes view. Git changes can be shown as a folder tree or as a flat list of full relative paths; the chosen layout is remembered across sessions.
 - **Automatic Explorer Fallback**: If all uncommitted changes are discarded or committed while you are in Git changes mode, px0 automatically switches back to standard file explorer mode so you are never left viewing an empty tree.
 - **Auto-Closing Discarded Diff Tabs**: When you discard changes to a file from the terminal (`git checkout -- file` or `git reset`), any tab opened in diff view for that file automatically closes in reverse index order, keeping the active tab index stable and preventing stale diff errors.
 - **Visual Gutter Diff Indicators**: The code viewer gutter places colored indicator bars alongside line numbers to mark edits in real time:
@@ -51,7 +51,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 
 ### Continuous Auditing of AI Agent Edits
 When an AI coding agent (Claude Code, Gemini CLI, Cursor Agent, Antigravity, Aider) edits your code in the background:
-1. Switch to the **Git Changes** view in the sidebar to isolate touched files.
+1. Switch to the **Git Changes** view in the sidebar and choose List view to see every touched path at once.
 2. Status badges and gutter markers update in real time as the agent writes to disk.
 3. Open any modified file and press **`Cmd/Ctrl+D`** to review side-by-side changes against `HEAD`.
 4. If an edit needs refinement, select the relevant lines directly inside the diff view and press `Alt+E` to prompt the agent with a targeted correction.
@@ -85,6 +85,7 @@ When a teammate (or CI) has pushed new commits to the branch you're reviewing:
 | :--- | :--- | :--- |
 | `Cmd/Ctrl+D` | Editor | Toggle Git Diff View (Split / Unified vs. `HEAD`) |
 | Toggle Segment (`Files` / `Changes`) | Sidebar Header | Switch between File Explorer and Changed Files Only |
+| Changed Layout (`Tree` / `List`) | Sidebar Header | Show changed files as folders or a flat list of relative paths |
 | Toggle Icon | Diff Header | Switch between Side-by-Side and Unified Diff |
 | Space Icon | Diff Header | Toggle Ignore Leading/Trailing Whitespace |
 | `Mod+Shift+R` | Global | Force Workspace and Git Status Refresh |
