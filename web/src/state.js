@@ -84,7 +84,10 @@ export function applyKeyLabels(root = document) {
   for (const el of $$('[title*="{"]', root)) el.title = withKeys(el.title);
 }
 
-export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
+// Row height in px; must always match the CSS --lh.
+export let LH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lh'));
+export const setLH = px => { LH = px; };
+export const CHUNK = 1000, OVERSCAN = 24;
 
 /**
  * @typedef {Object} LSPState

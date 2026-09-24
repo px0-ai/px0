@@ -1,6 +1,12 @@
 // web/src/renderer.js
-import { $, S, doc_, api, LH, CHUNK, OVERSCAN } from './state.js';
+import { $, S, doc_, api, LH, setLH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
+
+const ZOOM_MIN = 0.5, ZOOM_MAX = 3;
+// Start from the stylesheet's :root values; settings replace them once loaded.
+let zoom = 1, zoomRaf = 0;
+let baseFs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs'));
+let baseLh = LH;
 
 export function measure() {
   const m = $('#measure');
@@ -37,17 +43,29 @@ export function toggleLineNumbers(forced) {
 }
 
 export function applyEditorTypography(fontSize, fontFamily, lineHeight, tabSize) {
-  if (fontSize) document.documentElement.style.setProperty('--fs', fontSize + 'px');
-  if (fontFamily) document.documentElement.style.setProperty('--mono', fontFamily);
-  if (lineHeight) {
-    document.documentElement.style.setProperty('--lh', lineHeight + 'px');
-  } else if (fontSize) {
-    document.documentElement.style.setProperty('--lh', Math.round(fontSize * 1.5) + 'px');
-  }
-  if (tabSize) document.documentElement.style.setProperty('--tab-size', tabSize);
+  const root = document.documentElement.style;
+  if (fontSize) baseFs = fontSize;
+  if (lineHeight) baseLh = lineHeight;
+  else if (fontSize) baseLh = Math.round(fontSize * 1.5);
+  if (fontFamily) root.setProperty('--mono', fontFamily);
+  if (tabSize) root.setProperty('--tab-size', tabSize);
+  const topLine = vp.scrollTop / LH, chW = S.chW;
+  const lh = Math.round(baseLh * zoom);
+  root.setProperty('--fs', baseFs * zoom + 'px');
+  root.setProperty('--lh', lh + 'px');
+  setLH(lh);
   measure();
   layout();
-  render();
+  vp.scrollTop = topLine * LH;
+  if (chW) vp.scrollLeft *= S.chW / chW;
+  // Synchronous so no frame shows rows at the new height but the old offsets.
+  paint();
+}
+
+/** Sets the editor text zoom factor, clamped to 50%–300%, applied on the next animation frame. */
+export function setEditorZoom(z) {
+  zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  if (!zoomRaf) zoomRaf = requestAnimationFrame(() => { zoomRaf = 0; applyEditorTypography(); });
 }
 
 export function updateEditorOptionControls() {
@@ -333,4 +351,19 @@ export function refineChunk(d, c, delay = 800, tries = 0) {
 export function initRenderer() {
   vp.addEventListener('scroll', render, { passive: true });
   new ResizeObserver(() => { layout(); render(); }).observe(editor);
+  let pinchStart = 0;
+  for (const el of [vp, $('#diffview')]) {
+    // Trackpad pinch arrives as ctrl+wheel; cancelling it stops the browser zooming the page.
+    el.addEventListener('wheel', e => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      if (pinchStart) return;
+      const dy = Math.max(-10, Math.min(10, e.deltaY * (e.deltaMode ? 33 : 1)));
+      setEditorZoom(zoom * Math.exp(-dy / 100));
+    }, { passive: false });
+    // Safari reports pinch as gesture events instead.
+    el.addEventListener('gesturestart', e => { e.preventDefault(); pinchStart = zoom; });
+    el.addEventListener('gesturechange', e => { e.preventDefault(); setEditorZoom(pinchStart * e.scale); });
+    el.addEventListener('gestureend', () => { pinchStart = 0; });
+  }
 }
