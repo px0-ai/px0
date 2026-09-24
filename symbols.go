@@ -170,7 +170,7 @@ func Outline(abs, rel string) ([]Symbol, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
-	if ext == ".md" || ext == ".markdown" {
+	if ext == ".md" || ext == ".markdown" || ext == ".mdx" {
 		for line := 1; sc.Scan(); line++ {
 			if m := markdownHeading.FindStringSubmatch(sc.Text()); m != nil {
 				out = append(out, Symbol{Name: m[2], Kind: "heading", Line: line, Indent: len(m[1]) - 1})

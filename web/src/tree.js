@@ -74,7 +74,7 @@ export const FILE_KIND = {
   bash: 'code', zsh: 'code', sql: 'code',
   json: 'data', yaml: 'data', yml: 'data', toml: 'data', ini: 'data', xml: 'data',
   csv: 'data', env: 'data', lock: 'data', mod: 'data', sum: 'data',
-  md: 'doc', markdown: 'doc', txt: 'doc', rst: 'doc', adoc: 'doc',
+  md: 'doc', markdown: 'doc', mdx: 'doc', txt: 'doc', rst: 'doc', adoc: 'doc',
   html: 'web', htm: 'web', css: 'web', scss: 'web', less: 'web', svg: 'web', vue: 'web',
   png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', webp: 'img', ico: 'img', avif: 'img',
 };
