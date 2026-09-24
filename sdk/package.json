@@ -1,0 +1,24 @@
+{
+  "name": "@px0/sdk",
+  "version": "0.1.9",
+  "description": "Typed client for the px0 code viewer's HTTP API",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "index.ts"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test.ts",
+    "prepublishOnly": "tsc && node --test test.ts"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/px0-ai/px0.git", "directory": "sdk" }
+}

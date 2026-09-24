@@ -107,6 +107,7 @@ make build
 ## Documentation
 
 - [Docs](https://px0.ai/docs)
+- [TypeScript SDK](sdk/README.md)
 - [Benchmarks](https://px0.ai/#bench)
 - [Blog](https://px0.ai/blog)
 - [Changelog](https://px0.ai/changelog)

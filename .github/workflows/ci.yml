@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       # web/app.js is not committed — regenerate it so go:embed has a fresh
       # bundle, and prove the source modules bundle cleanly.
@@ -35,3 +35,6 @@ jobs:
 
       - name: Run tests
         run: go test -v ./...
+
+      - name: SDK end-to-end tests
+        run: cd sdk && PX0_BIN=../px0 node --test test.ts

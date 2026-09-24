@@ -35,6 +35,7 @@ Whenever modifying, adding, or refactoring code in this repository, you must aud
 | CLI Flags / Configuration            | `main.go`, `settings.go`                                         | [`docs/features/settings-and-configuration.md`](../features/settings-and-configuration.md), [`README.md`](../../README.md)|
 | Performance Metrics / Scripts        | `benchmark.sh`                                                   | [`BENCHMARKS.md`](../../BENCHMARKS.md)                                                                           |
 | Release Workflow                     | `Makefile`, `build.sh`, `scripts/build-web.js`                   | [`PUBLISHING.md`](../../PUBLISHING.md)                                                                           |
+| HTTP API (any handler or JSON shape) | `server.go`, `agent.go`, `pr.go`, `lspsetup.go`, `session.go`    | [`sdk/index.ts`](../../sdk/index.ts) types + methods, [`sdk/README.md`](../../sdk/README.md)                      |
 
 ## 3. Checklist for Agents Prior to Submitting Work
 
