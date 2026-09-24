@@ -24,7 +24,7 @@ See full performance benchmarks and comparisons at [px0.ai/#bench](https://px0.a
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
 - Remote-first: Run on any remote server, VM, or container and browse locally without SSH key setups or remote daemons.
 - Virtual rendering: Opens 400,000-line files smoothly by mounting only visible rows; frees memory back to the OS after 15 seconds of inactivity.
-- Rich code viewer: 14 built-in themes, rendered Markdown preview, image inspector, and optional zero-config LSP for Go-to-Definition and hover.
+- Rich code viewer: 14 built-in themes, rendered Markdown preview, image inspector, editor-only Ctrl+wheel / pinch zoom, and optional zero-config LSP for Go-to-Definition and hover.
 
 ## Installation
 
