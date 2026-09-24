@@ -3,7 +3,7 @@ import { $, $$, esc, S, api, apiPost, apiPostJson } from './state.js';
 import { showToast } from './ui.js';
 import { applyEditorTypography, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { setTheme, listThemes } from './theme.js';
-import { setLayoutPref } from './diff.js';
+import { setLayoutPref, syncDiffView } from './diff.js';
 import { setVimModeEnabled, showVimHelp } from './vim.js';
 
 export let settingsModalEl = null;
@@ -171,6 +171,17 @@ const BUILTIN_SCHEMA = [
     category: "Git & Diff",
     type: "boolean",
     default: true
+  },
+  {
+    key: "diffEditor.maxTokenizationSizeKB",
+    title: "Diff Tokenization Limit (KiB)",
+    description: "Skips syntax highlighting when the combined diff response exceeds this size. Use 0 to disable diff highlighting.",
+    category: "Git & Diff",
+    type: "number",
+    default: 512.0,
+    min: 0.0,
+    max: 16384.0,
+    step: 64.0
   },
   {
     key: "git.gutterIndicators",
@@ -642,6 +653,7 @@ function renderSettingsList() {
       else if (key === 'editor.lineHeight') numberPresets = [18, 20, 21, 24, 28];
       else if (key === 'search.maxResults') numberPresets = [200, 500, 1000, 5000];
       else if (key === 'agent.timeoutSeconds') numberPresets = [60, 120, 180, 300];
+      else if (key === 'diffEditor.maxTokenizationSizeKB') numberPresets = [0, 256, 512, 1024, 4096];
 
       const presetPills = numberPresets.length ? `
         <span class="settings-apt-label">Presets:</span>
@@ -806,6 +818,7 @@ async function handleSettingChange(key, value) {
     setSaveStatus('saving');
     const res = await apiPostJson('/api/settings', { [key]: value });
     if (res.raw) settingsData.raw = res.raw;
+    if (key === 'diffEditor.maxTokenizationSizeKB') syncDiffView(true);
     setSaveStatus('saved', 'All changes saved');
   } catch (err) {
     console.error(`Failed to save setting ${key}:`, err);
@@ -856,6 +869,7 @@ async function handleExplicitSave() {
       applyAllSettingsLive();
     }
     if (res.raw) settingsData.raw = res.raw;
+    if (Object.prototype.hasOwnProperty.call(toSave, 'diffEditor.maxTokenizationSizeKB')) syncDiffView(true);
     pendingSettingsChanges = {};
     renderSettingsList();
 
@@ -894,6 +908,7 @@ async function handleSaveRawSettings() {
       applyAllSettingsLive();
     }
     if (res.raw) settingsData.raw = res.raw;
+    syncDiffView(true);
     if (errEl) {
       errEl.textContent = 'Settings saved successfully.';
       errEl.hidden = false;

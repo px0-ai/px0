@@ -30,6 +30,12 @@ const (
 	// altogether rather than hand chroma something it will choke on.
 	hlWindowBytes = 512 << 10
 
+	// Diff highlighting is deliberately all-or-nothing: beyond this aggregate
+	// response size the raw diff stays available but no lexer work or token HTML
+	// allocation is performed. Users can tune the limit in Settings.
+	defaultDiffTokenizationKB = 512
+	diffAnalysisBytes         = 32 << 10
+
 	// The client sizes its horizontal scroll area from MaxCols. A line of a few
 	// million characters would ask the browser for a surface it cannot make, so
 	// the reported width stops here.
@@ -166,17 +172,128 @@ func newDoc(src, rel string) *Doc {
 	}
 	d.lineOff[len(raw)] = len(src)
 
-	d.lexer = lexers.Match(filepath.Base(rel))
-	if d.lexer == nil {
-		d.lexer = lexers.Analyse(src)
-	}
+	d.lexer = lexerFor(rel, src)
 	if d.lexer == nil {
 		d.Lang = "plain text"
 	} else {
 		d.Lang = d.lexer.Config().Name
-		d.lexer = chroma.Coalesce(d.lexer)
 	}
 	return d
+}
+
+func lexerFor(rel, src string) chroma.Lexer {
+	lexer := lexers.Match(filepath.Base(rel))
+	if lexer == nil {
+		lexer = lexers.Analyse(src)
+	}
+	if lexer != nil {
+		lexer = chroma.Coalesce(lexer)
+	}
+	return lexer
+}
+
+// highlightDiffLines returns safe token markup parallel to strings.Split(diff,
+// "\n"). Each hunk side is tokenised as a contiguous snippet so multi-line
+// constructs within the displayed context retain their lexer state. Diff
+// metadata and "no newline" markers intentionally have empty entries.
+func highlightDiffLines(rel, diff string) []string {
+	if diff == "" {
+		return nil
+	}
+	raw := strings.Split(diff, "\n")
+	lexer := lexers.Match(filepath.Base(rel))
+	if lexer == nil {
+		var sample strings.Builder
+		inHunk := false
+	sampleLines:
+		for _, line := range raw {
+			switch {
+			case strings.HasPrefix(line, "@@"):
+				inHunk = true
+			case inHunk && line != "" && (line[0] == ' ' || line[0] == '-' || line[0] == '+'):
+				if sample.Len()+len(line) > diffAnalysisBytes {
+					break sampleLines
+				}
+				sample.WriteString(line[1:])
+				sample.WriteByte('\n')
+			}
+		}
+		lexer = lexers.Analyse(sample.String())
+	}
+	if lexer == nil {
+		return nil
+	}
+	lexer = chroma.Coalesce(lexer)
+	out := make([]string, len(raw))
+
+	type diffLine struct {
+		at       int
+		text     string
+		old, new int
+	}
+	var hunk []diffLine
+	flush := func() {
+		if len(hunk) == 0 {
+			return
+		}
+		oldSrc, newSrc := make([]string, 0, len(hunk)), make([]string, 0, len(hunk))
+		for i := range hunk {
+			hunk[i].old, hunk[i].new = -1, -1
+			switch raw[hunk[i].at][0] {
+			case ' ':
+				hunk[i].old, hunk[i].new = len(oldSrc), len(newSrc)
+				oldSrc, newSrc = append(oldSrc, hunk[i].text), append(newSrc, hunk[i].text)
+			case '-':
+				hunk[i].old = len(oldSrc)
+				oldSrc = append(oldSrc, hunk[i].text)
+			case '+':
+				hunk[i].new = len(newSrc)
+				newSrc = append(newSrc, hunk[i].text)
+			}
+		}
+		oldHTML := highlightLines(lexer, strings.Join(oldSrc, "\n"), len(oldSrc))
+		newHTML := highlightLines(lexer, strings.Join(newSrc, "\n"), len(newSrc))
+		for _, line := range hunk {
+			if line.new >= 0 {
+				out[line.at] = newHTML[line.new]
+			} else if line.old >= 0 {
+				out[line.at] = oldHTML[line.old]
+			}
+		}
+		hunk = hunk[:0]
+	}
+
+	inHunk := false
+	for i, line := range raw {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			flush()
+			inHunk = true
+		case !inHunk || line == "" || strings.HasPrefix(line, "\\"):
+			continue
+		case line[0] == ' ' || line[0] == '-' || line[0] == '+':
+			hunk = append(hunk, diffLine{at: i, text: line[1:]})
+		}
+	}
+	flush()
+	return out
+}
+
+func diffHighlightWithinBudget(limitKB int, diffs ...string) bool {
+	if limitKB <= 0 {
+		return false
+	}
+	if limitKB > int(^uint(0)>>1)/1024 {
+		return true
+	}
+	remaining := limitKB * 1024
+	for _, diff := range diffs {
+		if len(diff) > remaining {
+			return false
+		}
+		remaining -= len(diff)
+	}
+	return true
 }
 
 // Raw returns the source text of a 1-based line, without its newline.

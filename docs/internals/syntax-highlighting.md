@@ -98,6 +98,18 @@ px0 maps token types to minimal 1-to-2 character CSS classes:
 
 This keeps network payloads minimal and guarantees that CSS stylesheets define colors cleanly through CSS custom properties (`--k`, `--nf`, `--s`, `--c`).
 
+The diff endpoint uses the same lexer and compact token classes. It tokenizes
+the old and new sides of each hunk separately, preserving lexer state across
+the context shown in that hunk, and returns safe HTML in arrays parallel to the
+raw diff lines. The browser keeps parsing the raw unified diff for layout and
+uses the parallel markup only when painting code cells, so split and unified
+views share identical highlighting without a client-side language runtime.
+The combined raw payload is budgeted before any hunk splitting or lexing. It
+defaults to 512 KiB across all variants in one response (including PR and local
+change sections); larger diffs omit token arrays entirely and render as escaped
+plain text. `diffEditor.maxTokenizationSizeKB` configures the limit, with `0`
+disabling diff tokenization.
+
 ## 5. Byte-Budgeted LRU Memory Cache
 
 Generated HTML fragments are cached in memory using a Least Recently Used (LRU) eviction policy backed by Go's `container/list`.

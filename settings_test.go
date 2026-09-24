@@ -40,6 +40,9 @@ func TestSettingsDefaults(t *testing.T) {
 	if m["server.basePath"] != "/" {
 		t.Errorf("expected server.basePath /, got %v", m["server.basePath"])
 	}
+	if m["diffEditor.maxTokenizationSizeKB"] != 512.0 {
+		t.Errorf("expected diffEditor.maxTokenizationSizeKB 512, got %v", m["diffEditor.maxTokenizationSizeKB"])
+	}
 }
 
 func TestSettingsPreserveNonAgentValues(t *testing.T) {
@@ -117,7 +120,7 @@ func TestSettingsAPIEndpoints(t *testing.T) {
 
 	// 2. POST /api/settings with key/value updates
 	payload := map[string]any{
-		"editor.tabSize":       2,
+		"editor.tabSize":              2,
 		"diffEditor.renderSideBySide": false,
 	}
 	b, _ := json.Marshal(payload)
@@ -204,4 +207,3 @@ func TestSettingsBasePath(t *testing.T) {
 		t.Errorf("expected ServerBasePath /rev-456/ from fallback, got %v", s.ServerBasePath)
 	}
 }
-

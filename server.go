@@ -914,12 +914,38 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	avail := diff != ""
 	resp := map[string]any{"path": rel, "diff": diff}
+	var prDiff, yourDiff string
 	if s.pr != nil {
-		prDiff := gitDiffBetween(s.ix.Root(), rel, s.diffBase, s.prHeadSHA)
-		yourDiff := gitDiffAgainst(s.ix.Root(), rel, s.prHeadSHA)
+		prDiff = gitDiffBetween(s.ix.Root(), rel, s.diffBase, s.prHeadSHA)
+		yourDiff = gitDiffAgainst(s.ix.Root(), rel, s.prHeadSHA)
 		resp["prDiff"] = prDiff
 		resp["yourDiff"] = yourDiff
 		avail = avail || prDiff != "" || yourDiff != ""
+	}
+	limitKB := defaultDiffTokenizationKB
+	if cfg := readSettings(); cfg.DiffEditorMaxTokenizationKB != nil {
+		limitKB = *cfg.DiffEditorMaxTokenizationKB
+	}
+	if limitKB < 0 {
+		limitKB = 0
+	}
+	totalBytes := len(diff) + len(prDiff) + len(yourDiff)
+	skipped := totalBytes > 0 && !diffHighlightWithinBudget(limitKB, diff, prDiff, yourDiff)
+	resp["diffHighlightSkipped"] = skipped
+	resp["diffHighlightLimitKB"] = limitKB
+	resp["diffHighlightBytes"] = totalBytes
+	if !skipped {
+		if lines := highlightDiffLines(rel, diff); lines != nil {
+			resp["diffLines"] = lines
+		}
+		if s.pr != nil {
+			if lines := highlightDiffLines(rel, prDiff); lines != nil {
+				resp["prDiffLines"] = lines
+			}
+			if lines := highlightDiffLines(rel, yourDiff); lines != nil {
+				resp["yourDiffLines"] = lines
+			}
+		}
 	}
 	resp["available"] = avail
 	writeJSON(w, resp)

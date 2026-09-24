@@ -127,6 +127,7 @@ func TestGitDiff(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
+	isolateSettings(t)
 	root := gitRepo(t)
 	ix := NewIndex(root)
 	ix.Build()
@@ -142,6 +143,12 @@ func TestGitDiff(t *testing.T) {
 	diff := body["diff"].(string)
 	if !strings.Contains(diff, "-line one") || !strings.Contains(diff, "+line two") {
 		t.Errorf("diff missing expected +/- lines:\n%s", diff)
+	}
+	if lines, ok := body["diffLines"].([]any); !ok || len(lines) != len(strings.Split(diff, "\n")) {
+		t.Errorf("diffLines = %T len %d, want one entry per diff line", body["diffLines"], len(lines))
+	}
+	if body["diffHighlightSkipped"] != false {
+		t.Errorf("diffHighlightSkipped = %v, want false", body["diffHighlightSkipped"])
 	}
 
 	// A clean, committed file yields no diff -> available:false.
@@ -168,6 +175,34 @@ func TestGitDiff(t *testing.T) {
 	}
 	if !ok || !found {
 		t.Errorf("meta gitFiles = %v, want to contain sub/mod.go", meta["gitFiles"])
+	}
+}
+
+func TestGitDiffSkipsHighlightingOverLimit(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	isolateSettings(t)
+	if err := updateSettingsMap(map[string]any{"diffEditor.maxTokenizationSizeKB": 1}); err != nil {
+		t.Fatal(err)
+	}
+	root := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "sub", "mod.go"), []byte(strings.Repeat("package changed\n", 200)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ix := NewIndex(root)
+	ix.Build()
+	s := NewServer(ix, nil)
+
+	code, body := get(t, s, "/api/diff?path=sub/mod.go")
+	if code != 200 {
+		t.Fatalf("diff status %d", code)
+	}
+	if body["diffHighlightSkipped"] != true {
+		t.Fatalf("diffHighlightSkipped = %v, want true", body["diffHighlightSkipped"])
+	}
+	if _, ok := body["diffLines"]; ok {
+		t.Fatalf("diffLines should be omitted when highlighting is skipped")
 	}
 }
 
@@ -1187,4 +1222,3 @@ func TestGitStagedDiffTruncation(t *testing.T) {
 		t.Fatalf("diff size %d exceeded expected bound", len(diff))
 	}
 }
-

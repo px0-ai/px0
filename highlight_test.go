@@ -130,6 +130,71 @@ func max(a, b int) int {
 	return b
 }
 
+func TestHighlightDiffLines(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/main.go b/main.go",
+		"--- a/main.go",
+		"+++ b/main.go",
+		"@@ -1,3 +1,3 @@",
+		" package main",
+		`-var message = "old"`,
+		`+var message = "<new>"`,
+		" func main() {}",
+		"",
+	}, "\n")
+
+	got := highlightDiffLines("main.go", diff)
+	wantLen := len(strings.Split(diff, "\n"))
+	if len(got) != wantLen {
+		t.Fatalf("got %d highlighted lines, want %d", len(got), wantLen)
+	}
+	for _, i := range []int{0, 1, 2, 3, 8} {
+		if got[i] != "" {
+			t.Errorf("metadata line %d = %q, want empty", i, got[i])
+		}
+	}
+	for _, i := range []int{4, 5, 6, 7} {
+		if !strings.Contains(got[i], "<i class=") {
+			t.Errorf("code line %d has no token markup: %q", i, got[i])
+		}
+	}
+	if strings.Contains(got[6], "<new>") || !strings.Contains(got[6], "&lt;new&gt;") {
+		t.Errorf("added line is not safely escaped: %q", got[6])
+	}
+}
+
+func TestDiffHighlightWithinBudget(t *testing.T) {
+	if !diffHighlightWithinBudget(1, strings.Repeat("a", 512), strings.Repeat("b", 512)) {
+		t.Fatal("two diffs exactly at the aggregate limit should be highlighted")
+	}
+	if diffHighlightWithinBudget(1, strings.Repeat("a", 513), strings.Repeat("b", 512)) {
+		t.Fatal("aggregate diff above the limit should be skipped")
+	}
+	if diffHighlightWithinBudget(0, "small") {
+		t.Fatal("zero should disable diff highlighting")
+	}
+}
+
+func BenchmarkHighlightDiffLines(b *testing.B) {
+	var diff strings.Builder
+	diff.WriteString("diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1,2000 +1,2000 @@\n")
+	for i := 0; i < 1000; i++ {
+		fmt.Fprintf(&diff, "-func old%d() string { return \"old value %d\" }\n", i, i)
+	}
+	for i := 0; i < 1000; i++ {
+		fmt.Fprintf(&diff, "+func new%d() string { return \"new value %d\" }\n", i, i)
+	}
+	src := diff.String()
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if got := highlightDiffLines("main.go", src); len(got) == 0 {
+			b.Fatal("no highlighted lines")
+		}
+	}
+}
+
 // Windows and the background pass race on the same chunk map by design.
 func TestConcurrentChunkAccess(t *testing.T) {
 	var sb strings.Builder
