@@ -570,6 +570,10 @@ body.md-tab.diff-tab #tabs { padding-right: 290px; }
   box-shadow: none;
 }
 .tab .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .tab-gs { flex: none; font: 600 10px/1 var(--mono); }
+.tab .tab-gs.git-M, .tab .tab-gs.git-R { color: var(--accent-fg); }
+.tab .tab-gs.git-A, .tab .tab-gs.git-untracked { color: var(--gi); }
+.tab .tab-gs.git-D { color: var(--gd); }
 /* The close cross is drawn, not typed: a glyph's ink sits wherever the font puts
    it, which is below centre for x in most UI fonts. */
 .tab .x { width: 15px; height: 15px; border-radius: var(--r); display: grid; place-items: center; color: var(--faint); flex: none; }

@@ -135,6 +135,16 @@ async function handleGitStatus(data) {
   }
 
   const statuses = data.statuses || {};
+  S.gitStatuses = statuses;
+  let tabStatusesChanged = false;
+  for (const t of S.tabs) {
+    const status = statuses[t.path] || '';
+    if (t.gitStatus !== status) {
+      t.gitStatus = status;
+      tabStatusesChanged = true;
+    }
+  }
+  if (tabStatusesChanged) drawTabs();
   const dirtyDirs = data.dirtyDirs || {};
   const staged = data.staged || {};
   const yourStatuses = data.yourStatuses || {};

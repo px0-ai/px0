@@ -18,7 +18,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 
 - **Real-Time Live Status Synchronization**: px0 establishes a lightweight Server-Sent Events (SSE) connection (`/api/stream`, aliased by `/api/git/stream`) to push working-tree status changes directly to the browser. You do not need to refresh the browser or click manual reindex buttons when files change on disk.
 - **Sub-Millisecond CLI Change Awareness**: When you execute Git operations in your terminal (`git checkout`, `git reset`, `git add`, `git commit`, `git restore`, `git stash`), px0 detects the operation in sub-milliseconds by checking metadata timestamps on Git control files (`.git/index`, `.git/HEAD`, `.git/packed-refs`), instantly updating your view without scanning files on disk.
-- **File Tree Status Badges**: The file explorer decorates changed files with colored badges indicating their Git working-tree status:
+- **Open Tab and File Tree Status Badges**: Open file tabs and the file explorer decorate changed files with colored badges indicating their Git working-tree status:
   - `M` (Modified): Working tree file differs from `HEAD`.
   - `A` (Added / Staged): Newly added file staged in the index.
   - `D` (Deleted): File removed from the working tree.
