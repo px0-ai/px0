@@ -29,6 +29,7 @@ type settings struct {
 	EditorMinimapEnabled        *bool    `json:"editor.minimap.enabled,omitempty"`
 	WorkbenchColorTheme         *string  `json:"workbench.colorTheme,omitempty"`
 	DiffEditorRenderSideBySide  *bool    `json:"diffEditor.renderSideBySide,omitempty"`
+	DiffEditorMaxTokenizationKB *int     `json:"diffEditor.maxTokenizationSizeKB,omitempty"`
 	MarkdownPreviewOpen         *bool    `json:"markdown.preview.open,omitempty"`
 	TelemetryEnabled            *bool    `json:"telemetry.enabled,omitempty"`
 	GitHubToken                 *string  `json:"github.token,omitempty"`
@@ -283,6 +284,17 @@ var settingsSchema = []settingSchemaItem{
 		Category:    "Git & Diff",
 		Type:        "boolean",
 		Default:     true,
+	},
+	{
+		Key:         "diffEditor.maxTokenizationSizeKB",
+		Title:       "Diff Tokenization Limit (KiB)",
+		Description: "Skips syntax highlighting when the combined diff response exceeds this size. Use 0 to disable diff highlighting.",
+		Category:    "Git & Diff",
+		Type:        "number",
+		Default:     512.0,
+		Min:         numPtr(0.0),
+		Max:         numPtr(16384.0),
+		Step:        numPtr(64.0),
 	},
 	{
 		Key:         "git.gutterIndicators",

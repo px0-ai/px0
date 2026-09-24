@@ -7,7 +7,7 @@
 import { $, S, doc_, esc, api } from './state.js';
 import { on } from './bus.js';
 import { syncPreview } from './markdown.js';
-import { setStatusNote, updateStatus } from './status.js';
+import { fmtBytes, setStatusNote, updateStatus } from './status.js';
 
 export const diffview = $('#diffview');
 const diffContent = $('#diffcontent');
@@ -88,18 +88,24 @@ async function drawDiff(d, force = false) {
       d.diffReq = api('/api/diff', { path: d.path });
       const j = await d.diffReq;
       d.diffText = j.diff || '';
-      d.diffHunks = parseDiff(d.diffText);
+      d.diffHunks = parseDiff(d.diffText, j.diffLines);
+      d.diffHighlightSkipped = !!j.diffHighlightSkipped;
+      d.diffHighlightLimitKB = j.diffHighlightLimitKB;
+      d.diffHighlightBytes = j.diffHighlightBytes;
       // In a PR review session the server also splits the diff at the PR's
       // checked-out head commit: prDiff is the PR's own change (frozen since
       // checkout/last Pull), yourDiff is whatever the reviewer has edited or
       // committed locally since then. Undefined outside PR mode.
-      d.prDiffHunks = j.prDiff !== undefined ? parseDiff(j.prDiff) : undefined;
-      d.yourDiffHunks = j.yourDiff !== undefined ? parseDiff(j.yourDiff) : undefined;
+      d.prDiffHunks = j.prDiff !== undefined ? parseDiff(j.prDiff, j.prDiffLines) : undefined;
+      d.yourDiffHunks = j.yourDiff !== undefined ? parseDiff(j.yourDiff, j.yourDiffLines) : undefined;
     } catch (e) {
       d.diffText = '';
       d.diffHunks = [];
       d.prDiffHunks = undefined;
       d.yourDiffHunks = undefined;
+      d.diffHighlightSkipped = false;
+      d.diffHighlightLimitKB = undefined;
+      d.diffHighlightBytes = undefined;
       setStatusNote('No diff: ' + e.message, 4000);
     } finally {
       d.diffReq = null;
@@ -123,6 +129,7 @@ function appendHunks(frag, hunks, mode, reviewable) {
 function renderDiff(d) {
   diffContent.replaceChildren();
   const frag = document.createDocumentFragment();
+  if (d.diffHighlightSkipped) frag.append(highlightSkippedNote(d.diffHighlightLimitKB, d.diffHighlightBytes));
   if (S.meta?.pr && d.prDiffHunks !== undefined) {
     const prHunks = d.prDiffHunks || [];
     const yourHunks = d.yourDiffHunks || [];
@@ -156,6 +163,15 @@ function renderDiff(d) {
   diffContent.append(frag);
   syncDiffAgentTargets();
   if (prSyncHandler) prSyncHandler();
+}
+
+function highlightSkippedNote(limitKB, totalBytes) {
+  const el = document.createElement('div');
+  el.className = 'diff-highlight-note';
+  el.textContent = limitKB === 0
+    ? 'Syntax highlighting is disabled for diffs. Configure Diff Tokenization Limit in Settings.'
+    : `Syntax highlighting skipped: ${fmtBytes(totalBytes || 0)} combined diff exceeds the ${fmtBytes(limitKB * 1024)} limit. Configure Diff Tokenization Limit in Settings.`;
+  return el;
 }
 
 function createDiffSection(d, kind, title, sub, populateBody) {
@@ -269,11 +285,11 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[ \t]?(.*)$/;
 // list of rows tagged ctx/add/del carrying old- and/or new-file line numbers.
 // File headers (diff --git, index, ---, +++) are skipped: nothing before the
 // first @@ is kept.
-function parseDiff(text) {
+function parseDiff(text, highlighted = []) {
   if (!text) return [];
   const hunks = [];
   let cur = null, oldLine = 0, newLine = 0;
-  for (const line of text.split('\n')) {
+  for (const [i, line] of text.split('\n').entries()) {
     const m = HUNK_RE.exec(line);
     if (m) {
       oldLine = +m[1];
@@ -284,10 +300,11 @@ function parseDiff(text) {
     }
     if (!cur || line === '' || line.startsWith('\\')) continue; // trailing split artifact, pre-hunk header, or "\ No newline..."
     const c = line[0], body = line.slice(1);
-    if (c === '+') cur.rows.push({ type: 'add', newLine: newLine++, text: body });
+    const html = highlighted?.[i] || esc(body);
+    if (c === '+') cur.rows.push({ type: 'add', newLine: newLine++, html });
     // A deletion has no line on disk; at is the working-tree line it sat before.
-    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, at: newLine, text: body });
-    else cur.rows.push({ type: 'ctx', oldLine: oldLine++, newLine: newLine++, text: body });
+    else if (c === '-') cur.rows.push({ type: 'del', oldLine: oldLine++, at: newLine, html });
+    else cur.rows.push({ type: 'ctx', oldLine: oldLine++, newLine: newLine++, html });
   }
   return hunks;
 }
@@ -305,7 +322,7 @@ function unifiedTable(hunk, reviewable = true) {
       lineCell(row.type === 'add' ? '' : row.oldLine, reviewable),
       lineCell(row.type === 'del' ? '' : row.newLine, reviewable),
       markerCell(row.type),
-      codeCell(row.text),
+      codeCell(row.html),
     );
     table.append(r);
   }
@@ -350,7 +367,7 @@ function splitSide(row, side, reviewable = true) {
   if (!row) { el.append(lineCell('', reviewable), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
   anchor(el, row, reviewable);
-  el.append(lineCell(ln, reviewable), markerCell(row.type), codeCell(row.text));
+  el.append(lineCell(ln, reviewable), markerCell(row.type), codeCell(row.html));
   return el;
 }
 
@@ -397,10 +414,10 @@ function markerCell(type) {
   return el;
 }
 
-function codeCell(text) {
+function codeCell(html = '') {
   const el = document.createElement('div');
   el.className = 'diff-code';
-  el.innerHTML = esc(text || '') || '&nbsp;';
+  el.innerHTML = html || '&nbsp;';
   return el;
 }
 

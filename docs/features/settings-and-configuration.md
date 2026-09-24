@@ -42,6 +42,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `workbench.colorTheme` | Workbench | `"github-dark"` | 14 built-in theme IDs | Active color theme |
 | `diffEditor.renderSideBySide` | Diff Editor | `true` | `true`, `false` | Split vs. unified diff view default |
 | `diffEditor.ignoreTrimWhitespace` | Diff Editor | `true` | `true`, `false` | Ignore whitespace differences in diffs |
+| `diffEditor.maxTokenizationSizeKB` | Diff Editor | `512` | `0` – `16,384` KiB | Skip diff syntax highlighting above the combined response size; `0` disables it |
 | `git.gutterIndicators` | Git | `true` | `true`, `false` | Visual change markers in gutter |
 | `git.commitMessageInstruction` | Git & Diff | `""` | any string (multi-line textarea) | Extra instructions given to the coding harness when the git panel's **Commit with AI** writes a commit message |
 | `explorer.compactFolders` | Explorer | `true` | `true`, `false` | Compact single-child directory chains |
@@ -79,6 +80,7 @@ For automated machine setup, dotfile repositories, or scripting, you can directl
   "editor.lineHeight": 22,
   "workbench.colorTheme": "tokyo-night",
   "diffEditor.renderSideBySide": true,
+  "diffEditor.maxTokenizationSizeKB": 512,
   "agent.harness": "claude",
   "agent.timeoutSeconds": 180
 }

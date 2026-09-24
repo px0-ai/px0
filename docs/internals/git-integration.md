@@ -98,7 +98,7 @@ When viewing a file, the editor displays green, blue, and red markers in the lin
 
 ### File Diff (`/api/diff?path=...`)
 
-`handleDiff` (`server.go`) returns `{ path, diff, available }` — the same raw text `gitDiff` produced, with `available` set whenever it's non-empty (clean or untracked files get `""`). No hunk parsing happens on the server for this endpoint; the client owns that, because it needs two different reshapes of the same hunks (split and unified) and re-parsing client-side avoids two server round trips or two response shapes for one diff.
+`handleDiff` (`server.go`) returns the same raw text `gitDiff` produced, with `available` set whenever it is non-empty (clean or untracked files get `""`). Within the configured aggregate tokenization budget it also returns `diffLines`, a parallel array of safe Chroma token markup for hunk body lines; metadata entries are empty. The 512 KiB default budget covers every raw diff variant in one response, so PR mode cannot silently triple the lexer workload. Above it, `diffHighlightSkipped` is true, token arrays are omitted, and the client renders escaped plain text with a notice. The server only separates old and new hunk snippets for lexing. The client still owns structural hunk parsing because it needs two different reshapes of the same raw diff (split and unified), while the parallel markup avoids a second request and a browser-side language runtime.
 
 ### Split & Unified Views (`web/src/diff.js`)
 
@@ -106,7 +106,7 @@ The active tab gets a `Source | Diff` switch next to the tab bar (`#diff-switch`
 
 Unlike the main code view, the diff is **not** rendered through the virtualized `#rows` viewport. A single file's diff is small (bounded by the size of that one file), so `diff.js` renders it as plain DOM into a dedicated `#diffview` overlay — the same overlay-over-`#viewport` pattern the Markdown preview uses (see [Markdown Preview](markdown.md)), just with its own content:
 
-1. **Parse.** `parseDiff(text)` splits the raw diff on `@@ ... @@` hunk headers and walks each hunk's `+`/`-`/context lines once, tagging every row `add` / `del` / `ctx` and carrying its old-file and/or new-file line number. This runs once per file per session; the parsed hunks are cached on `d.diffHunks` so switching Split ↔ Unified re-renders from memory with no re-fetch.
+1. **Parse.** `parseDiff(text, highlighted)` splits the raw diff on `@@ ... @@` hunk headers and walks each hunk's `+`/`-`/context lines once, tagging every row `add` / `del` / `ctx`, carrying its old-file and/or new-file line number, and attaching the corresponding highlighted markup. This runs once per file per session; the parsed hunks are cached on `d.diffHunks` so switching Split ↔ Unified re-renders from memory with no re-fetch.
 1. **Unified layout.** One row per parsed line: old-line column, new-line column (whichever side doesn't apply is blank), a `+`/`-` marker, and the code — a direct read of `d.diffHunks`, GitHub-"unified"-style.
 1. **Split layout.** `pairRows(hunk.rows)` walks each hunk and pairs a deletion run with the addition run immediately following it, index by index, padding the shorter side with a blank cell (`.diff-blank`) — the same replacement-block pairing GitHub's split view uses. Context lines pass straight across both columns unpaired. Each pair renders as one flex row with a left/right half, so the two columns stay vertically aligned for free — no synced-scroll JavaScript, because both halves of a pair are literally the same DOM row.
 
@@ -304,4 +304,3 @@ For a plain workspace, `handleGitPush` runs a bare `gitPush` (`git push`); if th
 | `/api/git/commit-message` | POST | Dispatch the selected harness to write a commit message for the staged diff. Returns an `agentJob`, polled via `/api/agent/job`. `400` if nothing is staged or no harness is selected. |
 
 Every write endpoint is guarded by `localPost` ([`lspsetup.go`](../../lspsetup.go)), the same POST-only, same-origin, IP-or-localhost check every other mutating px0 endpoint uses.
-

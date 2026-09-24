@@ -810,12 +810,30 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .c .gh, .md-code .gh{color:var(--accent-fg);font-weight:600} .c .ge, .md-code .ge{font-style:italic} .c .gs, .md-code .gs{font-weight:600}
 .c .err, .md-code .err{color:var(--err);text-decoration:underline wavy}
 
+/* Diff code uses the same compact Chroma token classes. */
+.diff-code i{font-style:normal}
+.diff-code .k{color:var(--k)} .diff-code .kt{color:var(--kt)}
+.diff-code .nf{color:var(--nf)} .diff-code .nc{color:var(--nc)}
+.diff-code .nb{color:var(--nb)} .diff-code .nv{color:var(--nv)}
+.diff-code .no{color:var(--no)} .diff-code .na{color:var(--na)}
+.diff-code .nt{color:var(--nt)} .diff-code .nd{color:var(--nd)}
+.diff-code .np{color:var(--np)} .diff-code .s{color:var(--s)}
+.diff-code .m{color:var(--m)} .diff-code .o{color:var(--o)} .diff-code .p{color:var(--p)}
+.diff-code .c{color:var(--c);font-style:italic} .diff-code .cp{color:var(--cp)}
+.diff-code .gi{color:var(--gi);background:var(--gi-bg)} .diff-code .gd{color:var(--gd);background:var(--gd-bg)}
+.diff-code .gh{color:var(--accent-fg);font-weight:600} .diff-code .ge{font-style:italic} .diff-code .gs{font-weight:600}
+.diff-code .err{color:var(--err);text-decoration:underline wavy}
+
 /* ---------- diff view (Mod+D): split (default) or unified render of a
    modified file's git diff against HEAD, in its own overlay like the
    Markdown preview -- not virtualized, since a single file's diff is small. */
 #diffview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
 #diffcontent { font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
 .diff-empty { padding: 24px 16px; color: var(--faint); font: 12px/1.4 var(--ui); }
+.diff-highlight-note {
+  padding: 7px 12px; color: var(--dim); background: var(--bg2);
+  border-bottom: 1px solid var(--line); font: 11px/1.4 var(--ui);
+}
 .diff-hunk-head {
   position: sticky; top: 0; z-index: 1; padding: 4px 12px;
   color: var(--accent-fg); background: var(--bg3);
@@ -2332,4 +2350,3 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   border-color: var(--err); color: var(--err); font-weight: 600;
 }
 .pr-btn-request-changes:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 26%, transparent); }
-
