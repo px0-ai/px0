@@ -115,7 +115,7 @@ function updateSessionMeta(session) {
 }
 
 // Loads harnesses and models asynchronously after the browser UI has loaded.
-export async function loadAgentAsync() {
+export async function loadAgentAsync(retry = true) {
   try {
     const j = await api('/api/agent/harnesses');
     S.meta.agents = j.harnesses || [];
@@ -123,6 +123,13 @@ export async function loadAgentAsync() {
     S.meta.agentModel = j.model || S.meta.agentModel || '';
     S.meta.agentPinned = !!j.pinned;
     applyAgentMeta();
+
+    // Model discovery runs in the background and initially returns each
+    // harness's static fallback. Refresh once after the server-side timeout so
+    // newly discovered catalogs reach pickers without user action.
+    if (retry && S.meta.agents.some(h => h.installed)) {
+      setTimeout(() => loadAgentAsync(false), 5500);
+    }
   } catch {}
 }
 
