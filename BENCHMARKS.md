@@ -4,13 +4,13 @@
 
 - Go 1.24+: To build the target binary.
 - Git: Required only for `--clone`.
-- System Utilities: `curl`, `awk`, `find`, `du` (standard on Linux and macOS).
+- System Utilities: `curl`, `awk`, `find`, `du`, `python3` (standard on Linux and macOS).
 - Disk Space: ~3 GB for the standard multi-repository corpus.
-- Memory Measurements: Read via `/proc`, supported natively on Linux (other metrics function cross-platform).
+- Memory Measurements: Cross-platform native support (Linux via `/proc` and macOS/Darwin via `getrusage`, `ps`, and `/api/metrics`).
 
 ## 2. Running Benchmarks
 
-### 2. Fetch the standard corpus
+### Fetch the standard corpus
 
 Clones shallow copies (`--depth 1`) of seven diverse open-source repositories:
 
@@ -18,12 +18,30 @@ Clones shallow copies (`--depth 1`) of seven diverse open-source repositories:
 ./benchmark.sh --clone
 ```
 
-### 3. Execute benchmark suite
+### Execute benchmark suite
 
 Spawns an isolated px0 server process per repository, records metrics, and terminates the instance:
 
 ```bash
 ./benchmark.sh
+```
+
+### Advanced Modes & Exports
+
+```bash
+# Export benchmark results as machine-readable JSON or CSV
+./benchmark.sh --json baseline.json
+./benchmark.sh --csv results.csv
+
+# Compare benchmark against a saved baseline (speedups, regressions, memory delta)
+./benchmark.sh --compare baseline.json
+
+# Run Go micro-benchmarks (fuzzy search, syntax highlighting, regex/literal search, allocs/op)
+./benchmark.sh --micro
+# or: make bench
+
+# Measure concurrent HTTP load throughput and latency distribution (p50, p95, p99)
+./benchmark.sh --load .
 ```
 
 ## 3. Benchmark Corpus
@@ -54,7 +72,20 @@ Measured on Linux x86_64 with language servers disabled (`-no-lsp`):
 | redis      | 26 MB       | 1,855  | 13 ms  | 1.0 ms  | 18.2 ms   | 80.8 ms  | 1.2 ms | 17 MB    | 27 MB    |
 | typescript | 414 MB      | 66,533 | 566 ms | 6.2 ms  | 150.3 ms  | 40.9 ms  | 6.5 ms | 69 MB    | 105 MB   |
 
-### Metric Descriptions
+### 4.1 Benchmark Results (macOS arm64 / Apple Silicon)
+
+Measured on macOS (Apple M4, Darwin arm64) with language servers disabled (`-no-lsp`):
+
+| Repo       | Source Size | Files  | Index   | Fuzzy   | Full Scan  | Open Big  | Reopen   | Base Mem | Peak Mem |
+| ---------- | ----------- | ------ | ------- | ------- | ---------- | --------- | -------- | -------- | -------- |
+| django     | 61 MB       | 7,014  | 142 ms  | 0.6 ms  | 50.7 ms    | 108.1 ms  | 8.4 ms   | 28 MB    | 46 MB    |
+| flask      | 2 MB        | 235    | 19 ms   | 0.4 ms  | 2.6 ms     | n/a       | n/a      | 23 MB    | 27 MB    |
+| kubernetes | 346 MB      | 25,922 | 544 ms  | 3.7 ms  | 299.9 ms   | 89.5 ms   | 8.4 ms   | 40 MB    | 110 MB   |
+| linux      | 1,783 MB    | 95,705 | 981 ms  | 4.2 ms  | 2,208.5 ms | 71.5 ms   | 11.9 ms  | 73 MB    | 367 MB   |
+| react      | 60 MB       | 7,204  | 102 ms  | 1.3 ms  | 66.3 ms    | 38.6 ms   | 7.4 ms   | 27 MB    | 48 MB    |
+| redis      | 25 MB       | 1,866  | 31 ms   | 0.6 ms  | 14.2 ms    | 32.8 ms   | 6.4 ms   | 25 MB    | 43 MB    |
+| typescript | 398 MB      | 66,617 | 925 ms  | 4.1 ms  | 1,019.2 ms | 52.0 ms   | 12.8 ms  | 77 MB    | 125 MB   |
+
 
 - `Source`: Total working tree size (excluding `.git`).
 - `Files`: Number of indexed files after applying `.gitignore` and built-in rules.
