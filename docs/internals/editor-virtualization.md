@@ -110,9 +110,13 @@ Proportional gutter widths and accurate scroll geometry require exact character 
 
 Instead, px0 measures typography once via an offscreen DOM element (`#measure`):
 
-- `LH` (Line Height) and `chW` (Character Width) are measured with sub-pixel fractional precision.
-- Values are cached in state `S.chW` and `S.LH`.
+- `chW` (Character Width) is measured with sub-pixel fractional precision and cached in `S.chW`.
+- `LH` (Line Height) lives in `state.js` and always equals the CSS `--lh`: `applyEditorTypography()` rounds the line height to whole pixels, writes `--lh`, and calls `setLH()`.
 - Scrollbar dimensions and virtual positions are computed algebraically without reading DOM layout metrics.
+
+### Editor Zoom
+
+Ctrl+wheel and trackpad pinch over `#viewport` or `#diffview` scale only the editor text, never the page. Chromium and Firefox report pinch as `wheel` with `ctrlKey`; Safari reports `gesturestart`/`gesturechange`. `setEditorZoom()` clamps the factor to 50%–300% and re-applies typography once per animation frame, multiplying `editor.fontSize` and `editor.lineHeight`. The first visible line stays in place. Zoom is session-only; the "Reset Editor Zoom" palette command returns to 100%.
 
 ## 5. Selection Preservation Across Repaints
 

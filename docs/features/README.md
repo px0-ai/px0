@@ -21,7 +21,7 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **Semantic Code Intelligence** | `F12`, `Shift+F12`, `Alt+Shift+H` | Go to Definition, Find References, Call Trails, and Hover docs | [LSP & Intelligence](lsp-code-intelligence.md) |
 | **Markdown Preview** | `Alt+M` | Full GFM preview, syntax-highlighted code fences, and scroll sync | [Markdown Preview](markdown-preview.md) |
 | **Image Viewer & Assets** | Click image file / lightbox | Standalone image tabs, zoom/pan transforms, and markdown lightbox | [Image Viewer](image-viewer.md) |
-| **Settings & Preferences** | `Cmd/Ctrl+,` | Graphical form editor, raw JSON sync, and instant live preview | [Settings & Configuration](settings-and-configuration.md) |
+| **Settings & Preferences** | `Cmd/Ctrl+,` | Graphical form editor, raw JSON sync, instant live preview, and session-only Ctrl+wheel / pinch editor zoom | [Settings & Configuration](settings-and-configuration.md) |
 | **Syntax Highlighting** | Automatic | Viewport-windowed Chroma lexing for ~280 languages | [Syntax Highlighting](syntax-highlighting.md) |
 | **Themes & Styling** | Settings / Palette | 14 built-in dark and light themes powered by CSS tokens | [Themes & Styling](themes-and-styling.md) |
 | **Selection Actions** | `Alt+C`, `Alt+A`, `Alt+U` | Copy reference, format LLM context, find usages, and edit | [Selection Actions](selection-actions.md) |
