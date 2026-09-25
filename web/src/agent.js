@@ -68,6 +68,7 @@ export function applyAgentMeta() {
 
 function modelValues(harness, currentModel) {
   const values = [...(harness?.models || [])];
+  // Keep an already selected model visible if a later catalog omits it.
   if (currentModel && !values.includes(currentModel)) values.unshift(currentModel);
   return values;
 }
@@ -347,6 +348,7 @@ function createSession(info) {
     errEl: el.querySelector('.agent-err'),
   };
   session.modelPicker = createModelPicker(session.modelHost, {
+    label: 'Model',
     onChange: async model => {
       const hName = session.harnessSelect?.value || chosen();
       const result = await select(hName, model, msg => showErr(session, msg));
@@ -424,14 +426,18 @@ async function cancelSession(session) {
   session.input.focus();
 }
 
-function closeAgentEdit(session) {
-  if (session.timer || session.jobId) {
-    cancelSession(session);
-  }
+function removeSession(session) {
   session.modelPicker?.destroy();
   session.pickModelPicker?.destroy();
   sessions.delete(session.id);
   session.el.remove();
+}
+
+function closeAgentEdit(session) {
+  if (session.timer || session.jobId) {
+    cancelSession(session);
+  }
+  removeSession(session);
   syncBoxVisibility();
   syncAgentTargets();
 }
@@ -526,6 +532,7 @@ function showCompose(session) {
 }
 
 async function showPicker(session) {
+  if (sessions.get(session.id) !== session) return;
   session.composeEl.hidden = true;
   if (session.metaEl) session.metaEl.hidden = true;
   session.pickEl.hidden = false;
@@ -538,6 +545,7 @@ async function showPicker(session) {
   // Re-scan, so a harness installed since startup shows up without a restart.
   try {
     const j = await api('/api/agent/harnesses');
+    if (sessions.get(session.id) !== session) return;
     list = j.harnesses || [];
     settingsPath = j.settings || '';
     S.meta.agents = list;
@@ -545,6 +553,7 @@ async function showPicker(session) {
     S.meta.agentModel = j.model || '';
     S.meta.agentPinned = !!j.pinned;
   } catch (e) {
+    if (sessions.get(session.id) !== session) return;
     session.pickEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc(e.message) + '</div>';
     return;
   }
@@ -567,11 +576,13 @@ async function showPicker(session) {
   session.pickEl.querySelectorAll('.agent-model-select').forEach(host => {
     const harness = host.dataset.harness;
     const picker = createModelPicker(host, {
+      label: 'Model for ' + harness,
       onChange: async model => {
         const result = await select(harness, model, msg => showErr(session, msg));
         if (result) {
           await showPicker(session);
           picker.destroy();
+          if (sessions.get(session.id) === session) session.pickModelPicker?.focus();
         }
         return result;
       },
@@ -851,8 +862,7 @@ async function finishBatch(targets, j) {
   }
 
   for (const t of currentTargets) {
-    sessions.delete(t.session.id);
-    t.session.el.remove();
+    removeSession(t.session);
   }
   syncBoxVisibility();
   syncAgentTargets();
@@ -939,8 +949,7 @@ async function finish(session, j) {
     return; // leave the box open so the error stays visible
   }
 
-  sessions.delete(session.id);
-  session.el.remove();
+  removeSession(session);
   syncBoxVisibility();
   syncAgentTargets();
 
@@ -999,6 +1008,7 @@ export function initAgent() {
   }
   if (batchModelHost) {
     batchModel = createModelPicker(batchModelHost, {
+      label: 'Model',
       onChange: model => select(batchHarness?.value || chosen(), model, msg => showBatchErr(msg)),
     });
   }
@@ -1011,6 +1021,7 @@ export function initAgent() {
   }
   if (gitModelHost) {
     gitModel = createModelPicker(gitModelHost, {
+      label: 'Model',
       onChange: model => select(gitHarness?.value || chosen(), model, msg => showToast('!', msg)),
     });
   }

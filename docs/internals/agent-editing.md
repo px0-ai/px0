@@ -84,7 +84,7 @@ Diff rows carry where they point in the working tree:
 
 Discovery alone never enables editing. Finding `claude` on PATH is not consent to let it rewrite a workspace, so the first edit opens a picker and the choice is explicit. Once made, it is remembered and the picker stays out of the way.
 
-The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). The model control is a searchable combobox that fuzzy-filters the IDs already returned by harness discovery; it does not run discovery or add model IDs. Changing the harness or model updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
+The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). The model control is a searchable combobox that fuzzy-filters the IDs already returned by harness discovery; it does not run discovery or invent model IDs. An already selected model remains visible if a later catalog omits it. Changing the harness or model updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
 
 The choice is written to:
 

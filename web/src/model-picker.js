@@ -120,6 +120,7 @@ export function createModelPicker(host, options = {}) {
     active: 0,
     disabled: false,
     isOpen: false,
+    label: options.label || 'Model',
     onChange: options.onChange || (() => {}),
   };
 
@@ -129,11 +130,14 @@ export function createModelPicker(host, options = {}) {
     else picker.open();
   };
   const onTriggerKeydown = (e) => {
-    e.stopPropagation();
-    if (e.key === 'Escape' && picker.isOpen) {
+    if (e.key === 'Escape') {
+      if (!picker.isOpen) return;
+      e.stopPropagation();
       e.preventDefault();
       picker.close(true);
+      return;
     }
+    e.stopPropagation();
   };
   const onSearchInput = () => {
     picker.active = 0;
@@ -187,6 +191,17 @@ export function createModelPicker(host, options = {}) {
   addEventListener('resize', onViewportChange);
   addEventListener('scroll', onViewportChange, true);
 
+  const visibilityObserver = typeof MutationObserver === 'function'
+    ? new MutationObserver(() => {
+      if (picker.isOpen && (!root.isConnected || root.getClientRects().length === 0)) picker.close(false);
+    })
+    : null;
+  if (visibilityObserver) {
+    for (let node = root; node && node !== document.body; node = node.parentElement) {
+      visibilityObserver.observe(node, { attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+    }
+  }
+
   picker.setOptions = (nextValues, selected = '', state = {}) => {
     const values = Array.isArray(nextValues) ? nextValues.filter(v => typeof v === 'string' && v) : [];
     picker.values = [...new Set(values)];
@@ -226,6 +241,7 @@ export function createModelPicker(host, options = {}) {
     document.removeEventListener('pointerdown', onDocumentPointerDown);
     removeEventListener('resize', onViewportChange);
     removeEventListener('scroll', onViewportChange, true);
+    visibilityObserver?.disconnect();
     menu.remove();
     root.remove();
   };
@@ -256,6 +272,7 @@ export function createModelPicker(host, options = {}) {
 
   picker.renderTrigger = () => {
     valueEl.textContent = picker.value || 'No models';
+    trigger.setAttribute('aria-label', picker.value ? picker.label + ': ' + picker.value : picker.label);
     trigger.disabled = picker.disabled;
     root.classList.toggle('disabled', picker.disabled);
   };
@@ -315,6 +332,10 @@ export function createModelPicker(host, options = {}) {
 
   picker.position = () => {
     if (!picker.isOpen) return;
+    if (!root.isConnected || root.getClientRects().length === 0) {
+      picker.close(false);
+      return;
+    }
     const rect = picker.trigger.getBoundingClientRect();
     const edge = 8;
     const gap = 4;
