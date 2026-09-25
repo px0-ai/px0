@@ -15,12 +15,20 @@ let hoverTimer = 0, hoverSeq = 0, moveRAF = 0, pendingMove = null, pointerAt = n
 
 const sameWord = (a, b) => !!a && !!b && a.line === b.line && a.col === b.col && a.word === b.word;
 
+const isOverCard = (x, y) => {
+  if (hovercard.hidden) return false;
+  const rect = hovercard.getBoundingClientRect();
+  return x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4;
+};
+
 /* Hit-testing a point costs a few milliseconds: it forces layout and walks the
    line's nodes. Far too much to spend on every animation frame, so it runs only
    when the modifier is actually held, or once the pointer has come to rest and
    the card is about to open. Everything on the hot path below is arithmetic. */
 export function onMove({ x, y, mod }) {
   if (mod) {
+    // Pressing the link modifier over the card itself must not dismiss it.
+    if (isOverCard(x, y)) { clearTimeout(hoverTimer); return; }
     const at = doc_() ? wordAtPoint(x, y) : null;
     if (!sameWord(at, S.link)) {
       S.link = at;
@@ -35,11 +43,9 @@ export function onMove({ x, y, mod }) {
   if (S.link) { S.link = null; vp.classList.remove('linking'); paint(); }
 
   // Dismiss an open card once the pointer has clearly left what it described.
+  // Staying over the card itself keeps it open so its buttons stay clickable.
   if (S.hoverAnchor) {
-    if (!hovercard.hidden) {
-      const rect = hovercard.getBoundingClientRect();
-      if (x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4) return;
-    }
+    if (!hovercard.hidden && isOverCard(x, y)) return;
     const dx = x - S.hoverAnchor.x, dy = y - S.hoverAnchor.y;
     if (dx * dx + dy * dy > HOVER_KEEP * HOVER_KEEP) hideHover();
     else return; // still on the same word: nothing to do
@@ -160,10 +166,41 @@ export function initHover() {
     });
   });
 
-  vp.addEventListener('mouseleave', () => { pointerAt = null; clearLink(); });
+  vp.addEventListener('mouseleave', (e) => {
+    // Moving from the code onto the card itself still leaves #viewport
+    // (the card is a sibling overlay, not a child), but must not dismiss it.
+    const to = e.relatedTarget;
+    if (to && to.closest && to.closest('#hovercard')) return;
+    pointerAt = null; clearLink();
+  });
   vp.addEventListener('scroll', () => { clearTimeout(hoverTimer); hideHover(); }, { passive: true });
-  vp.addEventListener('mousedown', (e) => {
-    if (e.target.closest('#hovercard')) return;
+
+  /* The card must stay open while the pointer is over it so its buttons can
+     be clicked. #viewport stops getting mousemove/mouseleave once the pointer
+     is on the card (sibling overlay), so the card needs its own handlers. */
+  hovercard.addEventListener('mouseenter', () => {
+    clearTimeout(hoverTimer);
+  });
+  hovercard.addEventListener('mousemove', (e) => {
+    pointerAt = { x: e.clientX, y: e.clientY };
+    clearTimeout(hoverTimer);
+  });
+  hovercard.addEventListener('mouseleave', (e) => {
+    const to = e.relatedTarget;
+    // Moving within the card or back to the code: let the viewport handler
+    // decide (keeps the card open when returning to its anchor word).
+    if (to instanceof Node && (to === hovercard || hovercard.contains(to))) return;
+    if (to && to.closest && to.closest('#hovercard')) return;
+    if (to instanceof Node && vp.contains(to)) return;
+    pointerAt = null;
+    hideHover();
+  });
+  // Clicks outside both the code and the card dismiss a card and cancel a
+  // pending one. The card's own buttons are excluded via closest().
+  document.addEventListener('mousedown', (e) => {
+    const t = e.target;
+    if (t instanceof Element && t.closest('#hovercard')) return;
+    clearTimeout(hoverTimer);
     hideHover();
   });
 
@@ -171,9 +208,15 @@ export function initHover() {
      underline has to follow. */
   const modKey = isMac ? 'Meta' : 'Control';   // the key MOD tests; Ctrl+click on a Mac is a right click
   addEventListener('keydown', e => {
-    if (e.key === modKey && pointerAt) onMove({ ...pointerAt, mod: true });
+    if (e.key === modKey && !e.repeat && pointerAt) onMove({ ...pointerAt, mod: true });
   });
   addEventListener('keyup', e => {
-    if (e.key === modKey) clearLink();
+    if (e.key !== modKey) return;
+    // Releasing the modifier over the card must not dismiss it.
+    if (pointerAt && isOverCard(pointerAt.x, pointerAt.y)) {
+      if (S.link) { S.link = null; vp.classList.remove('linking'); paint(); }
+      return;
+    }
+    clearLink();
   });
 }
