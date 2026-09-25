@@ -5,6 +5,13 @@ import { render } from './renderer.js';
 import { updateStatus, setLspState } from './status.js';
 import { pushHistory } from './history.js';
 
+/* Symbols live in the right inspector, so refresh them only while that tab is
+   on screen. Showing the inspector again goes through setRightInspectorTab,
+   which loads them itself. */
+export function symbolsShown() {
+  return !document.body.classList.contains('right-hidden') && !!$('#pane-right-symbols')?.classList.contains('active');
+}
+
 export async function loadOutline() {
   const d = doc_();
   const el = $('#outline');
@@ -29,7 +36,7 @@ export async function upgradeOutline(d) {
   if (!j.symbols || !j.symbols.length) { d.outlineLSP = false; return; }
   d.outline = j.symbols;
   d.outlineSource = j.server;
-  if (doc_() === d && $('#panel-outline')?.classList.contains('active')) drawOutline();
+  if (doc_() === d && symbolsShown()) drawOutline();
 }
 
 export function drawOutline() {
