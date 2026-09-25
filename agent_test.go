@@ -941,6 +941,3 @@ func TestCommitMessagePrompt(t *testing.T) {
 		t.Errorf("prompt contains file beyond 100:\n%s", p2)
 	}
 }
-
-
-

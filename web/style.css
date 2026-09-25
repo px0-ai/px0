@@ -823,6 +823,7 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
   font-size: 12px; white-space: pre;
 }
 .diff-hunk-head:first-child { border-top: none; }
+.diff-hunk-head { display: flex; align-items: stretch; }
 /* Splits a PR review's diff into the PR's own (frozen) change and whatever
    the reviewer has edited/committed locally since checkout -- see diff.js's
    drawDiff/renderDiff. Distinct from .diff-hunk-head so the two never read
@@ -863,6 +864,30 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-row-pair { display: flex; }
 .diff-side { flex: 1 1 50%; min-width: 0; }
 .diff-side-left { border-right: 1px solid var(--line); }
+
+/* Expandable unchanged context: initial control lives on hunk header; after
+   expanding, control moves before context and walks upward through file. */
+.diff-expand {
+  display: flex; align-items: center; min-height: 22px;
+  padding: 1px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.diff-expand + .diff-hunk-head { border-top: none; }
+.diff-hunk-head + .diff-expand, .diff-table + .diff-expand { border-top: none; }
+.diff-expand-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px;
+  border-radius: 4px; border: 1px solid transparent;
+  background: none; color: var(--faint); font: 10px/1 var(--ui); cursor: pointer;
+}
+.diff-expand-btn:hover { color: var(--accent-fg); border-color: var(--accent); background: var(--bg3); }
+.diff-expand-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.diff-expand.busy .diff-expand-btn { opacity: .4; pointer-events: none; }
+.diff-expand-btn svg { display: block; }
+.diff-expand-cell {
+  height: 100%; min-height: 20px; margin: -4px 0; padding: 0 10px 0 6px;
+  width: 48px; flex: none; justify-content: center;
+  border-radius: 0; border-right: 1px solid var(--line);
+}
+.diff-hunk-head .diff-expand-cell { margin: -4px 6px -4px -12px; height: auto; align-self: stretch; }
 
 /* ---------- markdown preview ---------- */
 #mdview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }

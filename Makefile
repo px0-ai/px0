@@ -42,6 +42,7 @@ build: web
 	@echo "Built ./px0 ($$(du -h px0 | cut -f1))"
 
 test: web
+	node --test web/test/*.test.mjs
 	go test -v ./...
 
 dist: web

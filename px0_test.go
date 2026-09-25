@@ -1139,7 +1139,3 @@ func TestFuzzyCaseSensitivity(t *testing.T) {
 		t.Errorf("expected 'src/HTTPServer.go' to rank higher for query 'HTTPServer', got: %s", res[0].Path)
 	}
 }
-
-
-
-

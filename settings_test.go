@@ -204,4 +204,3 @@ func TestSettingsBasePath(t *testing.T) {
 		t.Errorf("expected ServerBasePath /rev-456/ from fallback, got %v", s.ServerBasePath)
 	}
 }
-

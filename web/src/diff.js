@@ -5,6 +5,7 @@
 // Unlike the code viewport this is not virtualized -- a file's own diff is
 // bounded in size, so a plain DOM render is simple and fast enough.
 import { $, S, doc_, esc, api } from './state.js';
+import { EXPAND_STEP, gapHidden, hasExpanded, upwardExpandRun, upwardGapPlan } from './diff-expand.js';
 import { on } from './bus.js';
 import { syncPreview } from './markdown.js';
 import { setStatusNote, updateStatus } from './status.js';
@@ -39,6 +40,9 @@ export function syncDiffView(force = false) {
   if (force && want) {
     want.diffText = undefined;
     want.diffHunks = undefined;
+    want.diffExpand = null;
+    want.diffCtx = null;
+    want.diffPending = null;
   }
   if (want !== shown || force) {
     shown = want;
@@ -151,7 +155,7 @@ function renderDiff(d) {
       diffContent.append(p);
       return;
     }
-    appendHunks(frag, d.diffHunks, d.diffMode, true);
+    appendExpandableHunks(d, frag, d.diffHunks);
   }
   diffContent.append(frag);
   syncDiffAgentTargets();
@@ -257,7 +261,22 @@ export function syncDiffAgentTargets() {
 function hunkHeader(hunk) {
   const el = document.createElement('div');
   el.className = 'diff-hunk-head';
-  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@';
+  el.textContent = '@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@' + (hunk.section ? ' ' + hunk.section : '');
+  return el;
+}
+
+/* The first expansion starts on the hunk header. Once context is open, the
+   control renders before it so each click moves toward the file's top. */
+function expandableHunkHeader(d, hunk, i, gap) {
+  const el = hunkHeader(hunk);
+  el.dataset.hunk = i;
+  const ranges = d.diffExpand || [];
+  const run = upwardExpandRun(ranges, gap.g1, gap.g2);
+  if (run && !hasExpanded(ranges, gap.g1, gap.g2)) {
+    const [s, e] = run;
+    const btn = expandCell(d, run, i === 0 ? SVG_UNFOLD_UP : SVG_UNFOLD_BOTH, 'Expand ' + (e - s + 1) + (e === s ? ' line' : ' lines'));
+    el.prepend(btn);
+  }
   return el;
 }
 
@@ -305,7 +324,7 @@ function unifiedTable(hunk, reviewable = true) {
       lineCell(row.type === 'add' ? '' : row.oldLine, reviewable),
       lineCell(row.type === 'del' ? '' : row.newLine, reviewable),
       markerCell(row.type),
-      codeCell(row.text),
+      codeCellFor(row),
     );
     table.append(r);
   }
@@ -324,6 +343,123 @@ function splitTable(hunk, reviewable = true) {
     table.append(r);
   }
   return table;
+}
+
+/* ---------- expandable context for ordinary working-tree diffs ---------- */
+
+function appendExpandableHunks(d, frag, hunks) {
+  let lastNew = 0, lastOld = 0;
+  hunks.forEach((hunk, i) => {
+    const gap = { g1: lastNew + 1, g2: hunk.newStart - 1 };
+    const oldOf = l => (i === 0 ? hunk.oldStart : lastOld) + (l - (i === 0 ? hunk.newStart : lastNew));
+    frag.append(...gapElements(d, gap, oldOf, true));
+    frag.append(expandableHunkHeader(d, hunk, i, gap));
+    frag.append(d.diffMode === 'unified' ? unifiedTable(hunk) : splitTable(hunk));
+    for (const row of hunk.rows) {
+      if (row.newLine > lastNew) lastNew = row.newLine;
+      if (row.oldLine > lastOld) lastOld = row.oldLine;
+    }
+  });
+  const gap = { g1: lastNew + 1, g2: d.total || lastNew };
+  const oldOf = l => lastOld + (l - lastNew);
+  frag.append(...gapElements(d, gap, oldOf));
+  frag.append(tailExpandRow(d, gap));
+}
+
+function gapElements(d, gap, oldOf, upward = false) {
+  if (gap.g2 < gap.g1) return [];
+  const out = [];
+  const plan = upwardGapPlan(d.diffExpand || [], gap.g1, gap.g2);
+  if (upward && plan.expand) out.push(upExpandRow(d, plan.expand));
+  for (const [s, e] of plan.context) out.push(ctxTable(d, s, e, oldOf));
+  return out;
+}
+
+function expandCell(d, run, svg, label) {
+  const [s, e] = run;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'diff-expand-btn diff-expand-cell';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.innerHTML = svg;
+  btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    expandLines(d, s, e);
+  });
+  return btn;
+}
+
+function upExpandRow(d, run) {
+  const [s, e] = run;
+  const el = document.createElement('div');
+  el.className = 'diff-expand';
+  if (intersectsPending(d, s, e)) el.classList.add('busy');
+  el.append(expandCell(d, run, SVG_UNFOLD_UP, 'Expand ' + (e - s + 1) + (e === s ? ' line' : ' lines')));
+  return el;
+}
+
+function tailExpandRow(d, gap) {
+  const hidden = gapHidden(d.diffExpand || [], gap.g1, gap.g2);
+  if (!hidden) return document.createDocumentFragment();
+  const [s, e] = hidden;
+  const to = Math.min(e, s + EXPAND_STEP - 1);
+  const el = document.createElement('div');
+  el.className = 'diff-expand';
+  if (intersectsPending(d, s, to)) el.classList.add('busy');
+  el.append(expandCell(d, [s, to], SVG_UNFOLD_DOWN, 'Expand ' + (to - s + 1) + (to === s ? ' line' : ' lines')));
+  return el;
+}
+
+function ctxTable(d, s, e, oldOf) {
+  const cache = d.diffCtx || (d.diffCtx = new Map());
+  const rows = [];
+  for (let l = s; l <= e; l++) rows.push({ type: 'ctx', oldLine: oldOf(l), newLine: l, html: cache.get(l) || '&nbsp;' });
+  return d.diffMode === 'unified' ? unifiedTable({ rows }) : splitTable({ rows });
+}
+
+const chev = paths => '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' + paths.map(p => '<path d="' + p + '"/>').join('') + '</svg>';
+const SVG_UNFOLD_UP = chev(['M3.2 7.6L6 4.8L8.8 7.6', 'M3.2 4.6L6 1.8L8.8 4.6']);
+const SVG_UNFOLD_DOWN = chev(['M3.2 4.4L6 7.2L8.8 4.4', 'M3.2 7.4L6 10.2L8.8 7.4']);
+const SVG_UNFOLD_BOTH = chev(['M3.2 5.4L6 2.6L8.8 5.4', 'M3.2 8.9L6 6.1L8.8 8.9']);
+
+async function expandLines(d, s, e) {
+  if (s > e || shown !== d || intersectsPending(d, s, e)) return;
+  const key = s + ':' + e;
+  (d.diffPending || (d.diffPending = new Set())).add(key);
+  try {
+    const j = await api('/api/file', { path: d.path, start: s - 1, count: e - s + 1 });
+    const cache = d.diffCtx || (d.diffCtx = new Map());
+    for (let i = 0; i < (j.lines || []).length; i++) cache.set(s + i, j.lines[i]);
+    mergeExpand(d, s, e);
+  } catch (err) {
+    setStatusNote('Expand failed: ' + err.message, 4000);
+  } finally {
+    d.diffPending.delete(key);
+  }
+  if (shown === d) renderDiff(d);
+}
+
+function mergeExpand(d, s, e) {
+  const list = d.diffExpand || (d.diffExpand = []);
+  list.push({ s, e });
+  list.sort((a, b) => a.s - b.s);
+  const merged = [];
+  for (const r of list) {
+    const last = merged[merged.length - 1];
+    if (last && r.s <= last.e + 1) last.e = Math.max(last.e, r.e);
+    else merged.push({ s: r.s, e: r.e });
+  }
+  d.diffExpand = merged;
+}
+
+function intersectsPending(d, s, e) {
+  for (const key of d.diffPending || []) {
+    const i = key.indexOf(':');
+    const ps = +key.slice(0, i), pe = +key.slice(i + 1);
+    if (ps <= e && pe >= s) return true;
+  }
+  return false;
 }
 
 // Walks a hunk's flat row list, pairing each run of deletions with the run of
@@ -350,7 +486,7 @@ function splitSide(row, side, reviewable = true) {
   if (!row) { el.append(lineCell('', reviewable), markerCell(''), codeCell('')); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
   anchor(el, row, reviewable);
-  el.append(lineCell(ln, reviewable), markerCell(row.type), codeCell(row.text));
+  el.append(lineCell(ln, reviewable), markerCell(row.type), codeCellFor(row));
   return el;
 }
 
@@ -401,6 +537,14 @@ function codeCell(text) {
   const el = document.createElement('div');
   el.className = 'diff-code';
   el.innerHTML = esc(text || '') || '&nbsp;';
+  return el;
+}
+
+function codeCellFor(row) {
+  if (!row.html) return codeCell(row.text);
+  const el = document.createElement('div');
+  el.className = 'diff-code';
+  el.innerHTML = row.html;
   return el;
 }
 

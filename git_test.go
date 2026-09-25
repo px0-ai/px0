@@ -1187,4 +1187,3 @@ func TestGitStagedDiffTruncation(t *testing.T) {
 		t.Fatalf("diff size %d exceeded expected bound", len(diff))
 	}
 }
-
