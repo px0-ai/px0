@@ -7,6 +7,7 @@ import { refreshTree, treeEl } from './tree.js';
 import { setAgentHandler, hideSelectionBar } from './selbar.js';
 import { render } from './renderer.js';
 import { syncDiffAgentTargets } from './diff.js';
+import { createModelPicker } from './model-picker.js';
 
 /* px0 does not author edits. Each box composes an instruction and the range it
    is anchored to, hands both to a coding harness on this machine, and reloads
@@ -32,13 +33,16 @@ const batchBar = $('#agent-batch-bar');
 const batchCount = $('#agent-batch-count');
 const batchClear = $('#agent-batch-clear');
 const batchHarness = $('#agent-batch-harness');
-const batchModel = $('#agent-batch-model');
+const batchModelHost = $('#agent-batch-model');
 const batchHint = $('#agent-batch-hint');
 const batchApply = $('#agent-batch-apply');
 const batchCancel = $('#agent-batch-cancel');
 const batchErr = $('#agent-batch-err');
 const gitHarness = $('#git-harness');
-const gitModel = $('#git-model');
+const gitModelHost = $('#git-model');
+
+let batchModel = null;
+let gitModel = null;
 
 const sessions = new Map(); // local session id -> in-progress compose/edit
 let agentSeq = 0;
@@ -62,8 +66,18 @@ export function applyAgentMeta() {
   syncGitPanelMeta();
 }
 
+function modelValues(harness, currentModel) {
+  const values = [...(harness?.models || [])];
+  if (currentModel && !values.includes(currentModel)) values.unshift(currentModel);
+  return values;
+}
+
+function modelFor(harness, currentHarness, currentModel) {
+  return harness?.model || (harness?.name === currentHarness ? currentModel : '') || '';
+}
+
 function updateSessionMeta(session) {
-  if (!session.harnessSelect || !session.modelSelect) return;
+  if (!session.harnessSelect || !session.modelPicker) return;
   const ready = (S.meta?.agents || []).filter(h => h.installed);
   const currentHarness = chosen();
   const currentModel = chosenModel();
@@ -76,8 +90,8 @@ function updateSessionMeta(session) {
     opt.textContent = 'no harness';
     session.harnessSelect.appendChild(opt);
     session.harnessSelect.disabled = true;
-    session.modelSelect.innerHTML = '';
-    session.modelSelect.hidden = true;
+    session.modelPicker.setOptions([], '', { disabled: true });
+    session.modelPicker.setVisible(false);
     return;
   }
 
@@ -94,24 +108,15 @@ function updateSessionMeta(session) {
     ? 'Fixed for this run by -agent'
     : 'Change the coding harness';
 
-  // Populate model select for the currently selected harness
+  // Populate the searchable model control for the currently selected harness.
   const activeH = ready.find(h => h.name === (session.harnessSelect.value || currentHarness)) || ready[0];
-  session.modelSelect.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      session.modelSelect.appendChild(opt);
-    }
-    session.modelSelect.hidden = false;
-    session.modelSelect.disabled = isBusy;
-    session.modelSelect.title = 'Model for ' + activeH.name;
-  } else {
-    session.modelSelect.hidden = true;
-  }
+  const activeModel = modelFor(activeH, currentHarness, currentModel);
+  const models = modelValues(activeH, activeModel);
+  session.modelPicker.setOptions(models, activeModel, {
+    disabled: isBusy,
+    title: 'Model for ' + activeH.name,
+  });
+  session.modelPicker.setVisible(models.length > 0);
 }
 
 // Loads harnesses and models asynchronously after the browser UI has loaded.
@@ -139,8 +144,8 @@ function syncBatchMeta() {
     opt.textContent = 'no harness';
     batchHarness.appendChild(opt);
     batchHarness.disabled = true;
-    batchModel.innerHTML = '';
-    batchModel.hidden = true;
+    batchModel.setOptions([], '', { disabled: true });
+    batchModel.setVisible(false);
     return;
   }
 
@@ -156,22 +161,13 @@ function syncBatchMeta() {
   batchHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (batchHarness.value || currentHarness)) || ready[0];
-  batchModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      batchModel.appendChild(opt);
-    }
-    batchModel.hidden = false;
-    batchModel.disabled = isBusy;
-    batchModel.title = 'Model for ' + activeH.name;
-  } else {
-    batchModel.hidden = true;
-  }
+  const activeModel = modelFor(activeH, currentHarness, currentModel);
+  const models = modelValues(activeH, activeModel);
+  batchModel.setOptions(models, activeModel, {
+    disabled: isBusy,
+    title: 'Model for ' + activeH.name,
+  });
+  batchModel.setVisible(models.length > 0);
 }
 
 // Harness/model pickers for the sidebar git panel's "Generate" commit
@@ -190,8 +186,8 @@ function syncGitPanelMeta() {
     opt.textContent = 'no harness';
     gitHarness.appendChild(opt);
     gitHarness.disabled = true;
-    gitModel.innerHTML = '';
-    gitModel.hidden = true;
+    gitModel.setOptions([], '', { disabled: true });
+    gitModel.setVisible(false);
     return;
   }
 
@@ -206,21 +202,13 @@ function syncGitPanelMeta() {
   gitHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (gitHarness.value || currentHarness)) || ready[0];
-  gitModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      gitModel.appendChild(opt);
-    }
-    gitModel.hidden = false;
-    gitModel.title = 'Model for ' + activeH.name;
-  } else {
-    gitModel.hidden = true;
-  }
+  const activeModel = modelFor(activeH, currentHarness, currentModel);
+  const models = modelValues(activeH, activeModel);
+  gitModel.setOptions(models, activeModel, {
+    disabled: false,
+    title: 'Model for ' + activeH.name,
+  });
+  gitModel.setVisible(models.length > 0);
 }
 
 function getReadySessions() {
@@ -346,7 +334,9 @@ function createSession(info) {
     refEl: el.querySelector('.agent-ref'),
     metaEl: el.querySelector('.agent-meta'),
     harnessSelect: el.querySelector('.agent-harness-select'),
-    modelSelect: el.querySelector('.agent-model-select'),
+    modelHost: el.querySelector('.agent-model-select'),
+    modelPicker: null,
+    pickModelPicker: null,
     closeBtn: el.querySelector('.agent-close'),
     pickEl: el.querySelector('.agent-pick'),
     composeEl: el.querySelector('.agent-compose'),
@@ -356,6 +346,14 @@ function createSession(info) {
     hintEl: el.querySelector('.agent-hint'),
     errEl: el.querySelector('.agent-err'),
   };
+  session.modelPicker = createModelPicker(session.modelHost, {
+    onChange: async model => {
+      const hName = session.harnessSelect?.value || chosen();
+      const result = await select(hName, model, msg => showErr(session, msg));
+      if (result) session.input.focus();
+      return result;
+    },
+  });
   wireSession(session);
   refreshRef(session);
   setBusy(session, false);
@@ -381,14 +379,6 @@ function wireSession(session) {
       const hName = session.harnessSelect.value;
       if (!hName) return;
       await select(hName, msg => showErr(session, msg));
-      session.input.focus();
-    });
-  }
-  if (session.modelSelect) {
-    session.modelSelect.addEventListener('change', async () => {
-      const hName = session.harnessSelect?.value || chosen();
-      const mName = session.modelSelect.value;
-      await select(hName, mName, msg => showErr(session, msg));
       session.input.focus();
     });
   }
@@ -438,6 +428,8 @@ function closeAgentEdit(session) {
   if (session.timer || session.jobId) {
     cancelSession(session);
   }
+  session.modelPicker?.destroy();
+  session.pickModelPicker?.destroy();
   sessions.delete(session.id);
   session.el.remove();
   syncBoxVisibility();
@@ -522,7 +514,7 @@ function setBusy(session, busy, msg) {
   if (session.cancelBtn) session.cancelBtn.hidden = !busy;
   session.closeBtn.disabled = false;
   if (session.harnessSelect) session.harnessSelect.disabled = busy || !!(S.meta && S.meta.agentPinned);
-  if (session.modelSelect) session.modelSelect.disabled = busy;
+  session.modelPicker?.setDisabled(busy);
   if (session.hintEl && msg) session.hintEl.textContent = msg;
 }
 
@@ -537,6 +529,8 @@ async function showPicker(session) {
   session.composeEl.hidden = true;
   if (session.metaEl) session.metaEl.hidden = true;
   session.pickEl.hidden = false;
+  session.pickModelPicker?.destroy();
+  session.pickModelPicker = null;
   session.pickEl.innerHTML = '<div class="hint">Looking for coding harnesses…</div>';
 
   let list = S.meta?.agents || [];
@@ -570,12 +564,19 @@ async function showPicker(session) {
   session.pickEl.querySelectorAll('[data-pick]').forEach(b => {
     b.addEventListener('click', () => pick(session, b.dataset.pick));
   });
-  session.pickEl.querySelectorAll('.agent-model-select').forEach(sel => {
-    sel.addEventListener('change', async (e) => {
-      e.stopPropagation();
-      await select(sel.dataset.harness, sel.value, msg => showErr(session, msg));
-      showPicker(session);
+  session.pickEl.querySelectorAll('.agent-model-select').forEach(host => {
+    const harness = host.dataset.harness;
+    const picker = createModelPicker(host, {
+      onChange: async model => {
+        const result = await select(harness, model, msg => showErr(session, msg));
+        if (result) {
+          await showPicker(session);
+          picker.destroy();
+        }
+        return result;
+      },
     });
+    session.pickModelPicker = picker;
   });
 }
 
@@ -583,16 +584,18 @@ function optionsHtml(ready, settingsPath) {
   let html = '';
   for (const h of ready) {
     const isSelected = h.name === chosen();
+    const currentModel = h.model || (isSelected ? chosenModel() : '');
+    const models = modelValues(h, currentModel);
     html += '<div class="agent-opt-wrap">' +
       '<button class="agent-opt' + (isSelected ? ' on' : '') + '" data-pick="' + esc(h.name) + '">' +
       '<span class="agent-opt-name">' + esc(h.name) + '</span>' +
       '<code class="agent-opt-cmd">' + esc(h.cmd) + '</code></button>';
-    if (isSelected && h.models && h.models.length > 0) {
+    if (isSelected && models.length > 0) {
       html += '<div class="agent-model-row">' +
         '<span class="agent-model-label">Model:</span>' +
         '<select class="agent-model-select" data-harness="' + esc(h.name) + '">';
-      for (const m of h.models) {
-        const sel = m === (h.model || chosenModel()) ? ' selected' : '';
+      for (const m of models) {
+        const sel = m === currentModel ? ' selected' : '';
         html += '<option value="' + esc(m) + '"' + sel + '>' + esc(m) + '</option>';
       }
       html += '</select></div>';
@@ -699,7 +702,7 @@ function setBatchBusy(busy, msg) {
   if (batchCancel) batchCancel.hidden = !busy;
   if (batchClear) batchClear.disabled = busy;
   if (batchHarness) batchHarness.disabled = busy || !!(S.meta && S.meta.agentPinned);
-  if (batchModel) batchModel.disabled = busy;
+  batchModel?.setDisabled(busy);
   if (batchHint) {
     if (msg) batchHint.textContent = msg;
     else batchHint.textContent = keyLabel('Mod+Enter') + ' to apply all';
@@ -994,11 +997,9 @@ export function initAgent() {
       await select(hName, msg => showBatchErr(msg));
     });
   }
-  if (batchModel) {
-    batchModel.addEventListener('change', async () => {
-      const hName = batchHarness?.value || chosen();
-      const mName = batchModel.value;
-      await select(hName, mName, msg => showBatchErr(msg));
+  if (batchModelHost) {
+    batchModel = createModelPicker(batchModelHost, {
+      onChange: model => select(batchHarness?.value || chosen(), model, msg => showBatchErr(msg)),
     });
   }
   if (gitHarness) {
@@ -1008,11 +1009,9 @@ export function initAgent() {
       await select(hName, msg => showToast('!', msg));
     });
   }
-  if (gitModel) {
-    gitModel.addEventListener('change', async () => {
-      const hName = gitHarness?.value || chosen();
-      const mName = gitModel.value;
-      await select(hName, mName, msg => showToast('!', msg));
+  if (gitModelHost) {
+    gitModel = createModelPicker(gitModelHost, {
+      onChange: model => select(gitHarness?.value || chosen(), model, msg => showToast('!', msg)),
     });
   }
 

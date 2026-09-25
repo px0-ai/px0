@@ -27,7 +27,7 @@ px0 auto-detects and integrates with all leading terminal coding harnesses:
 | **Aider** | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | **Goose** | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
 
-By default, px0 selects fast and cost-effective models for each harness, but allows you to select any supported model directly from the harness menu.
+By default, px0 selects fast and cost-effective models for each harness. The model control opens a searchable combobox that fuzzy-filters the model IDs already discovered from the selected harness.
 
 ---
 

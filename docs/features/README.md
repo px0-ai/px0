@@ -65,7 +65,7 @@ Modern developers spend substantial time verifying diffs and reviewing code gene
 
 px0 intentionally omits a heavyweight text editor in favor of direct collaboration with the user's preferred coding agents:
 
-- **[Editing with Coding Agents](agent-editing.md)**: Select any code block in a source file or git diff, press `Alt+E` (or right-click), describe the required change, and px0 delegates the task directly to your chosen agent harness (Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). Execution progress streams to the launch terminal, while px0 automatically detects file changes and reloads tabs in place upon completion.
+- **[Editing with Coding Agents](agent-editing.md)**: Select any code block in a source file or git diff, press `Alt+E` (or right-click), describe the required change, and px0 delegates the task directly to your chosen agent harness (Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). Execution progress streams to the launch terminal, while px0 automatically detects file changes and reloads tabs in place upon completion. The model control fuzzy-filters the model IDs already discovered from the selected harness.
 - **[Selection Toolbar & Context Actions](selection-actions.md)**: High-ergonomic footer toolbar providing instant buttons to copy canonical path:line references (`Alt+C`), copy formatted code snippets with surrounding context tailored for LLM chat windows (`Alt+A`), find usages (`Alt+U`), and dispatch inline edits (`Alt+E`).
 
 ---

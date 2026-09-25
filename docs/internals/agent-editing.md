@@ -84,7 +84,7 @@ Diff rows carry where they point in the working tree:
 
 Discovery alone never enables editing. Finding `claude` on PATH is not consent to let it rewrite a workspace, so the first edit opens a picker and the choice is explicit. Once made, it is remembered and the picker stays out of the way.
 
-The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). Changing either dropdown updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
+The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). The model control is a searchable combobox that fuzzy-filters the IDs already returned by harness discovery; it does not run discovery or add model IDs. Changing the harness or model updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
 
 The choice is written to:
 
@@ -120,7 +120,7 @@ Every supported harness starts an interactive session by default and blocks on a
 | `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
 
-By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list, while letting users choose any available model from the harness menu or picker.
+By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list. The searchable model combobox lets users fuzzy-filter the discovered IDs and choose any model that the selected harness has reported.
 
 A full command template is accepted anywhere a harness name is, and must contain `{prompt}`:
 
