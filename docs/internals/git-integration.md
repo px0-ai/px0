@@ -146,7 +146,8 @@ To keep git statuses, sidebar badges, and editor gutter diff indicators in sync 
 4. **In-Memory Concurrency & Tree Updates (`UpdateGitStatus`)**
    - Refreshing git status does not re-walk the directory tree on disk.
    - `Index.UpdateGitStatus()` executes `gitStatus(ix.root)` concurrently, compares the new status map against `ix.gitStatusMap`, and if changed, updates `Node.Status` and `Node.Dirty` in-place on existing `ix.children` nodes.
-   - If the status map is identical, no memory allocations or broadcasts occur.
+   - Status codes alone miss a second edit to a file that is already `M` or `U`: the letter reads the same before and after. So every changed path also carries a stamp of its size and mtime (`worktreeStamps`, one `stat` per path `git status` already listed, with no directory walk), kept in `ix.gitStamps`. A path whose stamp moved counts as a change and is reported in the payload's `touched` list. `handleGitStatus` in `gitstream.js` reloads open tabs when one of them is modified *or* touched, so an untracked file being rewritten reloads too. Without this, a harness running beside px0 (Mode 2), or in its terminal, would leave open tabs stale after its first edit to a file for as long as the page kept focus.
+   - If the status map, staged map and stamps are all identical, nothing is broadcast.
 
 5. **Server-Sent Events (SSE) Stream (`/api/stream` / `/api/git/stream`)**
    - Implemented using Go standard library `http.Flusher` without external dependencies.

@@ -358,7 +358,7 @@ func TestUpdateGitStatus(t *testing.T) {
 	ix := NewIndex(root)
 	ix.Build()
 
-	count, files, changed, statuses, dirtyDirs, _, _, _ := ix.UpdateGitStatus()
+	count, files, changed, statuses, dirtyDirs, _, _, _, _ := ix.UpdateGitStatus()
 	// Should be unchanged because Build() just ran
 	if changed {
 		t.Errorf("expected changed=false immediately after Build(), got true")
@@ -378,7 +378,7 @@ func TestUpdateGitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	count2, _, changed2, statuses2, _, _, _, _ := ix.UpdateGitStatus()
+	count2, _, changed2, statuses2, _, _, _, _, _ := ix.UpdateGitStatus()
 	if !changed2 {
 		t.Errorf("expected changed=true after modifying keep.go")
 	}
@@ -390,9 +390,54 @@ func TestUpdateGitStatus(t *testing.T) {
 	}
 
 	// Calling it again without changes should report changed=false
-	_, _, changed3, _, _, _, _, _ := ix.UpdateGitStatus()
+	_, _, changed3, _, _, _, _, _, _ := ix.UpdateGitStatus()
 	if changed3 {
 		t.Errorf("expected changed=false when worktree has not changed")
+	}
+}
+
+// A second edit to a file that is already modified, or to an untracked file,
+// leaves its status code unchanged. It must still count as a change, or open
+// tabs stay stale while a harness keeps editing (issue 157).
+func TestUpdateGitStatusSeesEditsWithUnchangedStatus(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	ix := NewIndex(root)
+	ix.Build()
+
+	edit := func(rel, body string, bump time.Duration) {
+		t.Helper()
+		abs := filepath.Join(root, rel)
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Coarse filesystem clocks can give two quick writes the same mtime.
+		at := time.Now().Add(bump)
+		if err := os.Chtimes(abs, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	edit("keep.go", "first edit\n", time.Second)
+	edit("fresh.txt", "untracked\n", time.Second)
+	if _, _, changed, st, _, _, _, _, _ := ix.UpdateGitStatus(); !changed || st["keep.go"] != "M" || st["fresh.txt"] != "U" {
+		t.Fatalf("first edits: changed=%v statuses=%v", changed, st)
+	}
+
+	edit("keep.go", "second edit, same status\n", 2*time.Second)
+	edit("fresh.txt", "still untracked, new content\n", 2*time.Second)
+	_, _, changed, st, _, _, _, _, touched := ix.UpdateGitStatus()
+	if !changed {
+		t.Fatalf("second edits kept status (%q, %q) but were not reported as a change", st["keep.go"], st["fresh.txt"])
+	}
+	if !reflect.DeepEqual(touched, []string{"fresh.txt", "keep.go"}) {
+		t.Errorf("touched = %v, want [fresh.txt keep.go]", touched)
+	}
+
+	if _, _, changed, _, _, _, _, _, touched := ix.UpdateGitStatus(); changed || len(touched) != 0 {
+		t.Errorf("no edits since the last check, but changed=%v touched=%v", changed, touched)
 	}
 }
 
@@ -587,7 +632,7 @@ func TestGitStatusAgainstAndPRDiff(t *testing.T) {
 	ix.SetDiffBase(baseSHA)
 	ix.Build()
 
-	count, files, _, statuses, _, _, _, _ := ix.UpdateGitStatus()
+	count, files, _, statuses, _, _, _, _, _ := ix.UpdateGitStatus()
 	if count == 0 || statuses["foo.go"] != "M" {
 		t.Fatalf("expected Index to report foo.go as M against diffBase, got count=%d statuses=%v files=%v", count, statuses, files)
 	}
@@ -626,7 +671,7 @@ func TestGitStatusAgainstAndPRDiff(t *testing.T) {
 	write("foo.go", "package main\n\nfunc Foo() int { return 99 }\n")
 
 	// ix.UpdateGitStatus() must catch the modification
-	_, _, changed, statuses, _, _, _, _ := ix.UpdateGitStatus()
+	_, _, changed, statuses, _, _, _, _, _ := ix.UpdateGitStatus()
 	if !changed && statuses["foo.go"] != "M" {
 		t.Errorf("expected UpdateGitStatus to report foo.go as changed/M, got changed=%v statuses=%v", changed, statuses)
 	}
@@ -1039,7 +1084,7 @@ func TestPRReviewerChangesInIndex(t *testing.T) {
 
 	// Initially, working tree matches prHeadSHA:
 	// Statuses should report foo.go as M (against diffBase), but yourStatuses must be empty.
-	count, files, _, statuses, _, _, yourStatuses, yourDirtyDirs := ix.UpdateGitStatus()
+	count, files, _, statuses, _, _, yourStatuses, yourDirtyDirs, _ := ix.UpdateGitStatus()
 	if count != 1 || len(files) != 1 || statuses["pkg/foo.go"] != "M" {
 		t.Fatalf("expected 1 file in PR diff, got statuses=%v", statuses)
 	}
@@ -1052,7 +1097,7 @@ func TestPRReviewerChangesInIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, changed, statuses, _, _, yourStatuses, yourDirtyDirs := ix.UpdateGitStatus()
+	_, _, changed, statuses, _, _, yourStatuses, yourDirtyDirs, _ := ix.UpdateGitStatus()
 	if !changed {
 		t.Errorf("expected changed=true after reviewer modification")
 	}
@@ -1078,7 +1123,7 @@ func TestPRReviewerChangesInIndex(t *testing.T) {
 	// Now reviewer reverts all changes (restore to prHeadSHA)
 	gitTestRun(t, root, "checkout", "--", ".")
 
-	_, _, changed2, statuses, _, _, yourStatuses, yourDirtyDirs := ix.UpdateGitStatus()
+	_, _, changed2, statuses, _, _, yourStatuses, yourDirtyDirs, _ := ix.UpdateGitStatus()
 	if !changed2 {
 		t.Errorf("expected changed=true after revert")
 	}
