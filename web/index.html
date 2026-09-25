@@ -2,6 +2,7 @@
 <html lang="en" data-theme="github-dark">
 <head>
 <meta charset="utf-8">
+<base href="/">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>px0</title>
 <link rel="icon" type="image/x-icon" href="https://px0.ai/favicon.ico">
@@ -10,16 +11,70 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="static/style.css">
 <!-- Every web/themes/*.css joined by the server. See docs/internals/styling-and-themes.md. -->
-<link rel="stylesheet" href="/static/themes.css">
+<link rel="stylesheet" href="static/themes.css">
 </head>
 <body class="right-hidden">
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-collapse-tree" class="mini" title="Collapse all folders" aria-label="Collapse all folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 11 12 6 17 11"/><polyline points="7 18 12 13 17 18"/></svg></button><button id="btn-expand-tree" class="mini" title="Expand all project folders (ignored folders stay closed)" aria-label="Expand all project folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 6 12 11 17 6"/><polyline points="7 13 12 18 17 13"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
     <div class="panel-body" id="tree"></div>
+    <div id="git-panel" class="git-panel" hidden>
+      <div id="git-panel-resizer" class="git-panel-resizer" title="Drag to resize"></div>
+      <div class="git-panel-head">
+        <svg class="git-panel-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Git Panel"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+        <span id="git-branch" class="git-branch"></span>
+        <span id="git-counts" class="git-counts"></span>
+        <span class="grow"></span>
+        <button id="git-panel-collapse" class="pr-comments-collapse" title="Collapse">&#9662;</button>
+      </div>
+      <div id="git-panel-body" class="git-panel-body">
+        <button id="git-token-nudge" class="git-token-nudge" type="button" hidden title="Set GITHUB_TOKEN, set GH_TOKEN, or run 'gh auth login' -- or add one below">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>No GitHub token configured &mdash; add one</span>
+        </button>
+        <div id="git-commit-section" class="git-commit-section">
+          <div class="git-agent-picker">
+            <select id="git-harness" class="agent-harness-select" title="Coding harness"></select>
+            <select id="git-model" class="agent-model-select" title="Model"></select>
+            <div class="git-ai-row">
+              <button id="git-generate-msg" class="git-generate-btn" title="Stage all changes and write a commit message using the selected coding harness">Stage all + Commit with AI</button>
+            </div>
+          </div>
+          <textarea id="git-commit-msg" class="git-commit-msg" rows="3" spellcheck="false" autocomplete="off" placeholder="Commit message..." hidden></textarea>
+          <div class="git-instructions-wrap">
+            <a id="git-write-msg-link" class="git-instructions-link" href="#" role="button" title="Write the commit message yourself">write message</a>
+            <span class="git-link-sep" aria-hidden="true" hidden>&middot;</span>
+            <a id="git-generate-link" class="git-instructions-link" href="#" role="button" title="Generate a message for staged changes using the AI instructions" hidden>generate with AI</a>
+            <span class="git-link-sep" aria-hidden="true">&middot;</span>
+            <a id="git-instructions-link" class="git-instructions-link" href="#" role="button" title="Configure commit message instructions for AI in Settings">instructions for AI</a>
+          </div>
+          <div class="git-panel-actions git-commit-actions">
+            <button id="git-stage-all" class="footer-btn" title="Stage all changes">Stage All</button>
+            <button id="git-commit" class="footer-btn" title="Stage changes to commit" disabled>Commit</button>
+          </div>
+        </div>
+        <div id="git-clean-state" class="git-clean-state" hidden>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span>Working tree clean</span>
+        </div>
+        <div class="git-panel-actions git-sync-actions">
+          <button id="git-pull" class="footer-btn" title="Pull (fast-forward only; refuses on conflict)">Pull</button>
+          <button id="git-push" class="footer-btn" title="No unpushed commits to push" disabled>Push</button>
+        </div>
+        <div id="git-recent-commits" class="git-recent-commits">
+          <div class="git-recent-head">
+            <span class="git-recent-title">Recent Commits</span>
+          </div>
+          <div id="git-commits-list" class="git-commits-list"></div>
+          <div class="git-see-all-wrap">
+            <a id="git-see-all-commits" class="git-see-all-commits" href="#" target="_blank" rel="noopener">See all commits</a>
+          </div>
+        </div>
+      </div>
+    </div>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
         <img class="logo-dark" src="https://px0.ai/logo/px0-logo-dark.png" alt="px0" width="35" height="13">
@@ -48,24 +103,28 @@
     <!-- PR review bar: shown only when this session is `px0 pr ...` (web/src/pr.js) -->
     <div id="pr-bar" class="pr-bar" hidden>
       <div class="pr-bar-row">
-        <span id="pr-badge" class="pr-badge"></span>
+        <a id="pr-link" class="pr-link" target="_blank" rel="noopener noreferrer" title="Open on GitHub">
+          <span id="pr-badge" class="pr-badge"></span>
+          <span id="pr-title" class="pr-title"></span>
+        </a>
         <span id="pr-merged-badge" class="pr-merged-badge" hidden>Merged</span>
-        <span id="pr-title" class="pr-title"></span>
         <span id="pr-refs" class="pr-refs"></span>
         <span class="grow"></span>
-        <span id="pr-readonly-note" class="pr-readonly-note" hidden>Read-only &middot; no GitHub token configured</span>
+        <span id="pr-diff-warning" class="pr-diff-warning" hidden>&#9888; diff base unresolved</span>
+        <button id="pr-readonly-note" class="pr-readonly-note" type="button" hidden title="Set GITHUB_TOKEN, set GH_TOKEN, or run 'gh auth login' -- or click to connect">No GitHub token &mdash; click to connect</button>
         <span id="pr-draft-count" class="pr-draft-count"></span>
       </div>
       <div class="pr-bar-row pr-review-row">
-        <textarea id="pr-review-body" class="pr-review-body" rows="1" spellcheck="false" autocomplete="off" placeholder="Leave an overall review comment (optional)..."></textarea>
-        <button id="pr-batch-apply" class="footer-btn pr-btn-batch-apply" hidden title="Dispatch AI agent to apply all draft review comments directly to the codebase">⚡ Batch Apply</button>
-        <button id="pr-submit-comment" class="footer-btn" title="Submit as a plain comment, no verdict">Comment</button>
-        <button id="pr-submit-request-changes" class="footer-btn" hidden title="Request changes on this PR">Request Changes</button>
-        <button id="pr-submit-approve" class="footer-btn" hidden title="Approve this PR">Approve</button>
+        <textarea id="pr-review-body" class="pr-review-body" rows="1" spellcheck="false" autocomplete="off" placeholder="Review summary / verdict comment (optional)..."></textarea>
+        <button id="pr-batch-apply" class="footer-btn pr-btn-batch-apply" hidden title="Dispatch AI agent to apply all draft review comments directly to the codebase">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="footer-btn-icon"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+          <span class="footer-btn-label">Batch Apply</span>
+        </button>
+        <button id="pr-submit-comment" class="footer-btn pr-btn-neutral" title="Submit review with drafts, without approval or change requests">Submit Review</button>
+        <button id="pr-submit-request-changes" class="footer-btn pr-btn-request-changes" hidden title="Request changes on this PR">Request Changes</button>
+        <button id="pr-submit-approve" class="footer-btn pr-btn-approve" hidden title="Approve this PR">Approve</button>
       </div>
     </div>
-    <!-- Draft review comment composers, one .agent-box per open composer -->
-    <div id="pr-comment-list" class="agentbox-list" hidden></div>
     <!-- File Tabs -->
     <div id="tabs"></div>
     <!-- View-mode switches, pinned to the right of the tab bar -->
@@ -233,6 +292,31 @@
           </div>
         </div>
       </template>
+
+      <!-- Draft review comment composers: one .agent-box per open composer,
+           each pinned beside the diff line it's on (or docked bottom-right
+           when that file isn't the one on screen). web/src/pr.js owns it. -->
+      <div id="pr-comment-list" class="pr-comment-list" hidden></div>
+    </div>
+
+    <!-- PR comments bottom panel: existing GitHub comments (top-level and
+         inline) plus your own draft review comments, open by default for the
+         life of a PR review session. web/src/pr.js owns everything in it. -->
+    <div id="pr-comments-panel" class="pr-comments-panel collapsed" hidden>
+      <div id="pr-comments-resizer" class="pr-comments-resizer" title="Drag to resize"></div>
+      <div class="pr-comments-panel-head">
+        <span class="pr-comments-panel-title">Comments</span>
+        <span id="pr-comments-count" class="pr-comments-count"></span>
+        <span class="grow"></span>
+        <button id="pr-comments-collapse" class="pr-comments-collapse" title="Expand/collapse comments panel">&#9662;</button>
+      </div>
+      <div id="pr-comments-body" class="pr-comments-body">
+        <div id="pr-comments-list" class="pr-comments-list"></div>
+        <div id="pr-issue-compose" class="pr-issue-compose">
+          <textarea id="pr-issue-compose-body" class="pr-review-body" rows="2" spellcheck="false" autocomplete="off" placeholder="Write a comment on the PR conversation..."></textarea>
+          <button id="pr-issue-compose-send" class="footer-btn">Post Comment</button>
+        </div>
+      </div>
     </div>
 
     <!-- Floating Copy Toast Notification -->
@@ -275,6 +359,10 @@
         <span class="metric"><span class="metric-label">CPU</span> <span id="st-cpu">--%</span></span>
         <span class="metric-divider">·</span>
         <span class="metric"><span class="metric-label">RAM</span> <span id="st-ram">-- MB</span></span>
+        <span id="st-lspmem-wrap" class="status-metrics-group" hidden>
+          <span class="metric-divider">·</span>
+          <span class="metric"><span class="metric-label">LSP</span> <span id="st-lspmem">-- MB</span></span>
+        </span>
       </span>
     </footer>
   </main>
@@ -402,6 +490,20 @@
       <div id="settings-raw-error" class="settings-error-banner" hidden></div>
       <textarea id="settings-raw-editor" spellcheck="false" autocomplete="off" wrap="off"></textarea>
     </div>
+
+    <!-- Settings Footer with Explicit Save Button -->
+    <footer id="settings-footer" class="settings-footer">
+      <div id="settings-footer-status" class="settings-footer-status is-saved">
+        <svg id="settings-status-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="settings-status-text">All changes saved</span>
+      </div>
+      <div class="settings-footer-actions">
+        <button type="button" id="btn-settings-save" class="settings-btn-save" title="Save settings ({Mod+S})">
+          <svg class="settings-btn-save-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span id="settings-btn-save-label">Save</span>
+        </button>
+      </div>
+    </footer>
   </div>
 </div>
 
@@ -429,6 +531,6 @@
 <!-- Invisible text node to measure font metrics in DOM -->
 <span id="measure">0</span>
 
-<script src="/static/app.js"></script>
+<script src="static/app.js"></script>
 </body>
 </html>

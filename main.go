@@ -1,10 +1,10 @@
+// Package main implements px0: a fast, local-first code navigator and review tool
+// that opens any repository or pull request in a responsive browser UI.
 package main
 
 import (
-	"bufio"
 	"context"
 	_ "embed"
-	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -43,8 +43,9 @@ func main() {
 		noTelemetry  = flag.Bool("no-telemetry", false, "disable anonymous usage telemetry")
 		agentCmd     = flag.String("agent", "", "pin the coding harness used for edits (claude, gemini, cursor-agent, agy, opencode, codex, aider, goose, or a command template containing {prompt}); detected and chosen in the UI when omitted")
 		noAgent      = flag.Bool("no-agent", false, "do not offer editing through a coding harness")
-		yesFlag      = flag.Bool("y", false, "answer yes to prompts (e.g. open already merged PRs)")
-		yesFlagLong  = flag.Bool("yes", false, "answer yes to prompts (alias for -y)")
+		_            = flag.Bool("y", false, "answer yes to prompts (deprecated; PRs are always opened without prompt)")
+		_            = flag.Bool("yes", false, "answer yes to prompts (alias for -y)")
+		basePathFlag = flag.String("base-path", "", "base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n\nflags:\n", version)
@@ -110,44 +111,21 @@ func main() {
 	var root, initialFile string
 	var initialLine int
 	if isPR {
-		autoYes := *yesFlag || *yesFlagLong
 		sp := newSpinner(fmt.Sprintf("Preparing PR #%d (%s/%s)...", prTarget.Number, prTarget.Owner, prTarget.Repo), os.Stdout)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		confirmMerged := func(meta PRMeta) (bool, error) {
-			sp.Stop()
-			if autoYes {
-				uiStatus("warn", fmt.Sprintf("PR #%d is already merged into %s", meta.Number, meta.BaseRef), "continuing (-y)", 0, os.Stdout)
-				return true, nil
-			}
-			if !isTTY(os.Stdin) {
-				uiStatus("warn", fmt.Sprintf("PR #%d is already merged into %s", meta.Number, meta.BaseRef), "use -y to open in non-interactive environments", 0, os.Stdout)
-				return false, nil
-			}
-			fmt.Println()
-			uiStatus("warn", fmt.Sprintf("PR #%d is already merged into %s", meta.Number, meta.BaseRef), meta.Title, 0, os.Stdout)
-			fmt.Fprintf(os.Stdout, "  %s %s", uiAccent("?", os.Stdout), "Open anyway? [y/N] ")
-			reader := bufio.NewReader(os.Stdin)
-			line, _ := reader.ReadString('\n')
-			answer := strings.TrimSpace(strings.ToLower(line))
-			if answer == "y" || answer == "yes" {
-				sp = newSpinner(fmt.Sprintf("Continuing with PR #%d (%s/%s)...", prTarget.Number, prTarget.Owner, prTarget.Repo), os.Stdout)
-				return true, nil
-			}
-			fmt.Println("Aborted.")
-			return false, nil
-		}
 		p, err := checkoutPR(ctx, prProvider, prTarget, ".", func(msg string) {
 			sp.Update(msg)
-		}, confirmMerged)
+		})
 		cancel()
 		if err != nil {
-			if errors.Is(err, ErrPRMergedCancelled) {
-				os.Exit(0)
-			}
 			sp.Fail(fmt.Sprintf("Failed to prepare PR #%d: %v", prTarget.Number, err))
 			fatal(fmt.Errorf("px0: %w", err))
 		}
-		sp.Success(fmt.Sprintf("PR #%d checked out (%s)", prTarget.Number, p.meta.Title))
+		if p.meta.Merged {
+			sp.Success(fmt.Sprintf("PR #%d checked out [merged] (%s)", prTarget.Number, p.meta.Title))
+		} else {
+			sp.Success(fmt.Sprintf("PR #%d checked out (%s)", prTarget.Number, p.meta.Title))
+		}
 		pr = p
 		root = p.Root()
 	} else {
@@ -168,7 +146,14 @@ func main() {
 	tel := NewTelemetryService(*noTelemetry)
 	defer tel.Close("normal")
 
-	pxSrv := NewServer(ix, lsp)
+	configuredBasePath := "/"
+	if *basePathFlag != "" {
+		configuredBasePath = cleanBasePath(*basePathFlag)
+	} else if cfg := readSettings(); cfg.ServerBasePath != nil && *cfg.ServerBasePath != "" {
+		configuredBasePath = cleanBasePath(*cfg.ServerBasePath)
+	}
+
+	pxSrv := NewServer(ix, lsp, configuredBasePath)
 	if pr != nil {
 		pxSrv.SetPR(pr)
 	}
@@ -183,7 +168,7 @@ func main() {
 
 	srv := &http.Server{Handler: pxSrv}
 
-	url := viewerURL(addr, initialFile, initialLine)
+	url := viewerURL(addr, initialFile, initialLine, configuredBasePath)
 	uiHeading("px0 "+version, nil, os.Stdout)
 	if pr != nil {
 		prTitle := fmt.Sprintf("#%d %s", pr.meta.Number, pr.meta.Title)
@@ -359,8 +344,15 @@ func splitTargetLine(target string) (path string, line int) {
 	return target, 0
 }
 
-func viewerURL(addr, initialFile string, initialLine int) string {
+func viewerURL(addr, initialFile string, initialLine int, basePath ...string) string {
 	u := url.URL{Scheme: "http", Host: addr}
+	bp := "/"
+	if len(basePath) > 0 && basePath[0] != "" {
+		bp = cleanBasePath(basePath[0])
+	}
+	if bp != "/" {
+		u.Path = bp
+	}
 	q := u.Query()
 	if initialFile != "" {
 		q.Set("path", filepath.ToSlash(initialFile))

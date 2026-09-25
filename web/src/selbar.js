@@ -1,5 +1,6 @@
 // web/src/selbar.js
 import { $, S, doc_, keyLabel } from './state.js';
+import { on } from './bus.js';
 import { vp, copyToClipboard, showToast } from './ui.js';
 import { render } from './renderer.js';
 import { findReferences } from './lsp.js';
@@ -27,6 +28,9 @@ export function setAgentHandler(fn) { agentHandler = fn; }
    `px0 pr ...` session. */
 let reviewHandler = null;
 export function setReviewHandler(fn) { reviewHandler = fn; }
+// Read-only accessor so the diff gutter's pencil (linecomment.js) can offer
+// "Add Review Comment" directly, without duplicating the registration.
+export function getReviewHandler() { return reviewHandler; }
 
 let current = null;   // the selection the bar is showing, or null when it is not
 let allText = null;   // Ctrl+A: promise of the S.selAll file's full text
@@ -48,13 +52,11 @@ export function getSelectedRangeInfo() {
   const text = sel.toString().trim();
   if (!text) return null;
 
-  let startEl = range.startContainer;
-  if (startEl.nodeType !== 1) startEl = startEl.parentElement;
-  let endEl = range.endContainer;
-  if (endEl.nodeType !== 1) endEl = endEl.parentElement;
+  const startEl = /** @type {HTMLElement|null} */ (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
+  const endEl = /** @type {HTMLElement|null} */ (range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement);
 
-  const startRow = startEl ? startEl.closest('.row') : null;
-  const endRow = endEl ? endEl.closest('.row') : null;
+  const startRow = /** @type {HTMLElement|null} */ (startEl ? startEl.closest('.row') : null);
+  const endRow = /** @type {HTMLElement|null} */ (endEl ? endEl.closest('.row') : null);
 
   let l1 = d.cur || 1, l2 = d.cur || 1;
   if (startRow && startRow.dataset.l) l1 = +startRow.dataset.l;
@@ -148,8 +150,8 @@ export function selectAll() {
   window.getSelection()?.removeAllRanges();
   S.selAll = d;
   allInfo = null;
-  render();
-  const text = allText = fetch('/api/raw?path=' + encodeURIComponent(d.path))
+  const rawUrl = new URL('api/raw?path=' + encodeURIComponent(d.path), document.baseURI || location.href).href;
+  const text = allText = fetch(rawUrl)
     .then(r => { if (!r.ok) throw new Error(r.statusText); return r.text(); });
   text.then(t => {
     if (allText !== text) return; // cleared or selected again meanwhile
@@ -180,7 +182,7 @@ export function copySelectAll() {
 
 /* Runs one of the bar's actions on the current selection. Returns false when the
    bar is not showing, so a shortcut can fall through to the browser. */
-export function runSelectionAction(act) {
+export function runSelectionAction(act, triggerBtn = null) {
   if (!current) {
     if (act === 'agent-edit') {
       const d = doc_();
@@ -195,13 +197,14 @@ export function runSelectionAction(act) {
   }
   const { text, path } = current;
   const ref = selectionRef(current);
+  const targetBtn = triggerBtn || $('#footer-sel [data-sel="' + act + '"]');
   if (act === 'copy-ref') {
-    copyToClipboard(ref, 'Copied');
+    copyToClipboard(ref, 'Copied', targetBtn);
   } else if (act === 'copy-agent') {
     const ext = path.split('.').pop() || '';
     const lineStr = current.l1 === current.l2 ? 'line ' + current.l1 : 'lines ' + current.l1 + '-' + current.l2;
     const snippet = '@' + path + ' ' + lineStr + '\n```' + ext + '\n' + text + '\n```';
-    copyToClipboard(snippet, 'Copied');
+    copyToClipboard(snippet, 'Copied', targetBtn);
   } else if (act === 'agent-edit') {
     if (!agentHandler) return false;
     agentHandler(current);
@@ -271,7 +274,8 @@ export function initSelectionBar() {
   // Any click ends a whole-file selection, except on the bar's buttons or a viewport scrollbar.
   document.addEventListener('mousedown', e => {
     // A right click opens the menu for the selection, so it must not end it.
-    if (!S.selAll || e.button === 2 || e.target.closest?.('#footer-sel, #sel-menu')) return;
+    const target = /** @type {HTMLElement|null} */ (e.target);
+    if (!S.selAll || e.button === 2 || target?.closest?.('#footer-sel, #sel-menu')) return;
     if (e.target === vp && (e.offsetX >= vp.clientWidth || e.offsetY >= vp.clientHeight)) return;
     clearSelectAll();
   }, true);
@@ -284,7 +288,7 @@ export function initSelectionBar() {
       const btn = e.target.closest('[data-sel]');
       if (!btn) return;
       closeSelMenu();
-      runSelectionAction(btn.dataset.sel);
+      runSelectionAction(btn.dataset.sel, btn);
     });
   }
   if (!menu) return;
@@ -307,4 +311,5 @@ export function initSelectionBar() {
   addEventListener('resize', closeSelMenu);
   addEventListener('blur', closeSelMenu);
   document.addEventListener('scroll', closeSelMenu, true);
+  on('tab:activated', clearSelectAll);
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -10,25 +11,34 @@ import (
 	"time"
 )
 
+// ProcessMetrics captures system resource usage of the px0 server process
+// and any child language server processes.
 type ProcessMetrics struct {
-	RSSBytes  uint64  `json:"rssBytes"`
-	CPUUsage  float64 `json:"cpuUsage"`  // percentage e.g. 1.2%
-	Goroutine int     `json:"goroutines"`
+	RSSBytes    uint64  `json:"rssBytes"`    // Resident set size in bytes
+	CPUUsage    float64 `json:"cpuUsage"`    // CPU utilization percentage (e.g. 1.2%)
+	Goroutine   int     `json:"goroutines"`  // Current number of active goroutines
+	LSPEnabled  bool    `json:"lspEnabled"`  // Whether LSP is active
+	LSPMemBytes uint64  `json:"lspMemBytes"` // Combined RSS of running language server child processes
 }
 
+// metricsCollector periodically samples process CPU utilization by calculating
+// delta CPU time consumed over delta wall-clock time.
 type metricsCollector struct {
-	mu           sync.Mutex
-	lastSample   time.Time
-	lastCPUTime  time.Duration
-	lastUsage    float64
-	numCPU       int
+	mu          sync.Mutex
+	lastSample  time.Time
+	lastCPUTime time.Duration
+	lastUsage   float64
+	numCPU      int
 }
 
 var globalMetrics = &metricsCollector{
 	numCPU: runtime.NumCPU(),
 }
 
-func getProcessMetrics() ProcessMetrics {
+// getProcessMetrics samples px0's own process stats, plus the combined
+// memory of any running language server processes when lsp is non-nil and
+// enabled (-no-lsp turns it off, but the manager itself is never nil).
+func getProcessMetrics(lsp *lspManager) ProcessMetrics {
 	var m ProcessMetrics
 	m.Goroutine = runtime.NumGoroutine()
 
@@ -37,6 +47,14 @@ func getProcessMetrics() ProcessMetrics {
 
 	// 2. CPU Usage
 	m.CPUUsage = globalMetrics.sampleCPU()
+
+	// 3. Language server memory, if enabled
+	if lsp != nil {
+		m.LSPEnabled = lsp.Enabled()
+		if m.LSPEnabled {
+			m.LSPMemBytes = lsp.memBytes()
+		}
+	}
 
 	return m
 }
@@ -60,6 +78,38 @@ func readProcessRSS() uint64 {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return ms.Sys
+}
+
+// readRSSForPID returns another process's resident set size in bytes.
+// Best-effort: 0 if unavailable (process exited, unsupported platform, no
+// permission). Used for language server processes, which px0 doesn't own
+// the way it owns its own MemStats.
+func readRSSForPID(pid int) uint64 {
+	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid)); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 2 {
+			if pages, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+				pageSize := uint64(os.Getpagesize())
+				if pageSize == 0 {
+					pageSize = 4096
+				}
+				return pages * pageSize
+			}
+		}
+		return 0
+	}
+
+	// Non-Linux (darwin/bsd): no /proc, so shell out to ps, which reports
+	// RSS in KB for any process we're allowed to see.
+	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0
+	}
+	kb, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return kb * 1024
 }
 
 func (c *metricsCollector) sampleCPU() float64 {

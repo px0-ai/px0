@@ -14,7 +14,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -40,67 +42,155 @@ func useDiskAssets(dir string) error {
 	return nil
 }
 
+func cleanBasePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || p == "/" || p == "." {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = path.Clean(p)
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
+}
+
+// Server is the main px0 HTTP server handling the web UI, static assets,
+// REST API endpoints, Server-Sent Events (SSE), and workspace services.
 type Server struct {
-	ix         *Index
-	lsp        *lspManager
-	agent      *agentManager // nil unless main wires editing for this session
-	pr         *prSession    // nil unless main launched this process as `px0 pr ...`
-	diffBase   string        // ref /api/diff and /api/gutter diff against; "HEAD" unless in PR mode
+	ix        *Index
+	lsp       *lspManager
+	agent     *agentManager // nil unless main wires editing for this session
+	pr        *prSession    // nil unless main launched this process as `px0 pr ...`
+	diffBase  string        // ref /api/diff and /api/gutter diff against; "HEAD" unless in PR mode
+	prHeadSHA string        // PR mode only: the checked-out PR head commit. Frozen boundary between
+	// the PR's own diff (diffBase..prHeadSHA) and the reviewer's local edits
+	// since checkout (prHeadSHA..working tree); refreshed on Pull.
 	gitWatcher *GitWatcher
 	mux        *http.ServeMux
+	basePath   string
+	session    *sessionManager
 
 	lastReq atomic.Int64 // unix nanos of the most recent request
 }
 
-func NewServer(ix *Index, lsp *lspManager) *Server {
+// BasePath returns the URL path prefix configured for this server (e.g. "/" or "/rev-123/").
+func (s *Server) BasePath() string {
+	if s.basePath == "" {
+		return "/"
+	}
+	return s.basePath
+}
+
+func (s *Server) SetBasePath(bp string) {
+	s.basePath = cleanBasePath(bp)
+	s.session = newSessionManager(s.basePath, s.ix.Root())
+	s.mux = http.NewServeMux()
+	s.registerRoutes()
+}
+
+func (s *Server) routePath(subpath string) string {
+	if s.basePath == "" || s.basePath == "/" {
+		return subpath
+	}
+	bp := strings.TrimSuffix(s.basePath, "/")
+	if !strings.HasPrefix(subpath, "/") {
+		return bp + "/" + subpath
+	}
+	return bp + subpath
+}
+
+func (s *Server) registerRoutes() {
+	sub, _ := fs.Sub(assets, "web")
+	staticPrefix := s.routePath("/static/")
+	s.mux.Handle(staticPrefix, http.StripPrefix(staticPrefix, http.FileServer(http.FS(sub))))
+	s.mux.HandleFunc(s.routePath("/static/themes.css"), s.handleThemes)
+
+	if s.basePath != "/" && s.basePath != "" {
+		s.mux.HandleFunc(s.basePath, s.handleIndex)
+		trimmed := strings.TrimSuffix(s.basePath, "/")
+		s.mux.HandleFunc(trimmed, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, s.basePath, http.StatusMovedPermanently)
+		})
+		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" {
+				http.Redirect(w, r, s.basePath, http.StatusFound)
+				return
+			}
+			http.NotFound(w, r)
+		})
+	} else {
+		s.mux.HandleFunc("/", s.handleIndex)
+	}
+
+	s.mux.HandleFunc(s.routePath("/api/meta"), s.handleMeta)
+	s.mux.HandleFunc(s.routePath("/api/metrics"), s.handleMetrics)
+	s.mux.HandleFunc(s.routePath("/api/tree"), s.handleTree)
+	s.mux.HandleFunc(s.routePath("/api/find"), s.handleFind)
+	s.mux.HandleFunc(s.routePath("/api/file"), s.handleFile)
+	s.mux.HandleFunc(s.routePath("/api/close"), s.handleClose)
+	s.mux.HandleFunc(s.routePath("/api/raw"), s.handleRaw)
+	s.mux.HandleFunc(s.routePath("/api/markdown"), s.handleMarkdown)
+	s.mux.HandleFunc(s.routePath("/api/diff"), s.handleDiff)
+	s.mux.HandleFunc(s.routePath("/api/gutter"), s.handleGutter)
+	s.mux.HandleFunc(s.routePath("/api/stream"), s.handleEventStream)
+	s.mux.HandleFunc(s.routePath("/api/git/stream"), s.handleEventStream)
+	s.mux.HandleFunc(s.routePath("/api/git/refresh"), s.handleGitRefresh)
+	s.mux.HandleFunc(s.routePath("/api/git/stage"), s.handleGitStage)
+	s.mux.HandleFunc(s.routePath("/api/git/unstage"), s.handleGitUnstage)
+	s.mux.HandleFunc(s.routePath("/api/git/commit"), s.handleGitCommit)
+	s.mux.HandleFunc(s.routePath("/api/git/commit-message"), s.handleGitCommitMessage)
+	s.mux.HandleFunc(s.routePath("/api/git/push"), s.handleGitPush)
+	s.mux.HandleFunc(s.routePath("/api/git/pull"), s.handleGitPull)
+	s.mux.HandleFunc(s.routePath("/api/git/log"), s.handleGitLog)
+	s.mux.HandleFunc(s.routePath("/api/search"), s.handleSearch)
+	s.mux.HandleFunc(s.routePath("/api/outline"), s.handleOutline)
+	s.mux.HandleFunc(s.routePath("/api/def"), s.handleDef)
+	s.mux.HandleFunc(s.routePath("/api/reindex"), s.handleReindex)
+	s.mux.HandleFunc(s.routePath("/api/lsp/def"), s.handleLSPDef)
+	s.mux.HandleFunc(s.routePath("/api/lsp/refs"), s.handleLSPRefs)
+	s.mux.HandleFunc(s.routePath("/api/lsp/calls"), s.handleLSPCalls)
+	s.mux.HandleFunc(s.routePath("/api/lsp/symbols"), s.handleLSPSymbols)
+	s.mux.HandleFunc(s.routePath("/api/lsp/hover"), s.handleLSPHover)
+	s.mux.HandleFunc(s.routePath("/api/lsp/warm"), s.handleLSPWarm)
+	s.mux.HandleFunc(s.routePath("/api/lsp/setup"), s.handleLSPSetup)
+	s.mux.HandleFunc(s.routePath("/api/lsp/install"), s.handleLSPInstall)
+	s.mux.HandleFunc(s.routePath("/api/lsp/start"), s.handleLSPStart)
+	s.mux.HandleFunc(s.routePath("/api/agent/harnesses"), s.handleAgentHarnesses)
+	s.mux.HandleFunc(s.routePath("/api/agent/select"), s.handleAgentSelect)
+	s.mux.HandleFunc(s.routePath("/api/agent/edit"), s.handleAgentEdit)
+	s.mux.HandleFunc(s.routePath("/api/agent/batch"), s.handleAgentBatchEdit)
+	s.mux.HandleFunc(s.routePath("/api/agent/job"), s.handleAgentJob)
+	s.mux.HandleFunc(s.routePath("/api/agent/cancel"), s.handleAgentCancel)
+	s.mux.HandleFunc(s.routePath("/api/settings"), s.handleSettings)
+	s.mux.HandleFunc(s.routePath("/api/pr/meta"), s.handlePRMeta)
+	s.mux.HandleFunc(s.routePath("/api/pr/comments"), s.handlePRComments)
+	s.mux.HandleFunc(s.routePath("/api/pr/comments/delete"), s.handlePRCommentDelete)
+	s.mux.HandleFunc(s.routePath("/api/pr/submit"), s.handlePRSubmit)
+	s.mux.HandleFunc(s.routePath("/api/pr/launch"), s.handleLaunchPR)
+	s.mux.HandleFunc(s.routePath("/api/pr/existing-comments"), s.handlePRExistingComments)
+	s.mux.HandleFunc(s.routePath("/api/pr/comments/issue"), s.handlePRIssueCommentPost)
+	s.mux.HandleFunc(s.routePath("/api/pr/comments/review-reply"), s.handlePRReviewCommentReply)
+	s.mux.HandleFunc(s.routePath("/api/session"), s.handleSession)
+}
+
+// NewServer creates and initializes a px0 Server instance, binding index and language servers,
+// starting the background GitWatcher, and registering all HTTP and SSE routes.
+func NewServer(ix *Index, lsp *lspManager, basePaths ...string) *Server {
 	if lsp == nil {
 		lsp = newLSPManager(ix.Root(), false)
 	}
-	s := &Server{ix: ix, lsp: lsp, diffBase: "HEAD", mux: http.NewServeMux()}
+	bp := "/"
+	if len(basePaths) > 0 && basePaths[0] != "" {
+		bp = cleanBasePath(basePaths[0])
+	}
+	s := &Server{ix: ix, lsp: lsp, diffBase: "HEAD", basePath: bp, mux: http.NewServeMux()}
+	s.session = newSessionManager(s.basePath, ix.Root())
 	s.gitWatcher = NewGitWatcher(ix)
 	s.gitWatcher.Start(context.Background())
-	sub, _ := fs.Sub(assets, "web")
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
-	s.mux.HandleFunc("/static/themes.css", s.handleThemes)
-	s.mux.HandleFunc("/", s.handleIndex)
-	s.mux.HandleFunc("/api/meta", s.handleMeta)
-	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
-	s.mux.HandleFunc("/api/tree", s.handleTree)
-	s.mux.HandleFunc("/api/find", s.handleFind)
-	s.mux.HandleFunc("/api/file", s.handleFile)
-	s.mux.HandleFunc("/api/close", s.handleClose)
-	s.mux.HandleFunc("/api/raw", s.handleRaw)
-	s.mux.HandleFunc("/api/markdown", s.handleMarkdown)
-	s.mux.HandleFunc("/api/diff", s.handleDiff)
-	s.mux.HandleFunc("/api/gutter", s.handleGutter)
-	s.mux.HandleFunc("/api/stream", s.handleEventStream)
-	s.mux.HandleFunc("/api/git/stream", s.handleEventStream)
-	s.mux.HandleFunc("/api/git/refresh", s.handleGitRefresh)
-	s.mux.HandleFunc("/api/search", s.handleSearch)
-	s.mux.HandleFunc("/api/outline", s.handleOutline)
-	s.mux.HandleFunc("/api/def", s.handleDef)
-	s.mux.HandleFunc("/api/reindex", s.handleReindex)
-	s.mux.HandleFunc("/api/lsp/def", s.handleLSPDef)
-	s.mux.HandleFunc("/api/lsp/refs", s.handleLSPRefs)
-	s.mux.HandleFunc("/api/lsp/calls", s.handleLSPCalls)
-	s.mux.HandleFunc("/api/lsp/symbols", s.handleLSPSymbols)
-	s.mux.HandleFunc("/api/lsp/hover", s.handleLSPHover)
-	s.mux.HandleFunc("/api/lsp/warm", s.handleLSPWarm)
-	s.mux.HandleFunc("/api/lsp/setup", s.handleLSPSetup)
-	s.mux.HandleFunc("/api/lsp/install", s.handleLSPInstall)
-	s.mux.HandleFunc("/api/lsp/start", s.handleLSPStart)
-	s.mux.HandleFunc("/api/agent/harnesses", s.handleAgentHarnesses)
-	s.mux.HandleFunc("/api/agent/select", s.handleAgentSelect)
-	s.mux.HandleFunc("/api/agent/edit", s.handleAgentEdit)
-	s.mux.HandleFunc("/api/agent/batch", s.handleAgentBatchEdit)
-	s.mux.HandleFunc("/api/agent/job", s.handleAgentJob)
-	s.mux.HandleFunc("/api/agent/cancel", s.handleAgentCancel)
-	s.mux.HandleFunc("/api/settings", s.handleSettings)
-	s.mux.HandleFunc("/api/pr/meta", s.handlePRMeta)
-	s.mux.HandleFunc("/api/pr/comments", s.handlePRComments)
-	s.mux.HandleFunc("/api/pr/comments/delete", s.handlePRCommentDelete)
-	s.mux.HandleFunc("/api/pr/submit", s.handlePRSubmit)
-	s.mux.HandleFunc("/api/pr/launch", s.handleLaunchPR)
+	s.registerRoutes()
 	s.lastReq.Store(time.Now().UnixNano())
 	go s.scavenge()
 	return s
@@ -129,9 +219,14 @@ func (s *Server) scavenge() {
 	}
 }
 
+// ServeHTTP delegates incoming HTTP requests to the configured ServeMux,
+// recording request timing and updating access timestamps.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	isSSE := r.URL.Path == "/api/stream" || r.URL.Path == "/api/git/stream" || r.Header.Get("Accept") == "text/event-stream"
-	if r.URL.Path != "/api/metrics" && !isSSE {
+	streamPath := s.routePath("/api/stream")
+	gitStreamPath := s.routePath("/api/git/stream")
+	metricsPath := s.routePath("/api/metrics")
+	isSSE := r.URL.Path == streamPath || r.URL.Path == gitStreamPath || r.Header.Get("Accept") == "text/event-stream"
+	if r.URL.Path != metricsPath && !isSSE {
 		s.lastReq.Store(time.Now().UnixNano())
 	}
 	start := time.Now()
@@ -171,8 +266,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Accept-Encoding")
 		gz := gzipPool.Get().(*gzip.Writer)
 		gz.Reset(rec)
+		gw := &gzipWriter{ResponseWriter: rec, w: gz}
 		defer func() { gz.Close(); gzipPool.Put(gz) }()
-		out = gzipWriter{ResponseWriter: rec, w: gz}
+		out = gw
 	}
 
 	s.mux.ServeHTTP(out, r)
@@ -188,10 +284,29 @@ type gzipWriter struct {
 	w *gzip.Writer
 }
 
-func (g gzipWriter) Write(b []byte) (int, error) { return g.w.Write(b) }
+func (g gzipWriter) WriteHeader(status int) {
+	g.Header().Del("Content-Length")
+	if status == http.StatusNotModified || status == http.StatusNoContent {
+		g.Header().Del("Content-Encoding")
+		if g.w != nil {
+			g.w.Reset(io.Discard)
+		}
+	}
+	g.ResponseWriter.WriteHeader(status)
+}
+
+func (g gzipWriter) Write(b []byte) (int, error) {
+	g.Header().Del("Content-Length")
+	if g.w != nil {
+		return g.w.Write(b)
+	}
+	return g.ResponseWriter.Write(b)
+}
 
 func (g gzipWriter) Flush() {
-	_ = g.w.Flush()
+	if g.w != nil {
+		_ = g.w.Flush()
+	}
 	if flusher, ok := g.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
@@ -309,11 +424,25 @@ func (s *Server) SetPR(p *prSession) {
 	s.pr = p
 	if p != nil {
 		s.diffBase = p.diffBase
+		s.prHeadSHA = p.meta.HeadSHA
 		if s.ix != nil {
 			s.ix.SetDiffBase(p.diffBase)
+			s.ix.SetPRHead(p.meta.HeadSHA)
 		}
 		if s.gitWatcher != nil {
 			s.gitWatcher.Trigger()
+		}
+		if s.session != nil {
+			p.mu.Lock()
+			if len(p.comments) == 0 && len(s.session.Get().Drafts) > 0 {
+				p.comments = append([]prComment(nil), s.session.Get().Drafts...)
+				for _, c := range p.comments {
+					if c.ID > p.nextID {
+						p.nextID = c.ID
+					}
+				}
+			}
+			p.mu.Unlock()
 		}
 	}
 }
@@ -327,7 +456,8 @@ func (s *Server) agentHarnesses() []agentHarness {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	expected := s.BasePath()
+	if r.URL.Path != expected && r.URL.Path != strings.TrimSuffix(expected, "/") {
 		http.NotFound(w, r)
 		return
 	}
@@ -336,8 +466,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	html := string(b)
+	baseTag := fmt.Sprintf(`<base href="%s">`, expected)
+	if strings.Contains(html, "<base ") {
+		re := regexp.MustCompile(`<base\s+href="[^"]*">`)
+		html = re.ReplaceAllString(html, baseTag)
+	} else if idx := strings.Index(html, "<head>"); idx != -1 {
+		html = html[:idx+6] + "\n" + baseTag + html[idx+6:]
+	} else {
+		html = baseTag + "\n" + html
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(b)
+	io.WriteString(w, html)
 }
 
 // handleThemes joins web/themes/*.css into one stylesheet in file name order, so
@@ -366,6 +506,7 @@ func (s *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	n, at, ms := s.ix.Stats()
 	gitCount, gitFiles := s.ix.GitChanges()
+	githubToken, _ := resolveGitHubToken(readSettings())
 	meta := map[string]any{
 		"root":        s.ix.Root(),
 		"name":        filepath.Base(s.ix.Root()),
@@ -376,9 +517,11 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"git":         gitAvailable(s.ix.Root()),
 		"gitChanges":  gitCount,
 		"gitFiles":    gitFiles,
+		"githubToken": githubToken != "",
 		"lspServers":  s.lsp.Available(),
-		"metrics":     getProcessMetrics(),
+		"metrics":     getProcessMetrics(s.lsp),
 		"version":     version,
+		"basePath":    s.BasePath(),
 		"agent":       s.agent.Name(),
 		"agentModel":  s.agent.Model(),
 		"agentPinned": s.agent.Pinned(),
@@ -388,17 +531,20 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		p := s.pr
 		p.mu.Lock()
 		meta["pr"] = map[string]any{
-			"number":      p.meta.Number,
-			"title":       p.meta.Title,
-			"author":      p.meta.Author,
-			"base":        p.meta.BaseRef,
-			"head":        p.meta.HeadRef,
-			"state":       p.meta.State,
-			"merged":      p.meta.Merged,
-			"mergedAt":    p.meta.MergedAt,
-			"writeAccess": p.writeAccess,
-			"readOnly":    p.token == "",
-			"draftCount":  len(p.comments),
+			"number":          p.meta.Number,
+			"title":           p.meta.Title,
+			"author":          p.meta.Author,
+			"base":            p.meta.BaseRef,
+			"head":            p.meta.HeadRef,
+			"state":           p.meta.State,
+			"merged":          p.meta.Merged,
+			"mergedAt":        p.meta.MergedAt,
+			"writeAccess":     p.writeAccess,
+			"readOnly":        p.token == "",
+			"draftCount":      len(p.comments),
+			"diffBaseWarning": p.diffBaseWarning,
+			"headSHA":         p.meta.HeadSHA,
+			"url":             p.target.URL,
 		}
 		p.mu.Unlock()
 	}
@@ -406,7 +552,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, getProcessMetrics())
+	writeJSON(w, getProcessMetrics(s.lsp))
 }
 
 // lspCtx bounds how long a caller is willing to wait. Language servers can take
@@ -698,7 +844,13 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	_, coming := d.Exact()
 	diffAvail := false
 	if gitAvailable(s.ix.Root()) {
-		diffAvail = gitDiffAgainst(s.ix.Root(), rel, s.diffBase) != ""
+		if s.pr != nil {
+			diffAvail = gitDiffAgainst(s.ix.Root(), rel, s.diffBase) != "" ||
+				gitDiffBetween(s.ix.Root(), rel, s.diffBase, s.prHeadSHA) != "" ||
+				gitDiffAgainst(s.ix.Root(), rel, s.prHeadSHA) != ""
+		} else {
+			diffAvail = gitDiffAgainst(s.ix.Root(), rel, s.diffBase) != ""
+		}
 	}
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
@@ -737,6 +889,14 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 
 // handleDiff returns the unified diff of a file against HEAD. available is false
 // (with an empty diff and 200) when git is off/absent or the file is unchanged.
+//
+// In a PR review session, "diff" stays the full merge-base..working-tree diff
+// for backward compatibility, but the response also splits it into prDiff
+// (diffBase..prHeadSHA -- the PR's own, frozen change) and yourDiff
+// (prHeadSHA..working-tree -- what the reviewer has edited/committed locally
+// since checkout). Committing in that session only ever changes yourDiff, so
+// the frontend can label the two apart instead of showing one blended diff
+// that looks the same whether or not the reviewer has touched anything.
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
 	if !ok {
@@ -752,7 +912,17 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		}
 		uiStatus("info", "diff", fmt.Sprintf("%s · %s", rel, status), 0, os.Stdout)
 	}
-	writeJSON(w, map[string]any{"path": rel, "diff": diff, "available": diff != ""})
+	avail := diff != ""
+	resp := map[string]any{"path": rel, "diff": diff}
+	if s.pr != nil {
+		prDiff := gitDiffBetween(s.ix.Root(), rel, s.diffBase, s.prHeadSHA)
+		yourDiff := gitDiffAgainst(s.ix.Root(), rel, s.prHeadSHA)
+		resp["prDiff"] = prDiff
+		resp["yourDiff"] = yourDiff
+		avail = avail || prDiff != "" || yourDiff != ""
+	}
+	resp["available"] = avail
+	writeJSON(w, resp)
 }
 
 // handleGutter returns per-file changed-line ranges (new-file line numbers) for
@@ -796,11 +966,11 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	includeMetrics := r.URL.Path != "/api/git/stream"
+	includeMetrics := r.URL.Path != s.routePath("/api/git/stream")
 
 	// 1. Immediately send initial metrics on connection (for unified stream)
 	if includeMetrics {
-		if mBytes, err := json.Marshal(getProcessMetrics()); err == nil {
+		if mBytes, err := json.Marshal(getProcessMetrics(s.lsp)); err == nil {
 			if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", mBytes); err != nil {
 				return
 			}
@@ -844,7 +1014,7 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 
 		case <-metricsC:
-			if mBytes, err := json.Marshal(getProcessMetrics()); err == nil {
+			if mBytes, err := json.Marshal(getProcessMetrics(s.lsp)); err == nil {
 				if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", mBytes); err != nil {
 					return
 				}
@@ -875,6 +1045,242 @@ func (s *Server) handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 		"gitChanges": count,
 		"gitFiles":   files,
 		"statuses":   s.ix.GitStatusMap(),
+	})
+}
+
+func (s *Server) decodeGitPath(w http.ResponseWriter, r *http.Request) (rel string, ok bool) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.Path == "" {
+		fail(w, http.StatusBadRequest, "path is required")
+		return "", false
+	}
+	_, rel, ok = s.safePath(body.Path)
+	if !ok {
+		fail(w, http.StatusBadRequest, "bad path")
+		return "", false
+	}
+	return rel, true
+}
+
+// handleGitStage adds a file to the index (POST {path}).
+func (s *Server) handleGitStage(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	rel, ok := s.decodeGitPath(w, r)
+	if !ok {
+		return
+	}
+	if err := gitStage(s.ix.Root(), rel); err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleGitUnstage removes a file from the index without touching the
+// working tree (POST {path}).
+func (s *Server) handleGitUnstage(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	rel, ok := s.decodeGitPath(w, r)
+	if !ok {
+		return
+	}
+	if err := gitUnstage(s.ix.Root(), rel); err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleGitCommit commits whatever is currently staged (POST {message}).
+func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || strings.TrimSpace(body.Message) == "" {
+		fail(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	if err := gitCommit(s.ix.Root(), strings.TrimSpace(body.Message)); err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleGitCommitMessage dispatches the selected coding harness to write a
+// commit message for the currently staged diff, honoring the
+// git.commitMessageInstruction setting. Returns an agent job the frontend
+// polls via the existing /api/agent/job, the same as an inline edit.
+func (s *Server) handleGitCommitMessage(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	if !s.agentOrFail(w) {
+		return
+	}
+	root := s.ix.Root()
+	files := gitStagedFiles(root)
+	if len(files) == 0 {
+		// Auto-stage all uncommitted changes if nothing is staged
+		if gitHasUncommittedChanges(root) {
+			_ = gitStage(root, ".")
+			files = gitStagedFiles(root)
+			if s.gitWatcher != nil {
+				s.gitWatcher.Trigger()
+			}
+		}
+	}
+	if len(files) == 0 {
+		fail(w, http.StatusBadRequest, "nothing staged to generate a message for")
+		return
+	}
+	stat := gitStagedStat(root)
+	diff := gitStagedDiff(root)
+	instruction := ""
+	if cfg := readSettings(); cfg.GitCommitMessageInstruction != nil {
+		instruction = strings.TrimSpace(*cfg.GitCommitMessageInstruction)
+	}
+	job, err := s.agent.StartPrompt("commit message", commitMessagePrompt(files, stat, diff, instruction))
+	if err != nil {
+		code := http.StatusBadGateway
+		if errors.Is(err, errAgentNone) {
+			code = http.StatusBadRequest
+		}
+		fail(w, code, err.Error())
+		return
+	}
+	writeJSON(w, job)
+}
+
+// handleGitPush pushes the current branch to its remote -- or, in a PR
+// review session, pushes the worktree's HEAD to the PR's actual head branch
+// (possibly a fork), which may itself be a fresh branch with no upstream.
+func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	if s.pr != nil {
+		if err := s.pr.Push(); err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+	root := s.ix.Root()
+	out, err := gitPush(root)
+	if err != nil && strings.Contains(out, "has no upstream branch") {
+		if branch := gitCurrentBranch(root); branch != "" && branch != "HEAD" {
+			out, err = gitPushSetUpstream(root, "origin", branch)
+		}
+	}
+	if err != nil {
+		fail(w, http.StatusBadGateway, out)
+		return
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleGitPull fast-forwards onto the latest remote -- or, in a PR review
+// session, the PR's current head. Never merges: a non-fast-forward is
+// refused outright (409), since resolving a real conflict isn't supported.
+func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	if s.pr != nil {
+		info, err := s.pr.Pull()
+		if err != nil {
+			status := http.StatusBadGateway
+			if errors.Is(err, errPRDiverged) {
+				status = http.StatusConflict
+			}
+			fail(w, status, err.Error())
+			return
+		}
+		s.pr.mu.Lock()
+		s.diffBase = s.pr.diffBase
+		s.prHeadSHA = s.pr.meta.HeadSHA
+		s.pr.mu.Unlock()
+		if s.ix != nil {
+			s.ix.SetDiffBase(s.diffBase)
+			s.ix.SetPRHead(s.prHeadSHA)
+		}
+		if s.gitWatcher != nil {
+			s.gitWatcher.Trigger()
+		}
+		writeJSON(w, map[string]any{"ok": true, "message": info})
+		return
+	}
+
+	root := s.ix.Root()
+	if gitHasUncommittedChanges(root) {
+		fail(w, http.StatusConflict, "commit or discard your local changes before pulling")
+		return
+	}
+	branch := gitCurrentBranch(root)
+	if branch == "" || branch == "HEAD" {
+		fail(w, http.StatusBadRequest, "not on a branch")
+		return
+	}
+	remote, remoteBranch, ok := gitUpstream(root, branch)
+	if !ok {
+		fail(w, http.StatusBadRequest, "no upstream branch configured for "+branch)
+		return
+	}
+	if err := gitFFOnlyPull(root, remote, remoteBranch); err != nil {
+		if errors.Is(err, errNotFastForward) {
+			fail(w, http.StatusConflict, fmt.Sprintf("can't fast-forward; %s has diverged from %s/%s -- resolve manually, not supported here", branch, remote, remoteBranch))
+			return
+		}
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": "pulled the latest changes"})
+}
+
+// handleGitLog returns recent commits from HEAD (default 5).
+func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	limit := 5
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+	branch := gitCurrentBranch(s.ix.Root())
+	commits := gitRecentCommits(s.ix.Root(), limit)
+	commitsURL := gitCommitsWebURL(s.ix.Root(), branch)
+	writeJSON(w, map[string]any{
+		"commits":    commits,
+		"commitsUrl": commitsURL,
 	})
 }
 

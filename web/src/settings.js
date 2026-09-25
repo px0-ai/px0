@@ -1,5 +1,6 @@
 // web/src/settings.js
-import { $, $$, esc, S, api, apiPost } from './state.js';
+import { $, $$, esc, S, api, apiPost, apiPostJson } from './state.js';
+import { showToast } from './ui.js';
 import { applyEditorTypography, toggleWordWrap, toggleLineNumbers } from './renderer.js';
 import { setTheme, listThemes } from './theme.js';
 import { setLayoutPref } from './diff.js';
@@ -272,6 +273,14 @@ const BUILTIN_SCHEMA = [
     category: "Agent / AI",
     type: "boolean",
     default: false
+  },
+  {
+    key: "server.basePath",
+    title: "Base Path",
+    description: "Base URL path prefix for the px0 server and web interface (e.g. /rev-123/).",
+    category: "Server",
+    type: "string",
+    default: "/"
   }
 ];
 
@@ -404,10 +413,19 @@ export function applyAllSettingsLive() {
   }
 }
 
-export function openSettings(mode = 'ui') {
+export function openSettings(mode = 'ui', category = null, highlightKey = null) {
   if (!settingsModalEl) initSettingsDOM();
   settingsViewMode = mode === 'json' ? 'json' : 'ui';
   settingsModalEl.hidden = false;
+  pendingSettingsChanges = {};
+  setSaveStatus('saved', 'All changes saved');
+
+  if (category && settingsViewMode === 'ui') {
+    activeSettingsCategory = category;
+    settingsFilterQuery = '';
+    const searchInput = $('#settings-search');
+    if (searchInput) searchInput.value = '';
+  }
 
   // Immediately render with current schema & settings
   updateSettingsHeader();
@@ -425,11 +443,27 @@ export function openSettings(mode = 'ui') {
     } else {
       showSettingsUIView();
     }
+    if (highlightKey && settingsViewMode === 'ui') {
+      focusSettingCard(highlightKey);
+    }
   });
 
   const searchInput = $('#settings-search');
-  if (searchInput && settingsViewMode === 'ui') {
+  if (searchInput && settingsViewMode === 'ui' && !category) {
     setTimeout(() => searchInput.focus(), 50);
+  }
+
+  if (highlightKey && settingsViewMode === 'ui') {
+    setTimeout(() => focusSettingCard(highlightKey), 30);
+  }
+}
+
+function focusSettingCard(key) {
+  const card = settingsModalEl?.querySelector(`[data-setting="${key}"]`);
+  if (card) {
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const input = card.querySelector('textarea, input, select');
+    if (input) input.focus();
   }
 }
 
@@ -508,7 +542,7 @@ function isSettingModified(key, val, defVal) {
   if (val === undefined || val === null) return false;
   if (defVal === undefined || defVal === null) return val !== '';
   if (typeof defVal === 'number') {
-    return parseFloat(val) !== parseFloat(defVal);
+    return Number(val) !== Number(defVal);
   }
   if (typeof defVal === 'boolean') {
     return Boolean(val) !== Boolean(defVal);
@@ -625,6 +659,8 @@ function renderSettingsList() {
           ${step !== undefined ? `<span class="settings-tag tag-step">Step: <b>${step}</b></span>` : ''}
           ${presetPills}
         </div>`;
+    } else if (type === 'textarea') {
+      controlHtml = `<textarea class="settings-input settings-textarea" data-key="${esc(key)}" rows="3" spellcheck="false">${esc(String(val || ''))}</textarea>`;
     } else {
       const isSecret = item.secret || item.Secret;
       controlHtml = `<input type="${isSecret ? 'password' : 'text'}" class="settings-input" data-key="${esc(key)}" value="${esc(String(val || ''))}"${isSecret ? ' autocomplete="off"' : ''}>`;
@@ -670,7 +706,7 @@ function renderSettingsList() {
           ${aptValuesHtml}
           ${extraAction}
           <div class="settings-card-meta">
-            <span class="settings-tag tag-current">Current: <b>${esc(String(val))}</b></span>
+            ${(type !== 'textarea' && key !== 'git.commitMessageInstruction') ? `<span class="settings-tag tag-current">Current: <b>${esc(String(val))}</b></span>` : ''}
             <span class="settings-tag tag-default">Default: <code>${esc(String(def))}</code></span>
             ${modified ? `<span class="settings-tag tag-modified">Modified</span>` : ''}
             ${resetBtn}
@@ -686,10 +722,80 @@ function renderSettingsList() {
   container.innerHTML = html;
 }
 
+let pendingSettingsChanges = {};
+
+function setSaveStatus(state, msg) {
+  const statusEl = $('#settings-footer-status');
+  const statusText = $('#settings-status-text');
+  const statusIcon = $('#settings-status-icon');
+  const saveBtn = $('#btn-settings-save');
+  const saveLabel = $('#settings-btn-save-label');
+  if (!statusEl || !statusText) return;
+
+  statusEl.className = 'settings-footer-status';
+
+  if (state === 'saving') {
+    statusEl.classList.add('is-saving');
+    statusText.textContent = msg || 'Saving changes...';
+    if (statusIcon) {
+      statusIcon.style.animation = 'spin 0.8s linear infinite';
+      statusIcon.innerHTML = '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-dasharray="28" stroke-dashoffset="14" stroke-width="2.5"/>';
+    }
+    if (saveBtn) saveBtn.disabled = true;
+    if (saveLabel) saveLabel.textContent = 'Saving...';
+  } else if (state === 'saved') {
+    statusEl.classList.add('is-saved');
+    statusText.textContent = msg || 'All changes saved';
+    if (statusIcon) {
+      statusIcon.style.animation = '';
+      statusIcon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+    }
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      const saveIcon = saveBtn.querySelector('.settings-btn-save-icon');
+      if (saveIcon) saveIcon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+      if (saveLabel) saveLabel.textContent = 'Saved';
+      setTimeout(() => {
+        if (saveIcon) {
+          saveIcon.innerHTML = '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>';
+        }
+        if (saveLabel) saveLabel.textContent = 'Save';
+      }, 2000);
+    }
+  } else if (state === 'unsaved') {
+    statusEl.classList.add('is-unsaved');
+    statusText.textContent = msg || 'Unsaved changes';
+    if (statusIcon) {
+      statusIcon.style.animation = '';
+      statusIcon.innerHTML = '<circle cx="12" cy="12" r="5" fill="currentColor"/>';
+    }
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      const saveIcon = saveBtn.querySelector('.settings-btn-save-icon');
+      if (saveIcon) {
+        saveIcon.innerHTML = '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>';
+      }
+      if (saveLabel) saveLabel.textContent = 'Save';
+    }
+  } else if (state === 'error') {
+    statusEl.classList.add('is-error');
+    statusText.textContent = msg || 'Failed to save';
+    if (statusIcon) {
+      statusIcon.style.animation = '';
+      statusIcon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>';
+    }
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      if (saveLabel) saveLabel.textContent = 'Retry Save';
+    }
+  }
+}
+
 async function handleSettingChange(key, value) {
   // Update state locally
   if (!settingsData.settings) settingsData.settings = {};
   settingsData.settings[key] = value;
+  delete pendingSettingsChanges[key];
   applySettingLive(key, value);
 
   // Re-render setting card modified state
@@ -697,10 +803,13 @@ async function handleSettingChange(key, value) {
 
   // Persist to server
   try {
-    const res = await apiPost('/api/settings', { [key]: value });
+    setSaveStatus('saving');
+    const res = await apiPostJson('/api/settings', { [key]: value });
     if (res.raw) settingsData.raw = res.raw;
+    setSaveStatus('saved', 'All changes saved');
   } catch (err) {
     console.error(`Failed to save setting ${key}:`, err);
+    setSaveStatus('error', 'Failed to save: ' + (err.message || 'unknown error'));
   }
 }
 
@@ -708,6 +817,53 @@ async function handleResetSetting(key) {
   const def = settingsData.defaults ? settingsData.defaults[key] : undefined;
   if (def !== undefined) {
     await handleSettingChange(key, def);
+  }
+}
+
+async function handleExplicitSave() {
+  if (settingsViewMode === 'json') {
+    return handleSaveRawSettings();
+  }
+
+  // Capture value of currently focused input/textarea inside settings list if any
+  const activeEl = /** @type {HTMLInputElement|HTMLTextAreaElement|null} */ (document.activeElement);
+  if (activeEl && activeEl.dataset?.key && activeEl.closest('#settings-list')) {
+    const key = activeEl.dataset.key;
+    let val = /** @type {any} */ (activeEl.value);
+    if (activeEl instanceof HTMLInputElement && activeEl.type === 'checkbox') val = activeEl.checked;
+    else if (activeEl.type === 'number') val = parseFloat(val);
+    pendingSettingsChanges[key] = val;
+  }
+
+  // Apply any pending changes locally
+  for (const [k, v] of Object.entries(pendingSettingsChanges)) {
+    if (!settingsData.settings) settingsData.settings = {};
+    settingsData.settings[k] = v;
+    applySettingLive(k, v);
+  }
+
+  setSaveStatus('saving');
+
+  try {
+    const toSave = Object.keys(pendingSettingsChanges).length > 0
+      ? { ...pendingSettingsChanges }
+      : { ...(settingsData.settings || {}) };
+
+    const res = await apiPostJson('/api/settings', toSave);
+    if (res.settings) {
+      settingsData.settings = res.settings;
+      S.settings = res.settings;
+      applyAllSettingsLive();
+    }
+    if (res.raw) settingsData.raw = res.raw;
+    pendingSettingsChanges = {};
+    renderSettingsList();
+
+    setSaveStatus('saved', 'Settings saved successfully');
+    showToast('✓', 'Settings saved');
+  } catch (err) {
+    setSaveStatus('error', 'Failed to save: ' + (err.message || 'unknown error'));
+    showToast('!', err.message || 'Failed to save settings');
   }
 }
 
@@ -725,11 +881,13 @@ async function handleSaveRawSettings() {
       errEl.textContent = 'JSON Syntax Error: ' + err.message;
       errEl.hidden = false;
     }
+    setSaveStatus('error', 'JSON syntax error');
     return;
   }
 
+  setSaveStatus('saving');
   try {
-    const res = await apiPost('/api/settings', { raw: rawText });
+    const res = await apiPostJson('/api/settings', { raw: rawText });
     if (res.settings) {
       settingsData.settings = res.settings;
       S.settings = res.settings;
@@ -745,11 +903,14 @@ async function handleSaveRawSettings() {
         errEl.classList.remove('success');
       }, 2500);
     }
+    setSaveStatus('saved', 'Settings saved successfully');
+    showToast('✓', 'Settings saved');
   } catch (err) {
     if (errEl) {
       errEl.textContent = 'Failed to save: ' + err.message;
       errEl.hidden = false;
     }
+    setSaveStatus('error', 'Failed to save: ' + (err.message || 'unknown error'));
   }
 }
 
@@ -763,6 +924,17 @@ function initSettingsDOM() {
   // Click outside dialog to close
   settingsModalEl.addEventListener('click', e => {
     if (e.target === settingsModalEl) closeSettings();
+  });
+
+  // Explicit Save button in settings footer
+  $('#btn-settings-save')?.addEventListener('click', handleExplicitSave);
+
+  // Keyboard shortcut: Ctrl+S / Cmd+S inside settings modal
+  settingsModalEl.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      handleExplicitSave();
+    }
   });
 
   // Switch between UI and JSON mode
@@ -811,6 +983,16 @@ function initSettingsDOM() {
   // Settings list events (controls & reset buttons)
   const listEl = $('#settings-list');
   if (listEl) {
+    listEl.addEventListener('input', e => {
+      const target = e.target;
+      const key = target.dataset.key;
+      if (!key) return;
+      let value = target.value;
+      if (target.type === 'number') value = parseFloat(value);
+      pendingSettingsChanges[key] = value;
+      setSaveStatus('unsaved', 'Unsaved changes');
+    });
+
     listEl.addEventListener('change', e => {
       const target = e.target;
       const key = target.dataset.key;

@@ -183,10 +183,14 @@ func decodeRange(v any) lspRange {
 	return lspRange{Start: pos("start"), End: pos("end")}
 }
 
+// Definition queries the language server for the definition site(s) of the symbol at the given position.
+// Line is 1-based and col is the UTF-16 code unit offset from the frontend.
 func (m *lspManager) Definition(ctx context.Context, abs, rel string, line, col int) ([]NavHit, error) {
 	return m.locate(ctx, "textDocument/definition", abs, rel, line, col, nil)
 }
 
+// References queries the language server for all reference locations of the symbol at the given position,
+// including its declaration site.
 func (m *lspManager) References(ctx context.Context, abs, rel string, line, col int) ([]NavHit, error) {
 	return m.locate(ctx, "textDocument/references", abs, rel, line, col,
 		map[string]any{"context": map[string]any{"includeDeclaration": true}})

@@ -119,7 +119,7 @@ function wire(el, d, onReady) {
     renderLspSetup(el, onReady);
   }));
   el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
-    copyToClipboard(b.dataset.copy, 'Copied ' + b.dataset.copy);
+    copyToClipboard(b.dataset.copy, 'Copied ' + b.dataset.copy, b);
   }));
   el.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => start(el, d, onReady)));
 }

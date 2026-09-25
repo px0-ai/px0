@@ -1,6 +1,6 @@
 # Pull Request Review & Agent Collaboration
 
-px0 can check out a pull request's full source tree and review it like any local workspace: full codebase navigation, symbol outline, LSP intelligence, and search, alongside a diff scoped to the PR's merge-base, real-time coding agent synchronization, inline comment drafting, and AI batch application.
+px0 can check out a pull request's full source tree and review it like any local workspace: full codebase navigation, symbol outline, LSP intelligence, and search, alongside a diff scoped to the PR's merge-base, real-time coding agent synchronization, inline comment drafting, AI batch application, and the same git panel a plain workspace has — so you can commit and push fixes back to the PR's own branch, and pull in new commits someone else pushed while you were reviewing.
 
 ---
 
@@ -37,20 +37,10 @@ Because fetching metadata and checking out remote references takes a few moments
 ✔ PR #123 checked out (Refactor auth token resolution)
 ```
 
-### Merged PR Handling & Confirmation
+### Merged PR Handling
 If the pull request is already merged:
-- px0 detects its merged status from the API.
-- In interactive terminals, it pauses and prompts for confirmation:
-  ```text
-  ! PR #123 is already merged into main  Refactor auth token resolution
-    ? Open anyway? [y/N]
-  ```
-- Typing `y` continues with the review session; pressing Enter or typing `n` cleanly aborts.
-- To bypass the prompt (for scripting or automated environments), pass `-y` or `-yes`:
-  ```bash
-  px0 -y https://github.com/owner/repo/pull/123
-  ```
-- In both the CLI banner and the browser review header, a prominent purple **`Merged`** pill badge is displayed.
+- px0 detects its merged status from the API and opens it directly without blocking.
+- In both the CLI checkout message and the browser review header, a prominent purple **`Merged`** pill badge is displayed.
 
 ### Multi-Session Isolation
 Each PR review runs as its own isolated process on its own port. Running `px0 https://github.com/owner/repo/pull/456` while another PR review or local workspace is open will not disturb existing sessions.
@@ -89,6 +79,15 @@ The PR review bar above the editor tabs hosts the overall review summary and ver
 - **Comment**: Submit feedback without an approval status (available to all reviewers).
 - **Approve** / **Request Changes**: Available when your authenticated token has repository push access.
 - Submitting posts a single review payload containing all draft line comments and the review body.
+
+### 6. Editing, Committing, and Pushing Back
+A PR checkout is a real git worktree, and the git panel works inside it exactly as it does in a plain workspace:
+- **Edit and commit**: Make a change (by hand, or by dispatching a coding agent on the checkout), stage it, and either write a commit message yourself or click **Commit with AI**.
+- **Push**: Sends the checkout's `HEAD` to the pull request's *actual* head branch on its actual repository — a fork included — not wherever the checkout happens to live locally.
+- **Pull**: Re-fetches the PR's current head. If new commits landed on it since you opened the review and your checkout can fast-forward onto them cleanly, px0 updates the worktree and refreshes the diff, the PR bar, and the comments panel automatically. If your checkout has diverged — you made local commits that aren't on the PR head yet, or the head was force-pushed — px0 refuses with a clear message rather than merging; commit and push first, or resolve it in a terminal.
+
+> [!IMPORTANT]
+> A PR checkout lives in a temporary directory for the life of the px0 process (see [Multi-Session Isolation](#multi-session-isolation) below). Any edits you make there — committed or not — are gone once the session closes, unless you've pushed them back to the PR's branch first.
 
 ---
 
@@ -131,3 +130,6 @@ px0 abstracts forge interactions through a clean, minimal `GitProvider` interfac
 | Command Palette (`Cmd/Ctrl+K`) | Command Palette → **Git: Open Pull Request…** | Launch a new PR review tab |
 | **`⚡ Batch Apply`** | PR header bar | Dispatch all drafted comments to local AI coding harness |
 | **Submit Review** | PR header bar | Submit Approve / Request Changes / Comment to remote forge |
+| **Pull** | Sidebar git panel | Fast-forward the checkout onto the PR's current head; refuses on divergence |
+| **Push** | Sidebar git panel | Push the checkout's `HEAD` to the PR's actual head branch |
+| **Commit with AI** | Sidebar git panel | Write and commit a message for the staged diff with your coding harness |

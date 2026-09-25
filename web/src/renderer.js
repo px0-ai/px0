@@ -86,7 +86,7 @@ export function paint() {
       if (gut.dels.has(n)) rc += ' gut-del';
     }
     html += '<div class="' + rc + '" data-l="' + n + '">' +
-      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Comment or Edit">✎</span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
+      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Edit inline">✎</span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
   }
   const sel = saveSelection();
   rowsEl.style.transform = 'translateY(' + (first * LH) + 'px)';
@@ -110,6 +110,7 @@ export function placeCaret() {
   const row = d && rowFor(d.cur);
   if (!row) { el.hidden = true; return null; }
   const code = $('.c', row);
+  if (!code) { el.hidden = true; return null; }
   const col = Math.max(0, Math.min(d.col || 0, code.textContent.length));
   const [node, off] = toPoint({ line: d.cur, col });
   const base = sizer.getBoundingClientRect();
@@ -187,6 +188,7 @@ export function toPoint({ line, col }) {
   const row = rowFor(line);
   if (!row) return null;
   const code = $('.c', row);
+  if (!code) return null;
   const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
   let at = 0;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {

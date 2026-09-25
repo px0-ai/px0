@@ -89,7 +89,7 @@ export async function showHover(at, x, y) {
 
   if (btnRef) btnRef.onclick = (e) => {
     e.stopPropagation();
-    copyToClipboard(refPath, 'Copied');
+    copyToClipboard(refPath, 'Copied', btnRef);
   };
   if (btnAi) btnAi.onclick = (e) => {
     e.stopPropagation();
@@ -97,7 +97,7 @@ export async function showHover(at, x, y) {
     const ext = d.path.split('.').pop() || '';
     const lineStr = 'line ' + at.line;
     const text = '@' + d.path + ' ' + lineStr + '\n```' + ext + '\n' + lineText + '\n```';
-    copyToClipboard(text, 'Copied');
+    copyToClipboard(text, 'Copied', btnAi);
   };
   if (btnRefs) btnRefs.onclick = (e) => {
     e.stopPropagation();

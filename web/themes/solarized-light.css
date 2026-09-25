@@ -13,7 +13,7 @@
   --sel: #dfd8c2; --mark: rgba(181, 137, 0, 0.16); --mark-active: #e6c35c; --cur: #f5eedb;
   --on-mark-active: var(--fg);
   /* elevation */
-  --shadow: 0 16px 48px rgba(88, 110, 117, 0.18);
+  --shadow: 0 4px 16px rgba(88, 110, 117, 0.18);
 
   /* syntax */
   --k: #859900; --kt: #b58900; --nf: #268bd2; --nc: #b58900; --nb: #cb4b16;

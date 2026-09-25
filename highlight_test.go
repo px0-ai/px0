@@ -18,7 +18,14 @@ func fixtures(t *testing.T) []string {
 		root = "."
 	}
 	filepath.WalkDir(root, func(p string, de os.DirEntry, err error) error {
-		if err != nil || de.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if de.IsDir() {
+			name := de.Name()
+			if name == ".git" || name == "bench-repos" || name == "node_modules" || name == "dist" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(p)) {

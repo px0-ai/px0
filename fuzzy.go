@@ -7,13 +7,16 @@ import (
 	"sync"
 )
 
+// FuzzyResult represents a matched file path ranked by the fuzzy search engine.
 type FuzzyResult struct {
-	Path  string `json:"path"`
-	Name  string `json:"name"`
-	Pos   []int  `json:"pos"` // byte offsets in Path that matched, for highlighting
-	score int
+	Path  string `json:"path"` // Workspace-relative path to the matched file
+	Name  string `json:"name"` // Basename of the file
+	Pos   []int  `json:"pos"`  // Byte offsets in Path that matched, used by frontend for highlight badges
+	score int    // Computed match quality score (higher is better)
 }
 
+// isBoundary reports whether a byte acts as a word or segment boundary
+// in file paths (e.g. slashes, underscores, dashes, dots, spaces, or at-symbols).
 func isBoundary(b byte) bool {
 	switch b {
 	case '/', '_', '-', '.', ' ', '@':
@@ -26,7 +29,7 @@ func isBoundary(b byte) bool {
 // present, then backward from that endpoint to pull the matched positions as
 // tightly together as possible. Tight matches score higher, which is what makes
 // "fzf feel" work without an O(n*m) dynamic program.
-func fuzzyScore(q string, e *FileEntry, pos []int) (int, []int, bool) {
+func fuzzyScore(q, origQ string, e *FileEntry, pos []int) (int, []int, bool) {
 	p, lp := e.Path, e.lower
 	qi, end := 0, -1
 	for i := 0; i < len(lp) && qi < len(q); i++ {
@@ -67,7 +70,7 @@ func fuzzyScore(q string, e *FileEntry, pos []int) (int, []int, bool) {
 		} else if p[i] >= 'A' && p[i] <= 'Z' && p[i-1] >= 'a' && p[i-1] <= 'z' {
 			score += 14 // camelCase hump
 		}
-		if p[i] == q[k] {
+		if k < len(origQ) && p[i] == origQ[k] {
 			score += 4 // exact case
 		}
 		prev = i
@@ -93,8 +96,8 @@ func min(a, b int) int {
 
 // FuzzyFind ranks every indexed path against query and returns the best limit.
 func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
-	q := strings.ToLower(strings.TrimSpace(query))
-	q = strings.ReplaceAll(q, " ", "")
+	origQ := strings.ReplaceAll(strings.TrimSpace(query), " ", "")
+	q := strings.ToLower(origQ)
 
 	if q == "" {
 		out := make([]FuzzyResult, 0, limit)
@@ -126,7 +129,7 @@ func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 			local := make([]FuzzyResult, 0, 64)
 			scratch := make([]int, 0, 64)
 			for i := lo; i < hi; i++ {
-				s, pos, ok := fuzzyScore(q, &files[i], scratch)
+				s, pos, ok := fuzzyScore(q, origQ, &files[i], scratch)
 				if !ok {
 					continue
 				}

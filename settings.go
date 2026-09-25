@@ -12,24 +12,28 @@ import (
 // are stored with the other per-user files px0 writes (~/.px0/settings.json),
 // never in the working tree.
 
+// settings stores user configuration written to ~/.px0/settings.json (or XDG_CONFIG_HOME/px0/settings.json).
+// All settings are optional pointers so omitted values fall back to application defaults.
 type settings struct {
 	Agent  string            `json:"agent,omitempty"`
 	Models map[string]string `json:"models,omitempty"`
 
-	EditorFontSize             *float64 `json:"editor.fontSize,omitempty"`
-	EditorFontFamily           *string  `json:"editor.fontFamily,omitempty"`
-	EditorLineHeight           *float64 `json:"editor.lineHeight,omitempty"`
-	EditorTabSize              *int     `json:"editor.tabSize,omitempty"`
-	EditorWordWrap             *string  `json:"editor.wordWrap,omitempty"`
-	EditorLineNumbers          *string  `json:"editor.lineNumbers,omitempty"`
-	EditorVimMode              *bool    `json:"editor.vimMode,omitempty"`
-	EditorRenderWhitespace     *string  `json:"editor.renderWhitespace,omitempty"`
-	EditorMinimapEnabled       *bool    `json:"editor.minimap.enabled,omitempty"`
-	WorkbenchColorTheme        *string  `json:"workbench.colorTheme,omitempty"`
-	DiffEditorRenderSideBySide *bool    `json:"diffEditor.renderSideBySide,omitempty"`
-	MarkdownPreviewOpen        *bool    `json:"markdown.preview.open,omitempty"`
-	TelemetryEnabled           *bool    `json:"telemetry.enabled,omitempty"`
-	GitHubToken                *string  `json:"github.token,omitempty"`
+	EditorFontSize              *float64 `json:"editor.fontSize,omitempty"`
+	EditorFontFamily            *string  `json:"editor.fontFamily,omitempty"`
+	EditorLineHeight            *float64 `json:"editor.lineHeight,omitempty"`
+	EditorTabSize               *int     `json:"editor.tabSize,omitempty"`
+	EditorWordWrap              *string  `json:"editor.wordWrap,omitempty"`
+	EditorLineNumbers           *string  `json:"editor.lineNumbers,omitempty"`
+	EditorVimMode               *bool    `json:"editor.vimMode,omitempty"`
+	EditorRenderWhitespace      *string  `json:"editor.renderWhitespace,omitempty"`
+	EditorMinimapEnabled        *bool    `json:"editor.minimap.enabled,omitempty"`
+	WorkbenchColorTheme         *string  `json:"workbench.colorTheme,omitempty"`
+	DiffEditorRenderSideBySide  *bool    `json:"diffEditor.renderSideBySide,omitempty"`
+	MarkdownPreviewOpen         *bool    `json:"markdown.preview.open,omitempty"`
+	TelemetryEnabled            *bool    `json:"telemetry.enabled,omitempty"`
+	GitHubToken                 *string  `json:"github.token,omitempty"`
+	GitCommitMessageInstruction *string  `json:"git.commitMessageInstruction,omitempty"`
+	ServerBasePath              *string  `json:"server.basePath,omitempty"`
 }
 
 var settingsMu sync.Mutex
@@ -47,6 +51,7 @@ func settingsPath() string {
 	return filepath.Join(home, ".px0", "settings.json")
 }
 
+// settingSchemaItem describes a configurable setting for dynamic rendering in the settings modal.
 type settingSchemaItem struct {
 	Key         string   `json:"key"`
 	Title       string   `json:"title"`
@@ -331,6 +336,14 @@ var settingsSchema = []settingSchemaItem{
 		Default:     false,
 	},
 	{
+		Key:         "git.commitMessageInstruction",
+		Title:       "Commit Message Instructions",
+		Description: "Extra instructions given to the coding harness when it writes a commit message for the staged diff (e.g. \"Follow Conventional Commits\" or \"Reference the ticket number in the branch name\").",
+		Category:    "Git & Diff",
+		Type:        "textarea",
+		Default:     "",
+	},
+	{
 		Key:         "github.token",
 		Title:       "GitHub Token",
 		Description: "Personal access token used to check out and review pull requests (px0 <url>). Takes precedence over the GITHUB_TOKEN environment variable and 'gh auth token'.",
@@ -338,6 +351,14 @@ var settingsSchema = []settingSchemaItem{
 		Type:        "string",
 		Default:     "",
 		Secret:      true,
+	},
+	{
+		Key:         "server.basePath",
+		Title:       "Base Path",
+		Description: "Base URL path prefix for the px0 server and web interface (e.g. /rev-123/).",
+		Category:    "Server",
+		Type:        "string",
+		Default:     "/",
 	},
 }
 
@@ -395,6 +416,14 @@ func readSettingsLocked() settings {
 			s.Agent = h
 		}
 	}
+	// Support server.basePath and basePath fallback
+	if s.ServerBasePath == nil {
+		if bp, ok := raw["server.basePath"].(string); ok && bp != "" {
+			s.ServerBasePath = &bp
+		} else if bp, ok := raw["basePath"].(string); ok && bp != "" {
+			s.ServerBasePath = &bp
+		}
+	}
 	// Bi-directional bridge between models <-> agent.models
 	if s.Models == nil || len(s.Models) == 0 {
 		if am, ok := raw["agent.models"].(map[string]any); ok {
@@ -434,6 +463,13 @@ func readMergedSettingsMap() map[string]any {
 		res["agent.models"] = m
 	} else if am, ok := raw["agent.models"].(map[string]any); ok && len(am) > 0 {
 		res["models"] = am
+	}
+
+	// Synchronize server.basePath / basePath
+	if bp, ok := raw["server.basePath"].(string); ok && bp != "" {
+		res["server.basePath"] = bp
+	} else if bp, ok := raw["basePath"].(string); ok && bp != "" {
+		res["server.basePath"] = bp
 	}
 
 	return res
@@ -535,6 +571,24 @@ func updateSettingsMap(updates map[string]any) error {
 				delete(raw, "models")
 			} else {
 				raw["models"] = v
+			}
+		}
+
+		// Keep server.basePath / basePath in sync
+		if k == "server.basePath" {
+			if v == nil || v == "" {
+				delete(raw, "server.basePath")
+				delete(raw, "basePath")
+			} else {
+				raw["server.basePath"] = v
+			}
+		} else if k == "basePath" {
+			if v == nil || v == "" {
+				delete(raw, "server.basePath")
+				delete(raw, "basePath")
+			} else {
+				raw["server.basePath"] = v
+				raw["basePath"] = v
 			}
 		}
 	}

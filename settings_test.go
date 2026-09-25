@@ -37,6 +37,9 @@ func TestSettingsDefaults(t *testing.T) {
 	if m["agent.timeoutSeconds"] != 120.0 && m["agent.timeoutSeconds"] != 120 {
 		t.Errorf("expected agent.timeoutSeconds 120, got %v", m["agent.timeoutSeconds"])
 	}
+	if m["server.basePath"] != "/" {
+		t.Errorf("expected server.basePath /, got %v", m["server.basePath"])
+	}
 }
 
 func TestSettingsPreserveNonAgentValues(t *testing.T) {
@@ -158,5 +161,46 @@ func TestSettingsAPIEndpoints(t *testing.T) {
 	}
 	if m2["workbench.colorTheme"] != "nord" {
 		t.Errorf("expected workbench.colorTheme nord from raw, got %v", m2["workbench.colorTheme"])
+	}
+}
+
+func TestSettingsBasePath(t *testing.T) {
+	isolateSettings(t)
+
+	// Defaults to nil in readSettings()
+	s := readSettings()
+	if s.ServerBasePath != nil {
+		t.Errorf("expected default ServerBasePath to be nil, got %v", *s.ServerBasePath)
+	}
+
+	// Update via settings map
+	err := updateSettingsMap(map[string]any{
+		"server.basePath": "/rev-123/",
+	})
+	if err != nil {
+		t.Fatalf("updateSettingsMap failed: %v", err)
+	}
+
+	s = readSettings()
+	if s.ServerBasePath == nil || *s.ServerBasePath != "/rev-123/" {
+		t.Errorf("expected ServerBasePath /rev-123/, got %v", s.ServerBasePath)
+	}
+
+	m := readMergedSettingsMap()
+	if m["server.basePath"] != "/rev-123/" {
+		t.Errorf("expected merged server.basePath /rev-123/, got %v", m["server.basePath"])
+	}
+
+	// Fallback when keyed as basePath
+	err = updateSettingsMap(map[string]any{
+		"basePath": "/rev-456/",
+	})
+	if err != nil {
+		t.Fatalf("updateSettingsMap failed: %v", err)
+	}
+
+	s = readSettings()
+	if s.ServerBasePath == nil || *s.ServerBasePath != "/rev-456/" {
+		t.Errorf("expected ServerBasePath /rev-456/ from fallback, got %v", s.ServerBasePath)
 	}
 }

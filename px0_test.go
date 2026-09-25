@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -706,6 +707,103 @@ func TestViewerURL(t *testing.T) {
 	if got := viewerURL("127.0.0.1:7777", "", 0); got != "http://127.0.0.1:7777" {
 		t.Fatalf("viewerURL without a file = %q", got)
 	}
+
+	// Base path tests
+	if got := viewerURL("127.0.0.1:7777", "", 0, "/rev-123/"); got != "http://127.0.0.1:7777/rev-123/" {
+		t.Fatalf("viewerURL with base path = %q, want http://127.0.0.1:7777/rev-123/", got)
+	}
+	if got := viewerURL("127.0.0.1:7777", "main.go", 10, "/rev-123"); got != "http://127.0.0.1:7777/rev-123/?line=10&path=main.go" {
+		t.Fatalf("viewerURL with base path and file = %q", got)
+	}
+}
+
+func TestCleanBasePath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "/"},
+		{"/", "/"},
+		{".", "/"},
+		{"rev-123", "/rev-123/"},
+		{"/rev-123", "/rev-123/"},
+		{"/rev-123/", "/rev-123/"},
+		{"//rev-123///", "/rev-123/"},
+		{"sub/path", "/sub/path/"},
+		{"/a/b/", "/a/b/"},
+	}
+	for _, tc := range cases {
+		got := cleanBasePath(tc.in)
+		if got != tc.want {
+			t.Errorf("cleanBasePath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestServerBasePathRouting(t *testing.T) {
+	root := t.TempDir()
+	ix := NewIndex(root)
+	s := NewServer(ix, nil, "/rev-123/")
+
+	if s.BasePath() != "/rev-123/" {
+		t.Fatalf("BasePath() = %q, want /rev-123/", s.BasePath())
+	}
+
+	// 1. GET /rev-123/ should return 200 and have injected <base href="/rev-123/">
+	req := httptest.NewRequest(http.MethodGet, "/rev-123/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /rev-123/ code = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `<base href="/rev-123/">`) {
+		t.Errorf("GET /rev-123/ body missing injected base href: %s", rec.Body.String())
+	}
+
+	// 2. GET /rev-123 without trailing slash should redirect to /rev-123/
+	reqNoSlash := httptest.NewRequest(http.MethodGet, "/rev-123", nil)
+	recNoSlash := httptest.NewRecorder()
+	s.ServeHTTP(recNoSlash, reqNoSlash)
+	if recNoSlash.Code != http.StatusMovedPermanently && recNoSlash.Code != http.StatusFound {
+		t.Errorf("GET /rev-123 code = %d, want redirect", recNoSlash.Code)
+	}
+	if loc := recNoSlash.Header().Get("Location"); loc != "/rev-123/" {
+		t.Errorf("GET /rev-123 redirect Location = %q, want /rev-123/", loc)
+	}
+
+	// 3. GET / should redirect to /rev-123/
+	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)
+	recRoot := httptest.NewRecorder()
+	s.ServeHTTP(recRoot, reqRoot)
+	if recRoot.Code != http.StatusFound {
+		t.Errorf("GET / code = %d, want 302", recRoot.Code)
+	}
+	if loc := recRoot.Header().Get("Location"); loc != "/rev-123/" {
+		t.Errorf("GET / redirect Location = %q, want /rev-123/", loc)
+	}
+
+	// 4. GET /rev-123/api/meta returns 200 and basePath
+	reqMeta := httptest.NewRequest(http.MethodGet, "/rev-123/api/meta", nil)
+	recMeta := httptest.NewRecorder()
+	s.ServeHTTP(recMeta, reqMeta)
+	if recMeta.Code != http.StatusOK {
+		t.Fatalf("GET /rev-123/api/meta code = %d, want 200", recMeta.Code)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(recMeta.Body.Bytes(), &meta); err != nil {
+		t.Fatalf("failed to decode meta: %v", err)
+	}
+	if meta["basePath"] != "/rev-123/" {
+		t.Errorf("meta.basePath = %v, want /rev-123/", meta["basePath"])
+	}
+
+	// 5. GET /api/meta without prefix should 404
+	reqRootMeta := httptest.NewRequest(http.MethodGet, "/api/meta", nil)
+	recRootMeta := httptest.NewRecorder()
+	s.ServeHTTP(recRootMeta, reqRootMeta)
+	if recRootMeta.Code != http.StatusNotFound {
+		t.Errorf("GET /api/meta code = %d, want 404", recRootMeta.Code)
+	}
 }
 
 func TestVersionDrivenFromVERSIONFile(t *testing.T) {
@@ -903,5 +1001,141 @@ func TestUISpinner(t *testing.T) {
 	}
 }
 
+func TestGzipWriterBodilessResponsesAndContentLength(t *testing.T) {
+	rec := httptest.NewRecorder()
+	gz, _ := gzip.NewWriterLevel(rec, gzip.BestSpeed)
+	gw := &gzipWriter{ResponseWriter: rec, w: gz}
 
+	// 1. Test 304 Not Modified
+	gw.Header().Set("Content-Length", "1234")
+	gw.Header().Set("Content-Encoding", "gzip")
+	gw.WriteHeader(http.StatusNotModified)
+	gz.Close()
 
+	if rec.Header().Get("Content-Length") != "" {
+		t.Errorf("expected Content-Length to be deleted on 304, got: %q", rec.Header().Get("Content-Length"))
+	}
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Errorf("expected Content-Encoding to be deleted on 304, got: %q", rec.Header().Get("Content-Encoding"))
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected no body written on 304, got %d bytes: %q", rec.Body.Len(), rec.Body.String())
+	}
+
+	// 2. Test 200 with normal body
+	rec2 := httptest.NewRecorder()
+	gz2, _ := gzip.NewWriterLevel(rec2, gzip.BestSpeed)
+	gw2 := &gzipWriter{ResponseWriter: rec2, w: gz2}
+	gw2.Header().Set("Content-Length", "999")
+	gw2.Header().Set("Content-Encoding", "gzip")
+	gw2.WriteHeader(http.StatusOK)
+	gw2.Write([]byte("hello compressed world"))
+	gz2.Close()
+
+	if rec2.Header().Get("Content-Length") != "" {
+		t.Errorf("expected Content-Length to be stripped from compressed response, got: %q", rec2.Header().Get("Content-Length"))
+	}
+	if rec2.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected Content-Encoding to be gzip on 200, got: %q", rec2.Header().Get("Content-Encoding"))
+	}
+	if rec2.Body.Len() == 0 {
+		t.Errorf("expected compressed body on 200")
+	}
+}
+
+func TestServerServeHTTPGzip(t *testing.T) {
+	s, _ := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected gzip Content-Encoding, got %q", rec.Header().Get("Content-Encoding"))
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("failed to create gzip reader on response body: %v (len=%d)", err, rec.Body.Len())
+	}
+	defer zr.Close()
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("failed to read decompressed body: %v", err)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty decompressed body, got 0 bytes")
+	}
+	if !strings.Contains(string(body), "<!doctype html>") {
+		t.Errorf("expected html content in body")
+	}
+}
+
+func TestChildrenReturnsCopy(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0o644)
+	ix := NewIndex(dir)
+	ix.Build()
+
+	kids1, ok := ix.Children("")
+	if !ok || len(kids1) == 0 {
+		t.Fatalf("expected children at root")
+	}
+
+	// Mutating the returned slice must not mutate ix.children
+	kids1[0].Dirty = true
+	kids1[0].Status = "M"
+
+	kids2, _ := ix.Children("")
+	if kids2[0].Dirty != false || kids2[0].Status != "" {
+		t.Errorf("ix.Children did not return an isolated copy of node slice")
+	}
+}
+
+func TestLSPBoundsChecks(t *testing.T) {
+	c := &lspClient{encoding: "utf-32"}
+
+	// Test toLSP with negative column
+	pos := c.toLSP("hello", 1, -5)
+	if pos.Character != 0 {
+		t.Errorf("expected 0 for negative byteCol, got %d", pos.Character)
+	}
+
+	// Test fromLSP with negative character
+	lines := []string{"hello"}
+	line, col := c.fromLSP(lines, lspPosition{Line: 0, Character: -10})
+	if line != 1 || col != 0 {
+		t.Errorf("expected line 1 col 0 for negative character, got line %d col %d", line, col)
+	}
+}
+
+func TestSnipBoundsChecks(t *testing.T) {
+	// Negative from, out of bounds to, inverted range
+	m1 := snip([]byte("hello world"), -5, 100)
+	if m1.Mid != "hello world" {
+		t.Errorf("expected clamped mid 'hello world', got %q", m1.Mid)
+	}
+
+	m2 := snip([]byte("hello world"), 8, 3)
+	if m2.Mid != "" {
+		t.Errorf("expected empty mid for inverted range, got %q", m2.Mid)
+	}
+}
+
+func TestFuzzyCaseSensitivity(t *testing.T) {
+	files := []FileEntry{
+		{Path: "src/HTTPServer.go", Name: "HTTPServer.go", lower: "src/httpserver.go", nameStart: 4},
+		{Path: "src/httpserver.go", Name: "httpserver.go", lower: "src/httpserver.go", nameStart: 4},
+	}
+
+	// Uppercase query should rank exact-case match higher
+	res := FuzzyFind(files, "HTTPServer", 10)
+	if len(res) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(res))
+	}
+	if res[0].Path != "src/HTTPServer.go" {
+		t.Errorf("expected 'src/HTTPServer.go' to rank higher for query 'HTTPServer', got: %s", res[0].Path)
+	}
+}

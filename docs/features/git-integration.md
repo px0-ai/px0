@@ -1,6 +1,6 @@
-# Git Awareness & Visual Diff Viewer
+# Git Awareness, Diff Viewer & Stage/Commit/Push/Pull
 
-px0 includes built-in Git awareness and an interactive visual diff viewer. It highlights working-tree modifications across your file tree and editor gutters, and lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`.
+px0 includes built-in Git awareness, an interactive visual diff viewer, and a sidebar panel for the rest of the everyday git loop. It highlights working-tree modifications across your file tree and editor gutters, lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`, and stages, commits, pushes, and pulls without leaving the browser.
 
 ---
 
@@ -8,7 +8,9 @@ px0 includes built-in Git awareness and an interactive visual diff viewer. It hi
 
 In modern software engineering, coding agents, background formatters, and compilers continuously generate or modify files on disk. Developers spend a significant portion of their time verifying what changed, ensuring unintended edits were not introduced, and auditing modifications prior to staging or committing.
 
-px0 provides non-destructive, zero-latency Git awareness. It queries Git status asynchronously in the background without staging files, mutating index locks, or slowing down viewer startup. With visual badges, ancestor dirty propagation, gutter indicators, and full split/unified diffs, you can review changes with complete confidence without leaving the browser.
+px0's git status and diffing are read-only and zero-latency by default: querying `git status` asynchronously in the background never stages files, mutates index locks, or slows down viewer startup. With visual badges, ancestor dirty propagation, gutter indicators, and full split/unified diffs, you can review changes with complete confidence without leaving the browser.
+
+The sidebar's git panel is the one part of this feature that *does* write to the repository — but only in direct response to a click: staging, committing, pushing, and pulling all happen exactly when you ask for them, never automatically. Pull is deliberately conservative (fast-forward only) so it can never leave the working tree mid-conflict.
 
 ---
 
@@ -38,6 +40,11 @@ px0 provides non-destructive, zero-latency Git awareness. It queries Git status 
 - **Whitespace Diff Filtering**: Toggle whitespace trimming to hide trivial indentation and trailing space differences when reviewing significant logic changes.
 - **Direct Agent Editing from Diffs**: Select any modified or added line in the diff view and trigger an AI agent edit (`Alt+E`) to refine or correct the change on the spot.
 - **Battery and Focus Awareness**: The live stream automatically suspends when the browser tab is hidden (`document.visibilityState === 'hidden'`), conserving CPU cycles and laptop battery. When you switch back to px0, it instantly reconnects and queries `/api/git/refresh` to catch any changes made while the window was in the background.
+- **Per-File Stage Tick**: Every changed row in the file tree carries a small tick button next to its status badge. Clicking it stages or unstages that file (`git add` / `git reset`) without opening a terminal; the tick updates live as the same status stream that drives the badges reconciles it.
+- **Git Panel (Stage, Commit, Push, Pull)**: A resizable panel at the bottom of the sidebar shows the current branch, a live `staged / changed` count, a monospace commit message box, and Stage All / Commit / Pull / Push buttons.
+- **Commit with AI**: A harness and model picker (the same one used for inline edits) sits above the commit box. **Commit with AI** dispatches the selected harness with the staged diff — plus any instructions from `git.commitMessageInstruction` in Settings — asks it to write only the commit message text, drops that into the box, and commits with it in the same action.
+- **Fast-Forward-Only Pull**: Pull always tries a clean fast-forward onto the remote (or, in a PR review session, the pull request's current head). If history has diverged at all, it refuses immediately with a clear message rather than ever starting a merge — there is never a conflict state to clean up.
+- **Push to the Right Place**: In a plain workspace, Push pushes the current branch to its configured upstream (offering to set one up on a first push). In a PR review session, Push targets the pull request's actual head branch on its actual repository — a fork included — never wherever the checkout happens to be sitting.
 
 ---
 
@@ -59,6 +66,18 @@ When managing branches or staging files from your terminal:
 ### Pre-Commit Visual Review Station
 Before committing code from your terminal, open px0 to perform a visual walk-through of all pending changes. The Git changes view isolates your work, ensuring you do not commit debug logs, temporary comments, or unintended formatting tweaks.
 
+### Stage, Write, and Commit Without Leaving the Browser
+Once you've reviewed a change in the diff view, finish the commit right there:
+1. Tick the files you want in this commit from the file tree (or click **Stage All**).
+2. Write a message in the git panel's commit box, or click **Commit with AI** to have your configured coding harness write one from the staged diff and commit with it directly.
+3. Click **Push** to send the branch to its remote. If it's the first push on a new branch, px0 offers to set the upstream for you.
+
+### Catching Up With a Moving Remote
+When a teammate (or CI) has pushed new commits to the branch you're reviewing:
+1. Click **Pull** in the git panel.
+2. If your local branch can fast-forward cleanly onto the new commits, px0 updates it and the diff view refreshes automatically.
+3. If your branch has diverged — you have local commits the remote doesn't, or the remote history was rewritten — px0 refuses with a clear message instead of attempting a merge. Resolve it in a terminal, then pull again.
+
 ---
 
 ## Keyboard Shortcuts & Controls
@@ -70,6 +89,12 @@ Before committing code from your terminal, open px0 to perform a visual walk-thr
 | Toggle Icon | Diff Header | Switch between Side-by-Side and Unified Diff |
 | Space Icon | Diff Header | Toggle Ignore Leading/Trailing Whitespace |
 | `Mod+Shift+R` | Global | Force Workspace and Git Status Refresh |
+| Stage Tick | File Tree Row | Stage / unstage that file |
+| **Stage All** | Git Panel | Stage every changed file |
+| **Commit** | Git Panel | Commit whatever is currently staged with the written message |
+| **Commit with AI** | Git Panel | Write a commit message from the staged diff with the selected harness, then commit with it |
+| **Pull** | Git Panel | Fast-forward onto the remote (or, in PR review, the PR's current head); refuses on divergence |
+| **Push** | Git Panel | Push the current branch (or, in PR review, to the PR's head branch) |
 
 ---
 
@@ -80,7 +105,10 @@ Git behavior can be customized in Settings (`Cmd/Ctrl+,`):
 - **Git: Gutter Indicators** (`git.gutterIndicators`): Enable or disable real-time change indicator bars in the editor gutter (defaults to `true`).
 - **Diff Editor: Render Side-by-Side** (`diffEditor.renderSideBySide`): Default layout for the diff view (`true` for split, `false` for unified).
 - **Diff Editor: Ignore Trim Whitespace** (`diffEditor.ignoreTrimWhitespace`): Ignore leading and trailing whitespace diffs (defaults to `true`).
+- **Commit Message Instructions** (`git.commitMessageInstruction`): Free-text instructions appended to the prompt **Commit with AI** sends to your coding harness (e.g. *"Follow Conventional Commits"* or *"Reference the ticket number in the branch name"*). Defaults to empty. This setting renders as a multi-line textarea in the Settings UI.
+- **Coding Harness & Model**: **Commit with AI** uses the same globally selected harness and model as inline agent edits (`agent.harness`, and its persisted model) — see [Editing with Coding Agents](agent-editing.md).
 - **CLI Flag `-no-git`**: Launch px0 with Git features completely disabled (`px0 -no-git`) for environments where Git is not installed or when viewing plain directory archives.
+- **CLI Flag `-no-agent`**: Disables **Commit with AI** along with every other coding-harness feature; Stage/Commit/Push/Pull remain available since they never invoke a harness.
 
 ---
 

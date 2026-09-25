@@ -26,7 +26,7 @@ export function wordAtPoint(x, y) {
   if (!node || node.nodeType !== 3) return null;
 
   const code = node.parentElement && node.parentElement.closest('.c');
-  const row = code && code.closest('.row');
+  const row = /** @type {HTMLElement|null} */ (code && code.closest('.row'));
   if (!code || !row) return null;
 
   let col = 0;
@@ -58,12 +58,13 @@ export function colAtPoint(x, y) {
     if (!r) return null;
     node = r.startContainer; off = r.startOffset;
   } else return null;
-  const el = node && (node.nodeType === 1 ? node : node.parentElement);
-  const row = el && el.closest('.row');
+  const el = /** @type {HTMLElement|null} */ (node && (node.nodeType === 1 ? node : node.parentElement));
+  const row = /** @type {HTMLElement|null} */ (el && el.closest('.row'));
   if (!row) return null;
   const code = $('.c', row);
+  if (!code) return null;
   const line = +row.dataset.l;
-  if (!code.contains(node)) return { line, col: el.closest('.g') ? 0 : code.textContent.length };
+  if (!code.contains(node)) return { line, col: (el && el.closest('.g')) ? 0 : code.textContent.length };
   const r = document.createRange();
   r.setStart(code, 0);
   r.setEnd(node, off);

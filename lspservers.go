@@ -152,6 +152,9 @@ const (
 // maxLSPRestarts bounds how often one crashed language server is respawned.
 const maxLSPRestarts = 3
 
+// lspManager coordinates background language servers across file types and extensions.
+// It manages on-demand server lazy starting, discovery, restart on crash, installation jobs,
+// and path allowlisting for external references (such as standard library files).
 type lspManager struct {
 	root    string
 	enabled bool
@@ -194,6 +197,8 @@ func (m *lspManager) Allowed(abs string) bool {
 	return m.external[abs]
 }
 
+// newLSPManager creates a new language server manager for root.
+// If enabled is true, server discovery begins in the background without blocking startup.
 func newLSPManager(root string, enabled bool) *lspManager {
 	m := &lspManager{
 		root: root, enabled: enabled,
@@ -312,6 +317,30 @@ func (m *lspManager) Available() []string {
 	cp := make([]string, len(m.available))
 	copy(cp, m.available)
 	return cp
+}
+
+// Enabled reports whether language server support is on for this session
+// (-no-lsp turns it off process-wide).
+func (m *lspManager) Enabled() bool { return m.enabled }
+
+// memBytes returns the combined resident memory of every currently running
+// language server process, best-effort: a server whose RSS can't be read
+// (exited, unsupported platform, no permission) contributes 0.
+func (m *lspManager) memBytes() uint64 {
+	m.mu.Lock()
+	pids := make([]int, 0, len(m.clients))
+	for _, c := range m.clients {
+		if c.cmd != nil && c.cmd.Process != nil && c.alive() == nil {
+			pids = append(pids, c.cmd.Process.Pid)
+		}
+	}
+	m.mu.Unlock()
+
+	var total uint64
+	for _, pid := range pids {
+		total += readRSSForPID(pid)
+	}
+	return total
 }
 
 func (m *lspManager) defFor(rel string) *lspServerDef {

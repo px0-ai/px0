@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,12 +30,13 @@ import (
 type prSession struct {
 	mu sync.Mutex
 
-	provider    GitProvider
-	target      PRTarget
-	meta        PRMeta
-	token       string
-	writeAccess bool
-	diffBase    string // merge-base(head, base branch), or "HEAD" if the base couldn't be resolved
+	provider        GitProvider
+	target          PRTarget
+	meta            PRMeta
+	token           string
+	writeAccess     bool
+	diffBase        string // merge-base(head, base branch), or "HEAD" if the base couldn't be resolved
+	diffBaseWarning string // set when diffBase fell back to "HEAD"; surfaced in the UI so an empty diff doesn't read as "no changes"
 
 	worktree string // temp checkout, removed in Close
 	srcRepo  string // the repo the worktree was registered against ("" for a plain clone)
@@ -46,12 +48,59 @@ type prSession struct {
 // ErrPRMergedCancelled is returned when opening an already-merged PR is cancelled.
 var ErrPRMergedCancelled = errors.New("PR is already merged; opening cancelled")
 
+// computeDiffBase fetches the PR's base branch into worktree and returns a
+// merge-base with HEAD to diff against, so review diffs show exactly what
+// the PR changes rather than the head's full HEAD diff. Best-effort: if it
+// can't be resolved (e.g. the base branch was force-pushed away, or the
+// fetch itself failed), diffBase falls back to "HEAD" -- which diffs the
+// checkout against its own HEAD and looks empty -- with a warning explaining
+// why, so callers can surface it and a blank diff never reads as "no
+// changes". Shared by checkoutPR (initial checkout) and prSession.Pull
+// (re-sync after new commits land on the PR).
+func computeDiffBase(worktree, srcRepo string, target PRTarget, baseRef string, num int, onProgress func(string)) (diffBase, diffBaseWarning string) {
+	if onProgress != nil {
+		onProgress(fmt.Sprintf("Computing merge base with %s...", baseRef))
+	}
+	diffBase = "HEAD"
+	var fetchErr string
+	baseRefspec := fmt.Sprintf("refs/heads/%s:refs/px0/base/%d", baseRef, num)
+	baseRemote := "origin"
+	if srcRepo == "" {
+		baseRemote = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+	}
+	if out, err := exec.Command("git", "-C", worktree, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err != nil {
+		fetchErr = strings.TrimSpace(string(out))
+		if fetchErr == "" {
+			fetchErr = err.Error()
+		}
+	} else if mb := gitMergeBase(worktree, "HEAD", fmt.Sprintf("refs/px0/base/%d", num)); mb != "" {
+		diffBase = mb
+	}
+	if diffBase == "HEAD" && srcRepo != "" {
+		if mb := gitMergeBase(worktree, "HEAD", "origin/"+baseRef); mb != "" {
+			diffBase = mb
+			fetchErr = "" // recovered via the local clone's own remote-tracking ref
+		}
+	}
+	if diffBase == "HEAD" {
+		diffBaseWarning = fmt.Sprintf("could not resolve a merge-base with %s; diff will show no changes", baseRef)
+		if fetchErr != "" {
+			diffBaseWarning = fmt.Sprintf("%s (%s)", diffBaseWarning, fetchErr)
+		}
+		fmt.Fprintln(os.Stderr, "px0: warning:", diffBaseWarning)
+		if onProgress != nil {
+			onProgress("Warning: " + diffBaseWarning)
+		}
+	}
+	return diffBase, diffBaseWarning
+}
+
 // checkoutPR fetches a PR's head ref and checks it out into a system temp
 // directory: a git worktree of cwd's origin when cwd is already a clone of
 // the same repo (the common case -- opened inside the repo), or a shallow
 // single-branch clone of the PR head otherwise (a bare URL opened from an
 // unrelated directory).
-func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd string, onProgress func(string), onMerged func(meta PRMeta) (bool, error)) (*prSession, error) {
+func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd string, onProgress func(string)) (*prSession, error) {
 	cfg := readSettings()
 	token, _ := provider.ResolveToken(cfg)
 
@@ -63,19 +112,16 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		return nil, err
 	}
 
-	if meta.Merged && onMerged != nil {
-		proceed, err := onMerged(meta)
-		if err != nil {
-			return nil, err
-		}
-		if !proceed {
-			return nil, ErrPRMergedCancelled
-		}
-	}
-
 	tmp, err := os.MkdirTemp("", "px0-pr-*")
 	if err != nil {
 		return nil, err
+	}
+	// macOS TempDir lives under /var -> /private/var; git rev-parse
+	// --show-toplevel reports the resolved path, so leaving tmp unresolved
+	// makes gitStatusAgainst's toplevel-relative prefix check fail for every
+	// file, silently emptying the PR's diff/status view.
+	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
+		tmp = resolved
 	}
 	cleanup := func() { os.RemoveAll(tmp) }
 
@@ -119,41 +165,20 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		}
 	}
 
-	if onProgress != nil {
-		onProgress(fmt.Sprintf("Computing merge base with %s...", meta.BaseRef))
-	}
-	// Best-effort: fetch the base branch and compute a merge-base so review
-	// diffs show exactly what the PR changes rather than the head's full
-	// HEAD diff. If this fails (e.g. base branch was force-pushed away),
-	// fall back to HEAD -- still correct for the PR head's own worktree.
-	diffBase := "HEAD"
-	baseRefspec := fmt.Sprintf("refs/heads/%s:refs/px0/base/%d", meta.BaseRef, num)
-	baseRemote := "origin"
-	if srcRepo == "" {
-		baseRemote = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
-	}
-	if _, err := exec.Command("git", "-C", tmp, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err == nil {
-		if mb := gitMergeBase(tmp, "HEAD", fmt.Sprintf("refs/px0/base/%d", num)); mb != "" {
-			diffBase = mb
-		}
-	}
-	if diffBase == "HEAD" && srcRepo != "" {
-		if mb := gitMergeBase(tmp, "HEAD", "origin/"+meta.BaseRef); mb != "" {
-			diffBase = mb
-		}
-	}
+	diffBase, diffBaseWarning := computeDiffBase(tmp, srcRepo, target, meta.BaseRef, num, onProgress)
 
 	writeAccess := provider.CheckPushAccess(ctx, target, token)
 
 	return &prSession{
-		provider:    provider,
-		target:      target,
-		meta:        meta,
-		token:       token,
-		writeAccess: writeAccess,
-		diffBase:    diffBase,
-		worktree:    tmp,
-		srcRepo:     srcRepo,
+		provider:        provider,
+		target:          target,
+		meta:            meta,
+		token:           token,
+		writeAccess:     writeAccess,
+		diffBase:        diffBase,
+		diffBaseWarning: diffBaseWarning,
+		worktree:        tmp,
+		srcRepo:         srcRepo,
 	}, nil
 }
 
@@ -171,6 +196,93 @@ func (p *prSession) Close() {
 		exec.Command("git", "-C", p.srcRepo, "update-ref", "-d", fmt.Sprintf("refs/px0/base/%d", p.meta.Number)).Run()
 	}
 	os.RemoveAll(p.worktree)
+}
+
+// errPRDiverged is returned by Pull when the checkout can't be fast-forwarded
+// onto the PR's current head -- local commits, or a force-pushed head, that
+// don't share a straight-line history with what was fetched. Resolving that
+// is not supported: Pull never invokes git's merge machinery, only a reset
+// --hard onto an ancestor-verified fast-forward.
+var errPRDiverged = errors.New("local checkout has diverged from the PR head; resolve manually")
+
+// Pull re-fetches the PR's current head and, if it's a clean fast-forward,
+// resets the worktree onto it and refreshes meta.HeadSHA/diffBase to match.
+// Refuses outright when the worktree has uncommitted changes (nothing here
+// stashes) or when the fast-forward check fails, in which case the caller
+// should surface errPRDiverged as "not supported, resolve manually".
+func (p *prSession) Pull() (info string, err error) {
+	p.mu.Lock()
+	worktree, srcRepo, num := p.worktree, p.srcRepo, p.meta.Number
+	target, baseRef := p.target, p.meta.BaseRef
+	headRepoCloneURL, headRef := p.meta.HeadRepoCloneURL, p.meta.HeadRef
+	p.mu.Unlock()
+
+	if gitHasUncommittedChanges(worktree) {
+		return "", errors.New("commit or discard your local changes before pulling")
+	}
+
+	newRef := fmt.Sprintf("refs/px0/pr/%d", num)
+	if srcRepo != "" {
+		headRefspec := fmt.Sprintf("refs/pull/%d/head:%s", num, newRef)
+		if out, err := exec.Command("git", "-C", srcRepo, "fetch", "--no-tags", "origin", headRefspec).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git fetch PR head: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+	} else {
+		cloneURL := headRepoCloneURL
+		if cloneURL == "" {
+			cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+		}
+		if out, err := exec.Command("git", "-C", worktree, "fetch", "--no-tags", cloneURL, headRef).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git fetch PR head: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		newRef = "FETCH_HEAD"
+	}
+
+	if exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", newRef, "HEAD").Run() == nil {
+		return "already up to date", nil
+	}
+	if exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", "HEAD", newRef).Run() != nil {
+		return "", errPRDiverged
+	}
+	if out, err := exec.Command("git", "-C", worktree, "reset", "--hard", newRef).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	shaOut, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
+	}
+	diffBase, diffBaseWarning := computeDiffBase(worktree, srcRepo, target, baseRef, num, nil)
+
+	p.mu.Lock()
+	p.meta.HeadSHA = strings.TrimSpace(string(shaOut))
+	p.diffBase = diffBase
+	p.diffBaseWarning = diffBaseWarning
+	p.mu.Unlock()
+
+	return "pulled the latest changes", nil
+}
+
+// Push pushes the worktree's current commit to the PR's actual head branch
+// on its head repo (which may be a fork). Never force: a rejection means the
+// head moved since this checkout or since the last Pull, and the caller
+// should Pull before trying again.
+func (p *prSession) Push() error {
+	p.mu.Lock()
+	worktree := p.worktree
+	cloneURL, headRef := p.meta.HeadRepoCloneURL, p.meta.HeadRef
+	target := p.target
+	p.mu.Unlock()
+
+	if cloneURL == "" {
+		cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+	}
+	refspec := fmt.Sprintf("HEAD:refs/heads/%s", headRef)
+	out, err := exec.Command("git", "-C", worktree, "push", cloneURL, refspec).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -191,18 +303,112 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	writeJSON(w, map[string]any{
-		"number":      p.meta.Number,
-		"title":       p.meta.Title,
-		"author":      p.meta.Author,
-		"base":        p.meta.BaseRef,
-		"head":        p.meta.HeadRef,
-		"state":       p.meta.State,
-		"merged":      p.meta.Merged,
-		"mergedAt":    p.meta.MergedAt,
-		"writeAccess": p.writeAccess,
-		"readOnly":    p.token == "",
-		"draftCount":  len(p.comments),
+		"number":          p.meta.Number,
+		"title":           p.meta.Title,
+		"author":          p.meta.Author,
+		"base":            p.meta.BaseRef,
+		"head":            p.meta.HeadRef,
+		"state":           p.meta.State,
+		"merged":          p.meta.Merged,
+		"mergedAt":        p.meta.MergedAt,
+		"writeAccess":     p.writeAccess,
+		"readOnly":        p.token == "",
+		"draftCount":      len(p.comments),
+		"diffBaseWarning": p.diffBaseWarning,
+		"headSHA":         p.meta.HeadSHA,
+		"url":             p.target.URL,
 	})
+}
+
+// handlePRExistingComments fetches every comment already posted on the PR
+// (top-level and inline) directly from the forge -- always live, never
+// cached, since another reviewer may have commented since the page loaded.
+func (s *Server) handlePRExistingComments(w http.ResponseWriter, r *http.Request) {
+	if !s.prOrFail(w) {
+		return
+	}
+	p := s.pr
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	issue, review, err := p.provider.FetchComments(ctx, p.target, p.token)
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if issue == nil {
+		issue = []PRComment{}
+	}
+	if review == nil {
+		review = []PRComment{}
+	}
+	writeJSON(w, map[string]any{"issueComments": issue, "reviewComments": review})
+}
+
+// handlePRIssueCommentPost posts a new top-level PR comment immediately (not
+// part of the draft-then-submit review flow below, since GitHub's issue
+// comments aren't tied to a review). Used both for starting a new top-level
+// comment and for "replying" to one, since GitHub doesn't thread these.
+func (s *Server) handlePRIssueCommentPost(w http.ResponseWriter, r *http.Request) {
+	if !s.prOrFail(w) {
+		return
+	}
+	if !localPost(w, r) {
+		return
+	}
+	p := s.pr
+	if p.token == "" {
+		fail(w, http.StatusForbidden, "no auth token configured; posting comments requires a GitHub token")
+		return
+	}
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || strings.TrimSpace(body.Body) == "" {
+		fail(w, http.StatusBadRequest, "body is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	c, err := p.provider.PostIssueComment(ctx, p.target, p.token, strings.TrimSpace(body.Body))
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, c)
+}
+
+// handlePRReviewCommentReply posts an immediate, threaded reply to an
+// existing inline review comment (not a new draft: this bypasses the
+// draft-then-submit review flow, matching GitHub's own dedicated reply
+// endpoint, which posts right away).
+func (s *Server) handlePRReviewCommentReply(w http.ResponseWriter, r *http.Request) {
+	if !s.prOrFail(w) {
+		return
+	}
+	if !localPost(w, r) {
+		return
+	}
+	p := s.pr
+	if p.token == "" {
+		fail(w, http.StatusForbidden, "no auth token configured; posting comments requires a GitHub token")
+		return
+	}
+	var body struct {
+		CommentID int64  `json:"commentId"`
+		Body      string `json:"body"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || body.CommentID <= 0 || strings.TrimSpace(body.Body) == "" {
+		fail(w, http.StatusBadRequest, "commentId and body are required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	c, err := p.provider.ReplyToReviewComment(ctx, p.target, p.token, body.CommentID, strings.TrimSpace(body.Body))
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, c)
 }
 
 func (s *Server) handlePRComments(w http.ResponseWriter, r *http.Request) {
@@ -242,6 +448,9 @@ func (s *Server) handlePRComments(w http.ResponseWriter, r *http.Request) {
 		p.nextID++
 		c := prComment{ID: p.nextID, Path: body.Path, Line: body.Line, Side: side, Body: strings.TrimSpace(body.Body)}
 		p.comments = append(p.comments, c)
+		if s.session != nil {
+			s.session.Update(func(ws *WorkspaceSession) { ws.Drafts = p.comments })
+		}
 		p.mu.Unlock()
 		writeJSON(w, c)
 	default:
@@ -265,6 +474,9 @@ func (s *Server) handlePRCommentDelete(w http.ResponseWriter, r *http.Request) {
 			p.comments = append(p.comments[:i], p.comments[i+1:]...)
 			break
 		}
+	}
+	if s.session != nil {
+		s.session.Update(func(ws *WorkspaceSession) { ws.Drafts = p.comments })
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
@@ -310,6 +522,9 @@ func (s *Server) handlePRSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Lock()
 	p.comments = nil
+	if s.session != nil {
+		s.session.Update(func(ws *WorkspaceSession) { ws.Drafts = nil })
+	}
 	p.mu.Unlock()
 	writeJSON(w, map[string]any{"ok": true})
 }

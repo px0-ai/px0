@@ -6,7 +6,7 @@ import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
-import { openFind, clearFind, findbar } from './find.js';
+import { openFind, clearFind, findbar, findNextMatch } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { overlay, openPalette, closePalette } from './palette.js';
@@ -55,9 +55,11 @@ export function showHelp() {
   const ver = S.meta?.version ? ` <span class="help-version">v${esc(S.meta.version)}</span>` : '';
   h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver +
     '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;" title="View Vim Keybindings">View Vim Keybindings</button></div><dl class="help-grid">' +
-    SHORTCUTS.map(([combos, v]) =>
-      '<dt>' + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
-      '<dd>' + esc(v) + '</dd>').join('') + '</dl></div>';
+    SHORTCUTS.map(([combos, v]) => {
+      const comboList = Array.isArray(combos) ? combos : [combos];
+      return '<dt>' + comboList.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
+        '<dd>' + esc(v) + '</dd>';
+    }).join('') + '</dl></div>';
   h.hidden = false;
   h.querySelector('#btn-switch-to-vim-help')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -100,7 +102,7 @@ export function initShortcuts() {
       const lb = $('#img-lightbox');
       if (lb && !lb.hidden) { lb.hidden = true; return; }
       if (!$('#vim-helpsheet')?.hidden) { closeVimHelp(); return; }
-      if (isVimEnabled() && getVimMode() !== 'NORMAL' && handleVimKeyDown(e)) return;
+      if (isVimEnabled() && handleVimKeyDown(e)) return;
       if (isSettingsOpen()) { closeSettings(); return; }
       if (!overlay.hidden) { closePalette(); return; }
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
@@ -109,7 +111,7 @@ export function initShortcuts() {
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
-      if (inField(document.activeElement)) document.activeElement.blur();
+      if (inField(document.activeElement)) /** @type {HTMLElement} */ (document.activeElement).blur();
       return;
     }
 
@@ -186,6 +188,12 @@ export function initShortcuts() {
         submitBatch();
         return;
       }
+    }
+
+    if (!mod && e.key === 'Enter' && !findbar.hidden) {
+      e.preventDefault();
+      findNextMatch(e.shiftKey ? -1 : 1);
+      return;
     }
 
     if (inField(document.activeElement)) return;

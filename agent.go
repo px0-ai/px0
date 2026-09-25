@@ -345,22 +345,23 @@ type agentBatchItem struct {
 	Instruction string `json:"instruction"`
 }
 
-// agentJob is one dispatch, snapshot-able while it runs.
+// agentJob represents a single background editing task dispatched to an AI coding harness.
+// It tracks real-time progress, log outputs, duration, affected files, and cancellation handlers.
 type agentJob struct {
-	ID         int64            `json:"id"`
-	Harness    string           `json:"harness"`
-	Path       string           `json:"path"`
-	Lines      string           `json:"lines"`
-	Running    bool             `json:"running"`
-	Error      string           `json:"error,omitempty"`
-	Log        string           `json:"log"`
-	Stdout     string           `json:"stdout,omitempty"`
-	Stderr     string           `json:"stderr,omitempty"`
-	Changed    []string         `json:"changed"`
-	Ms         int64            `json:"ms"`
-	Tracked    bool             `json:"tracked"`
-	BatchCount int              `json:"batchCount,omitempty"`
-	Items      []agentBatchItem `json:"items,omitempty"`
+	ID         int64            `json:"id"`                   // Unique monotonic job identifier
+	Harness    string           `json:"harness"`              // Name of the harness executing this job
+	Path       string           `json:"path"`                 // Relative file path targeted for editing
+	Lines      string           `json:"lines"`                // Line range formatted string (e.g. "L12-L30")
+	Running    bool             `json:"running"`              // True while harness process is actively executing
+	Error      string           `json:"error,omitempty"`      // Error message if the job failed or was aborted
+	Log        string           `json:"log"`                  // Tail of merged stdout/stderr log output
+	Stdout     string           `json:"stdout,omitempty"`     // Stdout log output tail
+	Stderr     string           `json:"stderr,omitempty"`     // Stderr log output tail
+	Changed    []string         `json:"changed"`              // Files detected as modified after job execution
+	Ms         int64            `json:"ms"`                   // Elapsed runtime in milliseconds
+	Tracked    bool             `json:"tracked"`              // Whether telemetry tracking has been recorded
+	BatchCount int              `json:"batchCount,omitempty"` // Number of items in batch review edit
+	Items      []agentBatchItem `json:"items,omitempty"`      // Detailed batch items if multi-file edit
 
 	ranges []agentRange
 	l1, l2 int
@@ -882,12 +883,12 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 		m.jobs = map[int64]*agentJob{}
 	}
 	m.jobs[job.ID] = job
-	m.mu.Unlock()
-
 	modelStr := ""
 	if m.models != nil && m.models[name] != "" {
 		modelStr = fmt.Sprintf(" (%s)", m.models[name])
 	}
+	m.mu.Unlock()
+
 	if len(items) == 1 {
 		uiStatus("step", "agent", fmt.Sprintf("#%d %s%s · %s:%s  %q", job.ID, name, modelStr, items[0].Path, lineRef(items[0].L1, items[0].L2), items[0].Instruction), 0, os.Stdout)
 	} else {
@@ -900,6 +901,49 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 	} else {
 		prompt = agentBatchPrompt(prepared)
 	}
+
+	go m.run(ctx, cancel, job, args, prompt)
+	return m.Job(job.ID), nil
+}
+
+// StartPrompt dispatches a one-shot prompt to the selected harness with no
+// target file -- used for generating text (e.g. a commit message) rather
+// than editing code. There is no file range to anchor an overlap check
+// against, so a prompt job is never blocked by, or blocks, a file edit.
+func (m *agentManager) StartPrompt(label, prompt string) (*agentJob, error) {
+	m.mu.Lock()
+	if m.args == nil {
+		m.mu.Unlock()
+		uiStatus("err", "agent", "prompt dispatch refused: no coding harness selected", 0, os.Stdout)
+		return nil, errAgentNone
+	}
+	args := m.args
+	name := m.selected
+	m.seq++
+	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
+	job := &agentJob{
+		ID:      m.seq,
+		Harness: name,
+		Path:    label,
+		Running: true,
+		Changed: []string{},
+		Tracked: gitAvailable(m.root),
+		out:     &tailBuffer{max: agentLogBytes},
+		stderr:  &tailBuffer{max: agentLogBytes},
+		start:   time.Now(),
+		cancel:  cancel,
+	}
+	if m.jobs == nil {
+		m.jobs = map[int64]*agentJob{}
+	}
+	m.jobs[job.ID] = job
+	modelStr := ""
+	if m.models != nil && m.models[name] != "" {
+		modelStr = fmt.Sprintf(" (%s)", m.models[name])
+	}
+	m.mu.Unlock()
+
+	uiStatus("step", "agent", fmt.Sprintf("#%d %s%s · %s", job.ID, name, modelStr, label), 0, os.Stdout)
 
 	go m.run(ctx, cancel, job, args, prompt)
 	return m.Job(job.ID), nil
@@ -1162,6 +1206,42 @@ func agentBatchPrompt(items []itemWithSnippet) string {
 	}
 	b.WriteString("Edit the file(s) in place to carry out all of the above instructions. ")
 	b.WriteString("Change only what they ask for, coordinate changes cleanly, and do not explain the changes afterwards.")
+	return b.String()
+}
+
+// commitMessagePrompt asks the harness to write a commit message for the
+// staged changes. instruction is the user's git.commitMessageInstruction
+// setting (empty when unset), appended verbatim so it can refine or override
+// the base convention below.
+func commitMessagePrompt(files []string, stat, diff, instruction string) string {
+	var b strings.Builder
+	b.WriteString("Write a git commit message for the staged changes below.\n")
+	b.WriteString("Rules: imperative mood, a concise summary line under 72 characters, a blank line before an optional body, and explain why rather than just what changed.\n")
+	b.WriteString("Output ONLY the commit message text -- no markdown code fences, no preamble, no explanation afterwards, and do not edit any files.\n")
+	if instruction != "" {
+		fmt.Fprintf(&b, "\nAdditional instructions from the user: %s\n", instruction)
+	}
+	if len(files) > 0 {
+		fmt.Fprintf(&b, "\nChanged files (%d):\n", len(files))
+		maxFiles := 100
+		for i, f := range files {
+			if i >= maxFiles {
+				fmt.Fprintf(&b, "... and %d more files\n", len(files)-maxFiles)
+				break
+			}
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+	if strings.TrimSpace(stat) != "" {
+		b.WriteString("\nSummary of changes (diffstat):\n")
+		b.WriteString(stat)
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(diff) != "" {
+		b.WriteString("\nStaged diff:\n")
+		b.WriteString(diff)
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

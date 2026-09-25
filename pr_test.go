@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,6 +197,153 @@ func TestPRSessionCloseRefCleanup(t *testing.T) {
 	}
 }
 
+// TestPRSessionPullFastForwardAndDiverge exercises prSession.Pull against a
+// fake "upstream" (a bare repo standing in for GitHub) with a srcRepo/
+// worktree pair set up exactly like checkoutPR's worktree case. A clean
+// fast-forward onto a new PR commit must succeed and update meta.HeadSHA; a
+// local commit in the worktree that then diverges from a further PR push
+// must be refused with errPRDiverged, leaving the worktree untouched.
+func TestPRSessionPullFastForwardAndDiverge(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+	upstream := filepath.Join(base, "upstream.git")
+	srcRepo := filepath.Join(base, "src")
+
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
+
+	gitTestRun(t, base, "clone", upstream, "src")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, srcRepo, "config", cfg[0], cfg[1])
+	}
+	if err := os.WriteFile(filepath.Join(srcRepo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, srcRepo, "add", "base.txt")
+	gitTestRun(t, srcRepo, "commit", "-qm", "base commit")
+	gitTestRun(t, srcRepo, "push", "origin", "main")
+
+	// A "PR branch" pushed to upstream as refs/pull/99/head, the way GitHub does.
+	gitTestRun(t, srcRepo, "checkout", "-qb", "feature")
+	if err := os.WriteFile(filepath.Join(srcRepo, "feature.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, srcRepo, "add", "feature.txt")
+	gitTestRun(t, srcRepo, "commit", "-qm", "pr commit 1")
+	gitTestRun(t, srcRepo, "push", "origin", "feature:refs/pull/99/head")
+	gitTestRun(t, srcRepo, "checkout", "-q", "main")
+
+	// Check out the PR into a worktree, same as checkoutPR does.
+	gitTestRun(t, srcRepo, "fetch", "--no-tags", "origin", "refs/pull/99/head:refs/px0/pr/99")
+	worktree := filepath.Join(base, "wt")
+	gitTestRun(t, srcRepo, "worktree", "add", "--detach", worktree, "refs/px0/pr/99")
+
+	p := &prSession{
+		worktree: worktree,
+		srcRepo:  srcRepo,
+		target:   PRTarget{Owner: "o", Repo: "r"},
+		meta:     PRMeta{Number: 99, BaseRef: "main", HeadRef: "feature"},
+	}
+
+	// Someone pushes a second commit to the PR head -- Pull should fast-forward cleanly.
+	gitTestRun(t, srcRepo, "checkout", "-q", "feature")
+	if err := os.WriteFile(filepath.Join(srcRepo, "feature.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, srcRepo, "commit", "-aqm", "pr commit 2")
+	gitTestRun(t, srcRepo, "push", "origin", "feature:refs/pull/99/head")
+	gitTestRun(t, srcRepo, "checkout", "-q", "main")
+
+	info, err := p.Pull()
+	if err != nil {
+		t.Fatalf("expected a clean fast-forward Pull, got %v", err)
+	}
+	if info == "" {
+		t.Error("expected a non-empty info message")
+	}
+	if got, err := os.ReadFile(filepath.Join(worktree, "feature.txt")); err != nil || string(got) != "two\n" {
+		t.Fatalf("expected worktree to fast-forward to %q, got %q, err=%v", "two\n", got, err)
+	}
+	if p.meta.HeadSHA == "" {
+		t.Error("expected Pull to record the new HeadSHA")
+	}
+
+	// A local commit in the worktree (as if the reviewer committed a fix)
+	// that then diverges from a further PR push must be refused, not merged.
+	if err := os.WriteFile(filepath.Join(worktree, "feature.txt"), []byte("local edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, worktree, "commit", "-aqm", "reviewer's local commit")
+
+	gitTestRun(t, srcRepo, "checkout", "-q", "feature")
+	if err := os.WriteFile(filepath.Join(srcRepo, "feature.txt"), []byte("three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, srcRepo, "commit", "-aqm", "pr commit 3")
+	gitTestRun(t, srcRepo, "push", "origin", "feature:refs/pull/99/head")
+	gitTestRun(t, srcRepo, "checkout", "-q", "main")
+
+	if _, err := p.Pull(); !errors.Is(err, errPRDiverged) {
+		t.Fatalf("expected errPRDiverged, got %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(worktree, "feature.txt")); err != nil || string(got) != "local edit\n" {
+		t.Fatalf("expected worktree untouched by the refused pull, got %q, err=%v", got, err)
+	}
+}
+
+// TestPRSessionPush confirms Push sends the worktree's HEAD to the PR's
+// actual head branch (meta.HeadRepoCloneURL/HeadRef), not wherever the
+// worktree happens to be checked out from.
+func TestPRSessionPush(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+	upstream := filepath.Join(base, "upstream.git")
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
+
+	worktree := filepath.Join(base, "wt")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, worktree, "init", "-q", "-b", "feature")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, worktree, "config", cfg[0], cfg[1])
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "f.txt"), []byte("pushed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, worktree, "add", "f.txt")
+	gitTestRun(t, worktree, "commit", "-qm", "reviewer commit")
+
+	p := &prSession{
+		worktree: worktree,
+		target:   PRTarget{Owner: "o", Repo: "r"},
+		meta:     PRMeta{Number: 1, HeadRef: "feature", HeadRepoCloneURL: upstream},
+	}
+	if err := p.Push(); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	out := gitTestRun(t, upstream, "log", "--oneline", "-1", "refs/heads/feature")
+	if !strings.Contains(out, "reviewer commit") {
+		t.Fatalf("expected upstream's refs/heads/feature to carry the pushed commit, got %q", out)
+	}
+}
+
 func TestFetchPRMetaMerged(t *testing.T) {
 	orig := githubHTTPClient.Transport
 	defer func() { githubHTTPClient.Transport = orig }()
@@ -236,7 +385,7 @@ func TestFetchPRMetaMerged(t *testing.T) {
 	}
 }
 
-func TestCheckoutPRMergedConfirmationDecline(t *testing.T) {
+func TestCheckoutPRMergedAlwaysProceeds(t *testing.T) {
 	orig := githubHTTPClient.Transport
 	defer func() { githubHTTPClient.Transport = orig }()
 
@@ -262,21 +411,11 @@ func TestCheckoutPRMergedConfirmationDecline(t *testing.T) {
 		}, nil
 	})
 
-	called := false
 	target := PRTarget{Provider: "github", Owner: "px0-ai", Repo: "px0", Number: 77}
-	_, err := checkoutPR(context.Background(), &GitHubProvider{}, target, t.TempDir(), nil, func(meta PRMeta) (bool, error) {
-		called = true
-		if meta.Number != 77 || !meta.Merged {
-			t.Errorf("unexpected meta in onMerged: %+v", meta)
-		}
-		return false, nil // user declines
-	})
-
-	if !called {
-		t.Fatal("onMerged callback was not invoked for merged PR")
-	}
-	if !errors.Is(err, ErrPRMergedCancelled) {
-		t.Errorf("err = %v, want ErrPRMergedCancelled", err)
+	_, err := checkoutPR(context.Background(), &GitHubProvider{}, target, t.TempDir(), nil)
+	// Must not be ErrPRMergedCancelled; merged PRs are always opened without blocking.
+	if errors.Is(err, ErrPRMergedCancelled) {
+		t.Errorf("err = %v, did not want ErrPRMergedCancelled", err)
 	}
 }
 

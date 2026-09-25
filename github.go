@@ -66,6 +66,18 @@ func (g *GitHubProvider) SubmitReview(ctx context.Context, target PRTarget, toke
 	return submitReview(ctx, target.Owner, target.Repo, target.Number, token, headSHA, comments, event, body)
 }
 
+func (g *GitHubProvider) FetchComments(ctx context.Context, target PRTarget, token string) ([]PRComment, []PRComment, error) {
+	return fetchComments(ctx, target.Owner, target.Repo, target.Number, token)
+}
+
+func (g *GitHubProvider) PostIssueComment(ctx context.Context, target PRTarget, token, body string) (PRComment, error) {
+	return postIssueComment(ctx, target.Owner, target.Repo, target.Number, token, body)
+}
+
+func (g *GitHubProvider) ReplyToReviewComment(ctx context.Context, target PRTarget, token string, commentID int64, body string) (PRComment, error) {
+	return replyToReviewComment(ctx, target.Owner, target.Repo, target.Number, token, commentID, body)
+}
+
 // resolveGitHubToken looks for a token in order: the explicit px0 setting
 // (github.token), the GITHUB_TOKEN environment variable, GH_TOKEN, then the gh CLI
 // if installed and logged in. An empty return means PR review stays read-only.
@@ -90,7 +102,14 @@ func resolveGitHubToken(cfg settings) (token, source string) {
 }
 
 // githubRequest issues an authenticated (if token != "") GitHub REST call.
+// path is either relative ("/repos/...", resolved against githubAPIBase) or
+// an absolute URL, so a paginated Link header's "next" URL can be passed
+// straight through.
 func githubRequest(ctx context.Context, method, path, token string, body any) (*http.Response, error) {
+	url := path
+	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
+		url = githubAPIBase + path
+	}
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -99,7 +118,7 @@ func githubRequest(ctx context.Context, method, path, token string, body any) (*
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, githubAPIBase+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
 		return nil, err
 	}
@@ -236,4 +255,153 @@ func submitReview(ctx context.Context, owner, repo string, num int, token, commi
 		return fmt.Errorf("github: submit review: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	return nil
+}
+
+var githubLinkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+
+// githubGetAllPages follows a GitHub list endpoint's Link header until
+// exhausted, decoding each page as a raw JSON array so callers can unmarshal
+// elements into their own shape.
+func githubGetAllPages(ctx context.Context, path, token string) ([]json.RawMessage, error) {
+	var all []json.RawMessage
+	next := path
+	for next != "" {
+		resp, err := githubRequest(ctx, http.MethodGet, next, token, nil)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("github: get %s: %s: %s", path, resp.Status, strings.TrimSpace(string(b)))
+		}
+		var page []json.RawMessage
+		err = json.NewDecoder(resp.Body).Decode(&page)
+		next = ""
+		if link := resp.Header.Get("Link"); link != "" {
+			if m := githubLinkNextRe.FindStringSubmatch(link); m != nil {
+				next = m[1]
+			}
+		}
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+	}
+	return all, nil
+}
+
+type ghUser struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type ghIssueComment struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+	HTMLURL   string `json:"html_url"`
+	User      ghUser `json:"user"`
+}
+
+func (c ghIssueComment) toPRComment() PRComment {
+	return PRComment{
+		ID: c.ID, Kind: "issue", Author: c.User.Login, AvatarURL: c.User.AvatarURL,
+		Body: c.Body, CreatedAt: c.CreatedAt, URL: c.HTMLURL,
+	}
+}
+
+type ghReviewComment struct {
+	ID           int64  `json:"id"`
+	Body         string `json:"body"`
+	Path         string `json:"path"`
+	Line         int    `json:"line"`
+	OriginalLine int    `json:"original_line"`
+	Side         string `json:"side"`
+	InReplyToID  int64  `json:"in_reply_to_id"`
+	CreatedAt    string `json:"created_at"`
+	HTMLURL      string `json:"html_url"`
+	User         ghUser `json:"user"`
+}
+
+func (c ghReviewComment) toPRComment() PRComment {
+	// An outdated review comment (its line since edited elsewhere in the
+	// diff) has line == null; original_line still says where it was.
+	line := c.Line
+	if line == 0 {
+		line = c.OriginalLine
+	}
+	return PRComment{
+		ID: c.ID, Kind: "review", Path: c.Path, Line: line, Side: c.Side, InReplyTo: c.InReplyToID,
+		Author: c.User.Login, AvatarURL: c.User.AvatarURL, Body: c.Body, CreatedAt: c.CreatedAt, URL: c.HTMLURL,
+	}
+}
+
+// fetchComments returns every comment already posted on the PR: top-level
+// ("issue") comments from the issues API, and inline ("review") comments
+// (which may be replies, linked via InReplyTo) from the pulls API.
+func fetchComments(ctx context.Context, owner, repo string, num int, token string) (issue, review []PRComment, err error) {
+	issueRaw, err := githubGetAllPages(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", owner, repo, num), token)
+	if err != nil {
+		return nil, nil, err
+	}
+	reviewRaw, err := githubGetAllPages(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/comments?per_page=100", owner, repo, num), token)
+	if err != nil {
+		return nil, nil, err
+	}
+	issue = make([]PRComment, 0, len(issueRaw))
+	for _, raw := range issueRaw {
+		var c ghIssueComment
+		if err := json.Unmarshal(raw, &c); err == nil {
+			issue = append(issue, c.toPRComment())
+		}
+	}
+	review = make([]PRComment, 0, len(reviewRaw))
+	for _, raw := range reviewRaw {
+		var c ghReviewComment
+		if err := json.Unmarshal(raw, &c); err == nil {
+			review = append(review, c.toPRComment())
+		}
+	}
+	return issue, review, nil
+}
+
+// postIssueComment posts a new top-level PR conversation comment. GitHub's
+// issue comments have no reply/threading concept, so this is also how a
+// "reply" to one is implemented: just a new comment.
+func postIssueComment(ctx context.Context, owner, repo string, num int, token, body string) (PRComment, error) {
+	resp, err := githubRequest(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, num), token, map[string]string{"body": body})
+	if err != nil {
+		return PRComment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return PRComment{}, fmt.Errorf("github: post comment: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	var c ghIssueComment
+	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
+		return PRComment{}, err
+	}
+	return c.toPRComment(), nil
+}
+
+// replyToReviewComment posts an immediate, properly threaded reply to an
+// existing inline review comment via GitHub's dedicated replies endpoint.
+func replyToReviewComment(ctx context.Context, owner, repo string, num int, token string, commentID int64, body string) (PRComment, error) {
+	resp, err := githubRequest(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/comments/%d/replies", owner, repo, num, commentID), token, map[string]string{"body": body})
+	if err != nil {
+		return PRComment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return PRComment{}, fmt.Errorf("github: reply to review comment: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	var c ghReviewComment
+	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
+		return PRComment{}, err
+	}
+	return c.toPRComment(), nil
 }

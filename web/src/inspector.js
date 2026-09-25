@@ -1,5 +1,5 @@
 // web/src/inspector.js
-import { $, $$, esc, doc_, api } from './state.js';
+import { $, $$, esc, S, doc_, api } from './state.js';
 import { layout, render } from './renderer.js';
 import { updateStatus, setStatusNote } from './status.js';
 import { openFile, centerLine } from './tabs.js';
@@ -165,7 +165,8 @@ export function initInspector() {
       if (!g) return;
       const hidden = g.style.display === 'none';
       g.style.display = hidden ? '' : 'none';
-      $('.ar', t).innerHTML = hidden ? '&#9660;' : '&#9654;';
+      const ar = $('.ar', t);
+      if (ar) ar.innerHTML = hidden ? '&#9660;' : '&#9654;';
       return;
     }
     const r = e.target.closest('.rline');

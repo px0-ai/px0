@@ -12,7 +12,7 @@
   /* selection, search matches, current line */
   --sel: #44475a; --mark: rgba(241, 250, 140, 0.25); --mark-active: #ffb86c; --cur: #2e303e;
   /* elevation */
-  --shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 
   /* syntax */
   --k: #ff79c6; --kt: #8be9fd; --nf: #50fa7b; --nc: #8be9fd; --nb: #8be9fd;

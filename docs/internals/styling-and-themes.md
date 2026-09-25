@@ -15,6 +15,8 @@ px0 reads every colour in the user interface through a CSS custom property, know
 > [!NOTE]
 > Theme rules intentionally use `:root[data-theme="<id>"]` rather than a bare attribute selector `[data-theme="<id>"]`. The `:root` pseudo-class raises CSS specificity above the fallback rules in `style.css`, ensuring theme tokens always win regardless of stylesheet evaluation order.
 
+The explorer header controls use the same tokenized `.mini` button style as Re-index. The Expand All progress state uses accent tokens; its pulse runs only when the browser allows motion, and keyboard focus uses a visible tokenized outline.
+
 ## 2. Built-in Themes
 
 | Name             | ID                 | Scheme | Inspiration / Palette                  |

@@ -473,6 +473,9 @@ func (c *lspClient) closeDoc(abs string) {
 // server expects. The spec counts UTF-16 code units by default, which is not
 // what Go gives us.
 func (c *lspClient) toLSP(lineText string, line, byteCol int) lspPosition {
+	if byteCol < 0 {
+		byteCol = 0
+	}
 	if byteCol > len(lineText) {
 		byteCol = len(lineText)
 	}
@@ -494,6 +497,9 @@ func (c *lspClient) toLSP(lineText string, line, byteCol int) lspPosition {
 func (c *lspClient) fromLSP(lines []string, p lspPosition) (int, int) {
 	line := p.Line + 1
 	if p.Line < 0 || p.Line >= len(lines) {
+		return line, 0
+	}
+	if p.Character <= 0 {
 		return line, 0
 	}
 	text := lines[p.Line]

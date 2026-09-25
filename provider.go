@@ -32,6 +32,24 @@ type PRMeta struct {
 	HeadIsFork       bool
 }
 
+// PRComment is a comment already posted on the pull request, fetched
+// read-only from the forge -- distinct from pr.go's prComment, which is a
+// draft held in memory until a review is submitted. Kind is "issue" (a
+// top-level PR conversation comment) or "review" (anchored to a diff line).
+type PRComment struct {
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	Path      string `json:"path,omitempty"`
+	Line      int    `json:"line,omitempty"`
+	Side      string `json:"side,omitempty"`
+	InReplyTo int64  `json:"inReplyTo,omitempty"`
+	Author    string `json:"author"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	URL       string `json:"url"`
+}
+
 // GitProvider abstracts forge-specific operations (GitHub, GitLab, etc.)
 // for pull/merge request reviews.
 type GitProvider interface {
@@ -56,6 +74,18 @@ type GitProvider interface {
 
 	// SubmitReview posts draft comments and the overall review verdict back to the forge.
 	SubmitReview(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error
+
+	// FetchComments returns every comment already posted on the PR: top-level
+	// ("issue") comments and inline ("review") comments anchored to a diff line.
+	FetchComments(ctx context.Context, target PRTarget, token string) (issue, review []PRComment, err error)
+
+	// PostIssueComment posts a new top-level PR comment immediately. GitHub has
+	// no threading for these, so "replying" to one is just posting a new one.
+	PostIssueComment(ctx context.Context, target PRTarget, token, body string) (PRComment, error)
+
+	// ReplyToReviewComment posts an immediate, threaded reply to an existing
+	// inline review comment.
+	ReplyToReviewComment(ctx context.Context, target PRTarget, token string, commentID int64, body string) (PRComment, error)
 }
 
 var defaultProviders = []GitProvider{

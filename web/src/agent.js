@@ -1,5 +1,5 @@
 // web/src/agent.js
-import { $, esc, S, api, apiPost, apiPostJson, MOD, keyLabel } from './state.js';
+import { $, esc, S, doc_, api, apiPost, apiPostJson, MOD, keyLabel } from './state.js';
 import { showToast } from './ui.js';
 import { setStatusNote } from './status.js';
 import { openFile, reloadOpenTabs } from './tabs.js';
@@ -37,6 +37,8 @@ const batchHint = $('#agent-batch-hint');
 const batchApply = $('#agent-batch-apply');
 const batchCancel = $('#agent-batch-cancel');
 const batchErr = $('#agent-batch-err');
+const gitHarness = $('#git-harness');
+const gitModel = $('#git-model');
 
 const sessions = new Map(); // local session id -> in-progress compose/edit
 let agentSeq = 0;
@@ -57,6 +59,7 @@ export function applyAgentMeta() {
     updateSessionMeta(session);
   }
   syncBatchMeta();
+  syncGitPanelMeta();
 }
 
 function updateSessionMeta(session) {
@@ -168,6 +171,55 @@ function syncBatchMeta() {
     batchModel.title = 'Model for ' + activeH.name;
   } else {
     batchModel.hidden = true;
+  }
+}
+
+// Harness/model pickers for the sidebar git panel's "Generate" commit
+// message action -- same global selection as every other harness picker,
+// just a second view onto it (see syncBatchMeta above).
+function syncGitPanelMeta() {
+  if (!gitHarness || !gitModel) return;
+  const ready = installed();
+  const currentHarness = chosen();
+  const currentModel = chosenModel();
+
+  gitHarness.innerHTML = '';
+  if (!ready.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'no harness';
+    gitHarness.appendChild(opt);
+    gitHarness.disabled = true;
+    gitModel.innerHTML = '';
+    gitModel.hidden = true;
+    return;
+  }
+
+  for (const h of ready) {
+    const opt = document.createElement('option');
+    opt.value = h.name;
+    opt.textContent = h.name;
+    if (h.name === currentHarness) opt.selected = true;
+    gitHarness.appendChild(opt);
+  }
+  gitHarness.disabled = !!(S.meta && S.meta.agentPinned);
+  gitHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
+
+  const activeH = ready.find(h => h.name === (gitHarness.value || currentHarness)) || ready[0];
+  gitModel.innerHTML = '';
+  const models = activeH?.models || [];
+  if (models.length > 0) {
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      if (m === currentModel) opt.selected = true;
+      gitModel.appendChild(opt);
+    }
+    gitModel.hidden = false;
+    gitModel.title = 'Model for ' + activeH.name;
+  } else {
+    gitModel.hidden = true;
   }
 }
 
@@ -949,12 +1001,27 @@ export function initAgent() {
       await select(hName, mName, msg => showBatchErr(msg));
     });
   }
+  if (gitHarness) {
+    gitHarness.addEventListener('change', async () => {
+      const hName = gitHarness.value;
+      if (!hName) return;
+      await select(hName, msg => showToast('!', msg));
+    });
+  }
+  if (gitModel) {
+    gitModel.addEventListener('change', async () => {
+      const hName = gitHarness?.value || chosen();
+      const mName = gitModel.value;
+      await select(hName, mName, msg => showToast('!', msg));
+    });
+  }
 
   document.addEventListener('click', e => {
-    const row = e.target.closest('.row.agent-sel, .row.agent-anchor, .diff-row.agent-sel, .diff-row.agent-anchor, .diff-side.agent-sel, .diff-side.agent-anchor');
-    if (!row) return;
+    const target = /** @type {HTMLElement|null} */ (e.target);
+    const row = /** @type {HTMLElement|null} */ (target?.closest('.row.agent-sel, .row.agent-anchor, .diff-row.agent-sel, .diff-row.agent-anchor, .diff-side.agent-sel, .diff-side.agent-anchor'));
+    if (!row || !row.dataset.l) return;
     const line = +row.dataset.l;
-    const d = S.docs[S.active];
+    const d = doc_();
     if (!d) return;
     for (const s of sessions.values()) {
       if (s.target.path === d.path && line >= s.target.l1 && line <= s.target.l2) {

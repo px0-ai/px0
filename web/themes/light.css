@@ -14,7 +14,7 @@
   --sel: #b6e3ff; --mark: #fff8c5; --mark-active: #fae17d; --cur: #f3f6f9;
   --on-mark-active: var(--fg);
   /* elevation */
-  --shadow: 0 16px 48px rgba(31, 35, 40, 0.18);
+  --shadow: 0 4px 16px rgba(31, 35, 40, 0.18);
 
   /* syntax */
   --k: #cf222e; --kt: #0550ae; --nf: #8250df; --nc: #953800; --nb: #0550ae;

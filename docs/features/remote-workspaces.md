@@ -50,12 +50,31 @@ docker run -p 7777:7777 -v $(pwd):/workspace px0:latest -host 0.0.0.0 /workspace
 ### 3. CI/CD Runner Debugging
 When a build or test suite fails on a remote CI runner, download px0, run it in the background, and inspect generated artifacts, failure logs, and git status directly in your browser.
 
+### 4. Reverse Proxy & Subpath Hosting (`-base-path`)
+When hosting px0 behind a reverse proxy (Nginx, Traefik, Caddy), an API gateway, or a multi-tenant cloud platform (such as PR review pods at `https://tenant.px0.ai/rev-123/` or internal portals at `https://corp.internal/tools/px0/`), px0 is served from a URL subpath rather than the root domain (`/`).
+
+Run px0 with `-base-path`:
+```bash
+px0 -base-path /rev-123/ -host 0.0.0.0 -port 7777 ~/workspace
+```
+
+**When to use `-base-path`:**
+- **Hosted/Multi-Tenant Review Platforms**: When each PR review environment runs in an isolated container/pod routed through an edge gateway under a subpath (e.g. `/rev-<id>/`).
+- **Path-Based Ingress Routing**: When routing traffic through an existing domain or Kubernetes Ingress where the root `/` is reserved for another service.
+- **Corporate Dev Portals & Reverse Proxies**: When proxying multiple developer tools behind paths like `/tools/code-review/`.
+
+**What `-base-path` does:**
+- Prefixes all Go HTTP multiplexer endpoints (`/<base-path>/api/...`, `/<base-path>/static/...`).
+- Dynamically injects `<base href="/<base-path>/">` into the served `index.html`, allowing the browser to resolve all relative asset requests, WebSocket/SSE connections, and API calls correctly.
+- Automatically handles redirects: requests to `/<base-path>` without a trailing slash redirect to `/<base-path>/`, and root `/` redirects to the configured base path.
+
 ---
 
 ## CLI Flag Reference
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
+| `-base-path P` | `"/"` | Base URL path prefix to serve endpoints and assets from (e.g. `/rev-123/`). Also configurable in settings via `server.basePath`. |
 | `-port N` | `7777` | Port to listen on (`0` picks an ephemeral free port) |
 | `-host H` | `127.0.0.1` | Network address to bind |
 | `-no-open` | `false` | Suppress automatic browser launch (ideal for servers) |

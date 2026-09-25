@@ -8,7 +8,7 @@ px0 is intentionally designed as a read-optimized viewer rather than a tradition
 
 In modern AI-native development workflows, developers spend less time typing repetitive syntax and more time reviewing, directing, and guiding intelligent agents. Traditional IDEs carry massive authoring baggage—gigabytes of Electron RAM, plugin conflicts, and heavy text manipulation engines.
 
-px0 decouples code viewing from code authoring. It provides a sub-millisecond, low-resource reading experience (~20 MB RSS) while seamlessly integrating with whichever CLI coding agent you already run on your machine (such as Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). You select the code, provide an instruction, and px0 coordinates the background execution, streams the progress to your terminal, and automatically refreshes modified files upon completion.
+px0 decouples code viewing from code authoring. It provides a sub-millisecond, low-resource reading experience (~20–30 MB RSS) while seamlessly integrating with whichever CLI coding agent you already run on your machine (such as Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). You select the code, provide an instruction, and px0 coordinates the background execution, streams the progress to your terminal, and automatically refreshes modified files upon completion.
 
 ---
 
@@ -49,6 +49,12 @@ By default, px0 selects fast and cost-effective models for each harness, but all
 - **Tab Close Guard**: Closing a browser tab while an agent edit is actively running prompts for confirmation, ensuring harnesses are never abandoned mid-execution.
 - **Inline Error Recovery**: If an agent process fails (for example, due to an expired API key or invalid CLI argument), the error message along with process stdout and stderr is rendered inline beneath your instruction. Your instruction remains preserved so you can tweak and retry without retyping.
 - **Network Sandboxing**: Agent execution is only accepted when px0 is accessed via `localhost` or direct IP address. Access through remote hostnames or public tunnel domains rejects agent commands by default to prevent unauthorized execution.
+
+---
+
+## Beyond Code: Commit Messages
+
+The same harness and model you pick here are also used by the sidebar git panel's **Commit with AI** button, which asks the harness to write a commit message for your staged changes instead of editing code — see [Git Awareness: Stage, Commit, Push, Pull](git-integration.md).
 
 ---
 

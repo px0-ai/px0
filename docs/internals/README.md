@@ -2,7 +2,7 @@
 
 Welcome to the internal engineering documentation for px0, an ultra-lightweight, zero-config code reader and navigator that delegates edits to the user's coding agent, packaged as a single statically-linked binary (~9.5 MB).
 
-This directory contains in-depth technical write-ups explaining how px0 achieves sub-millisecond startup, instantaneous file navigation, deep code intelligence, and a minimal memory footprint (~20 MB RSS) across codebases containing tens of thousands of files.
+This directory contains in-depth technical write-ups explaining how px0 achieves sub-millisecond startup, instantaneous file navigation, deep code intelligence, and a minimal memory footprint (~20–30 MB RSS) across codebases containing tens of thousands of files.
 
 ## 1. Subsystem Architecture Map
 
@@ -67,9 +67,9 @@ The internal documentation is modularized into the following focused guides:
 - [Workspace Search & Symbol Extraction](workspace-search.md): Multi-core parallel grep, buffer reuse (`workBuf`), whole-file rejection fast paths (`bytes.Contains`), smart snippet elision (`{Pre, Mid, Post}`), and regex outline extraction.
 - [Windowed Syntax Highlighting](syntax-highlighting.md): Solving Chroma lexer bottlenecks with viewport-based windowing (`hlChunk = 1000`), byte-capping (`512 KB`), dual-tier tokenization (instant inexact window + background exact pass), and byte-budgeted LRU caching.
 - [Language Server Protocol (LSP) Architecture](lsp-and-intelligence.md): Lazy on-demand server lifecycle, zero-cost background binary discovery, external path boundary control, stateless call hierarchy trails, in-app installer recipes, and regex fallback.
-- [Git Awareness & Diffing](git-integration.md): CLI shell-out architecture that never stages or commits, concurrent status generation with indexing, ancestor folder dirty propagation, gutter diff parsing, and the client-side split/unified diff renderer.
-- [GitHub PR Review](github-pr-review.md): Extensible `GitProvider` interface and URL matching, zero-dependency REST client and multi-source auth resolution (`settings.json`, `GITHUB_TOKEN`, `GH_TOKEN`, `gh auth token`), animated CLI spinner, interactive merged-PR confirmation, temp-dir worktree checkout scoped to process lifetime, merge-base diffing instead of `HEAD`, fail-closed push-access gating, in-memory draft comment model, and AI agent batch-apply integration.
-- [Harness Editing & Agent Dispatch](agent-editing.md): The optional agent flow. Starting an edit from the selection bar, right-click menu or diff view, headless invocation contract for Claude Code / Gemini CLI / Cursor Agent, inline failure output, running several edits at once with an overlap guard and an uncommitted-work guard, change detection, and the cache, language-server and tab reload path.
+- [Git Awareness, Diffing & Stage/Commit/Push/Pull](git-integration.md): CLI shell-out architecture; status/diffing stay read-only, while the sidebar git panel's stage, commit, fast-forward-only pull, and push are explicit, click-triggered writes. Concurrent status generation with indexing, ancestor folder dirty propagation, gutter diff parsing, the client-side split/unified diff renderer, and AI-written commit messages via a file-free harness dispatch.
+- [GitHub PR Review](github-pr-review.md): Extensible `GitProvider` interface and URL matching, zero-dependency REST client and multi-source auth resolution (`settings.json`, `GITHUB_TOKEN`, `GH_TOKEN`, `gh auth token`), animated CLI spinner, interactive merged-PR confirmation, temp-dir worktree checkout scoped to process lifetime, merge-base diffing instead of `HEAD`, fail-closed push-access gating, in-memory draft comment model, AI agent batch-apply integration, and pushing/fast-forward-pulling directly against the PR's own head branch.
+- [Harness Editing & Agent Dispatch](agent-editing.md): The optional agent flow. Starting an edit from the selection bar, right-click menu or diff view, headless invocation contract for Claude Code / Gemini CLI / Cursor Agent, inline failure output, running several edits at once with an overlap guard and an uncommitted-work guard, change detection, the cache/language-server/tab reload path, and the file-free prompt dispatch (`StartPrompt`) behind the git panel's AI commit messages.
 
 ### Frontend & UI Subsystems
 
