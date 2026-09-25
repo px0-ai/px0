@@ -28,7 +28,7 @@ function persistOpenDirs() {
 }
 
 /* git status letter -> CSS class + label. Empty/absent = clean, no badge. */
-const GIT_STATUS = {
+export const GIT_STATUS = {
   M: ['git-M', 'modified'], A: ['git-A', 'added'], D: ['git-D', 'deleted'],
   U: ['git-untracked', 'untracked'], R: ['git-R', 'renamed'],
   C: ['git-A', 'copied'], '!': ['git-M', 'unmerged'],

@@ -160,7 +160,7 @@ To keep git statuses, sidebar badges, and editor gutter diff indicators in sync 
 6. **In-Place DOM Patching (`web/src/tree.js`)**
    - The frontend receives the delta payload and calls `patchTreeGitStatus(statuses, dirtyDirs)`.
    - Rather than tearing down the sidebar file tree, it toggles `.dirty` on directory rows and updates badge elements (`.gs`) and `.git-*` status classes on affected file rows.
-   - Tab diff dots (`.tab-git-dot`), diff toggle buttons (`#diff-switch`), and active editor gutter lines are refreshed in-place without disturbing scroll position or editor state.
+   - Open tabs retain the latest status code in `S.gitStatuses` and redraw their matching one-letter badge; diff toggle buttons (`#diff-switch`) and active editor gutter lines refresh without disturbing scroll position or editor state.
 
 ## 6. How Git Detects Changes Under the Hood
 

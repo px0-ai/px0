@@ -8,7 +8,7 @@ import { pushHistory } from './history.js';
 import { warmLSP } from './lsp.js';
 import { loadOutline } from './outline.js';
 import { showPanel } from './panels.js';
-import { revealDir, treeEl } from './tree.js';
+import { GIT_STATUS, revealDir, treeEl } from './tree.js';
 import { clearLink } from './hover.js';
 import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
@@ -46,6 +46,7 @@ export async function openFile(path, opts = {}) {
       diffAvailable: hasDiff,
       diffDismissed: false,
       openedInDiffView: hasDiff,
+      gitStatus: S.gitStatuses[path] || '',
     };
     if (!isImg) {
       for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
@@ -205,6 +206,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
       diffAvailable: hasDiff,
       diffDismissed: !!keep.diffDismissed || !keep.diffMode,
       openedInDiffView: !!keep.openedInDiffView || !!keep.diffMode,
+      gitStatus: S.gitStatuses[tgt.path] || '',
       diffScroll: keep === activeDoc && keep.diffMode ? diffScrollTop() : 0,
       prCollapsed: keep.prCollapsed,
       youCollapsed: keep.youCollapsed,
@@ -330,11 +332,14 @@ export async function reopenClosedTab() {
 }
 
 export function drawTabs() {
-  $('#tabs').innerHTML = S.tabs.map((t, i) =>
-    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
-    (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
-    '<span class="tn">' + esc(t.name) + '</span>' +
-    '<span class="x" data-close="' + i + '" title="' + withKeys('Close tab ({Alt+W})') + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join('');
+  $('#tabs').innerHTML = S.tabs.map((t, i) => {
+    const g = GIT_STATUS[t.gitStatus];
+    const gitBadge = g ? '<span class="tab-gs ' + g[0] + '" title="git: ' + g[1] + '">' + esc(t.gitStatus) + '</span>' : '';
+    return '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + '" data-i="' + i + '" title="' + esc(t.path) + '">' +
+      (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
+      '<span class="tn">' + esc(t.name) + '</span>' + gitBadge +
+      '<span class="x" data-close="' + i + '" title="' + withKeys('Close tab ({Alt+W})') + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>';
+  }).join('');
   const act = $('#tabs .tab.active');
   if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }

@@ -117,6 +117,7 @@ export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
  * @property {boolean} [diffAvailable]
  * @property {boolean} [diffDismissed]
  * @property {boolean} [openedInDiffView]
+ * @property {string} [gitStatus]
  * @property {any} [gutter]
  * @property {LSPState} [lsp]
  * @property {boolean} [imageFit]
@@ -183,6 +184,7 @@ export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
  * @property {boolean} mdPreview
  * @property {any} settings
  * @property {Array<{id: string, path: string, l1: number, l2: number}>} agentTargets
+ * @property {Record<string, string>} gitStatuses
  */
 
 /** @type {AppState} */
@@ -207,6 +209,7 @@ export const S = {
   mdPreview: true,   // Markdown tabs open rendered (default ON)
   settings: null,    // loaded from /api/settings
   agentTargets: [],  // [{ id, path, l1, l2 }, ...] ranges of open compose/edit sessions
+  gitStatuses: {},   // workspace-relative path -> git status letter
 };
 
 /** @returns {DocTab|null} */
