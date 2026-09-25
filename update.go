@@ -318,14 +318,20 @@ func runSelfUpdate(currentVer string) error {
 
 	// Download to temporary file in the same directory as the executable (for atomic rename)
 	dir := filepath.Dir(execPath)
-	tmpFile, err := os.CreateTemp(dir, "px0-update-*")
+	// ponytail: Windows can only execute files ending in .exe, so the temp
+	// binary must keep the extension or the -version verification fails.
+	tmpPattern := "px0-update-*"
+	if runtime.GOOS == "windows" {
+		tmpPattern = "px0-update-*.exe"
+	}
+	tmpFile, err := os.CreateTemp(dir, tmpPattern)
 	if err != nil {
 		// If directory is not writable, warn user about permissions
 		if os.IsPermission(err) {
 			return fmt.Errorf("permission denied writing to %s. Try running with 'sudo px0 --update'", dir)
 		}
 		// Try temp directory as fallback
-		tmpFile, err = os.CreateTemp("", "px0-update-*")
+		tmpFile, err = os.CreateTemp("", tmpPattern)
 		if err != nil {
 			return fmt.Errorf("could not create temporary file: %w", err)
 		}
