@@ -19,6 +19,52 @@ import { syncImageView } from './imageview.js';
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
 const MAX_CLOSED = 20;
+let tabMenu = null;
+let tabMenuIndex = -1;
+
+function closeTabMenu() {
+  if (tabMenu) tabMenu.hidden = true;
+  tabMenuIndex = -1;
+}
+
+function closeTabsForAction(action, index) {
+  if (!S.tabs[index]) return;
+  if (action === 'others') switchTab(index);
+  const targets = S.tabs.map((_, i) => i).filter(i => {
+    if (action === 'all') return true;
+    if (action === 'close') return i === index;
+    if (action === 'others') return i !== index;
+    if (action === 'right') return i > index;
+    return i < index;
+  });
+  closeTabs(targets);
+}
+
+function openTabMenu(index, x, y) {
+  const actions = [
+    { action: 'close', label: 'Close', disabled: false },
+    { action: 'all', label: 'Close All', disabled: false },
+    { action: 'others', label: 'Close Others', disabled: S.tabs.length < 2 },
+    { action: 'right', label: 'Close to the Right', disabled: index === S.tabs.length - 1 },
+    { action: 'left', label: 'Close to the Left', disabled: index === 0 },
+  ];
+  tabMenu.replaceChildren();
+  for (const { action, label, disabled } of actions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sel-menu-item';
+    button.dataset.tabAction = action;
+    button.setAttribute('role', 'menuitem');
+    button.textContent = label;
+    button.disabled = disabled;
+    tabMenu.append(button);
+  }
+  tabMenuIndex = index;
+  tabMenu.hidden = false;
+  const w = tabMenu.offsetWidth, h = tabMenu.offsetHeight;
+  tabMenu.style.left = Math.max(4, Math.min(x, innerWidth - w - 4)) + 'px';
+  tabMenu.style.top = Math.max(4, Math.min(y, innerHeight - h - 4)) + 'px';
+}
 
 export async function openFile(path, opts = {}) {
   const { line, push = true, col } = opts;
@@ -268,17 +314,27 @@ export function jumpToSourceLine(line) {
 }
 
 export function closeTab(i) {
+  if (!S.tabs[i]) return;
+  closeTabs([i]);
+}
+
+function closeTabs(indices) {
+  if (!indices.length) return;
+  // Descending indices stay valid as tabs are removed.
+  indices.sort((a, b) => b - a);
+  closeTabMenu();
   clearSelectAll();
-  const [closed] = S.tabs.splice(i, 1);
-  if (closed) {
+  const activeDoc = doc_();
+  if (activeDoc) activeDoc.scrollTop = vp.scrollTop;
+  const closedEvents = [];
+  const evictions = [];
+  for (const i of indices) {
+    const [closed] = S.tabs.splice(i, 1);
+    if (!closed) continue;
     if (closed.path) {
-      // The active tab's scrollTop is only saved on switch, so read the live one.
-      const scrollTop = i === S.active ? vp.scrollTop : closed.scrollTop;
-      closedTabs.push({ path: closed.path, cur: closed.cur, scrollTop });
+      closedTabs.push({ path: closed.path, cur: closed.cur, scrollTop: closed.scrollTop });
       if (closedTabs.length > MAX_CLOSED) closedTabs.shift();
-      api('/api/close', { path: closed.path })
-        .then(() => refreshMetrics())
-        .catch(() => {});
+      evictions.push(api('/api/close', { path: closed.path }));
     }
     // Release large arrays to assist garbage collection
     closed.lines = null;
@@ -286,7 +342,16 @@ export function closeTab(i) {
     closed.pending?.clear?.();
     closed.refining?.clear?.();
     closed.outline = null;
+    if (i < S.active) {
+      S.active--;
+    } else if (i === S.active) {
+      S.active = Math.min(i, S.tabs.length - 1);
+    }
+    closedEvents.push({ doc: closed, index: i });
   }
+  Promise.allSettled(evictions).then(results => {
+    if (results.some(result => result.status === 'fulfilled')) refreshMetrics();
+  });
   if (S.tabs.length === 0) {
     S.active = -1;
     syncImageView();
@@ -296,14 +361,9 @@ export function closeTab(i) {
     $('#empty').hidden = false; drawCrumbs();
     drawTabs(); updateStatus();
     saveWorkspaceState();
-    emit('tab:closed', { doc: closed, index: i });
+    for (const event of closedEvents) emit('tab:closed', event);
     emit('tabs:cleared');
     return;
-  }
-  if (i < S.active) {
-    S.active--;
-  } else if (i === S.active) {
-    S.active = Math.min(i, S.tabs.length - 1);
   }
   const d = doc_();
   syncImageView();
@@ -312,7 +372,7 @@ export function closeTab(i) {
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = d.scrollTop; render(); updateStatus();
   saveWorkspaceState();
-  emit('tab:closed', { doc: closed, index: i });
+  for (const event of closedEvents) emit('tab:closed', event);
   if (d) emit('tab:activated', { doc: d });
 }
 
@@ -413,7 +473,20 @@ export function hideImage() {
 
 export function initTabs() {
   setSourceJumpHandler(jumpToSourceLine);
+  tabMenu = document.createElement('div');
+  tabMenu.id = 'tab-menu';
+  tabMenu.setAttribute('role', 'menu');
+  tabMenu.hidden = true;
+  document.body.append(tabMenu);
+  tabMenu.addEventListener('click', e => {
+    const button = e.target.closest('[data-tab-action]');
+    if (!button || button.disabled) return;
+    const index = tabMenuIndex;
+    closeTabMenu();
+    closeTabsForAction(button.dataset.tabAction, index);
+  });
   $('#tabs').addEventListener('click', e => {
+    closeTabMenu();
     const x = e.target.closest('[data-close]');
     if (x) { closeTab(+x.dataset.close); return; }
     const t = e.target.closest('.tab');
@@ -423,6 +496,19 @@ export function initTabs() {
     const t = e.target.closest('.tab');
     if (t && e.button === 1) { e.preventDefault(); closeTab(+t.dataset.i); }
   });
+  $('#tabs').addEventListener('contextmenu', e => {
+    const tab = e.target.closest('.tab');
+    if (!tab) { closeTabMenu(); return; }
+    e.preventDefault();
+    openTabMenu(+tab.dataset.i, e.clientX, e.clientY);
+  });
+  document.addEventListener('mousedown', e => {
+    if (tabMenu && !tabMenu.hidden && !tabMenu.contains(e.target)) closeTabMenu();
+  }, true);
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeTabMenu(); });
+  addEventListener('resize', closeTabMenu);
+  addEventListener('blur', closeTabMenu);
+  document.addEventListener('scroll', closeTabMenu, true);
   const crumbsEl = $('#crumbs');
   if (crumbsEl) {
     crumbsEl.addEventListener('click', e => {

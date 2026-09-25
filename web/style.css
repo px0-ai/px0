@@ -1356,19 +1356,22 @@ kbd {
 #footer-sel .footer-btn { flex: none; }
 
 /* Right-click menu on a selection: the footer's actions at the pointer. */
-#sel-menu {
+#sel-menu, #tab-menu {
   position: fixed; z-index: 70; min-width: 190px;
   display: flex; flex-direction: column; gap: 1px; padding: 4px;
   background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
   user-select: none;
 }
-#sel-menu[hidden] { display: none; }
+#sel-menu[hidden], #tab-menu[hidden] { display: none; }
 .sel-menu-item {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 5px 8px; border-radius: var(--r); text-align: left;
   font: 12px var(--ui); color: var(--fg);
 }
 .sel-menu-item:hover { background: var(--bg4); color: var(--accent-fg); }
+.sel-menu-item:disabled { color: var(--faint); cursor: default; }
+.sel-menu-item:disabled:hover { background: none; color: var(--faint); }
+.sel-menu-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sel-menu-item:hover .footer-kbd { color: var(--fg); border-color: var(--accent); }
 #st-lsp { display: flex; align-items: center; gap: 5px; }
 #st-lsp::before {
