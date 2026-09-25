@@ -5,6 +5,7 @@
 // Unlike the code viewport this is not virtualized -- a file's own diff is
 // bounded in size, so a plain DOM render is simple and fast enough.
 import { $, S, doc_, esc, api } from './state.js';
+import { EXPAND_STEP, gapHidden, hasExpanded, upwardExpandRun, upwardGapPlan } from './diff-expand.js';
 import { syncPreview } from './markdown.js';
 import { setStatusNote, updateStatus } from './status.js';
 
@@ -128,7 +129,7 @@ function renderDiff(d) {
   d.diffHunks.forEach((hunk, i) => {
     const anchorOld = i === 0 ? hunk.oldStart : lastOld;
     const anchorNew = i === 0 ? hunk.newStart : lastNew;
-    frag.append(...gapElements(d, lastNew + 1, hunk.newStart - 1, anchorOld, anchorNew));
+    frag.append(...gapElements(d, lastNew + 1, hunk.newStart - 1, anchorOld, anchorNew, true));
     frag.append(hunkHeader(d, hunk, i, { g1: lastNew + 1, g2: hunk.newStart - 1 }));
     frag.append(diffTable(d, hunk.rows));
     for (const row of hunk.rows) {
@@ -164,22 +165,19 @@ export function syncDiffAgentTargets() {
   }
 }
 
-/* Each hunk header doubles as the expander for the gap above it, the way
-   GitHub's @@ rows do: a blue gutter cell (unfold-up on the first hunk,
-   unfold-both on later ones) that reveals twenty lines at a time from the
-   gap's hunk-adjacent edge. The cell disappears once the gap is fully open. */
+/* A hunk header starts with an expander for its hidden preceding gap. Once
+   lines are revealed, that control moves to the leading edge of context so
+   every click walks it upward through the file instead of leaving it at this
+   hunk. */
 function hunkHeader(d, hunk, i, gap) {
   const el = document.createElement('div');
   el.className = 'diff-hunk-head';
   el.dataset.hunk = i; // expansions and tests can find a header by its hunk
-  /* The expander for the gap above this hunk lives in the header's gutter,
-     GitHub-style. It reveals twenty lines from the run's bottom edge -- the
-     side adjacent to this hunk -- so content grows toward the reader. */
-  const hidden = gapHidden(d, gap.g1, gap.g2);
-  if (hidden) {
-    const [s, e] = hidden;
-    const from = Math.max(s, e - EXPAND_STEP + 1);
-    el.append(expandCell(d, [from, e], i === 0 ? SVG_UNFOLD_UP : SVG_UNFOLD_BOTH, 'Expand ' + (e - from + 1) + (e === from ? ' line' : ' lines')));
+  const ranges = d.diffExpand || [];
+  const run = upwardExpandRun(ranges, gap.g1, gap.g2);
+  if (run && !hasExpanded(ranges, gap.g1, gap.g2)) {
+    const [s, e] = run;
+    el.append(expandCell(d, run, i === 0 ? SVG_UNFOLD_UP : SVG_UNFOLD_BOTH, 'Expand ' + (e - s + 1) + (e === s ? ' line' : ' lines')));
   }
   const title = document.createElement('span');
   title.className = 'diff-hunk-title';
@@ -250,24 +248,18 @@ function diffTable(d, rows) {
 
 /* ---------- expandable context between hunks ---------- */
 
-const EXPAND_STEP = 20; // lines an expander reveals per click
-
 /* The lines git skipped between hunks (and before the first / after the last).
-   Ranges the reader expanded render as context rows; runs still hidden are
-   reached through the expander cell on the hunk header below them (a
-   standalone row closes the file's tail). Everything in a gap is unchanged by
-   definition, so oldOf maps a new-file line onto the base line it corresponds to. */
-function gapElements(d, g1, g2, lastOld, lastNew) {
+   An upward expander starts on its hunk header. After first use it moves ahead
+   of expanded context, so each following click advances its file position by
+   EXPAND_STEP lines. Everything in a gap is unchanged, so oldOf maps a
+   new-file line onto its base-file line. */
+function gapElements(d, g1, g2, lastOld, lastNew, upward = false) {
   if (g2 < g1) return [];
   const out = [];
   const oldOf = l => lastOld + (l - lastNew);
-  let cur = g1;
-  for (const r of d.diffExpand || []) {
-    if (r.e < g1 || r.s > g2) continue;
-    const s = Math.max(r.s, g1), e = Math.min(r.e, g2);
-    out.push(ctxTable(d, s, e, oldOf));
-    cur = e + 1;
-  }
+  const plan = upwardGapPlan(d.diffExpand || [], g1, g2);
+  if (upward && plan.expand) out.push(upExpandRow(d, plan.expand));
+  for (const [s, e] of plan.context) out.push(ctxTable(d, s, e, oldOf));
   return out;
 }
 
@@ -288,17 +280,16 @@ function expandCell(d, run, svg, label) {
   return btn;
 }
 
-/* The still-hidden part of a gap: the whole [g1,g2] run when nothing inside
-   it is expanded, else the single sub-run between the last expanded line and
-   g2 (expansions inside a gap merge as they grow, so at most one remains). */
-function gapHidden(d, g1, g2) {
-  let s = g1, e = g2;
-  for (const r of d.diffExpand || []) {
-    if (r.e < g1 || r.s > g2) continue;
-    if (r.s <= s) s = Math.max(s, r.e + 1);
-    else { e = Math.min(e, r.s - 1); break; }
-  }
-  return e < s ? null : [s, e];
+/* Once an upward expansion has started, its control sits immediately before
+   expanded context. Thus it moves from line 225 to line 205 after revealing
+   lines 205–224, then to line 185 after next click. */
+function upExpandRow(d, run) {
+  const [s, e] = run;
+  const el = document.createElement('div');
+  el.className = 'diff-expand';
+  if (intersectsPending(d, s, e)) el.classList.add('busy');
+  el.append(expandCell(d, run, SVG_UNFOLD_UP, 'Expand ' + (e - s + 1) + (e === s ? ' line' : ' lines')));
+  return el;
 }
 
 /* After the last hunk: a standalone row wearing the tail expander in the
@@ -306,7 +297,7 @@ function gapHidden(d, g1, g2) {
    the tail to carry it. Reveals twenty lines at a time from the run's top,
    the edge adjacent to the last hunk; gone once the tail is fully open. */
 function tailExpandRow(d, gap) {
-  const hidden = gapHidden(d, gap.g1, gap.g2);
+  const hidden = gapHidden(d.diffExpand || [], gap.g1, gap.g2);
   if (!hidden) return document.createDocumentFragment();
   const [s, e] = hidden;
   const to = Math.min(e, s + EXPAND_STEP - 1);
@@ -333,22 +324,13 @@ const SVG_UNFOLD_DOWN = chev(['M3.2 4.4L6 7.2L8.8 4.4', 'M3.2 7.4L6 10.2L8.8 7.4
 const SVG_UNFOLD_BOTH = chev(['M3.2 5.4L6 2.6L8.8 5.4', 'M3.2 8.9L6 6.1L8.8 8.9']);
 
 /* Fetches the range from /api/file (already syntax-highlighted), caches it on
-   the doc, merges the range into the expansion state, and redraws. The first
-   hunk header below the revealed range is pinned on screen: the header (with
-   its expander) travels up to the top of the viewport, and every new row
-   lands right below it. */
+   the doc, merges the range into expansion state, and redraws. Upward controls
+   render before the revealed rows, so they stay fixed at hidden/context edge;
+   do not pin the hunk header or the control remains below new context. */
 async function expandLines(d, s, e) {
   if (s > e || shown !== d || intersectsPending(d, s, e)) return;
   const key = s + ':' + e;
   (d.diffPending || (d.diffPending = new Set())).add(key);
-  /* The hunk below the gap keeps the reader's place: pin its header so the
-     header (with its expander) rides up to the viewport top and every new row
-     lands right below it. Expansions at the file's top or tail grow where the
-     reader is looking, so there is nothing to compensate. */
-  const below = d.diffHunks.findIndex(h => h.newStart > e);
-  const anchorSel = below > 0 ? '.diff-hunk-head[data-hunk="' + below + '"]' : null;
-  const anchor = anchorSel ? diffContent.querySelector(anchorSel) : null;
-  const was = anchor ? anchor.offsetTop : 0;
   try {
     const j = await api('/api/file', { path: d.path, start: s - 1, count: e - s + 1 });
     const cache = d.diffCtx || (d.diffCtx = new Map());
@@ -359,12 +341,7 @@ async function expandLines(d, s, e) {
   } finally {
     d.diffPending.delete(key);
   }
-  if (shown !== d) return;
-  renderDiff(d);
-  if (anchor) {
-    const nowEl = diffContent.querySelector(anchorSel);
-    if (nowEl) diffview.scrollTop += nowEl.offsetTop - was;
-  }
+  if (shown === d) renderDiff(d);
 }
 
 function mergeExpand(d, s, e) {
