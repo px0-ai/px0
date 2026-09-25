@@ -364,18 +364,29 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 }
 
 // safePath resolves a client-supplied relative path inside the root, refusing
-// anything that escapes it.
+// anything that escapes it. Both paths are canonicalized so a symlink inside
+// the workspace cannot redirect a request outside it.
 func (s *Server) safePath(rel string) (string, string, bool) {
 	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
 	clean := filepath.Clean(filepath.FromSlash(rel))
+	root := s.ix.Root()
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", false
+	}
 	if clean == "." {
-		return s.ix.Root(), "", true
+		return root, "", true
 	}
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
 		return "", "", false
 	}
-	abs := filepath.Join(s.ix.Root(), clean)
-	if abs != s.ix.Root() && !strings.HasPrefix(abs, s.ix.Root()+string(filepath.Separator)) {
+	abs := filepath.Join(root, clean)
+	resolvedAbs, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", "", false
+	}
+	relToRoot, err := filepath.Rel(resolvedRoot, resolvedAbs)
+	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) || filepath.IsAbs(relToRoot) {
 		return "", "", false
 	}
 	return abs, filepath.ToSlash(clean), true

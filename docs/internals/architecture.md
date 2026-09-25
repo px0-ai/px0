@@ -162,6 +162,7 @@ Paths supplied by client queries are rigorously sanitized:
 1. Leading slashes and spaces are trimmed.
 1. The path is cleaned via `filepath.Clean()`.
 1. Paths attempting directory traversal (`..`, `../`, or containing `..` path segments) are rejected with HTTP 400.
+1. The workspace root and requested path are resolved through symlinks before containment is checked, so a workspace symlink cannot escape the root.
 1. Any path that resolves outside the indexed workspace root is rejected, unless it has been explicitly admitted into the external path allowlist (`extAllowed`).
 
 ### External Path Allowlist (`extAllowed`)

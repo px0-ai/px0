@@ -119,6 +119,33 @@ func newTestServer(t *testing.T) (*Server, string) {
 	return NewServer(ix, nil), root
 }
 
+func TestSafePathRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("must stay outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+
+	ix := NewIndex(root)
+	ix.Build()
+	s := NewServer(ix, nil)
+	if _, _, ok := s.safePath("escape/secret.txt"); ok {
+		t.Fatal("safePath allowed a symlink target outside the workspace")
+	}
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/raw?path=escape%2Fsecret.txt", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("raw symlink escape status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if strings.Contains(rec.Body.String(), "must stay outside") {
+		t.Fatal("raw endpoint returned content outside the workspace")
+	}
+}
+
 func get(t *testing.T, s *Server, url string) (int, map[string]any) {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -1139,7 +1166,6 @@ func TestFuzzyCaseSensitivity(t *testing.T) {
 		t.Errorf("expected 'src/HTTPServer.go' to rank higher for query 'HTTPServer', got: %s", res[0].Path)
 	}
 }
-
 
 
 
