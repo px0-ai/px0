@@ -56,8 +56,49 @@ var mdConverter = goldmark.New(
 	),
 )
 
+func hideFrontmatter(src []byte) {
+	if !bytes.HasPrefix(src, []byte("---\n")) && !bytes.HasPrefix(src, []byte("+++\n")) {
+		return
+	}
+	marker := src[:3]
+	search := append([]byte("\n"), marker...)
+
+	endIdx := -1
+	offset := 3
+	for {
+		idx := bytes.Index(src[offset:], search)
+		if idx == -1 {
+			break
+		}
+
+		afterMarker := offset + idx + 4
+		if afterMarker == len(src) || src[afterMarker] == '\n' {
+			endIdx = offset + idx + 1
+			break
+		}
+
+		offset += idx + 4
+	}
+
+	if endIdx == -1 {
+		return
+	}
+
+	endOfFrontmatter := endIdx + 3
+	if endOfFrontmatter < len(src) && src[endOfFrontmatter] == '\n' {
+		endOfFrontmatter++
+	}
+
+	for i := 0; i < endOfFrontmatter; i++ {
+		if src[i] != '\n' {
+			src[i] = ' '
+		}
+	}
+}
+
 func renderMarkdown(src []byte) (string, error) {
 	src = bytes.ReplaceAll(src, []byte("\r\n"), []byte("\n"))
+	hideFrontmatter(src)
 	var buf bytes.Buffer
 	buf.Grow(len(src) * 2)
 	ctx := parser.NewContext(parser.WithIDs(&headingIDs{seen: map[string]bool{}}))
