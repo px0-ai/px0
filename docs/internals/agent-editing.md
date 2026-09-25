@@ -124,6 +124,12 @@ Every supported harness starts an interactive session by default and blocks on a
 
 By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list, while letting users choose any available model from the harness menu or picker.
 
+When Codex is installed, px0 asks `codex debug models` for the models visible to
+the current Codex login. Discovery runs in the background with a five-second
+timeout; unsupported commands, malformed output, and offline starts retain the
+static preset list. The browser refreshes the harness metadata once after the
+discovery window so the live catalog appears without delaying startup.
+
 A full command template is accepted anywhere a harness name is, and must contain `{prompt}`:
 
 ```bash

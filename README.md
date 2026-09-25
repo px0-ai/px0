@@ -20,7 +20,7 @@ See full performance benchmarks and comparisons at [px0.ai/#bench](https://px0.a
 ## Features
 
 - GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
-- AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
+- AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading and model discovery where supported.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
 - Tab management: Right-click a file tab to close it, close all tabs, close other tabs, or close tabs to its left or right.
 - Remote-first: Run on any remote server, VM, or container and browse locally without SSH key setups or remote daemons.

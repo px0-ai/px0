@@ -29,6 +29,11 @@ px0 auto-detects and integrates with all leading terminal coding harnesses:
 
 By default, px0 selects fast and cost-effective models for each harness, but allows you to select any supported model directly from the harness menu.
 
+For harnesses that expose model discovery, px0 refreshes the picker from the
+installed CLI while retaining its built-in list as an offline and compatibility
+fallback. Codex models are read from the current Codex login, so newly available
+models can appear without a px0 release.
+
 ---
 
 ## How an Agent Edit Works
