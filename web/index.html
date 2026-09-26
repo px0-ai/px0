@@ -125,46 +125,51 @@
         <button id="pr-submit-approve" class="footer-btn pr-btn-approve" hidden title="Approve this PR">Approve</button>
       </div>
     </div>
-    <!-- File Tabs -->
-    <div id="tabs"></div>
-    <!-- View-mode switches, pinned to the right of the tab bar -->
-    <div id="view-switches">
-      <!-- Markdown tabs only: switch between the rendered file and its source -->
-      <div id="md-switch" class="view-switch" role="group" aria-label="Markdown view" hidden>
-        <button data-md="preview" title="Rendered Markdown ({Alt+M})">Preview</button>
-        <button data-md="source" title="Markdown source ({Alt+M})">Source</button>
-      </div>
-      <!-- Modified files in a git repo only: view the file's diff against HEAD -->
-      <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
-        <button id="diff-source" data-diff-opt="source" title="Show the file ({Mod+D})">Source</button>
-        <div class="diff-seg">
-        <button id="diff-btn" title="Show changes against HEAD ({Mod+D})">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="diff-btn-icon"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
-          <span class="diff-btn-label">Diff</span>
-          <svg viewBox="0 0 10 10" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="diff-caret"><path d="M2 3.5L5 6.5L8 3.5"/></svg>
-        </button>
-        <div id="diff-menu" class="diff-menu" role="menu">
-          <div class="diff-menu-header">Diff View Mode</div>
-          <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem" title="Side-by-side split diff view">
-            <span class="diff-item-check" aria-hidden="true">✓</span>
-            <div class="diff-item-content">
-              <span class="diff-item-title">Split</span>
-              <span class="diff-item-desc">Side-by-side</span>
+    <div id="tab-bar">
+      <!-- File tabs scroll independently of the view controls -->
+      <div id="tabs"></div>
+      <!-- View-mode switches stay at the right edge of the tab bar -->
+      <div id="view-switches">
+        <div id="view-actions">
+          <!-- Markdown tabs only: switch between the rendered file and its source -->
+          <div id="md-switch" class="view-switch" role="group" aria-label="Markdown view" hidden>
+            <button data-md="preview" title="Rendered Markdown ({Alt+M})">Preview</button>
+            <button data-md="source" title="Markdown source ({Alt+M})">Source</button>
+          </div>
+          <!-- Modified files in a git repo only: view the file's diff against HEAD -->
+          <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
+            <button id="diff-source" data-diff-opt="source" title="Show the file ({Mod+D})">Source</button>
+            <div class="diff-seg">
+            <button id="diff-btn" title="Show changes against HEAD ({Mod+D})">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="diff-btn-icon"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+              <span class="diff-btn-label">Diff</span>
+              <svg viewBox="0 0 10 10" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="diff-caret"><path d="M2 3.5L5 6.5L8 3.5"/></svg>
+            </button>
+            <div id="diff-menu" class="diff-menu" role="menu">
+              <div class="diff-menu-header">Diff View Mode</div>
+              <button type="button" class="diff-menu-item" data-diff-opt="split" role="menuitem" title="Side-by-side split diff view">
+                <span class="diff-item-check" aria-hidden="true">✓</span>
+                <div class="diff-item-content">
+                  <span class="diff-item-title">Split</span>
+                  <span class="diff-item-desc">Side-by-side</span>
+                </div>
+                <span class="diff-item-badge">Default</span>
+              </button>
+              <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem" title="Inline unified diff view">
+                <span class="diff-item-check" aria-hidden="true">✓</span>
+                <div class="diff-item-content">
+                  <span class="diff-item-title">Unified</span>
+                  <span class="diff-item-desc">Inline unified</span>
+                </div>
+              </button>
             </div>
-            <span class="diff-item-badge">Default</span>
-          </button>
-          <button type="button" class="diff-menu-item" data-diff-opt="unified" role="menuitem" title="Inline unified diff view">
-            <span class="diff-item-check" aria-hidden="true">✓</span>
-            <div class="diff-item-content">
-              <span class="diff-item-title">Unified</span>
-              <span class="diff-item-desc">Inline unified</span>
             </div>
-          </button>
+          </div>
         </div>
-        </div>
+        <button id="view-more" type="button" title="View options" aria-label="View options" aria-expanded="false" hidden><svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg></button>
+        <!-- Opens the right sidebar; shown only while it is closed -->
+        <button id="btn-open-right" class="open-right" title="Open sidebar ({Mod+J})" aria-label="Open right sidebar"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
       </div>
-      <!-- Opens the right sidebar; shown only while it is closed -->
-      <button id="btn-open-right" class="open-right" title="Open sidebar ({Mod+J})" aria-label="Open right sidebar"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     </div>
 
     <!-- Virtualized Code Editor Viewport -->

@@ -28,7 +28,7 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **Virtualized Scroller** | Automatic | Virtual DOM rendering ~60 rows with idle memory scavenging | [Editor Virtualization](editor-virtualization.md) |
 | **Remote Workspaces** | CLI flags | Zero-config remote browsing over Tailscale, SSH-free operation | [Remote Workspaces](remote-workspaces.md) |
 | **Vim Keybindings** | Toggle in Settings | Modal normal, visual, and motion modes for keyboard navigation | [Vim Mode](vim-mode.md) |
-| **File Explorer** | `Cmd/Ctrl+B` | High-density tree, expand/collapse-all controls, compact folder chains, and tab management | [File Explorer](file-explorer.md) |
+| **File Explorer** | `Cmd/Ctrl+B` | High-density tree, expand/collapse-all controls, and a scrollable tab strip with compact view controls in narrow editors | [File Explorer](file-explorer.md) |
 
 ---
 

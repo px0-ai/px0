@@ -6,6 +6,8 @@ The sidebar file tree uses a separate on-demand rendering path in [`web/src/tree
 
 The tab bar is managed by [`web/src/tabs.js`](../../web/src/tabs.js). Its right-click menu closes selected groups in descending index order. Single and bulk actions share cache cleanup and active-tab selection, then redraw the tab bar and editor and persist the session once per action.
 
+The `#tab-bar` places scrollable `#tabs` beside `#view-switches`. The tab list has `min-width: 0` so it shrinks and scrolls as files accumulate; the Markdown, Diff, and right-sidebar controls retain their own space instead of covering tabs. When the editor area becomes narrower than 420px, a `ResizeObserver` switches the bar to compact mode: a View options button opens the same Markdown and Diff controls in a small menu, leaving space for tabs even when the right inspector is open. `drawTabs()` scrolls the active tab into the visible part of `#tabs` on the next animation frame, after switching files has shown or hidden the view controls and changed the available width.
+
 ## 1. Why a Bespoke Virtualized Viewer?
 
 General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are engineered for bidirectional text editing, undo/redo trees, multi-cursor keystrokes, and complex grammar parsing inside the browser. Consequently:

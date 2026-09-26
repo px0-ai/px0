@@ -37,6 +37,8 @@ export function updateStatus() {
   if (dsw) {
     const showSwitch = inGit && isCode;
     dsw.hidden = !showSwitch;
+    const more = $('#view-more');
+    if (more) more.hidden = !isMd && !showSwitch;
     document.body.classList.toggle('diff-tab', hasDiff);
     const btn = $('#diff-btn');
     if (btn) {

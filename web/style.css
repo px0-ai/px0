@@ -503,19 +503,27 @@ body.right-hidden #right-side, body.right-hidden #right-resizer { display: none;
 
 /* ---------- main ---------- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-/* View-mode switches (Markdown Preview/Source, git Diff), pinned to the right
-   of the tab bar. The bar pads its end so the last tab can scroll clear of them. */
+/* Tabs scroll in the space left by the view controls, so no tab can slip
+   behind Preview/Source, Diff, or the right-sidebar button. */
+#tab-bar { display: flex; align-items: center; height: 28px; flex: none; min-width: 0; background: var(--bg2); }
 .open-right {
   width: 24px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--dim); background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r);
 }
 .open-right:hover { color: var(--accent-fg); border-color: var(--accent); }
 body:not(.right-hidden) .open-right { display: none; }
-body.right-hidden #tabs { padding-right: 38px; }
-body.right-hidden.md-tab #tabs { padding-right: 178px; }
-body.right-hidden.diff-tab #tabs { padding-right: 188px; }
-body.right-hidden.md-tab.diff-tab #tabs { padding-right: 328px; }
-#view-switches { position: absolute; top: 3px; right: 8px; z-index: 7; display: flex; gap: 6px; }
+#view-switches { display: flex; align-items: center; flex: none; gap: 6px; margin-left: auto; padding: 0 8px 0 6px; }
+#view-actions { display: flex; gap: 6px; }
+#view-more { display: none; width: 24px; height: 22px; align-items: center; justify-content: center; color: var(--dim); background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r); }
+#view-more:hover { color: var(--accent-fg); border-color: var(--accent); }
+#tab-bar.compact #view-switches { position: relative; z-index: 8; }
+#tab-bar.compact #view-more { display: inline-flex; }
+#tab-bar.compact #view-actions { display: none; }
+#tab-bar.compact.views-open #view-actions {
+  display: flex; flex-direction: column; position: absolute; top: calc(100% + 3px); right: 8px;
+  gap: 5px; min-width: 140px; padding: 6px; background: var(--bg2);
+  border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
+}
 .view-switch {
   height: 22px; display: flex; gap: 1px;
   padding: 1px; background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r);
@@ -587,11 +595,7 @@ body.right-hidden.md-tab.diff-tab #tabs { padding-right: 328px; }
 }
 .diff-menu-item.active .diff-item-badge { background: var(--accent); color: var(--on-accent); }
 
-body.md-tab #tabs { padding-right: 140px; }
-body.diff-tab #tabs { padding-right: 150px; }
-body.md-tab.diff-tab #tabs { padding-right: 290px; }
-
-#tabs { display: flex; height: 28px; background: var(--bg2); box-shadow: inset 0 -1px 0 var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+#tabs { display: flex; flex: 1; min-width: 0; height: 28px; box-shadow: inset 0 -1px 0 var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 #tabs::-webkit-scrollbar { display: none; }
 #tabs:empty { display: none; }
 .tab {
