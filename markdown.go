@@ -182,6 +182,11 @@ func renderFence(w util.BufWriter, src []byte, n ast.Node, entering bool) (ast.W
 // highlightFence colours a block whose fence names a language chroma knows.
 // Unlabelled blocks stay plain: guessing from content is slow and often wrong.
 func highlightFence(code, lang string) string {
+	// Mermaid fences are diagrams, not code: leave the source untouched so the
+	// browser can render it with mermaid.js (see renderMermaidIn in web/src/mermaid.js).
+	if strings.EqualFold(lang, "mermaid") {
+		return htmlEscaper.Replace(code)
+	}
 	var lexer chroma.Lexer
 	if lang != "" && len(code) <= maxFenceBytes {
 		lexer = lexers.Get(lang)

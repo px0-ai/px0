@@ -6,6 +6,7 @@ import { openFile } from './tabs.js';
 import { setThreadHandler, hideSelectionBar } from './selbar.js';
 import { showRightInspector } from './inspector.js';
 import { registerAgentPicker, reloadWorkspace } from './agent.js';
+import { mermaidBlockHtml, renderMermaidIn } from './mermaid.js';
 
 /* A thread is a long-running conversation with the coding harness, kept on the
    server. It starts from a spot in the code but is not limited to it: the
@@ -147,12 +148,19 @@ function thrMd(src) {
       const rawLang = fenceMatch[3].trim().split(/\s+/)[0] || '';
       const lang = /^[\w+#.-]+$/.test(rawLang) ? rawLang : '';
       const codeLines = [];
+      let closed = false;
       i++;
       while (i < lines.length) {
         const endMatch = new RegExp('^( {0,3})' + marker + '{' + markerLen + ',}\\s*$').exec(lines[i]);
-        if (endMatch) { i++; break; }
+        if (endMatch) { i++; closed = true; break; }
         codeLines.push(lines[i]);
         i++;
+      }
+      // Render a diagram only once its fence is closed; while a reply streams the
+      // still-open block shows as code and becomes a diagram on the next pass.
+      if (closed && lang === 'mermaid') {
+        html += mermaidBlockHtml(codeLines.join('\n'));
+        continue;
       }
       const code = esc(codeLines.join('\n'));
       html += `<div class="thr-pre"` + (lang ? ` data-lang="${esc(lang)}"` : '') + `><pre><code>` + code + `</code></pre><button class="thr-copy" title="Copy code" aria-label="Copy code"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div>`;
@@ -464,6 +472,7 @@ function thrRenderMsgs() {
     : '<div class="hint">' + (thr.draft && thr.draft.path
       ? 'Ask a question about this code, or ask for changes. The reply can touch any file.'
       : 'Ask anything about this workspace. The reply can touch any file.') + '</div>';
+  renderMermaidIn(box);
   if (stick) box.scrollTop = box.scrollHeight;
 }
 
@@ -498,6 +507,7 @@ function thrOpenStream(id) {
     const box = thrEl.msgs;
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
     body.innerHTML = thrMd(turn.reply);
+    renderMermaidIn(body);
     if (stick) box.scrollTop = box.scrollHeight;
   });
   es.addEventListener('tool', e => {
