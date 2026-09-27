@@ -1016,6 +1016,30 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .md-img-broken { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg2); border: 1px dashed var(--border); border-radius: var(--r-lg); color: var(--faint); font-size: 12px; margin: 8px 0; font-family: var(--font-mono); }
 .md-img-broken svg { color: var(--err); width: 16px; height: 16px; flex-shrink: 0; }
 
+/* Mermaid diagrams (see web/src/mermaid.js). A placeholder shows the source in a
+   code style until the SVG arrives, then centres the rendered diagram. */
+.md-mermaid { margin: 0 0 16px; }
+.md-mermaid:not(.rendered) {
+  display: block; white-space: pre; overflow-x: auto;
+  padding: 12px 14px; background: var(--bg2); border: 1px solid var(--line);
+  border-radius: var(--r-lg); color: var(--faint);
+  font: 12.5px/1.6 var(--font-mono, var(--mono)); tab-size: 2;
+}
+.md-mermaid.rendered { display: flex; justify-content: center; background: none; border: 0; padding: 0; }
+.md-mermaid.rendered svg { max-width: 100%; height: auto; }
+.md-mermaid-error {
+  display: block; padding: 0; background: var(--bg2);
+  border: 1px dashed var(--border); border-radius: var(--r-lg); overflow: hidden;
+}
+.md-mermaid-error .md-mermaid-err-label {
+  padding: 8px 12px; color: var(--err); font: 12px var(--font-mono, var(--mono));
+  border-bottom: 1px dashed var(--border);
+}
+.md-mermaid-error pre { margin: 0; padding: 12px 14px; overflow-x: auto; color: var(--faint); font: 12.5px/1.6 var(--font-mono, var(--mono)); }
+
+/* In a thread message a diagram sits on the reply's surface, not a code card. */
+.thr-body .md-mermaid.rendered { margin: 8px 0; }
+
 /* Markdown Image Lightbox */
 #img-lightbox { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
 .lightbox-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }

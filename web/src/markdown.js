@@ -10,6 +10,7 @@ import { showPanel } from './panels.js';
 import { revealDir } from './tree.js';
 import { findbar, runFind } from './find.js';
 import { hideHover } from './hover.js';
+import { renderMermaidIn } from './mermaid.js';
 
 /* Markdown tabs open rendered. The server converts the file with goldmark and
    passes raw HTML through, so nothing it returns is trusted: mdSanitize rebuilds
@@ -220,6 +221,18 @@ const MD_ALERTS = { note: 'Note', tip: 'Tip', important: 'Important', warning: '
 
 function mdEnhance() {
   for (const q of $$('blockquote', mdArticle)) mdAlert(q);
+  // Mermaid fences become diagrams, not code blocks: convert them before the
+  // copy-button pass below so they never pick up code-block chrome.
+  let hasMermaid = false;
+  for (const pre of $$('pre.md-code[data-lang="mermaid"]', mdArticle)) {
+    const div = document.createElement('div');
+    div.className = 'md-mermaid';
+    if (pre.dataset.line) div.dataset.line = pre.dataset.line;
+    div.textContent = pre.textContent;
+    div.dataset.src = pre.textContent;
+    pre.replaceWith(div);
+    hasMermaid = true;
+  }
   for (const pre of $$('pre', mdArticle)) {
     const wrap = document.createElement('div');
     wrap.className = 'md-pre';
@@ -233,6 +246,7 @@ function mdEnhance() {
     copy.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
     wrap.append(pre, copy);
   }
+  if (hasMermaid) renderMermaidIn(mdArticle);
 }
 
 /* GitHub alerts: a blockquote opening with [!NOTE], [!TIP], [!IMPORTANT],

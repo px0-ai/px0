@@ -42,6 +42,26 @@ func TestMarkdownPreview(t *testing.T) {
 	}
 }
 
+func TestMermaidFenceKeepsRawSource(t *testing.T) {
+	// A mermaid fence must reach the client as raw, un-highlighted source so the
+	// browser can hand it to mermaid.js. It carries data-lang="mermaid" and must
+	// never be run through the syntax highlighter (no token <i class=...> spans),
+	// regardless of whether Chroma later ships a mermaid lexer.
+	out, err := renderMarkdown([]byte("```mermaid\ngraph TD\n  A[Start] --> B{OK?}\n```\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `data-lang="mermaid"`) {
+		t.Errorf("mermaid fence lost its language tag:\n%s", out)
+	}
+	if !strings.Contains(out, "A[Start] --&gt; B{OK?}") {
+		t.Errorf("mermaid source not preserved verbatim (escaped):\n%s", out)
+	}
+	if strings.Contains(out, "<i class=") {
+		t.Errorf("mermaid fence should not be syntax-highlighted:\n%s", out)
+	}
+}
+
 func TestHeadingIDsFollowGitHub(t *testing.T) {
 	ids := &headingIDs{seen: map[string]bool{}}
 	for _, c := range []struct{ in, want string }{
