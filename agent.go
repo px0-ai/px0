@@ -1151,15 +1151,11 @@ func changedSince(root string, before map[string]string) []string {
 }
 
 // worktreeSnapshot is git status with each listed file's size and mtime folded
-// into its entry. Status alone misses the common case of editing a file that is
-// already modified: it reads "M" before and after, so the edit would go unseen.
-// Files git lists as clean are left out, and those still surface through status.
+// into its entry (see worktreeStamps).
 func worktreeSnapshot(root string) map[string]string {
 	st := gitStatus(root)
-	for rel, code := range st {
-		if fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
-			st[rel] = code + " " + strconv.FormatInt(fi.Size(), 10) + " " + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
-		}
+	for rel, stamp := range worktreeStamps(root, st) {
+		st[rel] += " " + stamp
 	}
 	return st
 }

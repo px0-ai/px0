@@ -24,6 +24,7 @@ type GitStatusPayload struct {
 	Staged        map[string]bool   `json:"staged,omitempty"`        // Relative path -> true if file has staged changes
 	YourStatuses  map[string]string `json:"yourStatuses,omitempty"`  // PR mode: relative path -> reviewer modification status
 	YourDirtyDirs map[string]bool   `json:"yourDirtyDirs,omitempty"` // PR mode: directory path -> contains reviewer changes
+	Touched       []string          `json:"touched,omitempty"`       // Content changed since the last check, whatever the status code
 	Branch        string            `json:"branch,omitempty"`        // Active branch name
 	RecentCommits []GitCommit       `json:"recentCommits,omitempty"` // Recent git commits for commit list UI
 	CommitsURL    string            `json:"commitsUrl,omitempty"`    // Web URL to view commits on GitHub/forge
@@ -194,7 +195,7 @@ func (gw *GitWatcher) loop(ctx context.Context, gitdir string) {
 // Refresh runs an immediate UpdateGitStatus, broadcasts to subscribers if changed,
 // and returns the latest git status payload.
 func (gw *GitWatcher) Refresh() GitStatusPayload {
-	count, files, changed, statuses, dirtyDirs, staged, yourStatuses, yourDirtyDirs := gw.ix.UpdateGitStatus()
+	count, files, changed, statuses, dirtyDirs, staged, yourStatuses, yourDirtyDirs, touched := gw.ix.UpdateGitStatus()
 	var recentCommits []GitCommit
 	var ahead, behind int
 	if gitAvailable(gw.root) {
@@ -224,6 +225,7 @@ func (gw *GitWatcher) Refresh() GitStatusPayload {
 		Staged:        staged,
 		YourStatuses:  yourStatuses,
 		YourDirtyDirs: yourDirtyDirs,
+		Touched:       touched,
 		Branch:        branch,
 		RecentCommits: recentCommits,
 		CommitsURL:    gitCommitsWebURL(gw.root, branch),

@@ -158,10 +158,13 @@ async function handleGitStatus(data) {
     }
   }
 
-  // Check if any open tabs are affected by modifications
+  // Check if any open tabs are affected by modifications. `touched` names files
+  // whose content moved even though their status did not (a second edit to a
+  // modified or untracked file), so untracked tabs reload too.
+  const touched = new Set(data.touched || []);
   const anyTabModified = S.tabs.some(t => {
     const code = statuses[t.path];
-    return code && code !== 'U';
+    return (code && code !== 'U') || touched.has(t.path);
   });
 
   if (anyTabModified) {
