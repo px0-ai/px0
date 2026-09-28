@@ -70,9 +70,6 @@ func declPatterns(ident string) map[string]*regexp.Regexp {
 		}
 	}
 	out := map[string]*regexp.Regexp{"": byFamily["default"]}
-	for ext := range extFamily {
-		out[ext] = byFamily[extFamily[ext]]
-	}
 	for ext, fam := range extFamily {
 		out[ext] = byFamily[fam]
 	}

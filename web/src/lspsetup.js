@@ -9,14 +9,14 @@ import { warmLSP } from './lsp.js';
    or pick up a server installed by hand, then start it and carry on. */
 
 let setupSeq = 0;
-let pollTimer = 0;
+let setupPollTimer = 0;
 
 const hintHtml = html => '<div class="hint">' + html + '</div>';
 
 // Stops a pending refresh, so it cannot draw over whatever replaced the panel.
 export function cancelLspSetup() {
   setupSeq++;
-  clearTimeout(pollTimer);
+  clearTimeout(setupPollTimer);
 }
 
 export async function renderLspSetup(el, onReady) {
@@ -29,7 +29,7 @@ export async function renderLspSetup(el, onReady) {
   catch (e) { if (my === setupSeq) el.innerHTML = hintHtml('Could not check language servers: ' + esc(e.message)); return; }
   if (my !== setupSeq || doc_() !== d) return;
 
-  const again = ms => { pollTimer = setTimeout(() => { if (my === setupSeq) renderLspSetup(el, onReady); }, ms); };
+  const again = ms => { setupPollTimer = setTimeout(() => { if (my === setupSeq) renderLspSetup(el, onReady); }, ms); };
   if (s.state === 'starting' && !s.server) {
     el.innerHTML = hintHtml('Looking for language servers…');
     again(700);
@@ -119,7 +119,7 @@ function wire(el, d, onReady) {
     renderLspSetup(el, onReady);
   }));
   el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
-    copyToClipboard(b.dataset.copy, 'Copied ' + b.dataset.copy);
+    copyToClipboard(b.dataset.copy, 'Copied ' + b.dataset.copy, b);
   }));
   el.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => start(el, d, onReady)));
 }

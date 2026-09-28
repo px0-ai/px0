@@ -7,13 +7,19 @@ import { treeEl, refreshTree, setSidebarMode } from './tree.js';
 import { reloadOpenTabs } from './tabs.js';
 import { showToast } from './ui.js';
 
-export function showPanel(name) {
+export async function showPanel(name) {
   document.body.classList.remove('side-hidden');
+  if (name === 'files') {
+    await setSidebarMode('files');
+  }
   layout();
   render();
 }
 
 export async function reindexWorkspace() {
+  const btn = $('#btn-reindex');
+  const svg = btn?.querySelector('svg');
+  if (svg) svg.classList.add('spin');
   try {
     const j = await api('/api/reindex');
     S.meta.files = j.files; S.meta.indexMs = j.indexMs;
@@ -23,7 +29,7 @@ export async function reindexWorkspace() {
     if (hasGitChanges) {
       await setSidebarMode('git');
     } else {
-      setSidebarMode('files');
+      await setSidebarMode('files');
     }
     await refreshTree();
     await reloadOpenTabs();
@@ -31,6 +37,8 @@ export async function reindexWorkspace() {
     showToast('✓', 'Workspace refreshed');
   } catch (e) {
     showToast('!', 'Refresh failed: ' + e.message);
+  } finally {
+    if (svg) svg.classList.remove('spin');
   }
 }
 

@@ -1,5 +1,5 @@
 // web/src/vim.js
-import { $, esc, S, doc_, keyCaps } from './state.js';
+import { $, esc, S, doc_, keyCaps, LH } from './state.js';
 import { vp, sizer, copyToClipboard, showToast } from './ui.js';
 import { render, paint, rowFor, placeCaret } from './renderer.js';
 import { moveCursor, moveCol, moveWord, caretToEdge, updateDomSelection, clearSelection, revealCaretX } from './cursor.js';
@@ -190,7 +190,7 @@ function ensureLineSelection() {
 export function handleVimKeyDown(e) {
   if (!vimEnabled) return false;
 
-  const active = document.activeElement;
+  const active = /** @type {HTMLElement|null} */ (document.activeElement);
   if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
     return false;
   }
@@ -663,41 +663,36 @@ export function showVimHelp() {
 
   const isChecked = vimEnabled ? 'checked' : '';
 
-  modal.innerHTML = `
-    <div class="help-card vim-help-card">
-      <div class="help-header vim-help-header">
-        <div class="vim-help-title">
-          <h2>Vim Keybindings</h2>
-          <span class="help-version">Modal Navigation</span>
-        </div>
-        <div class="vim-toggle-row">
-          <label class="vim-switch-label">
-            <input type="checkbox" id="vim-toggle-input" ${isChecked}>
-            <span class="vim-switch-slider"></span>
-            <span class="vim-switch-text">${vimEnabled ? 'Enabled' : 'Disabled'}</span>
-          </label>
-          <button id="btn-close-vim-help" class="mini" title="Close (Esc)">✕</button>
-        </div>
-      </div>
-      <div class="vim-help-content">
-        ${VIM_SHORTCUT_SECTIONS.map(sec => `
-          <div class="vim-help-section">
-            <div class="vim-sec-title">${esc(sec.title)}</div>
-            <dl class="help-grid vim-help-grid">
-              ${sec.items.map(([combos, v]) => `
-                <dt>${combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>')}</dt>
-                <dd>${esc(v)}</dd>
-              `).join('')}
-            </dl>
-          </div>
-        `).join('')}
-      </div>
-      <div class="vim-help-footer">
-        <button id="btn-switch-to-std-help" class="settings-btn-link" title="View Standard Shortcuts (?)">View Standard Shortcuts (?)</button>
-        <span class="agent-hint">Press Esc or click outside to dismiss</span>
-      </div>
-    </div>
-  `;
+  const sectionsHtml = VIM_SHORTCUT_SECTIONS.map(sec => {
+    const itemsHtml = sec.items.map(([combos, v]) => {
+      const comboList = Array.isArray(combos) ? combos : [combos];
+      const keysHtml = comboList.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>');
+      return '<dt>' + keysHtml + '</dt><dd>' + esc(v) + '</dd>';
+    }).join('');
+    return '<div class="vim-help-section">' +
+      '<div class="vim-sec-title">' + esc(sec.title) + '</div>' +
+      '<dl class="help-grid vim-help-grid">' + itemsHtml + '</dl>' +
+      '</div>';
+  }).join('');
+
+  modal.innerHTML = '<div class="help-card vim-help-card">' +
+    '<div class="help-header vim-help-header">' +
+    '<div class="vim-help-title"><h2>Vim Keybindings</h2><span class="help-version">Modal Navigation</span></div>' +
+    '<div class="vim-toggle-row">' +
+    '<label class="vim-switch-label">' +
+    '<input type="checkbox" id="vim-toggle-input" ' + isChecked + '>' +
+    '<span class="vim-switch-slider"></span>' +
+    '<span class="vim-switch-text">' + (vimEnabled ? 'Enabled' : 'Disabled') + '</span>' +
+    '</label>' +
+    '<button id="btn-close-vim-help" class="mini" title="Close (Esc)">✕</button>' +
+    '</div>' +
+    '</div>' +
+    '<div class="vim-help-content">' + sectionsHtml + '</div>' +
+    '<div class="vim-help-footer">' +
+    '<button id="btn-switch-to-std-help" class="settings-btn-link" title="View Standard Shortcuts (?)">View Standard Shortcuts (?)</button>' +
+    '<span class="agent-hint">Press Esc or click outside to dismiss</span>' +
+    '</div>' +
+    '</div>';
 
   modal.hidden = false;
 

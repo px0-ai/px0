@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Bundle, build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # web/app.js is not committed — regenerate it so go:embed has a fresh
+      # bundle, and prove the source modules bundle cleanly.
+      - name: Bundle web assets
+        run: node ./scripts/build-web.js
+
+      - name: Build px0
+        run: go build -trimpath -o px0 .
+
+      - name: Run tests
+        run: go test -v ./...

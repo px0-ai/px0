@@ -23,6 +23,7 @@ const (
 	updateCheckPeriod = 24 * time.Hour
 )
 
+// githubRelease describes the GitHub Releases API payload for the latest release.
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 	Name    string `json:"name"`
@@ -32,6 +33,7 @@ type githubRelease struct {
 	} `json:"assets"`
 }
 
+// updateState stores the timestamp of the last daily update check and the latest version string seen.
 type updateState struct {
 	LastChecked time.Time `json:"last_checked"`
 	LatestVer   string    `json:"latest_ver"`

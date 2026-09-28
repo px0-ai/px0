@@ -1,5 +1,6 @@
 // web/src/imageview.js
 import { $, S, doc_, esc } from './state.js';
+import { on } from './bus.js';
 import { updateStatus, fmtBytes } from './status.js';
 
 let ivInit = false;
@@ -31,7 +32,7 @@ export function renderImageView(d) {
   const canvas = $('#imgview-canvas');
   if (!img || !canvas) return;
 
-  const rawUrl = '/api/raw?path=' + encodeURIComponent(d.path);
+  const rawUrl = new URL('api/raw?path=' + encodeURIComponent(d.path), document.baseURI || location.href).href;
   if (img.dataset.curPath !== d.path) {
     img.dataset.curPath = d.path;
     img.src = rawUrl;
@@ -43,9 +44,9 @@ export function renderImageView(d) {
   if (d.imagePanX === undefined) d.imagePanX = 0;
   if (d.imagePanY === undefined) d.imagePanY = 0;
   if (d.imageBg === undefined) d.imageBg = 'checker';
-  if (d.imagePixelated === undefined) {
+  if (d.imagePixelated === undefined && d.imageMeta) {
     // Default tiny icons (<= 64px) to pixelated; others to smooth
-    d.imagePixelated = d.imageMeta ? (d.imageMeta.width <= 64 && d.imageMeta.height <= 64) : false;
+    d.imagePixelated = d.imageMeta.width <= 64 && d.imageMeta.height <= 64;
   }
 
   const onLoaded = () => {
@@ -301,4 +302,7 @@ export function initImageViewer() {
       applyImageTransform(d);
     }
   });
+
+  on('tab:activated', () => syncImageView());
+  on('tabs:cleared', () => syncImageView());
 }

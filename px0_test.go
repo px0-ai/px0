@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIgnorePatterns(t *testing.T) {
@@ -575,6 +581,32 @@ func TestCloseEndpoint(t *testing.T) {
 	}
 }
 
+func TestLSPProblemsEndpoint(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// Bad path returns 400
+	code, _ := get(t, s, "/api/lsp/problems?path=../../nonexistent")
+	if code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad path, got %d", code)
+	}
+
+	// Valid path
+	code, body := get(t, s, "/api/lsp/problems?path=greet.go")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d %v", code, body)
+	}
+	if body["path"] != "greet.go" {
+		t.Errorf("expected path greet.go, got %v", body["path"])
+	}
+	counts, ok := body["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected counts map, got %v", body["counts"])
+	}
+	if counts["total"] == nil || counts["error"] == nil || counts["warning"] == nil {
+		t.Errorf("missing count fields: %v", counts)
+	}
+}
+
 func TestListenPortFallback(t *testing.T) {
 	// Bind a port first
 	ln1, addr1, err := listen("127.0.0.1", 0)
@@ -701,6 +733,103 @@ func TestViewerURL(t *testing.T) {
 	if got := viewerURL("127.0.0.1:7777", "", 0); got != "http://127.0.0.1:7777" {
 		t.Fatalf("viewerURL without a file = %q", got)
 	}
+
+	// Base path tests
+	if got := viewerURL("127.0.0.1:7777", "", 0, "/rev-123/"); got != "http://127.0.0.1:7777/rev-123/" {
+		t.Fatalf("viewerURL with base path = %q, want http://127.0.0.1:7777/rev-123/", got)
+	}
+	if got := viewerURL("127.0.0.1:7777", "main.go", 10, "/rev-123"); got != "http://127.0.0.1:7777/rev-123/?line=10&path=main.go" {
+		t.Fatalf("viewerURL with base path and file = %q", got)
+	}
+}
+
+func TestCleanBasePath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "/"},
+		{"/", "/"},
+		{".", "/"},
+		{"rev-123", "/rev-123/"},
+		{"/rev-123", "/rev-123/"},
+		{"/rev-123/", "/rev-123/"},
+		{"//rev-123///", "/rev-123/"},
+		{"sub/path", "/sub/path/"},
+		{"/a/b/", "/a/b/"},
+	}
+	for _, tc := range cases {
+		got := cleanBasePath(tc.in)
+		if got != tc.want {
+			t.Errorf("cleanBasePath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestServerBasePathRouting(t *testing.T) {
+	root := t.TempDir()
+	ix := NewIndex(root)
+	s := NewServer(ix, nil, "/rev-123/")
+
+	if s.BasePath() != "/rev-123/" {
+		t.Fatalf("BasePath() = %q, want /rev-123/", s.BasePath())
+	}
+
+	// 1. GET /rev-123/ should return 200 and have injected <base href="/rev-123/">
+	req := httptest.NewRequest(http.MethodGet, "/rev-123/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /rev-123/ code = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `<base href="/rev-123/">`) {
+		t.Errorf("GET /rev-123/ body missing injected base href: %s", rec.Body.String())
+	}
+
+	// 2. GET /rev-123 without trailing slash should redirect to /rev-123/
+	reqNoSlash := httptest.NewRequest(http.MethodGet, "/rev-123", nil)
+	recNoSlash := httptest.NewRecorder()
+	s.ServeHTTP(recNoSlash, reqNoSlash)
+	if recNoSlash.Code != http.StatusMovedPermanently && recNoSlash.Code != http.StatusFound {
+		t.Errorf("GET /rev-123 code = %d, want redirect", recNoSlash.Code)
+	}
+	if loc := recNoSlash.Header().Get("Location"); loc != "/rev-123/" {
+		t.Errorf("GET /rev-123 redirect Location = %q, want /rev-123/", loc)
+	}
+
+	// 3. GET / should redirect to /rev-123/
+	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)
+	recRoot := httptest.NewRecorder()
+	s.ServeHTTP(recRoot, reqRoot)
+	if recRoot.Code != http.StatusFound {
+		t.Errorf("GET / code = %d, want 302", recRoot.Code)
+	}
+	if loc := recRoot.Header().Get("Location"); loc != "/rev-123/" {
+		t.Errorf("GET / redirect Location = %q, want /rev-123/", loc)
+	}
+
+	// 4. GET /rev-123/api/meta returns 200 and basePath
+	reqMeta := httptest.NewRequest(http.MethodGet, "/rev-123/api/meta", nil)
+	recMeta := httptest.NewRecorder()
+	s.ServeHTTP(recMeta, reqMeta)
+	if recMeta.Code != http.StatusOK {
+		t.Fatalf("GET /rev-123/api/meta code = %d, want 200", recMeta.Code)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(recMeta.Body.Bytes(), &meta); err != nil {
+		t.Fatalf("failed to decode meta: %v", err)
+	}
+	if meta["basePath"] != "/rev-123/" {
+		t.Errorf("meta.basePath = %v, want /rev-123/", meta["basePath"])
+	}
+
+	// 5. GET /api/meta without prefix should 404
+	reqRootMeta := httptest.NewRequest(http.MethodGet, "/api/meta", nil)
+	recRootMeta := httptest.NewRecorder()
+	s.ServeHTTP(recRootMeta, reqRootMeta)
+	if recRootMeta.Code != http.StatusNotFound {
+		t.Errorf("GET /api/meta code = %d, want 404", recRootMeta.Code)
+	}
 }
 
 func TestNetworkURLs(t *testing.T) {
@@ -744,3 +873,444 @@ func TestMetaIncludesVersion(t *testing.T) {
 		t.Fatalf("expected version %q in /api/meta, got %v", version, body["version"])
 	}
 }
+
+func TestVerboseRequestLogging(t *testing.T) {
+	origVerbose := uiVerbose
+	origQuiet := uiQuiet
+	defer func() {
+		uiVerbose = origVerbose
+		uiQuiet = origQuiet
+	}()
+
+	s, _ := newTestServer(t)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() failed: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() {
+		os.Stdout = origStdout
+	}()
+
+	uiVerbose = true
+	uiQuiet = false
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	rec404 := httptest.NewRecorder()
+	req404 := httptest.NewRequest(http.MethodGet, "/api/nonexistent", nil)
+	s.ServeHTTP(rec404, req404)
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	r.Close()
+
+	logOutput := string(out)
+	if !strings.Contains(logOutput, "GET /api/tree · 200") {
+		t.Errorf("expected log output to contain 'GET /api/tree · 200', got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "GET /api/nonexistent · 404") {
+		t.Errorf("expected log output to contain 'GET /api/nonexistent · 404', got:\n%s", logOutput)
+	}
+}
+
+func TestStatusRecorderInterfaces(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sr := &statusRecorder{ResponseWriter: rec}
+
+	// Verify http.Flusher
+	if flusher, ok := any(sr).(http.Flusher); ok {
+		flusher.Flush()
+		if !rec.Flushed {
+			t.Error("expected Flush to propagate to underlying recorder")
+		}
+	} else {
+		t.Error("statusRecorder does not implement http.Flusher")
+	}
+
+	// Verify Unwrap
+	if unwrapped := sr.Unwrap(); unwrapped != rec {
+		t.Errorf("expected Unwrap to return %p, got %p", rec, unwrapped)
+	}
+
+	// Verify gzipWriter Flusher and Unwrap
+	gw := gzipWriter{ResponseWriter: rec}
+	if _, ok := any(gw).(http.Flusher); !ok {
+		t.Error("gzipWriter does not implement http.Flusher")
+	}
+	if unwrapped := gw.Unwrap(); unwrapped != rec {
+		t.Errorf("expected gzipWriter Unwrap to return %p, got %p", rec, unwrapped)
+	}
+}
+
+func TestUnifiedEventStream(t *testing.T) {
+	s, _ := newTestServer(t)
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/stream", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext failed: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("expected text/event-stream, got %q", ct)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	var foundMetrics bool
+	var metricsData string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "event: metrics" {
+			foundMetrics = true
+		} else if foundMetrics && strings.HasPrefix(line, "data: ") {
+			metricsData = strings.TrimPrefix(line, "data: ")
+			break
+		}
+	}
+
+	if !foundMetrics || metricsData == "" {
+		t.Fatalf("did not receive initial metrics event on /api/stream")
+	}
+
+	var m ProcessMetrics
+	if err := json.Unmarshal([]byte(metricsData), &m); err != nil {
+		t.Fatalf("failed to unmarshal metrics JSON: %v, raw: %s", err, metricsData)
+	}
+	if m.Goroutine <= 0 {
+		t.Errorf("expected goroutines > 0, got %d", m.Goroutine)
+	}
+}
+
+func TestUISpinner(t *testing.T) {
+	origQuiet := uiQuiet
+	defer func() { uiQuiet = origQuiet }()
+	uiQuiet = false
+
+	var buf bytes.Buffer
+	sp := newSpinner("Initial step", &buf)
+	sp.Update("Second step")
+	sp.Success("All done")
+
+	out := buf.String()
+	if !strings.Contains(out, "Initial step") {
+		t.Errorf("expected output to contain 'Initial step', got: %q", out)
+	}
+	if !strings.Contains(out, "Second step") {
+		t.Errorf("expected output to contain 'Second step', got: %q", out)
+	}
+	if !strings.Contains(out, "All done") {
+		t.Errorf("expected output to contain 'All done', got: %q", out)
+	}
+
+	// Test Fail
+	buf.Reset()
+	sp2 := newSpinner("Starting task", &buf)
+	sp2.Fail("Failed task")
+	out2 := buf.String()
+	if !strings.Contains(out2, "Failed task") {
+		t.Errorf("expected output to contain 'Failed task', got: %q", out2)
+	}
+
+	// Test Quiet mode
+	uiQuiet = true
+	buf.Reset()
+	sp3 := newSpinner("Quiet task", &buf)
+	sp3.Update("Quiet update")
+	sp3.Success("Quiet done")
+	if buf.Len() != 0 {
+		t.Errorf("expected quiet mode to produce no output, got: %q", buf.String())
+	}
+}
+
+func TestGzipWriterBodilessResponsesAndContentLength(t *testing.T) {
+	rec := httptest.NewRecorder()
+	gz, _ := gzip.NewWriterLevel(rec, gzip.BestSpeed)
+	gw := &gzipWriter{ResponseWriter: rec, w: gz}
+
+	// 1. Test 304 Not Modified
+	gw.Header().Set("Content-Length", "1234")
+	gw.Header().Set("Content-Encoding", "gzip")
+	gw.WriteHeader(http.StatusNotModified)
+	gz.Close()
+
+	if rec.Header().Get("Content-Length") != "" {
+		t.Errorf("expected Content-Length to be deleted on 304, got: %q", rec.Header().Get("Content-Length"))
+	}
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Errorf("expected Content-Encoding to be deleted on 304, got: %q", rec.Header().Get("Content-Encoding"))
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected no body written on 304, got %d bytes: %q", rec.Body.Len(), rec.Body.String())
+	}
+
+	// 2. Test 200 with normal body
+	rec2 := httptest.NewRecorder()
+	gz2, _ := gzip.NewWriterLevel(rec2, gzip.BestSpeed)
+	gw2 := &gzipWriter{ResponseWriter: rec2, w: gz2}
+	gw2.Header().Set("Content-Length", "999")
+	gw2.Header().Set("Content-Encoding", "gzip")
+	gw2.WriteHeader(http.StatusOK)
+	gw2.Write([]byte("hello compressed world"))
+	gz2.Close()
+
+	if rec2.Header().Get("Content-Length") != "" {
+		t.Errorf("expected Content-Length to be stripped from compressed response, got: %q", rec2.Header().Get("Content-Length"))
+	}
+	if rec2.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected Content-Encoding to be gzip on 200, got: %q", rec2.Header().Get("Content-Encoding"))
+	}
+	if rec2.Body.Len() == 0 {
+		t.Errorf("expected compressed body on 200")
+	}
+}
+
+func TestServerServeHTTPGzip(t *testing.T) {
+	s, _ := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected gzip Content-Encoding, got %q", rec.Header().Get("Content-Encoding"))
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("failed to create gzip reader on response body: %v (len=%d)", err, rec.Body.Len())
+	}
+	defer zr.Close()
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("failed to read decompressed body: %v", err)
+	}
+	if len(body) == 0 {
+		t.Errorf("expected non-empty decompressed body, got 0 bytes")
+	}
+	if !strings.Contains(string(body), "<!doctype html>") {
+		t.Errorf("expected html content in body")
+	}
+}
+
+func TestChildrenReturnsCopy(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0o644)
+	ix := NewIndex(dir)
+	ix.Build()
+
+	kids1, ok := ix.Children("")
+	if !ok || len(kids1) == 0 {
+		t.Fatalf("expected children at root")
+	}
+
+	// Mutating the returned slice must not mutate ix.children
+	kids1[0].Dirty = true
+	kids1[0].Status = "M"
+
+	kids2, _ := ix.Children("")
+	if kids2[0].Dirty != false || kids2[0].Status != "" {
+		t.Errorf("ix.Children did not return an isolated copy of node slice")
+	}
+}
+
+func TestLSPBoundsChecks(t *testing.T) {
+	c := &lspClient{encoding: "utf-32"}
+
+	// Test toLSP with negative column
+	pos := c.toLSP("hello", 1, -5)
+	if pos.Character != 0 {
+		t.Errorf("expected 0 for negative byteCol, got %d", pos.Character)
+	}
+
+	// Test fromLSP with negative character
+	lines := []string{"hello"}
+	line, col := c.fromLSP(lines, lspPosition{Line: 0, Character: -10})
+	if line != 1 || col != 0 {
+		t.Errorf("expected line 1 col 0 for negative character, got line %d col %d", line, col)
+	}
+}
+
+func TestSnipBoundsChecks(t *testing.T) {
+	// Negative from, out of bounds to, inverted range
+	m1 := snip([]byte("hello world"), -5, 100)
+	if m1.Mid != "hello world" {
+		t.Errorf("expected clamped mid 'hello world', got %q", m1.Mid)
+	}
+
+	m2 := snip([]byte("hello world"), 8, 3)
+	if m2.Mid != "" {
+		t.Errorf("expected empty mid for inverted range, got %q", m2.Mid)
+	}
+}
+
+func TestFuzzyCaseSensitivity(t *testing.T) {
+	files := []FileEntry{
+		{Path: "src/HTTPServer.go", Name: "HTTPServer.go", lower: "src/httpserver.go", nameStart: 4},
+		{Path: "src/httpserver.go", Name: "httpserver.go", lower: "src/httpserver.go", nameStart: 4},
+	}
+
+	// Uppercase query should rank exact-case match higher
+	res := FuzzyFind(files, "HTTPServer", 10)
+	if len(res) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(res))
+	}
+	if res[0].Path != "src/HTTPServer.go" {
+		t.Errorf("expected 'src/HTTPServer.go' to rank higher for query 'HTTPServer', got: %s", res[0].Path)
+	}
+}
+
+func TestSetRawHeaders(t *testing.T) {
+	cases := []struct {
+		path            string
+		wantContentType string
+		wantFilename    string
+	}{
+		{"index.html", "application/octet-stream", "index.html"},
+		{"app.js", "application/octet-stream", "app.js"},
+		{"main.go", "application/octet-stream", "main.go"},
+		{"nested/path/style.css", "application/octet-stream", "style.css"},
+		{"assets/logo.png", "image/png", "logo.png"},
+		{"assets/photo.jpg", "image/jpeg", "photo.jpg"},
+		{"assets/anim.gif", "image/gif", "anim.gif"},
+		{"assets/vector.svg", "image/svg+xml", "vector.svg"},
+		{"assets/icon.ico", "image/x-icon", "icon.ico"},
+		{"assets/pic.webp", "image/webp", "pic.webp"},
+	}
+
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		setRawHeaders(rec, c.path)
+
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: got nosniff header %q, want 'nosniff'", c.path, got)
+		}
+
+		gotCT := rec.Header().Get("Content-Type")
+		if strings.HasPrefix(c.wantContentType, "image/") {
+			if !strings.HasPrefix(gotCT, "image/") {
+				t.Errorf("%s: got Content-Type %q, want image/*", c.path, gotCT)
+			}
+		} else if gotCT != c.wantContentType {
+			t.Errorf("%s: got Content-Type %q, want %q", c.path, gotCT, c.wantContentType)
+		}
+
+		gotCD := rec.Header().Get("Content-Disposition")
+		if !strings.HasPrefix(gotCD, "attachment") || !strings.Contains(gotCD, c.wantFilename) {
+			t.Errorf("%s: got Content-Disposition %q, expected attachment containing %q", c.path, gotCD, c.wantFilename)
+		}
+	}
+}
+
+func TestRawEndpointHeaders(t *testing.T) {
+	s, root := newTestServer(t)
+
+	// Create test files
+	files := map[string]string{
+		"evil.html": "<!DOCTYPE html><html><script>alert(1)</script></html>",
+		"icon.svg":  `<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`,
+		"data.json": `{"foo": "bar"}`,
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		rel             string
+		wantContentType string
+		wantDisposition string
+	}{
+		{"main.go", "application/octet-stream", "main.go"},
+		{"evil.html", "application/octet-stream", "evil.html"},
+		{"data.json", "application/octet-stream", "data.json"},
+		{"icon.svg", "image/svg+xml", "icon.svg"},
+	}
+
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/raw?path="+url.QueryEscape(tc.rel), nil)
+		s.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d (body: %s)", tc.rel, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: X-Content-Type-Options = %q, want nosniff", tc.rel, got)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, tc.wantContentType) {
+			t.Errorf("%s: Content-Type = %q, want %q", tc.rel, got, tc.wantContentType)
+		}
+		if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, tc.wantDisposition) {
+			t.Errorf("%s: Content-Disposition = %q, want %q", tc.rel, got, tc.wantDisposition)
+		}
+	}
+}
+
+func TestContentSecurityPolicyHeader(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	endpoints := []string{"/", "/api/meta", "/api/raw?path=main.go"}
+	for _, ep := range endpoints {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		s.ServeHTTP(rec, req)
+
+		csp := rec.Header().Get("Content-Security-Policy")
+		if csp == "" {
+			t.Fatalf("%s: missing Content-Security-Policy header", ep)
+		}
+		if csp != contentSecurityPolicy {
+			t.Errorf("%s: got CSP %q, want %q", ep, csp, contentSecurityPolicy)
+		}
+
+		requiredDirectives := []string{
+			"default-src 'self'",
+			"script-src 'self'",
+			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+			"font-src 'self' https://fonts.gstatic.com",
+			"img-src 'self' data: https: http:",
+			"connect-src 'self'",
+			"object-src 'none'",
+			"base-uri 'self'",
+			"frame-ancestors 'none'",
+			"form-action 'none'",
+		}
+		for _, dir := range requiredDirectives {
+			if !strings.Contains(csp, dir) {
+				t.Errorf("%s: CSP missing directive %q", ep, dir)
+			}
+		}
+	}
+}
+
+
+
+

@@ -36,6 +36,18 @@ const (
 // snip turns one raw line plus a byte range into a display-ready match,
 // dropping indentation and keeping the match itself in view.
 func snip(line []byte, from, to int) Match {
+	if from < 0 {
+		from = 0
+	}
+	if from > len(line) {
+		from = len(line)
+	}
+	if to < from {
+		to = from
+	}
+	if to > len(line) {
+		to = len(line)
+	}
 	pre, mid, post := string(line[:from]), string(line[from:to]), string(line[to:])
 
 	trimmed := strings.TrimLeft(pre, " \t")
@@ -59,25 +71,29 @@ func snip(line []byte, from, to int) Match {
 	return Match{Pre: pre, Mid: mid, Post: strings.TrimRight(post, " \t")}
 }
 
+// FileMatches groups all search hits found within a single file.
 type FileMatches struct {
-	Path    string  `json:"path"`
-	Matches []Match `json:"matches"`
+	Path    string  `json:"path"`    // Workspace-relative path to the file
+	Matches []Match `json:"matches"` // List of snippet matches within this file
 }
 
+// SearchOpts specifies the configuration for a workspace text search query.
 type SearchOpts struct {
-	Query     string
-	Regex     bool
-	Case      bool
-	Word      bool
-	Glob      string
-	MaxFiles  int
-	MaxPerFil int
+	Query     string // Search string or regex pattern
+	Regex     bool   // Interpret Query as regular expression
+	Case      bool   // Case-sensitive search (if false, uses fast ASCII case folding)
+	Word      bool   // Match whole words only (\b...\b)
+	Glob      string // Optional glob or path filter (e.g. "*.go" or "src/")
+	MaxFiles  int    // Maximum number of files to return hits from (defaults to 200)
+	MaxPerFil int    // Maximum number of matches per file (defaults to 50)
 	// classifyDefs marks hits whose line looks like a declaration of Query.
 	classifyDefs bool
 }
 
-const searchFileCap = 8 << 20 // do not grep blobs
+const searchFileCap = 8 << 20 // do not grep blobs (cap at 8MB)
 
+// searcher compiles search options into precomputed patterns, byte slices,
+// and glob rules for high-speed parallel file grepping.
 type searcher struct {
 	opts   SearchOpts
 	re     *regexp.Regexp            // nil for the literal fast path
@@ -86,6 +102,7 @@ type searcher struct {
 	defRes map[string]*regexp.Regexp // ext -> declaration pattern for Query
 }
 
+// newSearcher creates and pre-compiles regexes and literal needles for search execution.
 func newSearcher(o SearchOpts) (*searcher, error) {
 	s := &searcher{opts: o}
 	if o.Glob != "" {

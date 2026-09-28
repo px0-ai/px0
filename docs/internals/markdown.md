@@ -242,7 +242,7 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 
 ## 10. Limits and Known Gaps
 
-- Files over 4 MB are not previewed.
+- Markdown files over 4 MB are not previewed. CSV and TSV files show their first 1,000 rows or 1 MB (section 12).
 - Fences over 256 KB and fences without a language are not highlighted.
 - Mermaid diagrams and math render as code blocks.
 - The preview does not reload when the file changes on disk. Close and reopen the tab.
@@ -258,3 +258,31 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 - `TestHeadingIDsFollowGitHub` checks the id rules and deduplication.
 
 The sanitizer, link routing, position sync and switch run only in a browser and have no automated test in the repository.
+
+## 12. Table Preview (CSV / TSV)
+
+CSV and TSV tabs reuse this overlay. `/api/file` returns `"table": true` for `.csv` and `.tsv`, the tab records `d.table`, and `previewKind(d)` returns `'markdown'`, `'table'` or `''`. `previewing(d)` reads `S.mdPreview` or `S.tablePreview` to match, so each kind keeps its own setting (`px0.mdPreview` / `px0.tablePreview` in localStorage, `markdown.preview.open` / `table.preview.open` in settings). Everything else in sections 6–9 (position sync, switch, find, select all, keys) is shared, because table rows carry `data-line` the same way Markdown blocks do.
+
+### Endpoint
+
+`GET /api/table?path=<path>` ([`table.go`](../../table.go)) resolves the path like `/api/markdown`, answers 415 for other extensions, and parses with `encoding/csv` (`LazyQuotes`, `FieldsPerRecord = -1`). `Comma` comes from `sniffDelim`: it peeks at the first 64 KB, takes the first non-blank line, and counts comma, tab, semicolon and pipe outside double quotes. The most frequent wins, and the extension's separator (`.csv` → comma, `.tsv` → tab) wins ties and files with none. Misnamed files are common: a tab-separated `.csv` read with commas comes out as one cell per line. The first record is the header, with a leading UTF-8 BOM removed. It returns:
+
+```json
+{ "header": ["repo", "files"], "headerLine": 1,
+  "rows": [{ "line": 2, "cells": ["linux", "81902"] }],
+  "cols": 2, "truncated": false }
+```
+
+`line` is `csv.Reader.FieldPos(0)`: the line the record's first cell starts on. Quoted cells that span lines and skipped blank lines therefore keep row numbers equal to source lines.
+
+### Caps
+
+`renderTable(r, size, fallback)` reads through `io.LimitReader(r, 1 MiB)` and stops after 1,000 data rows, so cost is bounded by the cap, not the file (a 50 MB file answers in well under a second). When the limit reader stops short of the end of the file (`size` over the cap), the last record may be cut in half: it is dropped and `truncated` is set. A parse error under the byte cap is ignored for the same reason. An error in a file read to its end returns 422.
+
+### Rendering
+
+`buildTable` ([`web/src/table.js`](../../web/src/table.js)) creates every cell with `textContent`. Nothing from the file is parsed as HTML, so the table needs no sanitizer. `drawPreview` sets the article's class to `csv` (the `.md` styles do not apply) and caches the rows in `d.tableData`. Cells use `white-space: pre-wrap` with `max-width: 48ch` and `overflow-wrap: break-word`, so long text wraps inside its column (checked in Chromium, WebKit and Firefox, which all honour `max-width` on cells of a `width: max-content` table). The header `th` cells and the `.ln` gutter are `position: sticky`; `mdGap()` returns the header row's height for tables, so `previewLine` places a row just under the pinned header instead of behind it. The header row is skipped as a scroll target (a line at or before it scrolls to the top), and `previewTopLine` returns the header's line while the table is unscrolled. `findInPreview` unwraps any match inside the `.ln` gutter or the footer, so counts and stepping cover cells only. The footer's **Open Source** button calls `togglePreview()`. It states the number of rows shown and the file's line count (`d.total`); counting rows in the whole file would mean parsing all of it.
+
+### Tests
+
+[`table_test.go`](../../table_test.go) holds the parsing rules (quoted comma and newline, line skipping, ragged rows, TSV, BOM, blank lines, stray quotes, empty file, row cap, exactly-at-cap), separator detection and ties, the endpoint and `table` flag, and the byte cap: an endless reader proves no more than 1 MiB is read and that the record the cap cuts through is dropped. The browser behaviour was checked with a headless Playwright run in Chromium, WebKit and Firefox; there is no browser test in the repository.

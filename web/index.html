@@ -2,6 +2,7 @@
 <html lang="en" data-theme="github-dark">
 <head>
 <meta charset="utf-8">
+<base href="/">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>px0</title>
 <link rel="icon" type="image/x-icon" href="https://px0.ai/favicon.ico">
@@ -10,16 +11,70 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="static/style.css">
 <!-- Every web/themes/*.css joined by the server. See docs/internals/styling-and-themes.md. -->
-<link rel="stylesheet" href="/static/themes.css">
+<link rel="stylesheet" href="static/themes.css">
 </head>
 <body class="right-hidden">
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-collapse-tree" class="mini" title="Collapse all folders" aria-label="Collapse all folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 11 12 6 17 11"/><polyline points="7 18 12 13 17 18"/></svg></button><button id="btn-expand-tree" class="mini" title="Expand all project folders (ignored folders stay closed)" aria-label="Expand all project folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 6 12 11 17 6"/><polyline points="7 13 12 18 17 13"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
     <div class="panel-body" id="tree"></div>
+    <div id="git-panel" class="git-panel" hidden>
+      <div id="git-panel-resizer" class="git-panel-resizer" title="Drag to resize"></div>
+      <div class="git-panel-head">
+        <svg class="git-panel-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Git Panel"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg>
+        <span id="git-branch" class="git-branch"></span>
+        <span id="git-counts" class="git-counts"></span>
+        <span class="grow"></span>
+        <button id="git-panel-collapse" class="pr-comments-collapse" title="Collapse">&#9662;</button>
+      </div>
+      <div id="git-panel-body" class="git-panel-body">
+        <button id="git-token-nudge" class="git-token-nudge" type="button" hidden title="Set GITHUB_TOKEN, set GH_TOKEN, or run 'gh auth login' -- or add one below">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>No GitHub token configured &mdash; add one</span>
+        </button>
+        <div id="git-commit-section" class="git-commit-section">
+          <div class="git-agent-picker">
+            <select id="git-harness" class="agent-harness-select" title="Coding harness"></select>
+            <select id="git-model" class="agent-model-select" title="Model"></select>
+            <div class="git-ai-row">
+              <button id="git-generate-msg" class="git-generate-btn" title="Stage all changes and write a commit message using the selected coding harness">Stage all + Commit with AI</button>
+            </div>
+          </div>
+          <textarea id="git-commit-msg" class="git-commit-msg" rows="3" spellcheck="false" autocomplete="off" placeholder="Commit message..." hidden></textarea>
+          <div class="git-instructions-wrap">
+            <a id="git-write-msg-link" class="git-instructions-link" href="#" role="button" title="Write the commit message yourself">write message</a>
+            <span class="git-link-sep" aria-hidden="true" hidden>&middot;</span>
+            <a id="git-generate-link" class="git-instructions-link" href="#" role="button" title="Generate a message for staged changes using the AI instructions" hidden>generate with AI</a>
+            <span class="git-link-sep" aria-hidden="true">&middot;</span>
+            <a id="git-instructions-link" class="git-instructions-link" href="#" role="button" title="Configure commit message instructions for AI in Settings">instructions for AI</a>
+          </div>
+          <div class="git-panel-actions git-commit-actions">
+            <button id="git-stage-all" class="footer-btn" title="Stage all changes">Stage All</button>
+            <button id="git-commit" class="footer-btn" title="Stage changes to commit" disabled>Commit</button>
+          </div>
+        </div>
+        <div id="git-clean-state" class="git-clean-state" hidden>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span>Working tree clean</span>
+        </div>
+        <div class="git-panel-actions git-sync-actions">
+          <button id="git-pull" class="footer-btn" title="Pull (fast-forward only; refuses on conflict)">Pull</button>
+          <button id="git-push" class="footer-btn" title="No unpushed commits to push" disabled>Push</button>
+        </div>
+        <div id="git-recent-commits" class="git-recent-commits">
+          <div class="git-recent-head">
+            <span class="git-recent-title">Recent Commits</span>
+          </div>
+          <div id="git-commits-list" class="git-commits-list"></div>
+          <div class="git-see-all-wrap">
+            <a id="git-see-all-commits" class="git-see-all-commits" href="#" target="_blank" rel="noopener">See all commits</a>
+          </div>
+        </div>
+      </div>
+    </div>
     <footer class="side-foot">
       <a class="side-logo" href="https://px0.ai" target="_blank" rel="noopener" title="px0.ai">
         <img class="logo-dark" src="https://px0.ai/logo/px0-logo-dark.png" alt="px0" width="35" height="13">
@@ -45,14 +100,39 @@
 
   <!-- SECTION: Main Editor Area -->
   <main id="main">
+    <!-- PR review bar: shown only when this session is `px0 pr ...` (web/src/pr.js) -->
+    <div id="pr-bar" class="pr-bar" hidden>
+      <div class="pr-bar-row">
+        <a id="pr-link" class="pr-link" target="_blank" rel="noopener noreferrer" title="Open on GitHub">
+          <span id="pr-badge" class="pr-badge"></span>
+          <span id="pr-title" class="pr-title"></span>
+        </a>
+        <span id="pr-merged-badge" class="pr-merged-badge" hidden>Merged</span>
+        <span id="pr-refs" class="pr-refs"></span>
+        <span class="grow"></span>
+        <span id="pr-diff-warning" class="pr-diff-warning" hidden>&#9888; diff base unresolved</span>
+        <button id="pr-readonly-note" class="pr-readonly-note" type="button" hidden title="Set GITHUB_TOKEN, set GH_TOKEN, or run 'gh auth login' -- or click to connect">No GitHub token &mdash; click to connect</button>
+        <span id="pr-draft-count" class="pr-draft-count"></span>
+      </div>
+      <div class="pr-bar-row pr-review-row">
+        <textarea id="pr-review-body" class="pr-review-body" rows="1" spellcheck="false" autocomplete="off" placeholder="Review summary / verdict comment (optional)..."></textarea>
+        <button id="pr-batch-apply" class="footer-btn pr-btn-batch-apply" hidden title="Dispatch AI agent to apply all draft review comments directly to the codebase">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="footer-btn-icon"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+          <span class="footer-btn-label">Batch Apply</span>
+        </button>
+        <button id="pr-submit-comment" class="footer-btn pr-btn-neutral" title="Submit review with drafts, without approval or change requests">Submit Review</button>
+        <button id="pr-submit-request-changes" class="footer-btn pr-btn-request-changes" hidden title="Request changes on this PR">Request Changes</button>
+        <button id="pr-submit-approve" class="footer-btn pr-btn-approve" hidden title="Approve this PR">Approve</button>
+      </div>
+    </div>
     <!-- File Tabs -->
     <div id="tabs"></div>
     <!-- View-mode switches, pinned to the right of the tab bar -->
     <div id="view-switches">
       <!-- Markdown tabs only: switch between the rendered file and its source -->
-      <div id="md-switch" class="view-switch" role="group" aria-label="Markdown view" hidden>
-        <button data-md="preview" title="Rendered Markdown ({Alt+M})">Preview</button>
-        <button data-md="source" title="Markdown source ({Alt+M})">Source</button>
+      <div id="md-switch" class="view-switch" role="group" aria-label="Preview or source" hidden>
+        <button data-md="preview" title="Rendered view ({Alt+M})">Preview</button>
+        <button data-md="source" title="File source ({Alt+M})">Source</button>
       </div>
       <!-- Modified files in a git repo only: view the file's diff against HEAD -->
       <div id="diff-switch" class="view-switch diff-dropdown" role="group" aria-label="Diff view" hidden>
@@ -83,6 +163,8 @@
         </div>
         </div>
       </div>
+      <!-- Opens the right sidebar; shown only while it is closed -->
+      <button id="btn-open-right" class="open-right" title="Open sidebar ({Mod+J})" aria-label="Open right sidebar"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     </div>
 
     <!-- Virtualized Code Editor Viewport -->
@@ -91,7 +173,7 @@
       <div id="viewport">
         <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
       </div>
-      <!-- Markdown preview: covers the code view for a Markdown tab (Alt+M toggles) -->
+      <!-- Preview: covers the code view for a Markdown tab, or a CSV/TSV tab as a table (Alt+M toggles) -->
       <div id="mdview" hidden><article id="md" class="md"></article></div>
       <!-- Diff view: covers the code view while a diff layout is active (Mod+D toggles) -->
       <div id="diffview" hidden><div id="diffcontent"></div></div>
@@ -160,32 +242,6 @@
         <button id="find-close" title="Close ({Esc})">&#10005;</button>
       </div>
 
-      <!-- Instruction composers: stacked box per edit in flight or being composed.
-           When multiple edits exist, #agent-batch-bar provides unified controls to apply all. -->
-      <div id="agentbox" hidden>
-        <div id="agent-batch-bar" class="agent-batch-bar" hidden>
-          <div class="agent-batch-header">
-            <div class="agent-batch-title-row">
-              <span class="agent-batch-badge">Batch Edit</span>
-              <span id="agent-batch-count" class="agent-batch-count">0 comments</span>
-              <span class="grow"></span>
-              <button id="agent-batch-clear" class="agent-batch-clear" title="Clear all comments">Clear All</button>
-            </div>
-            <div class="agent-batch-meta">
-              <span class="agent-meta-label">Model</span>
-              <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness"></select>
-              <select id="agent-batch-model" class="agent-model-select" title="Model"></select>
-            </div>
-          </div>
-          <div class="agent-batch-actions">
-            <span id="agent-batch-hint" class="agent-hint">Mod+Enter to apply all</span>
-            <button id="agent-batch-cancel" class="agent-cancel" title="Cancel in-flight batch edits" hidden>Cancel</button>
-            <button id="agent-batch-apply" class="agent-send agent-batch-apply" title="Apply all comments ({Mod+Enter})">Apply All</button>
-          </div>
-          <div id="agent-batch-err" class="agent-err" hidden></div>
-        </div>
-        <div id="agentbox-list" class="agentbox-list"></div>
-      </div>
       <template id="agentbox-tpl">
         <div class="agent-box">
           <div class="agent-head">
@@ -199,19 +255,48 @@
             <select class="agent-harness-select" title="Coding harness"></select>
             <select class="agent-model-select" title="Model"></select>
           </div>
+          <!-- A comment that has been added to the batch: click to edit it again -->
+          <button class="agent-queued" title="Click to edit this comment" hidden></button>
           <!-- Shown until a harness has been picked, and whenever one is changed -->
           <div class="agent-pick" hidden></div>
           <div class="agent-compose">
-            <textarea class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Edit comment / instruction... (Mod+Enter to apply all)"></textarea>
+            <textarea class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Describe the change. Add it as a comment to batch with others, or apply it right away."></textarea>
             <div class="agent-err" hidden></div>
             <div class="agent-foot">
               <span class="agent-hint">Enter to send, Esc to cancel</span>
               <button class="agent-cancel" title="Cancel in-flight edit" hidden>Cancel</button>
-              <button class="agent-send" title="Send edit instruction ({Mod+Enter})">Send</button>
+              <button class="agent-open-thread agent-now" title="Watch this edit as a thread" hidden>View thread</button>
+              <button class="agent-now" title="Run just this comment now ({Mod+Enter})">Apply now</button>
+              <button class="agent-send" title="Keep this comment and add more, then apply them all together ({Enter})">Add comment</button>
             </div>
           </div>
         </div>
       </template>
+
+      <!-- Draft review comment composers: one .agent-box per open composer,
+           each pinned beside the diff line it's on (or docked bottom-right
+           when that file isn't the one on screen). web/src/pr.js owns it. -->
+      <div id="pr-comment-list" class="pr-comment-list" hidden></div>
+    </div>
+
+    <!-- PR comments bottom panel: existing GitHub comments (top-level and
+         inline) plus your own draft review comments, open by default for the
+         life of a PR review session. web/src/pr.js owns everything in it. -->
+    <div id="pr-comments-panel" class="pr-comments-panel collapsed" hidden>
+      <div id="pr-comments-resizer" class="pr-comments-resizer" title="Drag to resize"></div>
+      <div class="pr-comments-panel-head">
+        <span class="pr-comments-panel-title">Comments</span>
+        <span id="pr-comments-count" class="pr-comments-count"></span>
+        <span class="grow"></span>
+        <button id="pr-comments-collapse" class="pr-comments-collapse" title="Expand/collapse comments panel">&#9662;</button>
+      </div>
+      <div id="pr-comments-body" class="pr-comments-body">
+        <div id="pr-comments-list" class="pr-comments-list"></div>
+        <div id="pr-issue-compose" class="pr-issue-compose">
+          <textarea id="pr-issue-compose-body" class="pr-review-body" rows="2" spellcheck="false" autocomplete="off" placeholder="Write a comment on the PR conversation..."></textarea>
+          <button id="pr-issue-compose-send" class="footer-btn">Post Comment</button>
+        </div>
+      </div>
     </div>
 
     <!-- Floating Copy Toast Notification -->
@@ -220,24 +305,31 @@
     <!-- Selection context menu: the footer's selection actions, at the pointer -->
     <div id="sel-menu" role="menu" hidden></div>
 
+    <!-- Tree context menu: file & folder actions on the left sidebar -->
+    <div id="tree-menu" role="menu" hidden></div>
+
     <!-- Metrics menu, opened from CPU/RAM status bar -->
     <div id="metrics-menu" role="menu" hidden></div>
+
+    <!-- LSP management menu, opened from LSP status bar button -->
+    <div id="lsp-menu" role="menu" hidden></div>
 
     <!-- Bottom Status Bar -->
     <footer id="status">
       <!-- Selection actions: replace the buttons and size below while code is selected -->
       <div id="footer-sel">
         <span class="sel-chip">Selection</span>
+        <button class="footer-btn" data-sel="thread" title="Start a thread on this selection ({Alt+T})"><span class="footer-btn-label">Thread</span><kbd class="footer-kbd" data-keys="Alt+T"></kbd></button>
+        <button class="footer-btn" data-sel="agent-edit" title="Edit this selection inline ({Alt+E})"><span class="footer-btn-label">Edit Inline</span><kbd class="footer-kbd" data-keys="Alt+E"></kbd></button>
         <button class="footer-btn" data-sel="copy-ref" title="Copy file and line reference ({Alt+C})"><span class="footer-btn-label">Copy Ref</span><kbd class="footer-kbd" data-keys="Alt+C"></kbd></button>
         <button class="footer-btn" data-sel="copy-agent" title="Copy snippet with file path and line numbers ({Alt+A})"><span class="footer-btn-label">Copy with Context</span><kbd class="footer-kbd" data-keys="Alt+A"></kbd></button>
-        <button class="footer-btn" data-sel="agent-edit" title="Edit this selection inline ({Alt+E})"><span class="footer-btn-label">Edit Inline</span><kbd class="footer-kbd" data-keys="Alt+E"></kbd></button>
       </div>
       <div id="footer-actions">
         <button class="footer-btn" data-action="quick-open" title="Go to File ({Mod+P})"><span class="footer-btn-label">Files</span><kbd class="footer-kbd" data-keys="Mod+P"></kbd></button>
         <button class="footer-btn" data-action="search" title="Search in Files ({Mod+Shift+F})"><span class="footer-btn-label">Search</span><kbd class="footer-kbd" data-keys="Mod+Shift+F"></kbd></button>
         <button class="footer-btn" data-action="find" title="Find in File ({Mod+F})"><span class="footer-btn-label">Find in File</span><kbd class="footer-kbd" data-keys="Mod+F"></kbd></button>
         <button class="footer-btn" data-action="goto" title="Go to Line ({Mod+G})"><span class="footer-btn-label">Go to</span><kbd class="footer-kbd" data-keys="Mod+G"></kbd></button>
-        <button class="footer-btn" data-action="md-preview" title="Toggle Markdown Preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
+        <button class="footer-btn" data-action="md-preview" title="Toggle Markdown / table preview ({Alt+M})" hidden><span class="footer-btn-label">Preview</span><kbd class="footer-kbd" data-keys="Alt+M"></kbd></button>
         <button class="footer-btn" data-action="wrap" title="Toggle Word Wrap ({Alt+Z})"><span class="footer-btn-label">Wrap</span><kbd class="footer-kbd" data-keys="Alt+Z"></kbd></button>
         <button class="footer-btn" id="btn-vim-help" data-action="vim-help" title="Vim Keybindings" hidden><span class="footer-btn-label">Vim Keys</span><kbd class="footer-kbd">?</kbd></button>
         <button class="footer-btn" data-action="help" title="Keyboard Shortcuts ({?})"><span class="footer-btn-label">Help</span><kbd class="footer-kbd" data-keys="?"></kbd></button>
@@ -247,13 +339,17 @@
       <span id="st-size"></span>
       <span id="st-pos"></span>
       <span class="grow"></span>
-      <span id="st-lsp"></span>
+      <span id="st-lsp" role="button" tabindex="0" title="Language Servers (Click to manage)">LSP</span>
       <span id="sel-stats"></span>
       <span class="status-sep"></span>
       <span id="st-metrics" class="status-metrics" role="button" tabindex="0">
         <span class="metric"><span class="metric-label">CPU</span> <span id="st-cpu">--%</span></span>
         <span class="metric-divider">·</span>
         <span class="metric"><span class="metric-label">RAM</span> <span id="st-ram">-- MB</span></span>
+        <span id="st-lspmem-wrap" class="status-metrics-group" hidden>
+          <span class="metric-divider">·</span>
+          <span class="metric"><span class="metric-label">LSP</span> <span id="st-lspmem">-- MB</span></span>
+        </span>
       </span>
     </footer>
   </main>
@@ -265,6 +361,8 @@
   <aside id="right-side">
     <header class="inspector-head">
       <div class="inspector-tabs">
+        <button class="inspector-tab" data-itab="threads" id="tab-threads" title="Long-running conversations with a coding harness ({Alt+T} on a selection)" hidden>Threads<span class="thr-tab-count" hidden></span><span class="thr-tab-dot" hidden></span></button>
+        <button class="inspector-tab" data-itab="problems" id="tab-problems" title="Compiler, type, and linter problems in active file ({Mod+Shift+M})">Problems<span class="prob-tab-badge" id="prob-tab-badge" hidden></span></button>
         <button class="inspector-tab active" data-itab="refs" title="View references across workspace">References</button>
         <button class="inspector-tab" data-itab="symbols" title="View file symbols outline">Symbols</button>
         <button class="inspector-tab" data-itab="calls" title="Trace callers and callees ({Alt+Shift+H})">Calls</button>
@@ -274,6 +372,21 @@
         <button id="btn-close-right" class="mini" title="Close inspector (Esc)">&#10005;</button>
       </div>
     </header>
+
+    <!-- Right Pane 0: Problems / Diagnostics for active file -->
+    <section class="inspector-pane" id="pane-right-problems">
+      <div class="inspector-bar prob-bar">
+        <span class="inspector-sym-title" id="prob-summary">Problems</span>
+        <div class="prob-filters" id="prob-filters">
+          <button class="opt on" data-prob-filter="all" title="All problems in file">All</button>
+          <button class="opt" data-prob-filter="changed" id="prob-filter-changed" title="Problems on added or modified lines" hidden>Changed lines</button>
+          <button class="opt" data-prob-filter="errors" title="Errors only">Errors</button>
+        </div>
+      </div>
+      <div class="panel-body prob-body" id="prob-list">
+        <div class="hint">Loading diagnostics…</div>
+      </div>
+    </section>
 
     <!-- Right Pane 1: References for active symbol -->
     <section class="inspector-pane active" id="pane-right-refs">
@@ -321,6 +434,70 @@
       </div>
       <div class="panel-body" id="results">
         <div class="hint">Search text across every indexed file.</div>
+      </div>
+    </section>
+    <!-- Right Pane 5: Threads. Long-running, multi-turn conversations with a
+         coding harness, anchored to code. web/src/thread.js owns it. -->
+    <section class="inspector-pane" id="pane-right-threads">
+    <!-- Inline edit comments: one box per edit being composed or in flight, kept at the top of the
+         Threads pane. #agent-batch-bar applies every added comment together, and each applied
+         edit becomes a thread in the list below. web/src/agent.js owns it. -->
+    <div id="agentbox" hidden>
+      <div id="agent-batch-bar" class="agent-batch-bar" hidden>
+        <div class="agent-batch-header">
+          <div class="agent-batch-title-row">
+            <span class="agent-batch-badge">Batch</span>
+            <span id="agent-batch-count" class="agent-batch-count">No comments yet</span>
+            <span class="grow"></span>
+            <button id="agent-batch-clear" class="agent-batch-clear" title="Clear all comments">Clear All</button>
+          </div>
+          <div class="agent-batch-meta">
+            <span class="agent-meta-label">Model</span>
+            <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness"></select>
+            <select id="agent-batch-model" class="agent-model-select" title="Model"></select>
+          </div>
+        </div>
+        <div class="agent-batch-actions">
+          <span id="agent-batch-hint" class="agent-hint"></span>
+          <button id="agent-batch-open" class="agent-now" title="Watch this batch as a thread" hidden>View thread</button>
+          <button id="agent-batch-cancel" class="agent-cancel" title="Cancel in-flight batch edits" hidden>Cancel</button>
+          <button id="agent-batch-apply" class="agent-send agent-batch-apply" title="Apply all comments together ({Mod+Shift+Enter})">Apply All</button>
+        </div>
+        <div id="agent-batch-err" class="agent-err" hidden></div>
+      </div>
+      <div id="agentbox-list" class="agentbox-list"></div>
+    </div>
+      <div id="thr-list-view" class="thr-view">
+        <div class="inspector-bar">
+          <span class="calls-dir" id="thr-filter">
+            <button class="opt on" data-thr-filter="all" title="Every thread in this workspace">All</button>
+            <button class="opt" data-thr-filter="file" title="Threads started in the open file">This file</button>
+          </span>
+          <button id="thr-new" class="thr-btn-primary" title="Start a thread about the workspace or the selection">+ New</button>
+        </div>
+        <div class="panel-body" id="thr-list"></div>
+      </div>
+      <div id="thr-thread-view" class="thr-view" hidden>
+        <div class="inspector-bar thr-head">
+          <button id="thr-back" class="mini" title="All threads" aria-label="All threads">&#8592;</button>
+          <span class="inspector-sym-title" id="thr-title">New thread</span>
+          <button id="thr-delete" class="mini" title="Delete this thread" aria-label="Delete thread" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+        </div>
+        <div id="thr-anchor" class="thr-anchor" hidden></div>
+        <div id="thr-msgs" class="thr-msgs"></div>
+        <div class="thr-compose">
+          <div class="agent-meta">
+            <span class="agent-meta-label">Model</span>
+            <select class="agent-harness-select" id="thr-harness" title="Coding harness"></select>
+            <select class="agent-model-select" id="thr-model" title="Model"></select>
+          </div>
+          <textarea id="thr-input" class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Ask about this code, or ask for changes anywhere..."></textarea>
+          <div class="agent-foot">
+            <span class="agent-hint" id="thr-hint">Enter to send, Shift+Enter for a new line</span>
+            <button id="thr-stop" class="agent-cancel" title="Stop this reply" hidden>Stop</button>
+            <button id="thr-send" class="agent-send" title="Send message">Send</button>
+          </div>
+        </div>
       </div>
     </section>
   </aside>
@@ -381,6 +558,20 @@
       <div id="settings-raw-error" class="settings-error-banner" hidden></div>
       <textarea id="settings-raw-editor" spellcheck="false" autocomplete="off" wrap="off"></textarea>
     </div>
+
+    <!-- Settings Footer with Explicit Save Button -->
+    <footer id="settings-footer" class="settings-footer">
+      <div id="settings-footer-status" class="settings-footer-status is-saved">
+        <svg id="settings-status-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="settings-status-text">All changes saved</span>
+      </div>
+      <div class="settings-footer-actions">
+        <button type="button" id="btn-settings-save" class="settings-btn-save" title="Save settings ({Mod+S})">
+          <svg class="settings-btn-save-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span id="settings-btn-save-label">Save</span>
+        </button>
+      </div>
+    </footer>
   </div>
 </div>
 
@@ -408,6 +599,6 @@
 <!-- Invisible text node to measure font metrics in DOM -->
 <span id="measure">0</span>
 
-<script src="/static/app.js"></script>
+<script src="static/app.js"></script>
 </body>
 </html>

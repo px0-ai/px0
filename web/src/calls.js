@@ -150,11 +150,6 @@ export function initCalls() {
     if (!T && (S.at || S.lsp.state === 'off' || S.lsp.state === 'failed')) showCalls(S.at);
   });
 
-  // The status bar names a missing or failed server; clicking it goes to the fix.
-  $('#st-lsp')?.addEventListener('click', () => {
-    if (S.lsp.missing || S.lsp.state === 'failed') openLspSetup();
-  });
-
   listEl()?.addEventListener('click', async e => {
     const row = e.target.closest('.cnode');
     if (!row) return;

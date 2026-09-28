@@ -1,5 +1,5 @@
 // web/src/renderer.js
-import { $, S, doc_, api, LH, CHUNK, OVERSCAN } from './state.js';
+import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 
 export function measure() {
@@ -85,8 +85,16 @@ export function paint() {
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';
       if (gut.dels.has(n)) rc += ' gut-del';
     }
+    let probTitle = '';
+    if (d.problemsByLine && d.problemsByLine.has(n)) {
+      const probs = d.problemsByLine.get(n);
+      const worst = probs[0].severityNum;
+      gc += worst === 1 ? ' prob-err' : (worst === 2 ? ' prob-warn' : ' prob-info');
+      probTitle = esc(probs.map(p => p.message).join(' • '));
+    }
+    const gTitleAttr = probTitle ? ' title="' + probTitle + '"' : '';
     html += '<div class="' + rc + '" data-l="' + n + '">' +
-      '<div class="' + gc + '">' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
+      '<div class="' + gc + '"' + gTitleAttr + '><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions"></span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
   }
   const sel = saveSelection();
   rowsEl.style.transform = 'translateY(' + (first * LH) + 'px)';
@@ -110,6 +118,7 @@ export function placeCaret() {
   const row = d && rowFor(d.cur);
   if (!row) { el.hidden = true; return null; }
   const code = $('.c', row);
+  if (!code) { el.hidden = true; return null; }
   const col = Math.max(0, Math.min(d.col || 0, code.textContent.length));
   const [node, off] = toPoint({ line: d.cur, col });
   const base = sizer.getBoundingClientRect();
@@ -187,6 +196,7 @@ export function toPoint({ line, col }) {
   const row = rowFor(line);
   if (!row) return null;
   const code = $('.c', row);
+  if (!code) return null;
   const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
   let at = 0;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {

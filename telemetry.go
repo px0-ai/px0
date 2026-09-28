@@ -29,6 +29,9 @@ type telemetryEvent struct {
 	Properties map[string]any `json:"properties"`
 }
 
+// TelemetryService provides non-blocking, anonymous usage telemetry.
+// Events are buffered in a queue and sent asynchronously to prevent delaying startup or UI responsiveness.
+// No file names, code contents, commit messages, or personal identifiable information are ever collected.
 type TelemetryService struct {
 	enabled    bool
 	apiKey     string

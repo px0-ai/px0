@@ -4,16 +4,35 @@ import { vp, editor, copyToClipboard } from './ui.js';
 import { paint } from './renderer.js';
 import { setLspState } from './status.js';
 import { wordAtPoint } from './cursor.js';
-import { findReferences } from './lsp.js';
+import { gotoDefinition, findReferences } from './lsp.js';
 import { showCalls } from './calls.js';
+import { diffview } from './diff.js';
 
 export const hovercard = $('#hovercard');
 export const HOVER_DELAY = 380;   // rest time before the card opens
 export const HOVER_KEEP = 26;     // px the pointer may drift before the card closes
 
 let hoverTimer = 0, hoverSeq = 0, moveRAF = 0, pendingMove = null, pointerAt = null;
+let hideTimer = 0;
 
 const sameWord = (a, b) => !!a && !!b && a.line === b.line && a.col === b.col && a.word === b.word;
+
+function isInsideCard(x, y, padding = 16) {
+  if (!hovercard || hovercard.hidden || x == null || y == null) return false;
+  const r = hovercard.getBoundingClientRect();
+  return x >= r.left - padding && x <= r.right + padding &&
+         y >= r.top - padding && y <= r.bottom + padding;
+}
+
+function isInCorridor(x, y, buffer = 48) {
+  if (!S.hoverAnchor || !hovercard || hovercard.hidden || x == null || y == null) return false;
+  const r = hovercard.getBoundingClientRect();
+  const minX = Math.min(S.hoverAnchor.x, r.left) - buffer;
+  const maxX = Math.max(S.hoverAnchor.x, r.right) + buffer;
+  const minY = Math.min(S.hoverAnchor.y, r.top) - buffer;
+  const maxY = Math.max(S.hoverAnchor.y, r.bottom) + buffer;
+  return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}
 
 /* Hit-testing a point costs a few milliseconds: it forces layout and walks the
    line's nodes. Far too much to spend on every animation frame, so it runs only
@@ -25,24 +44,35 @@ export function onMove({ x, y, mod }) {
     if (!sameWord(at, S.link)) {
       S.link = at;
       vp.classList.toggle('linking', !!at);
+      if (diffview) diffview.classList.toggle('linking', !!at);
       paint();
     }
     clearTimeout(hoverTimer);
+    clearTimeout(hideTimer);
     hideHover();
     return;
   }
 
-  if (S.link) { S.link = null; vp.classList.remove('linking'); paint(); }
+  if (S.link) {
+    S.link = null;
+    vp.classList.remove('linking');
+    if (diffview) diffview.classList.remove('linking');
+    paint();
+  }
 
-  // Dismiss an open card once the pointer has clearly left what it described.
-  if (S.hoverAnchor) {
-    if (!hovercard.hidden) {
-      const rect = hovercard.getBoundingClientRect();
-      if (x >= rect.left - 4 && x <= rect.right + 4 && y >= rect.top - 4 && y <= rect.bottom + 4) return;
+  // When hovercard is visible, keep it alive if moving towards or inside it
+  if (S.hoverAnchor && !hovercard.hidden) {
+    if (isInsideCard(x, y) || isInCorridor(x, y)) {
+      clearTimeout(hideTimer);
+      hideTimer = 0;
+      clearTimeout(hoverTimer);
+      return; // actively over the card or navigating towards it
     }
-    const dx = x - S.hoverAnchor.x, dy = y - S.hoverAnchor.y;
-    if (dx * dx + dy * dy > HOVER_KEEP * HOVER_KEEP) hideHover();
-    else return; // still on the same word: nothing to do
+    // Pointer has left both the card and the navigation corridor
+    if (!hideTimer) {
+      hideTimer = setTimeout(hideHover, 280);
+    }
+    return;
   }
 
   if (S.settings && (S.settings['lsp.hover.enabled'] === false || S.settings['lsp.enabled'] === false)) return;
@@ -67,6 +97,8 @@ export async function showHover(at, x, y) {
   setLspState(j);
   if (!j || j.empty || (!j.signature && !j.doc)) return;
 
+  clearTimeout(hideTimer);
+  hideTimer = 0;
   S.hover = at;
   S.hoverAnchor = { x, y };
   const refPath = d.path + ':' + at.line;
@@ -74,37 +106,52 @@ export async function showHover(at, x, y) {
     (j.signature ? '<div class="sig">' + j.signature + '</div>' : '') +
     (j.doc ? '<div class="doc">' + esc(j.doc) + '</div>' : '') +
     '<div class="actions">' +
+      '<button id="hc-def-src" title="' + withKeys('Jump to definition in Source ({Mod+Click})') + '">Definition (Source)</button>' +
+      '<button id="hc-def-diff" title="' + withKeys('Jump to definition in Diff ({Mod+Alt+Click})') + '">Definition (Diff)</button>' +
       '<button id="hc-copy-ref" title="Copy file and line reference">Copy Ref</button>' +
       '<button id="hc-copy-ai" title="Copy snippet with file path and line numbers">Copy with Context</button>' +
       '<button id="hc-find-refs" title="Find all usages across codebase">Usages</button>' +
       '<button id="hc-calls" title="' + withKeys('Trace callers and callees ({Alt+Shift+H})') + '">Calls</button>' +
     '</div>' +
     '<div class="foot"><b>' + esc(j.server || 'lsp') + '</b>' +
-    '<span>' + withKeys('{Mod+Click} definition') + '</span>' +
-    '<span>' + withKeys('{Shift+F12} references') + '</span></div>';
+    '<span>' + withKeys('{Mod+Click} source') + '</span>' +
+    '<span>' + withKeys('{Mod+Alt+Click} diff') + '</span>' +
+    '<span>' + withKeys('{Shift+F12} usages') + '</span></div>';
 
+  const btnDefSrc = hovercard.querySelector('#hc-def-src');
+  const btnDefDiff = hovercard.querySelector('#hc-def-diff');
   const btnRef = hovercard.querySelector('#hc-copy-ref');
   const btnAi = hovercard.querySelector('#hc-copy-ai');
   const btnRefs = hovercard.querySelector('#hc-find-refs');
+  const btnCalls = hovercard.querySelector('#hc-calls');
 
+  if (btnDefSrc) btnDefSrc.onclick = (e) => {
+    e.stopPropagation();
+    hideHover();
+    gotoDefinition(at, { view: 'source' });
+  };
+  if (btnDefDiff) btnDefDiff.onclick = (e) => {
+    e.stopPropagation();
+    hideHover();
+    gotoDefinition(at, { view: 'diff' });
+  };
   if (btnRef) btnRef.onclick = (e) => {
     e.stopPropagation();
-    copyToClipboard(refPath, 'Copied');
+    copyToClipboard(refPath, 'Copied', btnRef);
   };
   if (btnAi) btnAi.onclick = (e) => {
     e.stopPropagation();
-    const lineText = d.lines[at.line - 1] || at.word || '';
+    const lineText = (d.lines && d.lines[at.line - 1]) || at.word || '';
     const ext = d.path.split('.').pop() || '';
     const lineStr = 'line ' + at.line;
     const text = '@' + d.path + ' ' + lineStr + '\n```' + ext + '\n' + lineText + '\n```';
-    copyToClipboard(text, 'Copied');
+    copyToClipboard(text, 'Copied', btnAi);
   };
   if (btnRefs) btnRefs.onclick = (e) => {
     e.stopPropagation();
     hideHover();
     findReferences(at.word);
   };
-  const btnCalls = hovercard.querySelector('#hc-calls');
   if (btnCalls) btnCalls.onclick = (e) => {
     e.stopPropagation();
     hideHover();
@@ -133,6 +180,8 @@ export function placeHover(x, y) {
 }
 
 export function hideHover() {
+  clearTimeout(hideTimer);
+  hideTimer = 0;
   hoverSeq++;
   S.hover = null;
   S.hoverAnchor = null;
@@ -141,31 +190,72 @@ export function hideHover() {
 
 export function clearLink() {
   clearTimeout(hoverTimer);
+  clearTimeout(hideTimer);
+  hideTimer = 0;
   hideHover();
-  if (S.link) { S.link = null; vp.classList.remove('linking'); paint(); }
+  if (S.link) {
+    S.link = null;
+    vp.classList.remove('linking');
+    if (diffview) diffview.classList.remove('linking');
+    paint();
+  }
 }
 
 export function initHover() {
-  /* One mousemove handler drives both behaviours: with a modifier held the word
-     becomes a link, without one it gets an info card after a short rest. */
-  vp.addEventListener('mousemove', e => {
-    pointerAt = { x: e.clientX, y: e.clientY };
-    pendingMove = { x: e.clientX, y: e.clientY, mod: e[MOD] };
-    if (moveRAF) return;
-    moveRAF = requestAnimationFrame(() => {
-      moveRAF = 0;
-      const m = pendingMove;
-      pendingMove = null;
-      if (m) onMove(m);
-    });
+  hovercard.addEventListener('mouseenter', () => {
+    clearTimeout(hideTimer);
+    hideTimer = 0;
+  });
+  hovercard.addEventListener('mousemove', () => {
+    clearTimeout(hideTimer);
+    hideTimer = 0;
+  });
+  hovercard.addEventListener('mouseleave', () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(hideHover, 280);
   });
 
-  vp.addEventListener('mouseleave', () => { pointerAt = null; clearLink(); });
-  vp.addEventListener('scroll', () => { clearTimeout(hoverTimer); hideHover(); }, { passive: true });
-  vp.addEventListener('mousedown', (e) => {
-    if (e.target.closest('#hovercard')) return;
-    hideHover();
-  });
+  const attachPointer = (el) => {
+    if (!el) return;
+    el.addEventListener('mousemove', e => {
+      pointerAt = { x: e.clientX, y: e.clientY };
+      pendingMove = { x: e.clientX, y: e.clientY, mod: e[MOD] };
+      if (moveRAF) return;
+      moveRAF = requestAnimationFrame(() => {
+        moveRAF = 0;
+        const m = pendingMove;
+        pendingMove = null;
+        if (m) onMove(m);
+      });
+    });
+    el.addEventListener('mouseleave', (e) => {
+      pointerAt = null;
+      if (e.relatedTarget && (hovercard === e.relatedTarget || hovercard.contains(e.relatedTarget))) {
+        return;
+      }
+      if (isInsideCard(e.clientX, e.clientY)) {
+        return;
+      }
+      if (!hovercard.hidden) {
+        if (!hideTimer) hideTimer = setTimeout(hideHover, 280);
+      } else {
+        clearLink();
+      }
+    });
+    el.addEventListener('scroll', () => { clearTimeout(hoverTimer); hideHover(); }, { passive: true });
+    el.addEventListener('mousedown', (e) => {
+      if (e.target.closest('#hovercard')) return;
+      hideHover();
+    });
+    el.addEventListener('dblclick', e => {
+      clearTimeout(hideTimer);
+      hideTimer = 0;
+      hoverAt(e.clientX, e.clientY);
+    });
+  };
+
+  attachPointer(vp);
+  attachPointer(diffview);
 
   /* The modifier can be pressed or released without the pointer moving, and the
      underline has to follow. */

@@ -5,6 +5,7 @@ import { updateStatus, setStatusNote, setLspState } from './status.js';
 import { openFile } from './tabs.js';
 import { renderResults, runSearch } from './search.js';
 import { inspectReferences, showRightInspector } from './inspector.js';
+import { loadProblems } from './problems.js';
 
 /* Language servers answer precisely but can take a long time to wake up, while
    the regex index answers in milliseconds and is always there. So: use the
@@ -31,7 +32,12 @@ export function canAskServer(at) {
    until it is up. Without this the first hover would find the server still
    "starting" and quietly do nothing, with no way for the state to advance. */
 export async function warmLSP(d, tries = 0) {
-  if (!d.lsp || d.lsp.state === 'off' || d.lsp.state === 'ready' || d.lsp.state === 'failed') return;
+  if (!d.lsp || d.lsp.state === 'off' || d.lsp.state === 'ready' || d.lsp.state === 'failed') {
+    if (d.lsp && (d.lsp.state === 'ready' || d.lsp.state === 'off' || d.lsp.state === 'failed')) {
+      loadProblems(d);
+    }
+    return;
+  }
   if (tries > 20) return;
   let j;
   try { j = await api('/api/lsp/warm', { path: d.path, wait: tries === 0 ? 1 : 1200 }); }
@@ -39,6 +45,7 @@ export async function warmLSP(d, tries = 0) {
   if (!S.tabs.includes(d)) return;
   d.lsp = { state: j.state, server: j.server, missing: j.missing || '' };
   if (doc_() === d) setLspState(j);
+  loadProblems(d);
   if (j.state === 'starting' || j.state === 'indexing') {
     setTimeout(() => warmLSP(d, tries + 1), 900);
   }
@@ -54,16 +61,17 @@ export async function lspCall(kind, at, waitMs) {
   } catch { return null; }
 }
 
-export async function gotoDefinition(arg) {
+export async function gotoDefinition(arg, opts = {}) {
   const d = doc_();
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   if (!d || !at) return;
+  const view = opts.view || (arg && arg.view);
 
   if (canAskServer(at)) {
     setStatusNote('definition of ' + at.word + '…', 8000);
     const j = await lspCall('def', at, S.lsp.state === 'ready' ? 5000 : 20000);
     updateStatus();
-    if (j && j.hits && j.hits.length) { acceptHits(at.word, j.hits, j.server, 'definition'); return; }
+    if (j && j.hits && j.hits.length) { acceptHits(at.word, j.hits, j.server, 'definition', undefined, { view }); return; }
   } else if (!at.imprecise && S.lsp.state === 'starting') {
     // Kick the server awake for next time, but do not wait on it.
     lspCall('def', at, 60000).then(j => {
@@ -85,7 +93,7 @@ export async function gotoDefinition(arg) {
     if (q) { q.value = at.word; $('#o-word')?.classList.add('on'); runSearch(); }
     return;
   }
-  acceptHits(at.word, rx.defs, null, 'definition', rx.refCount);
+  acceptHits(at.word, rx.defs, null, 'definition', rx.refCount, { view });
 }
 
 export async function findReferences(arg) {
@@ -95,10 +103,10 @@ export async function findReferences(arg) {
   inspectReferences(at);
 }
 
-export function acceptHits(word, hits, server, noun, refCount) {
+export function acceptHits(word, hits, server, noun, refCount, opts = {}) {
   if (hits.length === 1) {
     const h = hits[0];
-    openFile(h.path, { line: h.line });
+    openFile(h.path, { line: h.line, view: opts.view });
     flashFind(h.mid || word);
     setStatusNote(server ? server + ' · ' + h.path + ':' + h.line : h.path + ':' + h.line, 4000);
     return;

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -567,3 +569,138 @@ func Open(abs, rel string) (*Doc, error) {
 	cache.put(key, d)
 	return d, nil
 }
+
+// ------------------------------------------------------------------ diff
+
+// DiffRow is a single line in a diff hunk.
+type DiffRow struct {
+	Type    string `json:"type"`              // "ctx", "add", "del"
+	OldLine int    `json:"oldLine,omitempty"` // 1-based old line number
+	NewLine int    `json:"newLine,omitempty"` // 1-based new line number
+	At      int    `json:"at,omitempty"`      // working-tree line for deletions
+	Text    string `json:"text"`              // raw line text
+	HTML    string `json:"html,omitempty"`    // syntax-highlighted HTML
+}
+
+// DiffHunk represents a unified diff hunk with its rows.
+type DiffHunk struct {
+	OldStart int       `json:"oldStart"`
+	NewStart int       `json:"newStart"`
+	Section  string    `json:"section,omitempty"`
+	Rows     []DiffRow `json:"rows"`
+}
+
+var diffHunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[ \t]?(.*)$`)
+
+// highlightDiff parses unified diff text into hunks and tokenises each line
+// with the Chroma lexer matched for rel, returning structured hunks with HTML.
+func highlightDiff(rel, diffText string) []DiffHunk {
+	if diffText == "" {
+		return []DiffHunk{}
+	}
+	var hunks []DiffHunk
+	var cur *DiffHunk
+	oldLine, newLine := 0, 0
+	lines := strings.Split(diffText, "\n")
+	for _, line := range lines {
+		m := diffHunkRe.FindStringSubmatch(line)
+		if m != nil {
+			oldLine, _ = strconv.Atoi(m[1])
+			newLine, _ = strconv.Atoi(m[3])
+			hunks = append(hunks, DiffHunk{
+				OldStart: oldLine,
+				NewStart: newLine,
+				Section:  m[5],
+				Rows:     []DiffRow{},
+			})
+			cur = &hunks[len(hunks)-1]
+			continue
+		}
+		if cur == nil || line == "" || strings.HasPrefix(line, "\\") {
+			continue
+		}
+		c := line[0]
+		body := line[1:]
+		if c == '+' {
+			cur.Rows = append(cur.Rows, DiffRow{Type: "add", NewLine: newLine, Text: body})
+			newLine++
+		} else if c == '-' {
+			cur.Rows = append(cur.Rows, DiffRow{Type: "del", OldLine: oldLine, At: newLine, Text: body})
+			oldLine++
+		} else {
+			cur.Rows = append(cur.Rows, DiffRow{Type: "ctx", OldLine: oldLine, NewLine: newLine, Text: body})
+			oldLine++
+			newLine++
+		}
+	}
+
+	if len(hunks) == 0 {
+		return hunks
+	}
+
+	lexer := lexers.Match(filepath.Base(rel))
+	if lexer != nil {
+		lexer = chroma.Coalesce(lexer)
+	}
+
+	for hIdx := range hunks {
+		hunk := &hunks[hIdx]
+		if lexer == nil {
+			for rIdx := range hunk.Rows {
+				hunk.Rows[rIdx].HTML = htmlEscaper.Replace(hunk.Rows[rIdx].Text)
+			}
+			continue
+		}
+
+		// Reconstruct old-side and new-side lines to tokenise each in its code context.
+		var oldRows []string
+		var newRows []string
+		for _, r := range hunk.Rows {
+			switch r.Type {
+			case "del":
+				oldRows = append(oldRows, r.Text)
+			case "add":
+				newRows = append(newRows, r.Text)
+			case "ctx":
+				oldRows = append(oldRows, r.Text)
+				newRows = append(newRows, r.Text)
+			}
+		}
+
+		var oldHTML, newHTML []string
+		if len(oldRows) > 0 {
+			oldHTML = highlightLines(lexer, strings.Join(oldRows, "\n"), len(oldRows))
+		}
+		if len(newRows) > 0 {
+			newHTML = highlightLines(lexer, strings.Join(newRows, "\n"), len(newRows))
+		}
+
+		oldIdx, newIdx := 0, 0
+		for rIdx := range hunk.Rows {
+			r := &hunk.Rows[rIdx]
+			switch r.Type {
+			case "del":
+				if oldIdx < len(oldHTML) {
+					r.HTML = oldHTML[oldIdx]
+					oldIdx++
+				}
+			case "add":
+				if newIdx < len(newHTML) {
+					r.HTML = newHTML[newIdx]
+					newIdx++
+				}
+			case "ctx":
+				if newIdx < len(newHTML) {
+					r.HTML = newHTML[newIdx]
+					newIdx++
+				}
+				if oldIdx < len(oldHTML) {
+					oldIdx++
+				}
+			}
+		}
+	}
+
+	return hunks
+}
+

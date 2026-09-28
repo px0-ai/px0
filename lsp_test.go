@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Position encodings are the classic source of off-by-N bugs in LSP clients:
@@ -164,3 +168,90 @@ func TestLSPCloseDoc(t *testing.T) {
 	// Repeated closeDoc does not panic
 	cl.closeDoc("/test.go")
 }
+
+func TestLSPDiagnosticsHandling(t *testing.T) {
+	cl := newLSPClient(lspServerDef{Name: "test", Cmd: []string{"echo"}}, t.TempDir())
+	uri := pathToURI("/workspace/main.go")
+
+	// Simulate incoming publishDiagnostics
+	payload := `{"uri":"` + uri + `","diagnostics":[{"range":{"start":{"line":2,"character":4},"end":{"line":2,"character":10}},"severity":1,"message":"undefined: foo","source":"compiler","code":"UndeclaredName"}]}`
+	cl.onNotification(rpcMessage{
+		Method: "textDocument/publishDiagnostics",
+		Params: json.RawMessage(payload),
+	})
+
+	diags, ok := cl.getDiagnostics(uri)
+	if !ok || len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got ok=%v len=%d", ok, len(diags))
+	}
+	if diags[0].Message != "undefined: foo" || diags[0].Severity != 1 {
+		t.Errorf("unexpected diagnostic: %+v", diags[0])
+	}
+
+	// Invalidate on closeDoc
+	cl.opened[uri] = 1
+	cl.closeDoc("/workspace/main.go")
+	if _, ok := cl.getDiagnostics(uri); ok {
+		t.Errorf("expected diagnostics to be cleared on closeDoc")
+	}
+}
+
+func TestLSPProblemsMapping(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(filePath, []byte("package main\n\nfunc main() {\n\tx := 1\n}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := lspServerDef{Name: "dummy", Cmd: []string{"echo"}, Exts: []string{".go"}}
+	cl := newLSPClient(def, dir)
+	uri := pathToURI(filePath)
+
+	// Pre-populate client diagnostics
+	cl.diagMu.Lock()
+	cl.diagnostics[uri] = []lspDiagnostic{
+		{
+			Range:    lspRange{Start: lspPosition{Line: 3, Character: 1}, End: lspPosition{Line: 3, Character: 2}},
+			Severity: 2, // warning
+			Message:  "x declared and not used",
+			Source:   "compiler",
+		},
+		{
+			Range:    lspRange{Start: lspPosition{Line: 2, Character: 0}, End: lspPosition{Line: 2, Character: 4}},
+			Severity: 1, // error
+			Message:  "syntax error",
+			Source:   "compiler",
+		},
+	}
+	cl.diagMu.Unlock()
+	cl.opened[uri] = 1
+
+	m := &lspManager{
+		root:     dir,
+		enabled:  true,
+		byExt:    map[string]*lspServerDef{".go": &def},
+		clients:  map[string]*lspClient{"dummy": cl},
+		starting: map[string]chan struct{}{},
+		failed:   map[string]string{},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	probs, err := m.Problems(ctx, filePath, "main.go", 0)
+	if err != nil {
+		t.Fatalf("Problems() error: %v", err)
+	}
+	if len(probs) != 2 {
+		t.Fatalf("expected 2 problems, got %d", len(probs))
+	}
+
+	// Should be sorted errors first (severity 1 before severity 2)
+	if probs[0].Severity != "error" || probs[0].Line != 3 {
+		t.Errorf("first problem should be error at line 3, got: %+v", probs[0])
+	}
+	if probs[1].Severity != "warning" || probs[1].Line != 4 {
+		t.Errorf("second problem should be warning at line 4, got: %+v", probs[1])
+	}
+}
+

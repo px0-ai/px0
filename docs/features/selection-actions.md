@@ -1,6 +1,6 @@
 # Selection Toolbar & Context Actions
 
-px0 features a dedicated footer selection toolbar and contextual right-click menu designed specifically for AI-assisted engineering and code review. When code is selected, px0 replaces standard footer clutter with purposeful actions: Copy Reference (`Alt+C`), Copy for Agent (`Alt+A`), Find Usages (`Alt+U`), and Edit with Agent (`Alt+E`).
+px0 features a dedicated footer selection toolbar and contextual right-click menu designed specifically for AI-assisted engineering and code review. When code is selected, px0 replaces standard footer clutter with purposeful actions: Copy Reference (`Alt+C`), Copy for Agent (`Alt+A`), Find Usages (`Alt+U`), Edit with Agent (`Alt+E`), and Start Thread (`Alt+T`, see [Threads](threads.md)).
 
 ---
 
@@ -53,6 +53,11 @@ px0 automatically normalizes diff selections:
 | **Copy for Agent** | `Alt+A` | Right-Click | `[Copy Context]` | Copies formatted markdown with lines & context |
 | **Find Usages** | `Alt+U` | Right-Click | `[Find Usages]` | Finds references across workspace |
 | **Edit with Agent** | `Alt+E` | Right-Click | `[Edit Agent]` | Opens agent edit composer |
+| **Start Thread** | `Alt+T` | Right-Click | `[Thread]` | Opens a long-running conversation anchored to the selection |
+
+### Line Actions
+
+Hovering a line number shows a thread icon. Clicking it opens the same menu as a right click, aimed at that line: Start Thread, Edit Inline, Copy Ref and Copy with Context (plus Add Review Comment on a pull request diff line).
 
 ---
 

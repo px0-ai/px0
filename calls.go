@@ -28,6 +28,8 @@ type CallNode struct {
 	Item     string `json:"item"`               // CallHierarchyItem, returned as-is to expand
 }
 
+// lspCallItem represents the LSP wire format for CallHierarchyItem
+// defined in the Language Server Protocol specification.
 type lspCallItem struct {
 	Name           string   `json:"name"`
 	Kind           int      `json:"kind"`

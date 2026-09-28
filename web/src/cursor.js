@@ -25,9 +25,24 @@ export function wordAtPoint(x, y) {
   } else return null;
   if (!node || node.nodeType !== 3) return null;
 
-  const code = node.parentElement && node.parentElement.closest('.c');
-  const row = code && code.closest('.row');
-  if (!code || !row) return null;
+  let code = node.parentElement && node.parentElement.closest('.c');
+  let row = /** @type {HTMLElement|null} */ (code && code.closest('.row'));
+  let line = 0;
+  let inDiff = false;
+
+  if (code && row) {
+    line = +row.dataset.l;
+  } else {
+    const diffCode = node.parentElement && node.parentElement.closest('.diff-code');
+    const diffRow = diffCode && diffCode.closest('[data-l], [data-at], [data-old-l]');
+    if (diffCode && diffRow) {
+      code = diffCode;
+      inDiff = true;
+      line = diffRow.dataset.l !== undefined ? +diffRow.dataset.l :
+             (diffRow.dataset.oldL !== undefined ? +diffRow.dataset.oldL : +diffRow.dataset.at);
+    }
+  }
+  if (!code || !line) return null;
 
   let col = 0;
   const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
@@ -36,13 +51,13 @@ export function wordAtPoint(x, y) {
     col += n.nodeValue.length;
   }
 
-  const full = code.textContent;
+  const full = code.textContent || '';
   let a = Math.min(col, full.length), b = a;
   while (a > 0 && WORD.test(full[a - 1])) a--;
   while (b < full.length && WORD.test(full[b])) b++;
   if (a === b) return null;
   const d = doc_();
-  return { word: full.slice(a, b), line: +row.dataset.l, col: a, path: d && d.path };
+  return { word: full.slice(a, b), line, col: a, path: d && d.path, inDiff };
 }
 
 /* Column (UTF-16 units into the line's text) under a point. Clicking the gutter
@@ -58,12 +73,13 @@ export function colAtPoint(x, y) {
     if (!r) return null;
     node = r.startContainer; off = r.startOffset;
   } else return null;
-  const el = node && (node.nodeType === 1 ? node : node.parentElement);
-  const row = el && el.closest('.row');
+  const el = /** @type {HTMLElement|null} */ (node && (node.nodeType === 1 ? node : node.parentElement));
+  const row = /** @type {HTMLElement|null} */ (el && el.closest('.row'));
   if (!row) return null;
   const code = $('.c', row);
+  if (!code) return null;
   const line = +row.dataset.l;
-  if (!code.contains(node)) return { line, col: el.closest('.g') ? 0 : code.textContent.length };
+  if (!code.contains(node)) return { line, col: (el && el.closest('.g')) ? 0 : code.textContent.length };
   const r = document.createRange();
   r.setStart(code, 0);
   r.setEnd(node, off);
@@ -206,6 +222,7 @@ export function initCursor() {
     // Only the primary button moves the caret: a right click opens a menu on
     // what is already selected and must leave it where it is.
     if (e.button !== 0) return;
+    if (e.target.closest('.line-btn')) return;
     const row = e.target.closest('.row');
     if (!row) return;
     const d = doc_(); if (!d) return;
@@ -237,7 +254,8 @@ export function initCursor() {
       e.preventDefault();
       S.at = w; S.lastWord = w.word;
       pushHistory(d.path, d.cur); // so Alt+Left returns to the call site
-      gotoDefinition(w);
+      const targetView = e.altKey ? 'diff' : 'source';
+      gotoDefinition(w, { view: targetView });
       return;
     }
     for (const r of rowsEl.children) r.classList.toggle('cur', +r.dataset.l === d.cur);

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -304,15 +305,160 @@ func (s *Server) handleLSPInstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, j)
 }
 
+func (s *Server) relevantLSPServers() []map[string]any {
+	if s.lsp == nil || !s.lsp.Enabled() {
+		return []map[string]any{}
+	}
+
+	extMap := map[string]bool{}
+	if s.ix != nil {
+		for _, f := range s.ix.Files() {
+			ext := strings.ToLower(filepath.Ext(f.Path))
+			if ext != "" {
+				extMap[ext] = true
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+	var result []map[string]any
+
+	// 1. Add servers matching extensions present in the workspace
+	for i := range lspRegistry {
+		def := &lspRegistry[i]
+		matchesExt := false
+		for _, ext := range def.Exts {
+			if extMap[ext] {
+				matchesExt = true
+				break
+			}
+		}
+		if matchesExt && !seen[def.Name] {
+			seen[def.Name] = true
+			result = append(result, s.lsp.ServerStatus(def))
+		}
+	}
+
+	// 2. Also include any server that is currently running or starting
+	s.lsp.mu.Lock()
+	for name := range s.lsp.clients {
+		if !seen[name] {
+			for i := range lspRegistry {
+				if lspRegistry[i].Name == name {
+					seen[name] = true
+					result = append(result, s.lsp.ServerStatus(&lspRegistry[i]))
+					break
+				}
+			}
+		}
+	}
+	for name := range s.lsp.starting {
+		if !seen[name] {
+			for i := range lspRegistry {
+				if lspRegistry[i].Name == name {
+					seen[name] = true
+					result = append(result, s.lsp.ServerStatus(&lspRegistry[i]))
+					break
+				}
+			}
+		}
+	}
+	s.lsp.mu.Unlock()
+
+	return result
+}
+
+// handleLSPServers returns the list of all language servers relevant to the workspace
+// along with their runtime states.
+func (s *Server) handleLSPServers(w http.ResponseWriter, r *http.Request) {
+	if s.lsp == nil {
+		writeJSON(w, map[string]any{
+			"enabled":    false,
+			"anyRunning": false,
+			"servers":    []any{},
+		})
+		return
+	}
+	servers := s.relevantLSPServers()
+	anyRunning := false
+	for _, srv := range servers {
+		if r, ok := srv["running"].(bool); ok && r {
+			anyRunning = true
+			break
+		}
+	}
+	if !anyRunning && s.lsp.AnyRunning() {
+		anyRunning = true
+	}
+	writeJSON(w, map[string]any{
+		"enabled":    s.lsp.Enabled(),
+		"anyRunning": anyRunning,
+		"servers":    servers,
+	})
+}
+
+// handleLSPStop stops a running language server or all servers.
+func (s *Server) handleLSPStop(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	server := r.URL.Query().Get("server")
+	if server == "" {
+		var body struct {
+			Server string `json:"server"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) == nil && body.Server != "" {
+			server = body.Server
+		}
+	}
+	s.lsp.Stop(server)
+	s.handleLSPServers(w, r)
+}
+
 // handleLSPStart finds servers installed since startup, clears earlier start
-// failures and starts the server for path, reporting where it has got to.
+// failures and starts the server for path or server name, reporting status.
 func (s *Server) handleLSPStart(w http.ResponseWriter, r *http.Request) {
 	if !localPost(w, r) {
 		return
 	}
+	server := r.URL.Query().Get("server")
+	if server == "" {
+		var body struct {
+			Server string `json:"server"`
+			All    bool   `json:"all"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) == nil {
+			if body.All {
+				server = "all"
+			} else {
+				server = body.Server
+			}
+		}
+	}
+
+	if server != "" {
+		if server == "all" {
+			servers := s.relevantLSPServers()
+			for _, srv := range servers {
+				if inst, _ := srv["installed"].(bool); inst {
+					if name, _ := srv["name"].(string); name != "" {
+						_ = s.lsp.StartServer(name)
+					}
+				}
+			}
+		} else {
+			if err := s.lsp.StartServer(server); err != nil {
+				fail(w, 400, err.Error())
+				return
+			}
+		}
+		s.handleLSPServers(w, r)
+		return
+	}
+
 	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
 	if !ok {
-		fail(w, 400, "bad path")
+		fail(w, 400, "bad path or server required")
 		return
 	}
 	s.lsp.Rescan()
@@ -326,7 +472,11 @@ func (s *Server) handleLSPStart(w http.ResponseWriter, r *http.Request) {
 // language that lacks a server when none is installed, so the UI can offer one.
 func (s *Server) lspBrief(rel string) map[string]any {
 	state, srv := s.lsp.State(rel)
-	b := map[string]any{"state": string(state), "server": srv}
+	b := map[string]any{
+		"state":      string(state),
+		"server":     srv,
+		"anyRunning": s.lsp.AnyRunning(),
+	}
 	if lang := s.lsp.MissingLang(rel); lang != "" {
 		b["missing"] = lang
 	}

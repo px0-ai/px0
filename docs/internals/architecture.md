@@ -12,6 +12,8 @@ px0 is engineered as an ultra-fast, zero-overhead code exploration console. Its 
 1. Stateless in the Workspace: px0 never writes configuration directories, temporary caches, or metadata files (e.g., `.px0/` or `.cache/`) into a workspace. Indexes and caches live in volatile memory. Outside the workspace it keeps only the remembered harness choice and update/telemetry state under `~/.px0/` (or `$XDG_CONFIG_HOME/px0/`).
 1. Strict Memory Reclamation: Long-lived background processes should not hold idle RAM. When the user finishes a burst of queries, unused pages are proactively returned to the operating system.
 
+The browser's file tabs are managed in `web/src/tabs.js`. Tab context-menu actions and the tab close button share cache cleanup. A bulk close updates the browser view and session once after removing the selected tabs.
+
 ## 2. Startup Pipeline (<1 ms Critical Path)
 
 When `px0` is executed in a terminal (e.g., `px0 .` or `px0 main.go:42`), the initialization flow executes as follows. A file target detects its enclosing project repository (or working directory) as the workspace and is passed to the browser with its relative path and optional line number.
@@ -51,13 +53,22 @@ sequenceDiagram
 1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
 1. Network URL Discovery: When the listener binds to `0.0.0.0`, `net.InterfaceAddrs()` supplies the host's interface addresses. px0 keeps unique non-loopback IPv4 addresses, sorts them for deterministic output, and prints each with the listener's final port. Initial file and line query parameters are preserved in every advertised URL.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
+
 1. Non-Blocking Browser Launch: `go openBrowser(url)` spawns the platform-specific browser opener (`xdg-open` on Linux, `open` on macOS, `rundll32` on Windows) in a separate goroutine.
 1. Concurrent Tree Walk & Git Status: Indexing runs inside a background goroutine. A dedicated goroutine runs `gitStatus(ix.root)` in parallel with the file walk so that subprocess overhead overlaps the walk rather than adding to it.
 1. Background Language Server Discovery: `lsp.Available()` checks `$PATH` using `exec.LookPath` across standard binary locations asynchronously.
 
+The explorer expands folders through `/api/tree` on demand. Expand All skips ignored subtrees, keeps at most four directory requests in flight, and marks the header control busy while it runs. Tree refreshes and user navigation invalidate older requests before they can redraw stale folders; Collapse All clears open state immediately.
+
 ## 3. HTTP Server & API Catalog
 
-The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps and applies pooled Gzip compression when accepted by the client.
+The server is implemented in [`server.go`](../../server.go) using Go's standard `http.ServeMux`. Every request passes through a centralized `ServeHTTP` wrapper that records activity timestamps, tracks status codes and durations, applies pooled Gzip compression when accepted by the client (excluding SSE streams), and logs every HTTP request to the terminal when the `-verbose` flag is active.
+
+### Base Path & Subpath Prefixing
+When hosted behind reverse proxies or multi-tenant review platforms, px0 supports custom URL prefixes via the `-base-path` CLI flag or `server.basePath` in settings (e.g. `/rev-123/`):
+- All routes below are prefixed with the base path (`/<base-path>/api/...`, `/<base-path>/static/...`).
+- `handleIndex` dynamically injects `<base href="/<base-path>/">` into `web/index.html`, allowing the frontend to resolve relative assets and API endpoints without domain-level assumptions.
+- Requests to `/<base-path>` without a trailing slash redirect to `/<base-path>/`, and root `/` redirects to the configured base path.
 
 ### Endpoints Reference
 
@@ -67,17 +78,20 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/static/*`           | `GET`  | Serves bundled JavaScript, CSS, and static assets                       | Asset MIME type                            |
 | `/static/themes.css`  | `GET`  | Concatenates all `web/themes/*.css` files in alphanumeric order         | `text/css; charset=utf-8`                  |
 | `/api/meta`           | `GET`  | Workspace metadata (root path, file count, index duration, git status)  | JSON (`{root, name, files, build_ms, git}`)|
-| `/api/metrics`        | `GET`  | Runtime memory and GC stats (`Alloc`, `Sys`, `NumGC`, etc.)             | JSON                                       |
+| `/api/metrics`        | `GET`  | Point-in-time process memory, CPU, and goroutine stats (polled via `/api/stream` SSE) | JSON (`{rssBytes, cpuUsage, goroutines}`)|
 | `/api/tree`           | `GET`  | Directory contents for the sidebar file explorer (`?dir=path`)          | JSON array of `Node` objects               |
 | `/api/file`           | `GET`  | Windowed, highlighted source file lines (`?path=...&start=0&count=500`) | JSON (`{lines, total, refine, markdown}`)  |
-| `/api/raw`            | `GET`  | Raw, unhighlighted file content for whole-file copies and preview assets| `text/plain` or binary                     |
+| `/api/raw`            | `GET`  | Raw file content for copies and preview assets (attachment; nosniff)    | `application/octet-stream` or `image/*`    |
 | `/api/markdown`       | `GET`  | Converted HTML preview of `.md` / `.markdown` files via goldmark        | JSON (`{path, html}`)                      |
+| `/api/table`          | `GET`  | First 1,000 rows (or 1 MB) of a `.csv` / `.tsv` file, parsed with `encoding/csv` | JSON (`{header, headerLine, rows, cols, truncated}`) |
 | `/api/find`           | `GET`  | Fast fuzzy match against all indexed workspace paths (`?q=...`)         | JSON array of `FuzzyResult` objects        |
 | `/api/search`         | `GET`  | Full-text project grep with snippet elision (`?q=...&case=...&regex=...`)| JSON array of file hits and matches        |
 | `/api/outline`        | `GET`  | Regex-extracted symbol outline for a given file (`?path=...`)          | JSON array of symbol declarations          |
 | `/api/def`            | `GET`  | Quick definition lookup fallback                                        | JSON array of matching definition locations|
 | `/api/diff`           | `GET`  | Unified diff of working tree vs. `HEAD` (`?path=...`)                   | JSON (`{path, diff, available}`)           |
 | `/api/gutter`         | `GET`  | Per-line change markers for code view gutter                            | JSON (`{added, modified, deleted}`)        |
+| `/api/stream`         | `GET`  | Unified SSE stream for real-time `git-status` and `metrics` events (aliased by `/api/git/stream`) | `text/event-stream`   |
+| `/api/git/refresh`    | `POST` | Triggers immediate git status check and returns status payload          | JSON (`{git, gitChanges, gitFiles, ...}`)  |
 | `/api/reindex`        | `POST` | Re-runs index walk and git status on demand (triggers frontend tab reload; see [`file-reload-and-updates.md`](file-reload-and-updates.md)) | JSON (`{files, indexMs}`)                  |
 | `/api/lsp/def`        | `GET`  | Go-to-Definition via LSP (`?path=...&line=...&col=...`)                 | JSON array of target locations             |
 | `/api/lsp/refs`       | `GET`  | Find References via LSP                                                 | JSON array of reference locations          |
@@ -87,7 +101,9 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 | `/api/lsp/warm`       | `POST` | Pre-warms or spawns language server for given file extension            | JSON (`{ok: true}`)                        |
 | `/api/lsp/setup`      | `GET`  | Reports install status and commands for current file language           | JSON (`{installed, recipes, ...}`)         |
 | `/api/lsp/install`    | `POST` | Executes user-level installer in background                             | JSON (`{ok: true}`)                        |
-| `/api/lsp/start`      | `POST` | Rescans and starts language server after installation                   | JSON (`{ok: true}`)                        |
+| `/api/lsp/start`      | `POST` | Starts language server for path or server name (`?server=...` or `?path=...`) | JSON status payload        |
+| `/api/lsp/stop`       | `POST` | Stops language server (`?server=...`) or all running language servers   | JSON status payload        |
+| `/api/lsp/servers`    | `GET`  | Lists relevant language servers for workspace with status and metrics   | JSON (`{enabled, anyRunning, servers}`)|
 | `/api/agent/harnesses`| `GET`  | Detected coding harnesses and the current choice                        | JSON (`{harnesses, selected, pinned, settings}`) |
 | `/api/agent/select`   | `POST` | Choose and remember a harness (`?name=...`)                             | JSON (`{harnesses, selected, pinned, settings}`) |
 | `/api/agent/edit`     | `POST` | Dispatch an instruction to the harness (`?path=...&l1=...&l2=...&instruction=...`) | JSON job snapshot               |
@@ -98,7 +114,7 @@ The server is implemented in [`server.go`](../../server.go) using Go's standard 
 
 Even though Go's garbage collector frees unreferenced heap objects rapidly, the Go runtime does not immediately release physical memory pages back to the host operating system. In high-churn CLI sessions (such as searching a 50,000-file repository), the process resident set size (RSS) could appear inflated long after the search completes.
 
-To maintain a lean footprint (~20 MB RSS), `server.go` implements an automatic scavenger:
+To maintain a lean footprint (~20–30 MB RSS), `server.go` implements an automatic scavenger:
 
 ```go
 func (s *Server) scavenge() {
@@ -126,6 +142,13 @@ func (s *Server) scavenge() {
 - `s.lastReq`: An atomic 64-bit integer tracks the Unix timestamp (in nanoseconds) of the most recent incoming HTTP request.
 - When no HTTP traffic has arrived for 15 seconds after an active period, `debug.FreeOSMemory()` is invoked.
 - Physical memory pages freed by the GC are surrendered back to the operating system kernel immediately, preventing background memory bloat.
+
+### Client-Server Memory Split & Total Footprint
+
+Because px0 uses a client-server architecture rather than embedding Electron:
+- **Host Server**: The Go backend daemon occupies ~20–30 MB RSS, handling indexing, symbol discovery, regex search, and git operations.
+- **Client Browser Tab**: The frontend web client runs in the user's existing browser, allocating ~80–150 MB for the DOM, V8 runtime, and GPU compositing. Memory is kept strictly bounded because px0's bespoke virtualized scroller mounts only ~60 active rows regardless of file size.
+- **Combined Impact**: Total system footprint is ~100–180 MB (~85–90% lower than the ~1,400 MB footprint of desktop Electron IDEs). On remote devboxes and containers, the host pays strictly the ~20–30 MB server cost.
 
 ### Gzip Buffer Pooling
 
@@ -167,6 +190,21 @@ The `/api/lsp/install` and `/api/lsp/start` endpoints execute shell commands (e.
 1. The request `Origin` header must match the request `Host` header.
 1. The `Host` header is validated to ensure it is strictly an IP address (`127.0.0.1`, `[::1]`) or `localhost`. This prevents DNS-rebinding attacks.
 1. The executed command is never supplied by the client; it is looked up exclusively from the hard-coded internal `lspRegistry`, or, for agent edits, from the harness the user picked (only the instruction text comes from the client).
+
+### Content Security Policy (CSP)
+
+`ServeHTTP` sets a strict `Content-Security-Policy` header on all responses to mitigate Cross-Site Scripting (XSS) and data exfiltration in depth:
+
+- `default-src 'self';`
+- `script-src 'self';` (disallows inline scripts; blocks injected `<script>` tags and event handlers)
+- `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;` (allows Google Fonts and dynamic UI styling)
+- `font-src 'self' https://fonts.gstatic.com;`
+- `img-src 'self' data: https: http:;` (supports icons, data URI previews, and external markdown images)
+- `connect-src 'self';` (prevents exfiltration to third-party endpoints)
+- `object-src 'none';`
+- `base-uri 'self';` (allows `<base href="...">` routing while preventing base-tag hijacking)
+- `frame-ancestors 'none';` (guards against clickjacking)
+- `form-action 'none';`
 
 ### Self-Update Integrity
 

@@ -1,5 +1,6 @@
 // web/src/selbar.js
 import { $, S, doc_, keyLabel } from './state.js';
+import { on } from './bus.js';
 import { vp, copyToClipboard, showToast } from './ui.js';
 import { render } from './renderer.js';
 import { findReferences } from './lsp.js';
@@ -15,7 +16,7 @@ const statsEl = $('#sel-stats');
 const diffviewEl = $('#diffview');
 
 // e.code, not e.key: Option+letter types a symbol on macOS.
-export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', KeyE: 'agent-edit' };
+export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', KeyE: 'agent-edit', KeyR: 'review-comment', KeyT: 'thread' };
 
 /* Editing lives in agent.js, which registers itself here on load. Keeping the
    dependency one-way means selbar imports nothing back and the two never form
@@ -23,7 +24,20 @@ export const SEL_KEYS = { KeyC: 'copy-ref', KeyA: 'copy-agent', KeyU: 'usages', 
 let agentHandler = null;
 export function setAgentHandler(fn) { agentHandler = fn; }
 
+/* Threads (thread.js) hook in the same way. */
+let threadHandler = null;
+export function setThreadHandler(fn) { threadHandler = fn; }
+
+/* Same one-way registration for PR review comments (pr.js), active only in a
+   `px0 pr ...` session. */
+let reviewHandler = null;
+export function setReviewHandler(fn) { reviewHandler = fn; }
+// Read-only accessor so the diff gutter's pencil (linecomment.js) can offer
+// "Add Review Comment" directly, without duplicating the registration.
+export function getReviewHandler() { return reviewHandler; }
+
 let current = null;   // the selection the bar is showing, or null when it is not
+let pinnedInfo = null; // the line a gutter button opened the menu for; independent of any text selection
 let allText = null;   // Ctrl+A: promise of the S.selAll file's full text
 let allInfo = null;   // the bar's view of that selection, once the text arrives
 
@@ -43,13 +57,11 @@ export function getSelectedRangeInfo() {
   const text = sel.toString().trim();
   if (!text) return null;
 
-  let startEl = range.startContainer;
-  if (startEl.nodeType !== 1) startEl = startEl.parentElement;
-  let endEl = range.endContainer;
-  if (endEl.nodeType !== 1) endEl = endEl.parentElement;
+  const startEl = /** @type {HTMLElement|null} */ (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
+  const endEl = /** @type {HTMLElement|null} */ (range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement);
 
-  const startRow = startEl ? startEl.closest('.row') : null;
-  const endRow = endEl ? endEl.closest('.row') : null;
+  const startRow = /** @type {HTMLElement|null} */ (startEl ? startEl.closest('.row') : null);
+  const endRow = /** @type {HTMLElement|null} */ (endEl ? endEl.closest('.row') : null);
 
   let l1 = d.cur || 1, l2 = d.cur || 1;
   if (startRow && startRow.dataset.l) l1 = +startRow.dataset.l;
@@ -68,9 +80,10 @@ export function getSelectedRangeInfo() {
    on both sides of a split is taken once. */
 function diffSelection(range, d) {
   let l1 = Infinity, l2 = -Infinity, at1 = Infinity, at2 = -Infinity;
+  let old1 = Infinity, old2 = -Infinity;
   const parts = [];
   const seen = new Set();
-  for (const el of diffviewEl.querySelectorAll('[data-l], [data-at]')) {
+  for (const el of diffviewEl.querySelectorAll('[data-l], [data-at], [data-old-l]')) {
     if (!range.intersectsNode(el)) continue;
     const code = el.querySelector('.diff-code');
     if (el.dataset.l !== undefined) {
@@ -79,22 +92,33 @@ function diffSelection(range, d) {
       if (n > l2) l2 = n;
       if (seen.has(n)) continue;
       seen.add(n);
-    } else {
+    } else if (el.dataset.at !== undefined) {
       const n = +el.dataset.at;
       if (n < at1) at1 = n;
       if (n > at2) at2 = n;
     }
+    if (el.dataset.oldL !== undefined && el.dataset.l === undefined) {
+      const n = +el.dataset.oldL;
+      if (n < old1) old1 = n;
+      if (n > old2) old2 = n;
+    }
     parts.push(code ? code.textContent : '');
   }
   if (!parts.length) return null;
-  if (l1 === Infinity) {
+  const isDeletedOnly = (l1 === Infinity);
+  let side = 'RIGHT';
+  let delL1 = 0, delL2 = 0;
+  if (isDeletedOnly) {
+    side = 'LEFT';
+    delL1 = old1 !== Infinity ? old1 : 1;
+    delL2 = old2 !== Infinity ? old2 : delL1;
     const last = Math.max(1, d.total || 1);
     l1 = Math.min(last, Math.max(1, at1 - 1));
     l2 = Math.max(l1, Math.min(last, at2));
   }
   const text = parts.join('\n').trim();
   if (!text) return null;
-  return { text, l1, l2, path: d.path, fromDiff: true };
+  return { text, l1, l2, delL1, delL2, path: d.path, fromDiff: true, side };
 }
 
 const selectionRef = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
@@ -109,7 +133,7 @@ function showSelectionBar(info) {
 }
 
 export function hideSelectionBar() {
-  closeSelMenu();
+  if (!pinnedInfo) closeSelMenu(); // a menu opened from the gutter is not tied to a selection
   if (!current) return;
   current = null;
   if (statsEl) statsEl.textContent = '';
@@ -131,8 +155,8 @@ export function selectAll() {
   window.getSelection()?.removeAllRanges();
   S.selAll = d;
   allInfo = null;
-  render();
-  const text = allText = fetch('/api/raw?path=' + encodeURIComponent(d.path))
+  const rawUrl = new URL('api/raw?path=' + encodeURIComponent(d.path), document.baseURI || location.href).href;
+  const text = allText = fetch(rawUrl)
     .then(r => { if (!r.ok) throw new Error(r.statusText); return r.text(); });
   text.then(t => {
     if (allText !== text) return; // cleared or selected again meanwhile
@@ -163,8 +187,17 @@ export function copySelectAll() {
 
 /* Runs one of the bar's actions on the current selection. Returns false when the
    bar is not showing, so a shortcut can fall through to the browser. */
-export function runSelectionAction(act) {
-  if (!current) {
+export function runSelectionAction(act, triggerBtn = null, override = null) {
+  const target = override || current;
+  if (!target) {
+    if (act === 'thread') {
+      const d = doc_();
+      if (d && threadHandler) {
+        const line = d.cur || 1;
+        threadHandler({ text: (d.lines && d.lines[line - 1]) || '', l1: line, l2: line, path: d.path });
+        return true;
+      }
+    }
     if (act === 'agent-edit') {
       const d = doc_();
       if (d && agentHandler) {
@@ -176,18 +209,25 @@ export function runSelectionAction(act) {
     }
     return false;
   }
-  const { text, path } = current;
-  const ref = selectionRef(current);
+  const { text, path } = target;
+  const ref = selectionRef(target);
+  const targetBtn = triggerBtn || $('#footer-sel [data-sel="' + act + '"]');
   if (act === 'copy-ref') {
-    copyToClipboard(ref, 'Copied');
+    copyToClipboard(ref, 'Copied', targetBtn);
   } else if (act === 'copy-agent') {
     const ext = path.split('.').pop() || '';
-    const lineStr = current.l1 === current.l2 ? 'line ' + current.l1 : 'lines ' + current.l1 + '-' + current.l2;
+    const lineStr = target.l1 === target.l2 ? 'line ' + target.l1 : 'lines ' + target.l1 + '-' + target.l2;
     const snippet = '@' + path + ' ' + lineStr + '\n```' + ext + '\n' + text + '\n```';
-    copyToClipboard(snippet, 'Copied');
+    copyToClipboard(snippet, 'Copied', targetBtn);
   } else if (act === 'agent-edit') {
     if (!agentHandler) return false;
-    agentHandler(current);
+    agentHandler(target);
+  } else if (act === 'thread') {
+    if (!threadHandler) return false;
+    threadHandler(target);
+  } else if (act === 'review-comment') {
+    if (!reviewHandler) return false;
+    reviewHandler(target);
   } else if (act === 'usages') {
     findReferences(text.split(/\s+/)[0] || text);
   } else {
@@ -201,20 +241,33 @@ export function runSelectionAction(act) {
 const menu = $('#sel-menu');
 
 export function closeSelMenu() {
+  pinnedInfo = null;
   if (menu && !menu.hidden) menu.hidden = true;
 }
 
-const SEL_MENU_ITEMS = [
+/* The gutter's thread button: the same actions as the right-click menu, aimed
+   at one line. Find Usages needs a symbol, which a whole line is not, and
+   Add Review Comment only makes sense on a line GitHub knows about. */
+export function openLineMenu(info, x, y) {
+  closeSelMenu();
+  pinnedInfo = info;
+  openSelMenu(x, y, item => item.sel !== 'usages' && (item.sel !== 'review-comment' || !!info.fromDiff));
+}
+
+// Exported so pr.js can append "Add Review Comment" in a PR review session
+// without selbar needing to know PR review exists.
+export const SEL_MENU_ITEMS = [
+  { sel: 'thread', label: 'Start Thread', keys: 'Alt+T' },
+  { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
   { sel: 'copy-ref', label: 'Copy Ref', keys: 'Alt+C' },
   { sel: 'copy-agent', label: 'Copy with Context', keys: 'Alt+A' },
-  { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
   { sel: 'usages', label: 'Find Usages', keys: 'Alt+U' },
 ];
 
 /* Built from the selection actions each time, keeping Find Usages in context menu. */
-function openSelMenu(x, y) {
+function openSelMenu(x, y, keep = () => true) {
   menu.replaceChildren();
-  for (const item of SEL_MENU_ITEMS) {
+  for (const item of SEL_MENU_ITEMS.filter(keep)) {
     const btn = document.createElement('button');
     btn.className = 'sel-menu-item';
     btn.dataset.sel = item.sel;
@@ -249,7 +302,8 @@ export function initSelectionBar() {
   // Any click ends a whole-file selection, except on the bar's buttons or a viewport scrollbar.
   document.addEventListener('mousedown', e => {
     // A right click opens the menu for the selection, so it must not end it.
-    if (!S.selAll || e.button === 2 || e.target.closest?.('#footer-sel, #sel-menu')) return;
+    const target = /** @type {HTMLElement|null} */ (e.target);
+    if (!S.selAll || e.button === 2 || target?.closest?.('#footer-sel, #sel-menu')) return;
     if (e.target === vp && (e.offsetX >= vp.clientWidth || e.offsetY >= vp.clientHeight)) return;
     clearSelectAll();
   }, true);
@@ -261,8 +315,9 @@ export function initSelectionBar() {
     el.addEventListener('click', e => {
       const btn = e.target.closest('[data-sel]');
       if (!btn) return;
+      const info = pinnedInfo; // closing the menu forgets it
       closeSelMenu();
-      runSelectionAction(btn.dataset.sel);
+      runSelectionAction(btn.dataset.sel, btn, info);
     });
   }
   if (!menu) return;
@@ -285,4 +340,5 @@ export function initSelectionBar() {
   addEventListener('resize', closeSelMenu);
   addEventListener('blur', closeSelMenu);
   document.addEventListener('scroll', closeSelMenu, true);
+  on('tab:activated', clearSelectAll);
 }

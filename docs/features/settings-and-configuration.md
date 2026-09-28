@@ -40,9 +40,12 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `editor.bracketPairColorization` | Text Editor | `true` | `true`, `false` | Rainbow bracket pairs & matching |
 | `editor.vimMode` | Text Editor | `false` | `true`, `false` | Modal Vim navigation keybindings |
 | `workbench.colorTheme` | Workbench | `"github-dark"` | 14 built-in theme IDs | Active color theme |
+| `markdown.preview.open` | Workbench | `true` | `true`, `false` | Open Markdown files in rendered preview |
+| `table.preview.open` | Workbench | `true` | `true`, `false` | Open CSV and TSV files as a table |
 | `diffEditor.renderSideBySide` | Diff Editor | `true` | `true`, `false` | Split vs. unified diff view default |
 | `diffEditor.ignoreTrimWhitespace` | Diff Editor | `true` | `true`, `false` | Ignore whitespace differences in diffs |
 | `git.gutterIndicators` | Git | `true` | `true`, `false` | Visual change markers in gutter |
+| `git.commitMessageInstruction` | Git & Diff | `""` | any string (multi-line textarea) | Extra instructions given to the coding harness when the git panel's **Commit with AI** writes a commit message |
 | `explorer.compactFolders` | Explorer | `true` | `true`, `false` | Compact single-child directory chains |
 | `explorer.autoReveal` | Explorer | `true` | `true`, `false` | Auto-scroll to active file in tree |
 | `files.exclude` | Files | Default globs | Array of glob patterns | Exclude patterns from trees and searches |
@@ -52,6 +55,8 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `lsp.hover.enabled` | LSP | `true` | `true`, `false` | Hover documentation cards |
 | `agent.harness` | Coding Agent | `""` | `claude`, `gemini`, `agy`, etc. | Preferred CLI coding harness |
 | `agent.timeoutSeconds` | Coding Agent | `120` | `10` – `600` (seconds) | Max runtime for agent edits |
+| `github.token` | GitHub | `""` | any string | Personal access token for `px0 pr` review; takes precedence over `GITHUB_TOKEN` and `gh auth token`. Masked in the Settings UI. |
+| `server.basePath` | Server | `"/"` | any path prefix (e.g. `"/rev-123/"`) | Base URL path prefix to serve endpoints and assets from. Overridden by the `-base-path` CLI flag. |
 
 ---
 

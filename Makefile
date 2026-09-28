@@ -42,10 +42,13 @@ build: web
 	@echo "Built ./px0 ($$(du -h px0 | cut -f1))"
 
 test: web
-	go test -v ./...
+	go test -v .
 
-dist: web
-	@./build.sh
+bench:
+	go test -bench=. -benchmem -run=^$$ .
+
+benchmark: build
+	./benchmark.sh
 
 publish:
 	@if [ -z "$(CLEAN_VERSION)" ]; then \
@@ -68,5 +71,5 @@ publish:
 	@echo "  git push origin master --tags"
 
 clean:
-	rm -f px0
+	rm -f px0 web/app.js
 	rm -rf dist/

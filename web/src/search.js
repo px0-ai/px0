@@ -91,9 +91,11 @@ export function initSearch() {
     const t = e.target.closest('[data-toggle]');
     if (t) {
       const g = resultsEl.querySelector('[data-group="' + CSS.escape(t.dataset.toggle) + '"]');
+      if (!g) return;
       const hidden = g.style.display === 'none';
       g.style.display = hidden ? '' : 'none';
-      $('.ar', t).innerHTML = hidden ? '&#9660;' : '&#9654;';
+      const ar = $('.ar', t);
+      if (ar) ar.innerHTML = hidden ? '&#9660;' : '&#9654;';
       return;
     }
     const r = e.target.closest('.rline');
@@ -101,15 +103,15 @@ export function initSearch() {
       $$('.rline.sel', resultsEl).forEach(x => x.classList.remove('sel'));
       r.classList.add('sel');
       openFile(r.dataset.p, { line: +r.dataset.n });
-      const q = $('#q').value;
+      const q = $('#q')?.value;
       if (q) flashFind(q);
     }
   });
 
-  $('#q').addEventListener('input', runSearch);
-  $('#glob').addEventListener('input', runSearch);
+  $('#q')?.addEventListener('input', runSearch);
+  $('#glob')?.addEventListener('input', runSearch);
   $$('.opt').forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); runSearch(); }));
-  $('#q').addEventListener('keydown', e => {
+  $('#q')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); const f = $('.rline', resultsEl); if (f) f.click(); }
   });
 }

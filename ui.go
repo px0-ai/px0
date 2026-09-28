@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -182,3 +183,103 @@ func uiBullet(text string, w io.Writer) {
 	}
 	fmt.Fprintf(w, "  %s %s\n", uiFaint("·", w), text)
 }
+
+// uiSpinner displays an animated spinner on TTY terminals, or clean step messages on non-TTYs.
+type uiSpinner struct {
+	w       io.Writer
+	msg     string
+	mu      sync.Mutex
+	done    chan struct{}
+	stopped bool
+	tty     bool
+	start   time.Time
+}
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func newSpinner(msg string, w io.Writer) *uiSpinner {
+	s := &uiSpinner{
+		w:     w,
+		msg:   msg,
+		done:  make(chan struct{}),
+		tty:   isTTY(w) && !uiQuiet,
+		start: time.Now(),
+	}
+	if uiQuiet {
+		s.stopped = true
+		return s
+	}
+	if !s.tty {
+		fmt.Fprintf(s.w, "%s %s\n", uiGlyph("step", s.w), msg)
+		return s
+	}
+
+	go s.run()
+	return s
+}
+
+func (s *uiSpinner) run() {
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	idx := 0
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			if s.stopped {
+				s.mu.Unlock()
+				return
+			}
+			frame := paint(spinnerFrames[idx%len(spinnerFrames)], colorAccent, true, s.w)
+			fmt.Fprintf(s.w, "\r\033[K%s %s", frame, s.msg)
+			idx++
+			s.mu.Unlock()
+		}
+	}
+}
+
+func (s *uiSpinner) Update(msg string) {
+	if uiQuiet {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.msg = msg
+	if !s.tty {
+		fmt.Fprintf(s.w, "%s %s\n", uiGlyph("step", s.w), msg)
+	}
+}
+
+func (s *uiSpinner) Stop() {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	s.stopped = true
+	close(s.done)
+	if s.tty {
+		fmt.Fprint(s.w, "\r\033[K")
+	}
+	s.mu.Unlock()
+}
+
+func (s *uiSpinner) Success(msg string) {
+	s.Stop()
+	if uiQuiet {
+		return
+	}
+	elapsed := fmtDuration(time.Since(s.start))
+	uiStatus("ok", msg, elapsed, 0, s.w)
+}
+
+func (s *uiSpinner) Fail(msg string) {
+	s.Stop()
+	if uiQuiet {
+		return
+	}
+	uiStatus("err", msg, "", 0, s.w)
+}
+

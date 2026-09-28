@@ -4,13 +4,13 @@
 
 - Go 1.24+: To build the target binary.
 - Git: Required only for `--clone`.
-- System Utilities: `curl`, `awk`, `find`, `du` (standard on Linux and macOS).
+- System Utilities: `curl`, `awk`, `find`, `du`, `python3` (standard on Linux and macOS).
 - Disk Space: ~3 GB for the standard multi-repository corpus.
-- Memory Measurements: Read via `/proc`, supported natively on Linux (other metrics function cross-platform).
+- Memory Measurements: Cross-platform native support (Linux via `/proc` and macOS/Darwin via `getrusage`, `ps`, and `/api/metrics`).
 
 ## 2. Running Benchmarks
 
-### 2. Fetch the standard corpus
+### Fetch the standard corpus
 
 Clones shallow copies (`--depth 1`) of seven diverse open-source repositories:
 
@@ -18,12 +18,30 @@ Clones shallow copies (`--depth 1`) of seven diverse open-source repositories:
 ./benchmark.sh --clone
 ```
 
-### 3. Execute benchmark suite
+### Execute benchmark suite
 
 Spawns an isolated px0 server process per repository, records metrics, and terminates the instance:
 
 ```bash
 ./benchmark.sh
+```
+
+### Advanced Modes & Exports
+
+```bash
+# Export benchmark results as machine-readable JSON or CSV
+./benchmark.sh --json baseline.json
+./benchmark.sh --csv results.csv
+
+# Compare benchmark against a saved baseline (speedups, regressions, memory delta)
+./benchmark.sh --compare baseline.json
+
+# Run Go micro-benchmarks (fuzzy search, syntax highlighting, regex/literal search, allocs/op)
+./benchmark.sh --micro
+# or: make bench
+
+# Measure concurrent HTTP load throughput and latency distribution (p50, p95, p99)
+./benchmark.sh --load .
 ```
 
 ## 3. Benchmark Corpus
@@ -54,7 +72,20 @@ Measured on Linux x86_64 with language servers disabled (`-no-lsp`):
 | redis      | 26 MB       | 1,855  | 13 ms  | 1.0 ms  | 18.2 ms   | 80.8 ms  | 1.2 ms | 17 MB    | 27 MB    |
 | typescript | 414 MB      | 66,533 | 566 ms | 6.2 ms  | 150.3 ms  | 40.9 ms  | 6.5 ms | 69 MB    | 105 MB   |
 
-### Metric Descriptions
+### 4.1 Benchmark Results (macOS arm64 / Apple Silicon)
+
+Measured on macOS (Apple M4, Darwin arm64) with language servers disabled (`-no-lsp`):
+
+| Repo       | Source Size | Files  | Index   | Fuzzy   | Full Scan  | Open Big  | Reopen   | Base Mem | Peak Mem |
+| ---------- | ----------- | ------ | ------- | ------- | ---------- | --------- | -------- | -------- | -------- |
+| django     | 61 MB       | 7,014  | 142 ms  | 0.6 ms  | 50.7 ms    | 108.1 ms  | 8.4 ms   | 28 MB    | 46 MB    |
+| flask      | 2 MB        | 235    | 19 ms   | 0.4 ms  | 2.6 ms     | n/a       | n/a      | 23 MB    | 27 MB    |
+| kubernetes | 346 MB      | 25,922 | 544 ms  | 3.7 ms  | 299.9 ms   | 89.5 ms   | 8.4 ms   | 40 MB    | 110 MB   |
+| linux      | 1,783 MB    | 95,705 | 981 ms  | 4.2 ms  | 2,208.5 ms | 71.5 ms   | 11.9 ms  | 73 MB    | 367 MB   |
+| react      | 60 MB       | 7,204  | 102 ms  | 1.3 ms  | 66.3 ms    | 38.6 ms   | 7.4 ms   | 27 MB    | 48 MB    |
+| redis      | 25 MB       | 1,866  | 31 ms   | 0.6 ms  | 14.2 ms    | 32.8 ms   | 6.4 ms   | 25 MB    | 43 MB    |
+| typescript | 398 MB      | 66,617 | 925 ms  | 4.1 ms  | 1,019.2 ms | 52.0 ms   | 12.8 ms  | 77 MB    | 125 MB   |
+
 
 - `Source`: Total working tree size (excluding `.git`).
 - `Files`: Number of indexed files after applying `.gitignore` and built-in rules.
@@ -72,16 +103,44 @@ Side-by-side comparison on identical Linux hardware across px0 and several other
 
 ### Multi-Editor Benchmark Matrix
 
-| Editor | Memory (RSS) | Time to Open |
-| :--- | :--- | :--- |
-| **px0** | **~15 - 18 MB** | **~10 ms** |
-| Vim | ~10 - 15 MB | ~15 ms |
-| Neovim | ~10 - 20 MB | ~150 ms |
-| Zed | ~200 - 450 MB | *GUI dependent* |
-| Sublime Text | ~100 - 250 MB | *GUI dependent* |
-| VS Code | ~1,100 - 1,440 MB| ~3.0 - 5.0 s |
+| Editor | Architecture / Process Model | Host / Server RSS | Total System RAM (incl. UI) | Time to Open |
+| :--- | :--- | :--- | :--- | :--- |
+| **px0** | Native Go daemon + Browser client | **~20 - 30 MB** | **~100 - 180 MB** | **~10 ms** |
+| Vim | Native CLI | ~10 - 15 MB | ~10 - 15 MB | ~15 ms |
+| Neovim | Native CLI | ~10 - 20 MB | ~10 - 20 MB | ~150 ms |
+| Zed | Native GUI (Metal / Vulkan) | ~200 - 450 MB | ~200 - 450 MB | *GUI dependent* |
+| Sublime Text | Native GUI (C++) | ~100 - 250 MB | ~100 - 250 MB | *GUI dependent* |
+| VS Code | Electron (Chromium + Node) | ~1,100 - 1,440 MB | ~1,100 - 1,440 MB | ~3.0 - 5.0 s |
 
-*Note: CLI editors (Vim/Neovim) do not provide inline LSP out-of-the-box (like px0 does) without extra processes. Zed and Sublime Text were evaluated as active running GUI configurations. px0 serves a full workspace complete with instantaneous indexing natively in sub-20 Megabytes.*
+*Note: CLI editors (Vim/Neovim) do not provide inline LSP out-of-the-box (like px0 does) without extra processes. Zed and Sublime Text were evaluated as active running GUI configurations. px0 serves a full workspace complete with instantaneous indexing natively in 20-30 Megabytes.*
+
+### Accounting for the Browser Tab (Client/Server Breakdown)
+
+A fair and rigorous evaluation of px0 requires acknowledging its client-server architecture:
+1. **Host Go Server**: A single static native binary running on the workspace host (~20–30 MB RSS).
+2. **Web Client**: A browser tab running in an existing web browser (Chrome, Firefox, Safari) providing the virtualized UI (~80–150 MB RSS).
+
+Because desktop Electron IDEs (such as VS Code or Cursor) bundle Chromium and Node.js directly into their process tree, comparing only px0's Go server against VS Code's combined tree would be an incomplete comparison without accounting for the browser tab.
+
+#### Client/Server Footprint Breakdown vs. VS Code
+
+| Component / Layer | VS Code (Desktop Electron) | VS Code Remote (`code-server`) | px0 (Local Mode) | px0 (Remote Server Mode) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Server / Host Daemon** | ~400–600 MB *(Node.js, Extension Host)* | ~500–1,200 MB *(VS Code Server tree)* | **~20–30 MB** *(Native Go binary)* | **~20–30 MB** *(Host memory only)* |
+| **Client UI / Frontend** | ~700–900 MB *(Bundled Chromium + GPU)* | ~150–300 MB *(Web browser tab)* | **~80–150 MB** *(Single browser tab)* | **~80–150 MB** *(Local client browser)* |
+| **Total System RAM** | **~1,100–1,440 MB** | **~650–1,500 MB** | **~100–180 MB** *(~85–90% reduction)* | **~100–180 MB** |
+| **Host Impact (Server / Devbox)** | N/A | ~500–1,200 MB | ~20–30 MB | **~20–30 MB** |
+
+#### Why this architectural distinction matters:
+
+1. **Total System Memory is Still ~90% Lighter**:
+   Even when adding the browser tab (~80–150 MB) to the Go backend (~20–30 MB), px0's total local system footprint is **~100–180 MB**. Compared to Electron-based IDEs running at ~1,100–1,440 MB, px0 achieves an **85–90% net memory reduction** across the operating system.
+2. **Remote & Cloud Devboxes**:
+   When working across remote servers, cloud VMs, Kubernetes pods, or devboxes (`px0 -host 0.0.0.0`), the remote machine pays **strictly the ~20–30 MB server cost**. The UI rendering workload is offloaded to the developer's local machine. In contrast, remote solutions like `code-server` run heavy Node.js runtimes and remote daemons directly on the server, consuming 500 MB to 1.2 GB+ of server memory.
+3. **Marginal Cost of an Existing Browser**:
+   Developers virtually always have a browser running with active tabs. Adding one lightweight tab to an already-warm browser process pool avoids the steep CPU and memory penalty of cold-starting a dedicated, isolated Chromium instance, GPU process, and helper daemons.
+4. **Virtualized DOM Keeps the Tab Lean**:
+   px0 does not bundle heavy third-party editor frameworks like Monaco or CodeMirror. The frontend uses a custom virtualized renderer that mounts only ~60 active rows at any time regardless of file size. As a result, the browser tab itself remains bounded (~80–150 MB) and does not balloon when inspecting 500,000-line files or large diffs.
 
 ### Measured VS Code Process Tree Breakdown (Baseline Contrast)
 

@@ -2,24 +2,27 @@
 import { $, esc, S, doc_, api, debounce, withKeys } from './state.js';
 import { render, toggleWordWrap } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
-import { updateStatus } from './status.js';
+import { updateStatus, openLspMenu } from './status.js';
 import { pushHistory } from './history.js';
-import { showPanel } from './panels.js';
+import { showPanel, reindexWorkspace } from './panels.js';
 import { openFind } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { revealFile } from './tree.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
-import { showCalls, openLspSetup } from './calls.js';
+import { showCalls } from './calls.js';
 import { showHelp } from './shortcuts.js';
 import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
 import { togglePreview } from './markdown.js';
-import { openSettings } from './settings.js';
+import { openSettings, isAutoRevealEnabled } from './settings.js';
 import { showVimHelp, isVimEnabled, setVimModeEnabled } from './vim.js';
+import { launchPR } from './pr.js';
+import { newThread } from './thread.js';
 
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
 export const palList = $('#pal-list');
 export let pal = null;
+
 
 export const COMMANDS = [
   { name: withKeys('Preferences: Open Settings (UI) ({Mod+,})'), run: () => openSettings('ui') },
@@ -32,22 +35,27 @@ export const COMMANDS = [
   { name: 'Go to Definition', run: () => gotoDefinition() },
   { name: 'Find All References (Right Panel)', run: () => findReferences() },
   { name: withKeys('Show Call Trail: Callers / Callees ({Alt+Shift+H})'), run: () => showCalls() },
-  { name: 'Set Up Language Server…', run: () => openLspSetup() },
+  { name: 'Language Servers: Setup & Manage…', run: () => openLspMenu() },
+  { name: 'Set Up Language Server…', run: () => openLspMenu() },
   { name: 'Toggle Right Inspector (Symbols & References)', run: () => {
     if (document.body.classList.contains('right-hidden')) showRightInspector('refs');
     else hideRightInspector();
   } },
   { name: 'Show File Symbols (Right Panel)', run: () => showRightInspector('symbols') },
+  { name: withKeys('Show Problems in File ({Mod+Shift+M})'), run: () => showRightInspector('problems') },
   { name: 'Reveal Active File in Explorer', run: () => { const d = doc_(); if (d) { showPanel('files'); revealFile(d.path); } } },
   { name: withKeys('Toggle Word Wrap ({Alt+Z})'), run: () => toggleWordWrap() },
-  { name: withKeys('Toggle Markdown Preview ({Alt+M})'), run: () => togglePreview() },
+  { name: withKeys('Toggle Markdown / Table Preview ({Alt+M})'), run: () => togglePreview() },
   { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => document.body.classList.toggle('side-hidden') },
   { name: 'Select Theme…', run: () => openPalette('theme') },
   { name: 'Next Theme', run: cycleTheme },
-  { name: 'Re-index Workspace', run: () => $('#btn-reindex').click() },
+  { name: 'Re-index Workspace', run: reindexWorkspace },
   { name: 'Close Tab', run: () => { if (S.active >= 0) closeTab(S.active); } },
   { name: 'Close All Tabs', run: () => { while (S.tabs.length) closeTab(0); } },
   { name: withKeys('Reopen Closed Tab ({Alt+Shift+T})'), run: () => reopenClosedTab() },
+  { name: 'Threads: Show All', run: () => showRightInspector('threads') },
+  { name: withKeys('Threads: Start New Thread ({Alt+T} on a selection)'), run: () => newThread(null) },
+  { name: 'Git: Open Pull Request…', run: () => openPalette('openpr', '') },
   { name: 'Preferences: Toggle Vim Keybindings', run: () => setVimModeEnabled(!isVimEnabled(), true) },
   { name: 'Help: Vim Keybindings Cheat Sheet', run: showVimHelp },
   { name: 'Keyboard Shortcuts', run: showHelp },
@@ -59,6 +67,7 @@ export const PAL_MODES = {
   line: { tag: 'Line', hint: 'Enter a line number.' },
   command: { tag: 'Command', hint: '' },
   theme: { tag: 'Theme', hint: 'Arrows preview a theme. Enter keeps it, Esc restores the previous one.' },
+  openpr: { tag: 'Open PR', hint: 'Full pull request URL (e.g. https://github.com/owner/repo/pull/123), then Enter.' },
 };
 
 export function openPalette(mode, seed) {
@@ -81,8 +90,11 @@ export function closePalette() {
 export const refreshPalette = debounce(async () => {
   if (!pal) return;
   let raw = palInput.value;
-  let mode = pal.mode === 'theme' ? 'theme' : 'file';
-  if (mode === 'theme') { /* no prefixes: the query is a theme name */ }
+  // theme and openpr have no prefix character: once entered (via a command),
+  // they stay put regardless of what's typed, unlike file/symbol/line/command
+  // which re-derive their mode from the input on every keystroke.
+  let mode = (pal.mode === 'theme' || pal.mode === 'openpr') ? pal.mode : 'file';
+  if (mode === 'theme' || mode === 'openpr') { /* no prefixes: the query is the value itself */ }
   else if (raw.startsWith('>')) { mode = 'command'; raw = raw.slice(1); }
   else if (raw.startsWith('@')) { mode = 'symbol'; raw = raw.slice(1); }
   else if (raw.startsWith(':')) { mode = 'line'; raw = raw.slice(1); }
@@ -108,6 +120,8 @@ export const refreshPalette = debounce(async () => {
     const lq = q.toLowerCase();
     pal.items = listThemes().filter(t => (t.name + ' ' + t.id).toLowerCase().includes(lq))
       .map(t => ({ kind: 'theme', id: t.id, label: t.name, sub: t.scheme, right: t.id === pal.restoreTheme ? 'current' : '' }));
+  } else if (mode === 'openpr') {
+    pal.items = q ? [{ kind: 'openpr', target: q, label: 'Open PR: ' + esc(q), sub: 'Enter to open in a new tab', raw: true }] : [];
   } else {
     let j;
     try { j = await api('/api/find', { q, limit: 120 }); } catch { return; }
@@ -157,17 +171,23 @@ export function movePalette(delta) {
   drawPalette();
 }
 
-export function acceptPalette() {
+export async function acceptPalette() {
   if (!pal || !pal.items.length) return;
   const it = pal.items[pal.sel];
   if (it.kind === 'theme') pal.restoreTheme = null;
   closePalette();
-  if (it.kind === 'file') openFile(it.path);
-  else if (it.kind === 'sym' || it.kind === 'line') {
+  if (it.kind === 'file') {
+    await openFile(it.path);
+    if (isAutoRevealEnabled()) {
+      await showPanel('files');
+      await revealFile(it.path);
+    }
+  } else if (it.kind === 'sym' || it.kind === 'line') {
     const d = doc_(); if (!d) return;
     d.cur = it.n; centerLine(it.n); render(); updateStatus(); pushHistory(d.path, it.n);
   } else if (it.kind === 'cmd') it.cmd.run();
   else if (it.kind === 'theme') setTheme(it.id);
+  else if (it.kind === 'openpr') launchPR(it.target);
 }
 
 export function initPalette() {

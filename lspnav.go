@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -183,10 +186,14 @@ func decodeRange(v any) lspRange {
 	return lspRange{Start: pos("start"), End: pos("end")}
 }
 
+// Definition queries the language server for the definition site(s) of the symbol at the given position.
+// Line is 1-based and col is the UTF-16 code unit offset from the frontend.
 func (m *lspManager) Definition(ctx context.Context, abs, rel string, line, col int) ([]NavHit, error) {
 	return m.locate(ctx, "textDocument/definition", abs, rel, line, col, nil)
 }
 
+// References queries the language server for all reference locations of the symbol at the given position,
+// including its declaration site.
 func (m *lspManager) References(ctx context.Context, abs, rel string, line, col int) ([]NavHit, error) {
 	return m.locate(ctx, "textDocument/references", abs, rel, line, col,
 		map[string]any{"context": map[string]any{"includeDeclaration": true}})
@@ -436,4 +443,135 @@ func highlightSnippet(code, rel string) string {
 	d := newDoc(code, rel)
 	out, _ := d.Lines(0, d.Total)
 	return strings.Join(out, "\n")
+}
+
+// Problem represents one compiler, type, or linter problem published by a
+// language server for an open document.
+type Problem struct {
+	Line        int              `json:"line"`        // 1-based
+	Col         int              `json:"col"`         // 0-based
+	EndLine     int              `json:"endLine"`     // 1-based
+	EndCol      int              `json:"endCol"`      // 0-based
+	Severity    string           `json:"severity"`    // "error", "warning", "info", "hint"
+	SeverityNum int              `json:"severityNum"` // 1: error, 2: warning, 3: info, 4: hint
+	Message     string           `json:"message"`
+	Source      string           `json:"source,omitempty"`
+	Code        string           `json:"code,omitempty"`
+	Related     []ProblemRelated `json:"related,omitempty"`
+}
+
+type ProblemRelated struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Col     int    `json:"col"`
+	Message string `json:"message"`
+}
+
+func lspSeverityName(sev int) string {
+	switch sev {
+	case 1:
+		return "error"
+	case 2:
+		return "warning"
+	case 3:
+		return "info"
+	case 4:
+		return "hint"
+	default:
+		return "error"
+	}
+}
+
+func lspCodeString(c any) string {
+	if c == nil {
+		return ""
+	}
+	switch v := c.(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case json.Number:
+		return v.String()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// Problems returns the diagnostics reported by the language server for the given file.
+func (m *lspManager) Problems(ctx context.Context, abs, rel string, waitMs int) ([]Problem, error) {
+	c, err := m.client(ctx, rel)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureOpen(abs, rel); err != nil {
+		return nil, err
+	}
+
+	uri := pathToURI(abs)
+	var raw []lspDiagnostic
+	if waitMs > 0 {
+		raw = c.waitDiagnostics(ctx, uri)
+	} else {
+		diags, _ := c.getDiagnostics(uri)
+		raw = diags
+	}
+
+	var lines []string
+	if d, err := Open(abs, rel); err == nil {
+		lines = d.RawLines()
+	}
+
+	out := make([]Problem, 0, len(raw))
+	for _, d := range raw {
+		line, col := c.fromLSP(lines, d.Range.Start)
+		endLine, endCol := c.fromLSP(lines, d.Range.End)
+		sev := d.Severity
+		if sev < 1 || sev > 4 {
+			sev = 1
+		}
+
+		var rels []ProblemRelated
+		for _, r := range d.RelatedInformation {
+			rAbs, err := uriToPath(r.Location.URI)
+			if err != nil {
+				continue
+			}
+			rRel := rAbs
+			if relPath, err := filepath.Rel(m.root, rAbs); err == nil && !strings.HasPrefix(relPath, "..") {
+				rRel = filepath.ToSlash(relPath)
+			}
+			rels = append(rels, ProblemRelated{
+				Path:    rRel,
+				Line:    r.Location.Range.Start.Line + 1,
+				Col:     r.Location.Range.Start.Character,
+				Message: r.Message,
+			})
+		}
+
+		out = append(out, Problem{
+			Line:        line,
+			Col:         col,
+			EndLine:     endLine,
+			EndCol:      endCol,
+			Severity:    lspSeverityName(sev),
+			SeverityNum: sev,
+			Message:     d.Message,
+			Source:      d.Source,
+			Code:        lspCodeString(d.Code),
+			Related:     rels,
+		})
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SeverityNum != out[j].SeverityNum {
+			return out[i].SeverityNum < out[j].SeverityNum
+		}
+		if out[i].Line != out[j].Line {
+			return out[i].Line < out[j].Line
+		}
+		return out[i].Col < out[j].Col
+	})
+
+	return out, nil
 }

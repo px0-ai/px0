@@ -68,6 +68,27 @@ var lspSymbolKind = map[int]string{
 	26: "type",
 }
 
+type lspDiagnostic struct {
+	Range              lspRange         `json:"range"`
+	Severity           int              `json:"severity,omitempty"` // 1: Error, 2: Warning, 3: Info, 4: Hint
+	Code               any              `json:"code,omitempty"`
+	Source             string           `json:"source,omitempty"`
+	Message            string           `json:"message"`
+	Tags               []int            `json:"tags,omitempty"`
+	RelatedInformation []lspRelatedInfo `json:"relatedInformation,omitempty"`
+}
+
+type lspRelatedInfo struct {
+	Location lspLocation `json:"location"`
+	Message  string      `json:"message"`
+}
+
+type lspPublishDiagnosticsParams struct {
+	URI         string          `json:"uri"`
+	Version     *int            `json:"version,omitempty"`
+	Diagnostics []lspDiagnostic `json:"diagnostics"`
+}
+
 type rpcMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -112,16 +133,22 @@ type lspClient struct {
 	// "the server has not finished indexing yet".
 	indexMu  sync.Mutex
 	indexing int
+
+	diagMu      sync.RWMutex
+	diagnostics map[string][]lspDiagnostic
+	diagChs     map[string][]chan struct{}
 }
 
 func newLSPClient(def lspServerDef, root string) *lspClient {
 	return &lspClient{
 		def: def, root: root,
-		pending:  map[int64]chan rpcMessage{},
-		opened:   map[string]int{},
-		encoding: "utf-16",
-		readyCh:  make(chan struct{}),
-		logf:     func(string, ...any) {},
+		pending:     map[int64]chan rpcMessage{},
+		opened:      map[string]int{},
+		encoding:    "utf-16",
+		readyCh:     make(chan struct{}),
+		logf:        func(string, ...any) {},
+		diagnostics: map[string][]lspDiagnostic{},
+		diagChs:     map[string][]chan struct{}{},
 	}
 }
 
@@ -218,27 +245,84 @@ func (c *lspClient) reply(id json.RawMessage, method string) {
 }
 
 func (c *lspClient) onNotification(msg rpcMessage) {
-	if msg.Method != "$/progress" {
-		return
-	}
-	var p struct {
-		Value struct {
-			Kind string `json:"kind"`
-		} `json:"value"`
-	}
-	if json.Unmarshal(msg.Params, &p) != nil {
-		return
-	}
-	c.indexMu.Lock()
-	switch p.Value.Kind {
-	case "begin":
-		c.indexing++
-	case "end":
-		if c.indexing > 0 {
-			c.indexing--
+	switch msg.Method {
+	case "$/progress":
+		var p struct {
+			Value struct {
+				Kind string `json:"kind"`
+			} `json:"value"`
+		}
+		if json.Unmarshal(msg.Params, &p) != nil {
+			return
+		}
+		c.indexMu.Lock()
+		switch p.Value.Kind {
+		case "begin":
+			c.indexing++
+		case "end":
+			if c.indexing > 0 {
+				c.indexing--
+			}
+		}
+		c.indexMu.Unlock()
+
+	case "textDocument/publishDiagnostics":
+		var p lspPublishDiagnosticsParams
+		if err := json.Unmarshal(msg.Params, &p); err == nil {
+			c.diagMu.Lock()
+			if p.Diagnostics == nil {
+				p.Diagnostics = []lspDiagnostic{}
+			}
+			c.diagnostics[p.URI] = p.Diagnostics
+			if chs, ok := c.diagChs[p.URI]; ok {
+				for _, ch := range chs {
+					select {
+					case ch <- struct{}{}:
+					default:
+					}
+				}
+				delete(c.diagChs, p.URI)
+			}
+			c.diagMu.Unlock()
 		}
 	}
-	c.indexMu.Unlock()
+}
+
+func (c *lspClient) getDiagnostics(uri string) ([]lspDiagnostic, bool) {
+	c.diagMu.RLock()
+	defer c.diagMu.RUnlock()
+	d, ok := c.diagnostics[uri]
+	if !ok {
+		return nil, false
+	}
+	out := make([]lspDiagnostic, len(d))
+	copy(out, d)
+	return out, true
+}
+
+func (c *lspClient) waitDiagnostics(ctx context.Context, uri string) []lspDiagnostic {
+	c.diagMu.Lock()
+	if d, ok := c.diagnostics[uri]; ok {
+		c.diagMu.Unlock()
+		out := make([]lspDiagnostic, len(d))
+		copy(out, d)
+		return out
+	}
+	ch := make(chan struct{}, 1)
+	c.diagChs[uri] = append(c.diagChs[uri], ch)
+	c.diagMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+	case <-ch:
+	}
+
+	c.diagMu.RLock()
+	defer c.diagMu.RUnlock()
+	d := c.diagnostics[uri]
+	out := make([]lspDiagnostic, len(d))
+	copy(out, d)
+	return out
 }
 
 func (c *lspClient) busy() bool {
@@ -368,7 +452,11 @@ func (c *lspClient) initialize(ctx context.Context) error {
 				"symbol":           map[string]any{"dynamicRegistration": false},
 			},
 			"textDocument": map[string]any{
-				"synchronization": map[string]any{"didSave": false, "dynamicRegistration": false},
+				"synchronization": map[string]any{"didSave": true, "dynamicRegistration": false},
+				"publishDiagnostics": map[string]any{
+					"relatedInformation": true,
+					"versionSupport":    true,
+				},
 				"definition":      map[string]any{"linkSupport": true},
 				"typeDefinition":  map[string]any{"linkSupport": true},
 				"implementation":  map[string]any{"linkSupport": true},
@@ -448,6 +536,45 @@ func (c *lspClient) ensureOpen(abs, rel string) error {
 	return nil
 }
 
+// syncDoc re-reads an already opened file from disk and notifies the server of
+// changes, e.g. after a reindex or external edit.
+func (c *lspClient) syncDoc(abs, rel string) error {
+	uri := pathToURI(abs)
+	c.mu.Lock()
+	v, ok := c.opened[uri]
+	c.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		c.closeDoc(abs)
+		return err
+	}
+	v++
+	c.mu.Lock()
+	c.opened[uri] = v
+	c.mu.Unlock()
+
+	if err := c.notify("textDocument/didChange", map[string]any{
+		"textDocument": map[string]any{
+			"uri":     uri,
+			"version": v,
+		},
+		"contentChanges": []map[string]any{
+			{"text": string(data)},
+		},
+	}); err != nil {
+		return err
+	}
+	_ = c.notify("textDocument/didSave", map[string]any{
+		"textDocument": map[string]any{
+			"uri": uri,
+		},
+	})
+	return nil
+}
+
 // closeDoc notifies the server that the file was closed, allowing the server
 // to free ASTs and file memory.
 func (c *lspClient) closeDoc(abs string) {
@@ -460,6 +587,11 @@ func (c *lspClient) closeDoc(abs string) {
 	}
 	delete(c.opened, uri)
 	c.mu.Unlock()
+
+	c.diagMu.Lock()
+	delete(c.diagnostics, uri)
+	c.diagMu.Unlock()
+
 	c.notify("textDocument/didClose", map[string]any{
 		"textDocument": map[string]any{
 			"uri": uri,
@@ -473,6 +605,9 @@ func (c *lspClient) closeDoc(abs string) {
 // server expects. The spec counts UTF-16 code units by default, which is not
 // what Go gives us.
 func (c *lspClient) toLSP(lineText string, line, byteCol int) lspPosition {
+	if byteCol < 0 {
+		byteCol = 0
+	}
 	if byteCol > len(lineText) {
 		byteCol = len(lineText)
 	}
@@ -494,6 +629,9 @@ func (c *lspClient) toLSP(lineText string, line, byteCol int) lspPosition {
 func (c *lspClient) fromLSP(lines []string, p lspPosition) (int, int) {
 	line := p.Line + 1
 	if p.Line < 0 || p.Line >= len(lines) {
+		return line, 0
+	}
+	if p.Character <= 0 {
 		return line, 0
 	}
 	text := lines[p.Line]

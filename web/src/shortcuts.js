@@ -6,7 +6,7 @@ import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
 import { clearLink, hovercard } from './hover.js';
-import { openFind, clearFind, findbar } from './find.js';
+import { openFind, clearFind, findbar, findNextMatch } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { overlay, openPalette, closePalette } from './palette.js';
@@ -18,7 +18,7 @@ import { cycleTheme } from './theme.js';
 import { previewing, togglePreview, previewKey, selectPreview } from './markdown.js';
 import { toggleDiff } from './diff.js';
 import { openSettings, closeSettings, isSettingsOpen } from './settings.js';
-import { handleVimKeyDown, showVimHelp, closeVimHelp } from './vim.js';
+import { handleVimKeyDown, isVimEnabled, getVimMode, showVimHelp, closeVimHelp } from './vim.js';
 import { handleImageKey } from './imageview.js';
 import { submitBatch } from './agent.js';
 import { reindexWorkspace } from './panels.js';
@@ -32,10 +32,11 @@ export const SHORTCUTS = [
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
   [['Mod+Shift+F'], 'Search in files'], [['Mod+Shift+R'], 'Refresh workspace'], [['Mod+F'], 'Find in file'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
-  [['Alt+M'], 'Toggle Markdown preview'],
+  [['Alt+M'], 'Toggle Markdown / table preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
   [['F12', 'Mod+Click'], 'Go to definition'], [['Shift+F12'], 'Find all references'],
   [['Alt+Shift+H'], 'Call trail (callers / callees)'],
+  [['Mod+Shift+M'], 'Show Problems in file'],
   [['Mod+J'], 'Toggle right inspector (Symbols/Refs)'],
   [['Alt+Left', 'Alt+Right'], 'Navigate back / forward'], [['Mod+B'], 'Toggle sidebar'],
   [['Alt+W'], 'Close tab'], [['Alt+Shift+T'], 'Reopen closed tab'], [['Ctrl+Tab'], 'Next tab'],
@@ -43,6 +44,7 @@ export const SHORTCUTS = [
   [['Mod+A'], 'Select whole file'],
   [['Alt+C', 'Alt+A'], 'Copy selection ref / with context'], [['Alt+U'], 'Find usages of selection'],
   [['Alt+E'], 'Edit selection inline'],
+  [['Alt+T'], 'Start a thread on the selection'],
   [['Right click'], 'Selection actions at the pointer'],
   [['Mod+Home|Mod+Up', 'Mod+End|Mod+Down'], 'Top / bottom of file'],
   [['Home|Mod+Left', 'End|Mod+Right'], 'Start / end of line'],
@@ -55,9 +57,11 @@ export function showHelp() {
   const ver = S.meta?.version ? ` <span class="help-version">v${esc(S.meta.version)}</span>` : '';
   h.innerHTML = '<div class="help-card"><div class="help-header"><h2>Keyboard Shortcuts</h2>' + ver +
     '<button id="btn-switch-to-vim-help" class="settings-btn-link" style="margin-left:auto;font-size:12px;cursor:pointer;" title="View Vim Keybindings">View Vim Keybindings</button></div><dl class="help-grid">' +
-    SHORTCUTS.map(([combos, v]) =>
-      '<dt>' + combos.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
-      '<dd>' + esc(v) + '</dd>').join('') + '</dl></div>';
+    SHORTCUTS.map(([combos, v]) => {
+      const comboList = Array.isArray(combos) ? combos : [combos];
+      return '<dt>' + comboList.map(keyCaps).filter(Boolean).join('<span class="key-or">/</span>') + '</dt>' +
+        '<dd>' + esc(v) + '</dd>';
+    }).join('') + '</dl></div>';
   h.hidden = false;
   h.querySelector('#btn-switch-to-vim-help')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -100,6 +104,7 @@ export function initShortcuts() {
       const lb = $('#img-lightbox');
       if (lb && !lb.hidden) { lb.hidden = true; return; }
       if (!$('#vim-helpsheet')?.hidden) { closeVimHelp(); return; }
+      if (isVimEnabled() && handleVimKeyDown(e)) return;
       if (isSettingsOpen()) { closeSettings(); return; }
       if (!overlay.hidden) { closePalette(); return; }
       if (!$('#helpsheet').hidden) { $('#helpsheet').hidden = true; return; }
@@ -108,7 +113,7 @@ export function initShortcuts() {
       if (S.selAll) { clearSelectAll(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
-      if (inField(document.activeElement)) document.activeElement.blur();
+      if (inField(document.activeElement)) /** @type {HTMLElement} */ (document.activeElement).blur();
       return;
     }
 
@@ -133,6 +138,7 @@ export function initShortcuts() {
     }
 
     if (mod && e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); openPalette('command'); return; }
+    if (mod && e.shiftKey && (e.key === 'M' || e.key === 'm')) { e.preventDefault(); showRightInspector('problems'); return; }
     if (mod && e.shiftKey && (e.key === 'O' || e.key === 'o')) { e.preventDefault(); showRightInspector('symbols'); return; }
     if (mod && e.shiftKey && (e.key === 'F' || e.key === 'f')) { e.preventDefault(); showRightInspector('search'); $('#q')?.select(); return; }
     if (mod && e.shiftKey && (e.key === 'R' || e.key === 'r')) { e.preventDefault(); reindexWorkspace(); return; }
@@ -178,13 +184,19 @@ export function initShortcuts() {
       return;
     }
 
-    if (mod && !e.shiftKey && !e.altKey && e.key === 'Enter') {
+    if (mod && e.shiftKey && !e.altKey && e.key === 'Enter') {
       const b = $('#agentbox');
       if (b && !b.hidden) {
         e.preventDefault();
         submitBatch();
         return;
       }
+    }
+
+    if (!mod && e.key === 'Enter' && !findbar.hidden) {
+      e.preventDefault();
+      findNextMatch(e.shiftKey ? -1 : 1);
+      return;
     }
 
     if (inField(document.activeElement)) return;

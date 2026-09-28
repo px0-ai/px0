@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -345,22 +346,24 @@ type agentBatchItem struct {
 	Instruction string `json:"instruction"`
 }
 
-// agentJob is one dispatch, snapshot-able while it runs.
+// agentJob represents a single background editing task dispatched to an AI coding harness.
+// It tracks real-time progress, log outputs, duration, affected files, and cancellation handlers.
 type agentJob struct {
-	ID         int64            `json:"id"`
-	Harness    string           `json:"harness"`
-	Path       string           `json:"path"`
-	Lines      string           `json:"lines"`
-	Running    bool             `json:"running"`
-	Error      string           `json:"error,omitempty"`
-	Log        string           `json:"log"`
-	Stdout     string           `json:"stdout,omitempty"`
-	Stderr     string           `json:"stderr,omitempty"`
-	Changed    []string         `json:"changed"`
-	Ms         int64            `json:"ms"`
-	Tracked    bool             `json:"tracked"`
-	BatchCount int              `json:"batchCount,omitempty"`
-	Items      []agentBatchItem `json:"items,omitempty"`
+	ID         int64            `json:"id"`                   // Unique monotonic job identifier
+	Harness    string           `json:"harness"`              // Name of the harness executing this job
+	Path       string           `json:"path"`                 // Relative file path targeted for editing
+	Lines      string           `json:"lines"`                // Line range formatted string (e.g. "L12-L30")
+	Running    bool             `json:"running"`              // True while harness process is actively executing
+	Error      string           `json:"error,omitempty"`      // Error message if the job failed or was aborted
+	Log        string           `json:"log"`                  // Tail of merged stdout/stderr log output
+	Stdout     string           `json:"stdout,omitempty"`     // Stdout log output tail
+	Stderr     string           `json:"stderr,omitempty"`     // Stderr log output tail
+	Changed    []string         `json:"changed"`              // Files detected as modified after job execution
+	Ms         int64            `json:"ms"`                   // Elapsed runtime in milliseconds
+	Tracked    bool             `json:"tracked"`              // Whether telemetry tracking has been recorded
+	ThreadID   string           `json:"threadId,omitempty"`   // The thread this edit runs as, when it runs as one
+	BatchCount int              `json:"batchCount,omitempty"` // Number of items in batch review edit
+	Items      []agentBatchItem `json:"items,omitempty"`      // Detailed batch items if multi-file edit
 
 	ranges []agentRange
 	l1, l2 int
@@ -438,6 +441,10 @@ type agentManager struct {
 	jobs     map[int64]*agentJob
 	seq      int64
 	onEdit   func()
+
+	// Set by the thread manager: inline and batch edits run as threads.
+	threadJob    func(id int64) *agentJob // id 0 means the most recent
+	threadCancel func(id int64) bool      // id 0 means every one running
 }
 
 // newAgentManager wires discovery and restores the remembered choice. A flag
@@ -612,6 +619,17 @@ func (m *agentManager) Model() string {
 	return m.models[m.selected]
 }
 
+// current returns the selected harness, its headless argv and its model, read
+// together so a run never mixes one harness's name with another's flags.
+func (m *agentManager) current() (string, []string, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.args == nil {
+		return "", nil, ""
+	}
+	return m.selected, append([]string(nil), m.args...), m.models[m.selected]
+}
+
 func (m *agentManager) Pinned() bool {
 	if m == nil {
 		return false
@@ -685,7 +703,6 @@ func (m *agentManager) Job(id int64) *agentJob {
 		return nil
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	j := m.jobs[id]
 	if id == 0 {
 		for _, cand := range m.jobs {
@@ -694,19 +711,38 @@ func (m *agentManager) Job(id int64) *agentJob {
 			}
 		}
 	}
-	if j == nil {
-		return nil
+	var cp *agentJob
+	if j != nil {
+		c := *j
+		c.Log = j.out.String()
+		c.Stdout = c.Log
+		if j.stderr != nil {
+			c.Stderr = j.stderr.String()
+		}
+		if c.Running {
+			c.Ms = time.Since(j.start).Milliseconds()
+		}
+		cp = &c
 	}
-	cp := *j
-	cp.Log = j.out.String()
-	cp.Stdout = cp.Log
-	if j.stderr != nil {
-		cp.Stderr = j.stderr.String()
+	lookup := m.threadJob
+	m.mu.Unlock()
+
+	// Inline and batch edits run as threads and share this id space, so one
+	// poll endpoint serves both. Asked for the latest, the newer of the two wins.
+	if lookup != nil {
+		if tj := lookup(id); tj != nil && (cp == nil || tj.ID > cp.ID) {
+			return tj
+		}
 	}
-	if cp.Running {
-		cp.Ms = time.Since(j.start).Milliseconds()
-	}
-	return &cp
+	return cp
+}
+
+// nextJobID hands out an id from the sequence every job shares.
+func (m *agentManager) nextJobID() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
+	return m.seq
 }
 
 // anyRunningLocked reports whether any job is still in flight. Callers hold m.mu.
@@ -882,12 +918,12 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 		m.jobs = map[int64]*agentJob{}
 	}
 	m.jobs[job.ID] = job
-	m.mu.Unlock()
-
 	modelStr := ""
 	if m.models != nil && m.models[name] != "" {
 		modelStr = fmt.Sprintf(" (%s)", m.models[name])
 	}
+	m.mu.Unlock()
+
 	if len(items) == 1 {
 		uiStatus("step", "agent", fmt.Sprintf("#%d %s%s · %s:%s  %q", job.ID, name, modelStr, items[0].Path, lineRef(items[0].L1, items[0].L2), items[0].Instruction), 0, os.Stdout)
 	} else {
@@ -900,6 +936,49 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 	} else {
 		prompt = agentBatchPrompt(prepared)
 	}
+
+	go m.run(ctx, cancel, job, args, prompt)
+	return m.Job(job.ID), nil
+}
+
+// StartPrompt dispatches a one-shot prompt to the selected harness with no
+// target file -- used for generating text (e.g. a commit message) rather
+// than editing code. There is no file range to anchor an overlap check
+// against, so a prompt job is never blocked by, or blocks, a file edit.
+func (m *agentManager) StartPrompt(label, prompt string) (*agentJob, error) {
+	m.mu.Lock()
+	if m.args == nil {
+		m.mu.Unlock()
+		uiStatus("err", "agent", "prompt dispatch refused: no coding harness selected", 0, os.Stdout)
+		return nil, errAgentNone
+	}
+	args := m.args
+	name := m.selected
+	m.seq++
+	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
+	job := &agentJob{
+		ID:      m.seq,
+		Harness: name,
+		Path:    label,
+		Running: true,
+		Changed: []string{},
+		Tracked: gitAvailable(m.root),
+		out:     &tailBuffer{max: agentLogBytes},
+		stderr:  &tailBuffer{max: agentLogBytes},
+		start:   time.Now(),
+		cancel:  cancel,
+	}
+	if m.jobs == nil {
+		m.jobs = map[int64]*agentJob{}
+	}
+	m.jobs[job.ID] = job
+	modelStr := ""
+	if m.models != nil && m.models[name] != "" {
+		modelStr = fmt.Sprintf(" (%s)", m.models[name])
+	}
+	m.mu.Unlock()
+
+	uiStatus("step", "agent", fmt.Sprintf("#%d %s%s · %s", job.ID, name, modelStr, label), 0, os.Stdout)
 
 	go m.run(ctx, cancel, job, args, prompt)
 	return m.Job(job.ID), nil
@@ -1025,6 +1104,13 @@ func (m *agentManager) CancelJob(id int64) bool {
 		return false
 	}
 	m.mu.Lock()
+	tc := m.threadCancel
+	m.mu.Unlock()
+	fromThreads := tc != nil && tc(id)
+	if fromThreads && id != 0 {
+		return true
+	}
+	m.mu.Lock()
 	defer m.mu.Unlock()
 	if id != 0 {
 		j := m.jobs[id]
@@ -1052,7 +1138,7 @@ func (m *agentManager) CancelJob(id int64) bool {
 		cancel()
 		cancelled = true
 	}
-	return cancelled
+	return cancelled || fromThreads
 }
 
 func (m *agentManager) Close() { m.Cancel() }
@@ -1094,6 +1180,9 @@ func changedSinceMaps(before, after map[string]string) []string {
 			out = append(out, path)
 		}
 	}
+	// Map iteration order is random; sort so the job's summary and API
+	// response list the same files in the same order on every run.
+	sort.Strings(out)
 	return out
 }
 
@@ -1162,6 +1251,42 @@ func agentBatchPrompt(items []itemWithSnippet) string {
 	}
 	b.WriteString("Edit the file(s) in place to carry out all of the above instructions. ")
 	b.WriteString("Change only what they ask for, coordinate changes cleanly, and do not explain the changes afterwards.")
+	return b.String()
+}
+
+// commitMessagePrompt asks the harness to write a commit message for the
+// staged changes. instruction is the user's git.commitMessageInstruction
+// setting (empty when unset), appended verbatim so it can refine or override
+// the base convention below.
+func commitMessagePrompt(files []string, stat, diff, instruction string) string {
+	var b strings.Builder
+	b.WriteString("Write a git commit message for the staged changes below.\n")
+	b.WriteString("Rules: imperative mood, a concise summary line under 72 characters, a blank line before an optional body, and explain why rather than just what changed.\n")
+	b.WriteString("Output ONLY the commit message text -- no markdown code fences, no preamble, no explanation afterwards, and do not edit any files.\n")
+	if instruction != "" {
+		fmt.Fprintf(&b, "\nAdditional instructions from the user: %s\n", instruction)
+	}
+	if len(files) > 0 {
+		fmt.Fprintf(&b, "\nChanged files (%d):\n", len(files))
+		maxFiles := 100
+		for i, f := range files {
+			if i >= maxFiles {
+				fmt.Fprintf(&b, "... and %d more files\n", len(files)-maxFiles)
+				break
+			}
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+	if strings.TrimSpace(stat) != "" {
+		b.WriteString("\nSummary of changes (diffstat):\n")
+		b.WriteString(stat)
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(diff) != "" {
+		b.WriteString("\nStaged diff:\n")
+		b.WriteString(diff)
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -1236,7 +1361,7 @@ func (s *Server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
 	l1, _ := strconv.Atoi(q.Get("l1"))
 	l2, _ := strconv.Atoi(q.Get("l2"))
 
-	job, err := s.agent.Start(abs, rel, l1, l2, q.Get("instruction"), q.Get("force") == "1")
+	job, err := s.threads.StartEdit([]agentBatchItem{{Abs: abs, Path: rel, L1: l1, L2: l2, Instruction: q.Get("instruction")}})
 	if err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) || errors.Is(err, errAgentDirty) {
@@ -1341,7 +1466,7 @@ func (s *Server) handleAgentBatchEdit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	job, err := s.agent.StartBatch(items, req.Force)
+	job, err := s.threads.StartEdit(items)
 	if err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) || errors.Is(err, errAgentDirty) {
