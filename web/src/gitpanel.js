@@ -470,8 +470,8 @@ let currentCommitsUrl = '';
 
 function updateSeeAllCommits(commitsUrl, commitCount) {
   if (commitsUrl) currentCommitsUrl = commitsUrl;
-  if (S.meta?.pr) {
-    currentCommitsUrl = `https://github.com/${S.meta.pr.owner}/${S.meta.pr.repo}/pull/${S.meta.pr.number}/commits`;
+  if (S.meta?.pr?.url) {
+    currentCommitsUrl = `${S.meta.pr.url.replace(/\/+$/, '')}/commits`;
   }
   const link = $('#git-see-all-commits');
   if (!link) return;
