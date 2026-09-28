@@ -452,6 +452,55 @@ func TestClaudeModelDiscovery(t *testing.T) {
 	}
 }
 
+func TestCodexModelDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	fakeCodex := filepath.Join(dir, "codex")
+	script := `#!/bin/sh
+if [ "$1" != "debug" ] || [ "$2" != "models" ]; then
+  exit 1
+fi
+printf '%s\n' '{"models":[{"slug":"gpt-new-fast","visibility":"list"},{"slug":"internal-only","visibility":"hide"},{"slug":"gpt-new-deep","visibility":"list"}]}'
+`
+	if err := os.WriteFile(fakeCodex, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	discoveredModelsMu.Lock()
+	delete(discoveredModels, "codex")
+	delete(discoveringModels, "codex")
+	discoveredModelsMu.Unlock()
+
+	runModelDiscovery("codex", fakeCodex, []string{"fallback-model"})
+
+	discoveredModelsMu.Lock()
+	models := append([]string(nil), discoveredModels["codex"]...)
+	discoveredModelsMu.Unlock()
+
+	want := []string{"gpt-new-fast", "gpt-new-deep"}
+	if fmt.Sprint(models) != fmt.Sprint(want) {
+		t.Fatalf("models = %v, want %v", models, want)
+	}
+}
+
+func TestCodexModelDiscoveryFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	fakeCodex := filepath.Join(dir, "codex")
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nprintf 'not json\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fallback := []string{"fallback-small", "fallback-large"}
+	runModelDiscovery("codex", fakeCodex, fallback)
+
+	discoveredModelsMu.Lock()
+	models := append([]string(nil), discoveredModels["codex"]...)
+	discoveredModelsMu.Unlock()
+
+	if fmt.Sprint(models) != fmt.Sprint(fallback) {
+		t.Fatalf("models = %v, want fallback %v", models, fallback)
+	}
+}
+
 // Editing in the diff view means editing a file that is already modified. Its
 // git status reads M before and after, so the change has to be seen some other way.
 func TestAgentReportsEditToAlreadyModifiedFile(t *testing.T) {
@@ -953,6 +1002,3 @@ func TestCommitMessagePrompt(t *testing.T) {
 		t.Errorf("prompt contains file beyond 100:\n%s", p2)
 	}
 }
-
-
-

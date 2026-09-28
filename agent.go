@@ -312,6 +312,29 @@ func runModelDiscovery(name, bin string, staticModels []string) {
 				models = reordered
 			}
 		}
+	case "codex":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "debug", "models").Output()
+		cancel()
+		if err == nil {
+			var catalog struct {
+				Models []struct {
+					Slug       string `json:"slug"`
+					Visibility string `json:"visibility"`
+				} `json:"models"`
+			}
+			if json.Unmarshal(out, &catalog) == nil {
+				var list []string
+				for _, model := range catalog.Models {
+					if model.Visibility == "list" && model.Slug != "" {
+						list = append(list, model.Slug)
+					}
+				}
+				if len(list) > 0 {
+					models = list
+				}
+			}
+		}
 	}
 
 	discoveredModelsMu.Lock()
@@ -578,6 +601,18 @@ func (m *agentManager) Detect() []agentHarness {
 		curModel := savedModels[p.Name]
 		if curModel == "" {
 			curModel = p.DefaultModel
+		}
+		if len(models) > 0 && curModel != "" {
+			found := false
+			for _, model := range models {
+				if model == curModel {
+					found = true
+					break
+				}
+			}
+			if !found {
+				models = append([]string{curModel}, models...)
+			}
 		}
 
 		cmdStr := strings.Join(p.Args, " ")
