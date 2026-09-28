@@ -175,11 +175,22 @@ These cases come from the browser checks run against the implementation:
 
 - GitHub alerts. A blockquote whose first paragraph opens with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` loses the marker, gains a `.md-alert-title` paragraph, and gets `.md-alert .md-alert-<kind>`.
 - Code block wrappers. Each `<pre>` moves into `.md-pre`, which carries `data-lang` for a corner label and a copy button. The button holds an SVG icon rather than a text label, because find in the preview walks text nodes and would otherwise match the word "Copy".
+- Mermaid diagrams. A fence whose `data-lang` is `mermaid` keeps its sanitized source block and copy button, then `web/src/mermaid.js` renders a diagram beside it. Successful renders hide the source block and provide per-diagram zoom controls; failed renders leave the source visible with a local error message.
 - Inline image enhancements. Every kept `<img>` is injected with `loading="lazy"` and `decoding="async"`, preventing layout shifts and deferring offscreen network transfers. Standalone images receive `.md-zoomable`, affording hover highlights and zoom-in cursors.
 - Interactive Lightbox (`#img-lightbox`). Clicking a standalone image opens a centered modal over a blurred backdrop (`rgba(0, 0, 0, 0.72)` + `backdrop-filter: blur(8px)`). The lightbox displays natural dimensions, offers an "Open in Tab" button (to promote the image into a dedicated image tab), a "Copy Path" button, and dismisses on `Esc` or backdrop click.
 - Broken image recovery. An error event listener registered during the capture phase on `#md` detects failed image loads and replaces the element with a styled `.md-img-broken` card displaying the missing path. See [Image Viewer Architecture](image-viewer.md) for full details.
 
 Styles live under `/* ---------- markdown preview ---------- */` in [`web/style.css`](../../web/style.css). They read only existing theme tokens, so all themes work without changes. Alerts set a local `--alert` property from existing tokens: Note `--accent`, Tip `--gi`, Important `--nc`, Warning `--mark-active`, Caution `--err`. [`styling-and-themes.md`](styling-and-themes.md) lists every token the preview uses.
+
+### Mermaid Diagrams
+
+Mermaid is a presentation-stage enhancement, not a server renderer. `renderFence` emits the same escaped `<pre><code>` and `data-line` metadata as every other fence. After `mdSanitize` has rejected repository-supplied SVG, `renderMermaidBlocks` lazy-loads the pinned, same-origin `web/vendor/mermaid-12.0.0.min.js` asset and inserts Mermaid's generated SVG. The runtime is embedded by `go:embed`, so diagrams work offline and under `-base-path` without a CDN or another process.
+
+The adapter initializes Mermaid with `startOnLoad: false`, `securityLevel: strict`, disabled error rendering, and Mermaid's secure configuration keys. Diagram directives therefore cannot enable HTML labels, click callbacks, or a weaker security level. The returned `bindFunctions` hook is intentionally ignored.
+
+Rendering is sequential because Mermaid configuration is process-global in the browser. Every asynchronous continuation checks the preview generation and active document before changing the DOM. `drawPreview` waits for the batch before restoring a line, anchor, or saved scroll position. A syntax error affects only its fence: the original source remains visible and neighboring diagrams continue.
+
+The original `<pre>` stays in the DOM after a successful render, hidden from presentation and find but available to the existing copy button and `domToMarkdown`. This preserves exact Mermaid source when copying code or raw Markdown. Each rendered diagram owns a lightweight CSS zoom level from 50% through 200%; zoom changes layout locally without invoking Mermaid again and resets when the diagram rerenders. `theme:changed` rerenders only the active preview after a short debounce, using the current px0 theme tokens.
 
 ## 6. Keeping the Reader's Place
 
@@ -234,7 +245,7 @@ Clicking the half that is already selected does nothing. The handler toggles onl
 
 The code view's features assume rows, so the preview substitutes its own versions:
 
-- Find (Ctrl+F). `runFind` in [`web/src/find.js`](../../web/src/find.js) calls `findInPreview(q)` instead of `/api/search`. It clears earlier `mark.md-hit` elements, then reuses `markNodes` from [`web/src/renderer.js`](../../web/src/renderer.js), the same text-node walker the code view uses, case-insensitively. `S.find.preview` routes `jumpToHit` to `showPreviewHit`, which scrolls the match to the middle when it is near an edge. Minimap ticks come from each mark's offset within `#mdview`'s scroll height.
+- Find (Ctrl+F). `runFind` in [`web/src/find.js`](../../web/src/find.js) calls `findInPreview(q)` instead of `/api/search`. It clears earlier `mark.md-hit` elements, then reuses `markNodes` from [`web/src/renderer.js`](../../web/src/renderer.js), the same text-node walker the code view uses, case-insensitively. Hidden Mermaid source is excluded so matches correspond to visible content. `S.find.preview` routes `jumpToHit` to `showPreviewHit`, which scrolls the match to the middle when it is near an edge. Minimap ticks come from each mark's offset within `#mdview`'s scroll height.
 - Select all (Ctrl+A). `selectPreview()` selects the contents of `#md` natively instead of the whole-file `S.selAll` mode, so Ctrl+C copies the rendered text.
 - Scrolling. `previewKey(e)` maps ArrowUp and ArrowDown (and `k` / `j`) to 48 px, PageUp and PageDown to 90% of the view, and Home and End (Cmd+Up and Cmd+Down on macOS) to the ends. `shortcuts.js` calls it before the code view's caret handling.
 
@@ -244,7 +255,7 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 
 - Markdown files over 4 MB are not previewed. CSV and TSV files show their first 1,000 rows or 1 MB (section 12).
 - Fences over 256 KB and fences without a language are not highlighted.
-- Mermaid diagrams and math render as code blocks.
+- Math fences render as code blocks.
 - The preview does not reload when the file changes on disk. Close and reopen the tab.
 - Images that load after a scroll position is restored can push content down.
 - Relative images in a Markdown file outside the workspace (opened through a language server) do not load, because `/api/raw` accepts only workspace paths.
@@ -257,7 +268,7 @@ Hover cards, Ctrl+click definitions and the selection bar listen on `#viewport`.
 - `TestMarkdownPreview` checks heading ids and `data-line`, highlighted fenced code, preserved relative links, task list checkboxes, the `markdown` flag on `/api/file`, and the 415 and 400 responses.
 - `TestHeadingIDsFollowGitHub` checks the id rules and deduplication.
 
-The sanitizer, link routing, position sync and switch run only in a browser and have no automated test in the repository.
+The sanitizer, Mermaid rendering, link routing, position sync and switch run only in a browser and have no automated test in the repository.
 
 ## 12. Table Preview (CSV / TSV)
 

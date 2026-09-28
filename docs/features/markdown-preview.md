@@ -22,6 +22,7 @@ px0 provides a native Markdown preview engine that renders formatted typography,
   - `[!WARNING]`: Yellow/amber callout noting breaking changes or potential issues.
   - `[!CAUTION]`: Red callout warning against dangerous operations or data risks.
 - **Syntax-Highlighted Code Fences**: Code blocks inside Markdown files are tokenized with native language highlighting matching your active workbench theme, complete with language badges and one-click copy buttons.
+- **Mermaid Diagrams**: Fenced `mermaid` blocks render as theme-aware diagrams. The renderer loads from the px0 binary only when needed, preserves the original definition for copying, and falls back to readable source when a diagram is invalid.
 - **Bi-Directional Scroll Synchronization**: Switching between preview and source code (`Alt+M`) translates your viewport position seamlessly so you never lose your place.
 - **Deep Anchor Linking**: Supports internal anchor links (`#heading-name`) and source line coordinates (`#L42`), enabling smooth navigation within documents and between project files.
 - **Browser-Side Security Sanitization**: Every rendered HTML element passes through an inert DOM sanitizer allowlist that eliminates any risk of script injection, dangerous protocol schemes, or CSS overlay exploits when previewing untrusted repositories.

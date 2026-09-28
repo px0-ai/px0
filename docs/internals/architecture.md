@@ -206,6 +206,8 @@ The `/api/lsp/install` and `/api/lsp/start` endpoints execute shell commands (e.
 - `frame-ancestors 'none';` (guards against clickjacking)
 - `form-action 'none';`
 
+The pinned Mermaid browser runtime is self-hosted under `web/vendor/` and embedded in the binary with the rest of `web/`. Markdown preview loads it lazily from the same origin only when a Mermaid fence is present, so the CSP needs no external script or connection source and diagrams continue to work offline and behind `-base-path`.
+
 ### Self-Update Integrity
 
 Before `px0 --update` executes or installs a release binary, it verifies the download against the SHA-256 digest in that release's `checksums.txt` asset. Missing, malformed, or mismatched checksum data aborts the update without replacing the current executable.

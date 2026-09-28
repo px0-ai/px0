@@ -4,6 +4,7 @@
 // /static/themes.css, so themes are discovered from the loaded stylesheets and
 // adding one needs no JavaScript change. See docs/internals/styling-and-themes.md.
 import { showToast } from './ui.js';
+import { emit } from './bus.js';
 
 const KEY = 'px0.theme';
 const DEFAULT_THEME = 'github-dark';
@@ -41,8 +42,10 @@ export const currentTheme = () => document.documentElement.dataset.theme;
 
 export function setTheme(id, persist = true) {
   if (!listThemes().some(t => t.id === id)) return false;
+  const changed = currentTheme() !== id;
   document.documentElement.dataset.theme = id;
   if (persist) { try { localStorage.setItem(KEY, id); } catch {} }
+  if (changed) emit('theme:changed', id);
   return true;
 }
 

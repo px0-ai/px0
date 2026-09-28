@@ -151,3 +151,9 @@ CSV and TSV tabs render inside `#mdview` with the article's class switched from 
 | Find matches | `--mark`, `--mark-active` / `--on-mark-active` |
 | Row-cap footer | `--dim` text, `--accent-fg` button |
 
+## 6. Mermaid Diagram Styling
+
+Mermaid fences render inside `.md-mermaid`, a tokenized, scrollable surface using `--bg2`, `--bg3`, `--bg4`, `--line`, and `--err`; generated SVG is constrained to the article width. Each diagram's zoom controls use those same tokens and scale only its `.md-mermaid-canvas`, leaving the rest of the preview unchanged. Mermaid itself receives a `base` theme derived from the active px0 theme's `--bg`, `--bg2`, `--bg3`, `--fg`, `--dim`, and `--line` values. `setTheme` emits `theme:changed`, and the Markdown preview debounces a rerender of the active diagrams so both palette previews and persisted theme changes remain readable.
+
+Repository-supplied SVG is still removed by the Markdown sanitizer. Only SVG generated after sanitization by the pinned, strict-mode Mermaid runtime reaches `.md-mermaid`.
+

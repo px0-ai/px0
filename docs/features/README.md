@@ -19,7 +19,7 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **Coding Agent Editing** | `Alt+E`, Right-click | Delegating edits to Claude Code, Gemini CLI, Cursor Agent, and more | [Agent Editing](agent-editing.md) |
 | **Threads** | `Alt+T` | Long-running, multi-turn conversations with your coding harness that can read and change any file, with per-turn changed files | [Threads](threads.md) |
 | **Semantic Code Intelligence** | `F12`, `Shift+F12`, `Alt+Shift+H` | Go to Definition, Find References, Call Trails, and Hover docs | [LSP & Intelligence](lsp-code-intelligence.md) |
-| **Markdown Preview** | `Alt+M` | Full GFM preview, syntax-highlighted code fences, and scroll sync | [Markdown Preview](markdown-preview.md) |
+| **Markdown Preview** | `Alt+M` | Full GFM preview, Mermaid diagrams, syntax-highlighted code fences, and scroll sync | [Markdown Preview](markdown-preview.md) |
 | **CSV / TSV Table View** | `Alt+M` | Data files open as a table with a sticky header and source-line gutter | [Table View](table-view.md) |
 | **Image Viewer & Assets** | Click image file / lightbox | Standalone image tabs, zoom/pan transforms, and markdown lightbox | [Image Viewer](image-viewer.md) |
 | **Settings & Preferences** | `Cmd/Ctrl+,` | Graphical form editor, raw JSON sync, and instant live preview | [Settings & Configuration](settings-and-configuration.md) |

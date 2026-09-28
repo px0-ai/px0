@@ -11,6 +11,7 @@ import { revealDir } from './tree.js';
 import { findbar, runFind } from './find.js';
 import { hideHover } from './hover.js';
 import { buildTable } from './table.js';
+import { renderMermaidBlocks } from './mermaid.js';
 
 /* Markdown tabs open rendered. The server converts the file with goldmark and
    passes raw HTML through, so nothing it returns is trusted: mdSanitize rebuilds
@@ -26,6 +27,7 @@ const mdArticle = $('#md');
 let mdShown = null;  // doc the preview is showing, null while it is hidden
 let mdDrawn = null;  // doc whose HTML is in the article; drawing can wait on a fetch
 let mdGen = 0;
+let mdThemeTimer = 0;
 
 /* 'markdown', 'table', or '' for a tab with no rendered view. */
 export function previewKind(d = doc_()) {
@@ -73,10 +75,13 @@ async function drawPreview(d) {
     if (gen !== mdGen || mdShown !== d) return;
   }
   mdArticle.className = table ? 'csv' : 'md';
-  if (table) mdArticle.replaceChildren(buildTable(d.tableData, d.total));
-  else {
+  if (table) {
+    mdArticle.replaceChildren(buildTable(d.tableData, d.total));
+  } else {
     mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
     mdEnhance();
+    const current = () => gen === mdGen && mdShown === d;
+    if (!await renderMermaidBlocks(mdArticle, current) || !current()) return;
   }
   mdDrawn = d;
   const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
@@ -86,6 +91,21 @@ async function drawPreview(d) {
   d.mdAnchor = '';
   d.mdLine = 0;
   if (!findbar.hidden) runFind();
+}
+
+function scheduleMermaidThemeRender() {
+  clearTimeout(mdThemeTimer);
+  mdThemeTimer = setTimeout(async () => {
+    const d = mdShown;
+    if (!d || mdDrawn !== d || !mdArticle.querySelector('.md-pre[data-lang="mermaid" i]')) return;
+    const line = previewTopLine();
+    const gen = ++mdGen;
+    const current = () => gen === mdGen && mdShown === d;
+    if (!await renderMermaidBlocks(mdArticle, current) || !current()) return;
+    mdDrawn = d;
+    previewLine(line);
+    if (!findbar.hidden) runFind();
+  }, 120);
 }
 
 export function togglePreview() {
@@ -410,9 +430,10 @@ export function clearPreviewMarks() {
 export function findInPreview(q) {
   clearPreviewMarks();
   if (!q) return 0;
-  // A table's line numbers and cap footer are chrome, not content: no hits there.
+  // Hidden Mermaid source is retained for code/raw-copy, not visible search.
+  // A table's line numbers and cap footer are chrome, not content.
   const marks = markNodes(mdArticle, q, false, 'mark').filter(m => {
-    if (!m.closest('.ln, .csv-cap')) return true;
+    if (!m.closest('[hidden], .ln, .csv-cap')) return true;
     m.replaceWith(...m.childNodes);
     return false;
   });
@@ -514,6 +535,7 @@ export function initMarkdown() {
 
   on('tab:activated', () => syncPreview());
   on('tabs:cleared', () => syncPreview());
+  on('theme:changed', scheduleMermaidThemeRender);
 }
 
 export function getDocRaw(d) {
@@ -544,6 +566,11 @@ export async function copyFullMarkdown(btn = null) {
 
 export function getFragmentPlainText(frag) {
   const clone = frag.cloneNode(true);
+  for (const wrap of clone.querySelectorAll?.('.md-pre.md-mermaid-ready') || []) {
+    const source = wrap.querySelector('pre');
+    const diagram = wrap.querySelector('.md-mermaid');
+    if (source && diagram) diagram.replaceWith(document.createTextNode(source.textContent || ''));
+  }
   const bad = clone.querySelectorAll?.('.md-copy, .line-btn, [hidden], svg, style, script');
   if (bad) {
     for (const b of bad) b.remove();
