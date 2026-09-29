@@ -9,6 +9,8 @@ This document describes the design and implementation of px0's editing flow:
 
 Harnesses are discovered automatically, the same way language servers are. Editing becomes available as soon as px0 finds one installed, but nothing ever runs until the user picks one, and that choice is remembered between runs. `-no-agent` removes the feature entirely; `-agent` pins a harness for scripted use and takes the choice away from the UI.
 
+> Inline and batch edits now run as [threads](threads.md). `/api/agent/edit` and `/api/agent/batch` call `threadManager.StartEdit`, which creates a thread (kind `edit` or `batch`), runs the first turn through the same harness argv, and returns an `agentJob`-shaped snapshot. `agentManager.Job` and `CancelJob` consult the thread manager through hooks, so `/api/agent/job` and `/api/agent/cancel` and the browser's polling are unchanged. The overlap guard in section 5 is enforced by `threadManager.overlappingEdit`, against running inline and batch edits only. `Start`, `StartBatch` and `run` remain for `StartPrompt` (commit messages).
+
 ## 1. The Dispatcher Model
 
 px0 does not author changes. No endpoint accepts file content; it composes a prompt and reloads whatever the harness wrote.
@@ -161,7 +163,7 @@ A harness routinely edits files nobody pointed it at, so the set of touched file
 
 `worktreeSnapshot` is `gitStatus` with each listed file's size and modification time folded into its entry. Status alone misses the most common case in review: editing a file that is already modified reads `M` before and after, so the edit would go unseen and nothing would reload. Clean files are not stamped; a change to one surfaces through status on its own.
 
-That set drives the reload and the summary shown to the user.
+That set drives the reload and the summary shown to the user. It is sorted by path, since both snapshots are maps and Go randomises their iteration order: without the sort, the same run could list its files differently each time.
 
 Outside a git repository there is no status to compare, so the job reports `tracked: false` and an empty change list. The client treats that as "unknown" rather than "nothing" and reloads the workspace regardless.
 
@@ -231,5 +233,5 @@ The explicit first-run pick matters for the same reason. Auto-enabling on discov
 - The job keeps the last 32 KB of each of stdout and stderr (`tailBuffer`), enough to explain a failure without holding a full transcript.
 - A run is abandoned after 10 minutes.
 - Changes to gitignored files are invisible to `git status`, so they are never reloaded.
-- Instructions live in memory for the life of the process. Only the harness choice is persisted, and never inside a workspace.
+- Inline edit instructions live in memory for the life of the process. Only the harness choice is persisted, and never inside a workspace. Conversations that should persist are [threads](threads.md).
 - Leaving the tab while an edit is in flight is guarded by a `beforeunload` prompt, but closing the browser process outright or losing power still abandons the harness mid-run with no undo to fall back on.

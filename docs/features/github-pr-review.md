@@ -63,10 +63,11 @@ When you or your background AI coding agents (Claude Code, Gemini CLI, Cursor Ag
 
 ### 3. Line Comments & Hover Actions
 When hovering over code lines or diff lines:
-- A pencil icon (`✏`) appears next to the line number.
-- Clicking the pencil icon opens a context menu with two actions:
-  - **Leave Comment on GitHub**: Drafts an inline review comment.
-  - **Leave Comment for Inline Edit**: Prompts your local AI coding agent to edit those lines directly.
+- A thread icon appears next to the line number.
+- Clicking it opens a context menu for that line. On a diff line GitHub knows about it includes:
+  - **Add Review Comment**: Drafts an inline review comment.
+  - **Edit Inline**: Prompts your local AI coding agent to edit those lines directly.
+  - **Start Thread**: Opens a conversation with the agent about the line.
 - Alternatively, select any range of lines and press **`Alt+R`** (or click **Comment** on the selection bar) to open the review comment composer.
 
 ### 4. Batch Applying Comments Locally (`⚡ Batch Apply`)

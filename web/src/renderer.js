@@ -1,5 +1,5 @@
 // web/src/renderer.js
-import { $, S, doc_, api, LH, CHUNK, OVERSCAN } from './state.js';
+import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 
 export function measure() {
@@ -86,7 +86,7 @@ export function paint() {
       if (gut.dels.has(n)) rc += ' gut-del';
     }
     html += '<div class="' + rc + '" data-l="' + n + '">' +
-      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Edit inline">✎</span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
+      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions">Edit</span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
   }
   const sel = saveSelection();
   rowsEl.style.transform = 'translateY(' + (first * LH) + 'px)';

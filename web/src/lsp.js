@@ -54,16 +54,21 @@ export async function lspCall(kind, at, waitMs) {
   } catch { return null; }
 }
 
-export async function gotoDefinition(arg) {
+export async function gotoDefinition(arg, opts = {}) {
   const d = doc_();
   const at = (arg && arg.word) ? arg : positionNow(typeof arg === 'string' ? arg : S.lastWord);
   if (!d || !at) return;
+  // No explicit view: follow the mode we are navigating from (diff stays diff,
+  // source stays source). A diff request on a file without a diff falls back quietly.
+  const explicit = opts.view || (arg && arg.view);
+  const view = explicit || (d.diffMode ? 'diff' : 'source');
+  const soft = !explicit;
 
   if (canAskServer(at)) {
     setStatusNote('definition of ' + at.word + '…', 8000);
     const j = await lspCall('def', at, S.lsp.state === 'ready' ? 5000 : 20000);
     updateStatus();
-    if (j && j.hits && j.hits.length) { acceptHits(at.word, j.hits, j.server, 'definition'); return; }
+    if (j && j.hits && j.hits.length) { acceptHits(at.word, j.hits, j.server, 'definition', undefined, { view, soft }); return; }
   } else if (!at.imprecise && S.lsp.state === 'starting') {
     // Kick the server awake for next time, but do not wait on it.
     lspCall('def', at, 60000).then(j => {
@@ -85,7 +90,7 @@ export async function gotoDefinition(arg) {
     if (q) { q.value = at.word; $('#o-word')?.classList.add('on'); runSearch(); }
     return;
   }
-  acceptHits(at.word, rx.defs, null, 'definition', rx.refCount);
+  acceptHits(at.word, rx.defs, null, 'definition', rx.refCount, { view, soft });
 }
 
 export async function findReferences(arg) {
@@ -95,10 +100,10 @@ export async function findReferences(arg) {
   inspectReferences(at);
 }
 
-export function acceptHits(word, hits, server, noun, refCount) {
+export function acceptHits(word, hits, server, noun, refCount, opts = {}) {
   if (hits.length === 1) {
     const h = hits[0];
-    openFile(h.path, { line: h.line });
+    openFile(h.path, { line: h.line, view: opts.view, soft: opts.soft });
     flashFind(h.mid || word);
     setStatusNote(server ? server + ' · ' + h.path + ':' + h.line : h.path + ':' + h.line, 4000);
     return;

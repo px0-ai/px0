@@ -82,3 +82,41 @@ export async function copyToClipboard(text, notify = 'Copied', triggerEl = null)
     if (triggerEl) flashActionSuccess(triggerEl, 'Copied');
   }
 }
+
+export async function copyRichToClipboard(plainText, htmlText, notify = 'Copied', triggerEl = null) {
+  let ok = false;
+  if (htmlText && navigator.clipboard && window.ClipboardItem) {
+    try {
+      const textBlob = new Blob([plainText], { type: 'text/plain' });
+      const htmlBlob = new Blob([htmlText], { type: 'text/html' });
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': textBlob,
+          'text/html': htmlBlob,
+        })
+      ]);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    // Fallback to copy event or plain text
+    try {
+      const handler = (e) => {
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', plainText);
+        if (htmlText) e.clipboardData.setData('text/html', htmlText);
+      };
+      document.addEventListener('copy', handler, { once: true });
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    return copyToClipboard(plainText, notify, triggerEl);
+  }
+  if (notify) showToast('✓', notify);
+  if (triggerEl) flashActionSuccess(triggerEl, 'Copied');
+}

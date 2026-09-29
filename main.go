@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,13 +34,13 @@ func main() {
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
-		dev          = flag.String("dev", "", "serve the UI from this source directory instead of the embedded copy")
 		showVer      = flag.Bool("version", false, "print version and exit")
 		showVerShort = flag.Bool("v", false, "print version and exit (shorthand)")
 		doUpdate     = flag.Bool("update", false, "check for and install latest version of px0")
+		noUpdate     = flag.Bool("no-update", false, "do not auto-update px0 on startup")
 		noColor      = flag.Bool("no-color", false, "disable colour output")
 		quiet        = flag.Bool("quiet", false, "suppress narration")
-		verbose      = flag.Bool("verbose", false, "log requests, searches, symbols, and agent prompts to terminal")
+		verbose      = flag.Bool("verbose", false, "log startup steps, requests, searches, symbols, and agent prompts to terminal")
 		noTelemetry  = flag.Bool("no-telemetry", false, "disable anonymous usage telemetry")
 		agentCmd     = flag.String("agent", "", "pin the coding harness used for edits (claude, gemini, cursor-agent, agy, opencode, codex, aider, goose, or a command template containing {prompt}); detected and chosen in the UI when omitted")
 		noAgent      = flag.Bool("no-agent", false, "do not offer editing through a coding harness")
@@ -79,12 +80,6 @@ func main() {
 		return
 	}
 
-	if *dev != "" {
-		if err := useDiskAssets(*dev); err != nil {
-			fatal(fmt.Errorf("-dev %s: %w", *dev, err))
-		}
-	}
-
 	// A full pull request URL (e.g. https://github.com/owner/repo/pull/123)
 	// checks out the PR's full source tree instead of resolving a local file/directory.
 	// Only full URLs via "px0 <url>" are supported for PR review.
@@ -110,6 +105,7 @@ func main() {
 	var pr *prSession
 	var root, initialFile string
 	var initialLine int
+	var targetDur time.Duration
 	if isPR {
 		sp := newSpinner(fmt.Sprintf("Preparing PR #%d (%s/%s)...", prTarget.Number, prTarget.Owner, prTarget.Repo), os.Stdout)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -129,18 +125,23 @@ func main() {
 		pr = p
 		root = p.Root()
 	} else {
+		tStart := time.Now()
 		r, f, l, err := resolveTarget(target)
 		if err != nil {
 			fatal(err)
 		}
+		targetDur = time.Since(tStart)
 		root, initialFile, initialLine = r, f, l
 	}
 
+	tListen := time.Now()
 	ln, addr, err := listen(*host, *port)
 	if err != nil {
 		fatal(err)
 	}
+	listenDur := time.Since(tListen)
 
+	tInit := time.Now()
 	ix := NewIndex(root)
 	lsp := newLSPManager(root, !*noLSP)
 	tel := NewTelemetryService(*noTelemetry)
@@ -165,6 +166,7 @@ func main() {
 		}
 		pxSrv.SetAgent(agent)
 	}
+	initDur := time.Since(tInit)
 
 	srv := &http.Server{Handler: pxSrv}
 
@@ -182,11 +184,28 @@ func main() {
 	}
 	uiKV("workspace", root, 11, os.Stdout)
 	uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
+	if *host == "0.0.0.0" {
+		for _, networkURL := range networkURLs(addr, initialFile, initialLine) {
+			uiKV("network", uiAccent(networkURL, os.Stdout), 11, os.Stdout)
+		}
+	}
 	uiHint("ctrl-c to stop", os.Stdout)
+
+	if uiVerbose {
+		if !isPR {
+			uiStatus("ok", "resolved workspace target", fmtDuration(targetDur), 0, os.Stdout)
+		}
+		uiStatus("ok", fmt.Sprintf("bound TCP listener on %s", addr), fmtDuration(listenDur), 0, os.Stdout)
+		uiStatus("ok", "initialized HTTP server and services", fmtDuration(initDur), 0, os.Stdout)
+	}
 
 	// Launch browser immediately without blocking startup.
 	if !*noOpen {
+		tBrowser := time.Now()
 		go openBrowser(url)
+		if uiVerbose {
+			uiStatus("ok", "spawned browser launcher", fmtDuration(time.Since(tBrowser)), 0, os.Stdout)
+		}
 	}
 
 	// Index workspace asynchronously so the server and UI respond in <1ms.
@@ -194,10 +213,20 @@ func main() {
 		ix.Build()
 		n, _, ms := ix.Stats()
 		uiStatus("ok", fmt.Sprintf("indexed %d files", n), fmt.Sprintf("%dms", ms), 0, os.Stdout)
-		if names := lsp.Available(); len(names) > 0 {
-			uiBullet(fmt.Sprintf("language servers: %s (started on first use)", strings.Join(names, ", ")), os.Stdout)
+		tLSP := time.Now()
+		names := lsp.Available()
+		lspDur := time.Since(tLSP)
+		if len(names) > 0 {
+			if uiVerbose {
+				uiStatus("ok", fmt.Sprintf("discovered language servers: %s", strings.Join(names, ", ")), fmtDuration(lspDur), 0, os.Stdout)
+			} else {
+				uiBullet(fmt.Sprintf("language servers: %s (started on first use)", strings.Join(names, ", ")), os.Stdout)
+			}
+		} else if uiVerbose {
+			uiStatus("ok", "checked language servers (none installed)", fmtDuration(lspDur), 0, os.Stdout)
 		}
 		if agent != nil {
+			tAgent := time.Now()
 			var found []string
 			for _, h := range agent.Detect() {
 				if h.Installed {
@@ -208,8 +237,13 @@ func main() {
 					found = append(found, item)
 				}
 			}
-			if uiVerbose && len(found) > 0 {
-				uiStatus("info", uiInfo("coding harnesses: "+strings.Join(found, ", "), os.Stdout), "", 0, os.Stdout)
+			agentDur := time.Since(tAgent)
+			if uiVerbose {
+				if len(found) > 0 {
+					uiStatus("ok", fmt.Sprintf("detected coding harnesses: %s", strings.Join(found, ", ")), fmtDuration(agentDur), 0, os.Stdout)
+				} else {
+					uiStatus("ok", "checked coding harnesses (none found)", fmtDuration(agentDur), 0, os.Stdout)
+				}
 			}
 		}
 
@@ -221,8 +255,11 @@ func main() {
 		})
 	}()
 
-	// Check for updates asynchronously once a day without delaying startup (<1ms).
-	go checkDailyUpdate(version)
+	// Check for updates in the background once the server is already up, so
+	// px0 never makes a network call before serving the first request.
+	if !*noUpdate {
+		go autoUpdate(version)
+	}
 
 	// Language servers are children that can hold gigabytes. Shut them down on
 	// the way out rather than leaving them for the OS to reap.
@@ -246,6 +283,7 @@ func main() {
 	err = srv.Serve(ln)
 	lsp.Close()
 	agent.Close()
+	pxSrv.CloseThreads()
 	pr.Close()
 
 	if interrupted {
@@ -364,6 +402,53 @@ func viewerURL(addr, initialFile string, initialLine int, basePath ...string) st
 		u.RawQuery = q.Encode()
 	}
 	return u.String()
+}
+
+// networkURLs returns URLs for the machine's non-loopback IPv4 addresses.
+// The supplied address contributes the bound port; its host is intentionally
+// ignored because a bind address is not necessarily a usable destination.
+func networkURLs(addr, initialFile string, initialLine int) []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	return networkURLsFromAddrs(addr, initialFile, initialLine, addrs)
+}
+
+func networkURLsFromAddrs(addr, initialFile string, initialLine int, addrs []net.Addr) []string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	urls := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		var ip net.IP
+		switch a := addr.(type) {
+		case *net.IPNet:
+			ip = a.IP
+		case *net.IPAddr:
+			ip = a.IP
+		default:
+			continue
+		}
+
+		ip = ip.To4()
+		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+			continue
+		}
+
+		host := ip.String()
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		urls = append(urls, viewerURL(net.JoinHostPort(host, port), initialFile, initialLine))
+	}
+
+	sort.Strings(urls)
+	return urls
 }
 
 // listen binds the requested port, walking forward if it is already taken so a

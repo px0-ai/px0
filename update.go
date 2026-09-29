@@ -225,43 +225,91 @@ func downloadVerifiedAsset(client *http.Client, assetURL, checksumURL, assetName
 	return nil
 }
 
-// checkDailyUpdate runs in a background goroutine on CLI startup.
-// It ensures that checking for updates never blocks px0 startup (<1ms).
-func checkDailyUpdate(currentVersion string) {
+// autoUpdate runs in a background goroutine after the server has already
+// started listening, so px0 never makes a network call before serving. It
+// reuses the cached daily-check state so it only hits the network once
+// every updateCheckPeriod; on the days it does check, a newer release is
+// installed immediately and the process re-execs into the new binary so
+// this invocation runs the update instead of the stale one. Any failure
+// (network, permissions, verification) is non-fatal: px0 continues running
+// on the current binary. Because the re-exec replaces the process image
+// outright, an update that lands mid-session drops in-flight connections
+// and any open browser tab loses its socket; the browser's UI will show a
+// disconnect until it reconnects to the freshly restarted server.
+func autoUpdate(currentVersion string) {
 	if uiQuiet {
 		return
 	}
 
 	state, _ := readUpdateState()
 	now := time.Now()
-	if state != nil && now.Sub(state.LastChecked) < updateCheckPeriod {
-		// If we already detected a newer version during the last check, inform user
-		if state.LatestVer != "" && compareSemver(state.LatestVer, currentVersion) > 0 {
-			printUpdateNotification(state.LatestVer, currentVersion)
+
+	var rel *githubRelease
+	latestVer := ""
+	if state != nil {
+		latestVer = state.LatestVer
+	}
+
+	dueForCheck := state == nil || now.Sub(state.LastChecked) >= updateCheckPeriod
+	if dueForCheck {
+		var err error
+		rel, err = fetchLatestRelease(getRepoName())
+		if err != nil {
+			return
+		}
+		latestVer = strings.TrimPrefix(rel.TagName, "v")
+		writeUpdateState(&updateState{LastChecked: now, LatestVer: latestVer})
+	}
+
+	if latestVer == "" || compareSemver(latestVer, currentVersion) <= 0 {
+		if uiVerbose {
+			uiStatus("ok", fmt.Sprintf("px0 is up to date (v%s)", currentVersion), "", 0, os.Stdout)
 		}
 		return
 	}
 
-	// Needs check
-	rel, err := fetchLatestRelease(getRepoName())
+	// A cached "newer version" hint doesn't carry download URLs; fetch the
+	// release details fresh if we haven't already this call.
+	if rel == nil {
+		var err error
+		rel, err = fetchLatestRelease(getRepoName())
+		if err != nil {
+			return
+		}
+		latestVer = strings.TrimPrefix(rel.TagName, "v")
+		if compareSemver(latestVer, currentVersion) <= 0 {
+			if uiVerbose {
+				uiStatus("ok", fmt.Sprintf("px0 is up to date (v%s)", currentVersion), "", 0, os.Stdout)
+			}
+			return
+		}
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
 		return
 	}
 
-	latestVer := strings.TrimPrefix(rel.TagName, "v")
-	writeUpdateState(&updateState{
-		LastChecked: now,
-		LatestVer:   latestVer,
-	})
+	uiStatus("step", fmt.Sprintf("updating px0 v%s -> v%s...", currentVersion, latestVer), "pass -no-update to skip", 0, os.Stdout)
 
-	if compareSemver(latestVer, currentVersion) > 0 {
-		printUpdateNotification(latestVer, currentVersion)
+	if err := installUpdate(rel, latestVer, execPath); err != nil {
+		uiStatus("warn", fmt.Sprintf("auto-update failed: %v", err), "continuing with current version", 0, os.Stderr)
+		return
 	}
-}
 
-func printUpdateNotification(latestVer, currentVersion string) {
-	msg := fmt.Sprintf("a new version of px0 (v%s) is available (current: v%s)", latestVer, currentVersion)
-	uiStatus("step", msg, "run 'px0 --update' to upgrade", 0, os.Stderr)
+	writeUpdateState(&updateState{LastChecked: time.Now(), LatestVer: latestVer})
+
+	uiStatus("ok", fmt.Sprintf("px0 has been updated to v%s", latestVer), "restarting now to run the new version...", 0, os.Stdout)
+
+	if err := reexecSelf(execPath, os.Args, os.Environ()); err != nil {
+		uiStatus("warn", fmt.Sprintf("updated to v%s but failed to restart: %v", latestVer, err), "please re-run px0", 0, os.Stderr)
+	}
+	// On success reexecSelf never returns (Unix replaces the process image;
+	// Windows exits after the child finishes).
 }
 
 // runSelfUpdate implements px0 --update.
@@ -282,6 +330,33 @@ func runSelfUpdate(currentVer string) error {
 
 	uiStatus("info", fmt.Sprintf("found newer version v%s (current: v%s)", latestVer, currentVer), "", 0, os.Stdout)
 
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not determine running binary location: %w", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("could not resolve executable symlink: %w", err)
+	}
+
+	if err := installUpdate(rel, latestVer, execPath); err != nil {
+		return err
+	}
+
+	// Update cached check state
+	writeUpdateState(&updateState{
+		LastChecked: time.Now(),
+		LatestVer:   latestVer,
+	})
+
+	uiStatus("ok", fmt.Sprintf("px0 successfully updated to v%s at %s", latestVer, execPath), "", 0, os.Stdout)
+	return nil
+}
+
+// installUpdate downloads, verifies, and atomically installs the release
+// binary matching the current OS/arch in place of execPath.
+func installUpdate(rel *githubRelease, latestVer, execPath string) error {
+	repo := getRepoName()
 	ext := ""
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
@@ -303,15 +378,6 @@ func runSelfUpdate(currentVer string) error {
 	}
 	if checksumURL == "" {
 		return fmt.Errorf("release %s does not include checksums.txt", rel.TagName)
-	}
-
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not determine running binary location: %w", err)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return fmt.Errorf("could not resolve executable symlink: %w", err)
 	}
 
 	uiStatus("step", fmt.Sprintf("downloading %s...", expectedAsset), "", 0, os.Stdout)
@@ -379,13 +445,6 @@ func runSelfUpdate(currentVer string) error {
 		}
 	}
 
-	// Update cached check state
-	writeUpdateState(&updateState{
-		LastChecked: time.Now(),
-		LatestVer:   latestVer,
-	})
-
-	uiStatus("ok", fmt.Sprintf("px0 successfully updated to v%s at %s", latestVer, execPath), "", 0, os.Stdout)
 	return nil
 }
 

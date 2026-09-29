@@ -25,9 +25,24 @@ export function wordAtPoint(x, y) {
   } else return null;
   if (!node || node.nodeType !== 3) return null;
 
-  const code = node.parentElement && node.parentElement.closest('.c');
-  const row = /** @type {HTMLElement|null} */ (code && code.closest('.row'));
-  if (!code || !row) return null;
+  let code = node.parentElement && node.parentElement.closest('.c');
+  let row = /** @type {HTMLElement|null} */ (code && code.closest('.row'));
+  let line = 0;
+  let inDiff = false;
+
+  if (code && row) {
+    line = +row.dataset.l;
+  } else {
+    const diffCode = node.parentElement && node.parentElement.closest('.diff-code');
+    const diffRow = diffCode && diffCode.closest('[data-l], [data-at], [data-old-l]');
+    if (diffCode && diffRow) {
+      code = diffCode;
+      inDiff = true;
+      line = diffRow.dataset.l !== undefined ? +diffRow.dataset.l :
+             (diffRow.dataset.oldL !== undefined ? +diffRow.dataset.oldL : +diffRow.dataset.at);
+    }
+  }
+  if (!code || !line) return null;
 
   let col = 0;
   const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
@@ -36,13 +51,13 @@ export function wordAtPoint(x, y) {
     col += n.nodeValue.length;
   }
 
-  const full = code.textContent;
+  const full = code.textContent || '';
   let a = Math.min(col, full.length), b = a;
   while (a > 0 && WORD.test(full[a - 1])) a--;
   while (b < full.length && WORD.test(full[b])) b++;
   if (a === b) return null;
   const d = doc_();
-  return { word: full.slice(a, b), line: +row.dataset.l, col: a, path: d && d.path };
+  return { word: full.slice(a, b), line, col: a, path: d && d.path, inDiff };
 }
 
 /* Column (UTF-16 units into the line's text) under a point. Clicking the gutter
@@ -239,7 +254,9 @@ export function initCursor() {
       e.preventDefault();
       S.at = w; S.lastWord = w.word;
       pushHistory(d.path, d.cur); // so Alt+Left returns to the call site
-      gotoDefinition(w);
+      // Plain click keeps the current mode; Alt flips it.
+      const inDiff = !!d.diffMode;
+      gotoDefinition(w, { view: (e.altKey ? !inDiff : inDiff) ? 'diff' : 'source' });
       return;
     }
     for (const r of rowsEl.children) r.classList.toggle('cur', +r.dataset.l === d.cur);

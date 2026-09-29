@@ -34,11 +34,24 @@ By default, px0 selects fast and cost-effective models for each harness, but all
 ## How an Agent Edit Works
 
 1. **Select Code**: Highlight the lines of code you wish to change in either the source code viewer or the visual git diff view.
-2. **Trigger Composer**: Press **`Alt+E`**, right-click to open the context menu, or click **Edit with Agent** in the footer selection bar.
+2. **Trigger Composer**: Press **`Alt+E`**, right-click to open the context menu, click **Edit Inline** in the footer selection bar, or click the thread icon that appears beside a line number and choose **Edit Inline**. The comment box opens at the top of the **Threads** pane in the right sidebar, which slides open if it was closed.
 3. **Configure Harness (First Time)**: Choose your preferred coding harness and model. Your choice is saved globally in `~/.px0/settings.json`, never in your repository files.
-4. **Enter Instruction**: Type what needs to change (e.g., *"Handle nil pointer return in error check"* or *"Refactor to use sync.Once"*) and press `Enter`.
+4. **Write a Comment**: Type what needs to change (e.g., *"Handle nil pointer return in error check"* or *"Refactor to use sync.Once"*). Then either **Add comment** (`Enter`) to keep it for a batch, or **Apply now** (`Ctrl/Cmd+Enter`) to run just that one straight away.
 5. **Real-Time Streaming**: px0 sends the file path, line range, selected code, and prompt to the harness. Progress and agent thought output stream in real time to the terminal stdout where px0 was launched.
-6. **Automatic Document Reload**: When the harness finishes writing to disk, px0 automatically detects the modified files, refreshes the open tabs in place, updates git gutters, and preserves your scroll position. Source views stay source views; diff views stay diff views.
+6. **Saved as a Thread**: Every edit you apply is recorded as a [thread](threads.md), labelled `inline` or `batch` in the Threads list. While an edit runs, its box and the batch bar offer **View thread** to watch it live. Open it later to see what the agent replied and which files it changed, or to ask a follow-up.
+7. **Automatic Document Reload**: When the harness finishes writing to disk, px0 automatically detects the modified files, refreshes the open tabs in place, updates git gutters, and preserves your scroll position. Source views stay source views; diff views stay diff views.
+
+---
+
+## Batching Comments
+
+You can queue several comments and apply them together, in one coordinated run:
+
+1. Write a comment and press **Add comment** (`Enter`). The box folds down to a single line showing your text. Click it to edit it again.
+2. Select other code (or click the thread icon beside another line, then **Edit Inline**) and add another comment.
+3. The **Batch** bar at the top of the Threads pane counts your comments and offers **Apply all (N)** (`Ctrl/Cmd+Shift+Enter`). Its harness and model selectors apply to the whole batch. **Clear All** discards every comment.
+
+The bar appears as soon as the first box opens, so the batch is always in view. A batch runs as one thread whose first message lists every comment with its code, so the agent can coordinate the changes.
 
 ---
 

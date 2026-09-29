@@ -1,10 +1,12 @@
 import { S, apiPost, doc_ } from './state.js';
-import { updateSidebarToggleState, patchTreeGitStatus, treeEl, setSidebarMode } from './tree.js';
+import { updateSidebarToggleState, patchTreeGitStatus, treeEl, setSidebarMode, hasGitView } from './tree.js';
 import { drawTabs, loadGutter, closeTab, reloadOpenTabs } from './tabs.js';
 import { syncDiffView } from './diff.js';
 import { render } from './renderer.js';
 import { updateStatus, updateMetricsDisplay } from './status.js';
 import { updateGitPanel } from './gitpanel.js';
+import { refreshUnpushed } from './unpushed.js';
+import { updateScopeCounts } from './prscope.js';
 
 let eventSource = null;
 let reconnectTimer = null;
@@ -129,8 +131,14 @@ async function handleGitStatus(data) {
   if (data.gitChanges !== undefined) S.meta.gitChanges = data.gitChanges;
   if (data.gitFiles !== undefined) S.meta.gitFiles = data.gitFiles;
 
+  // Before the Git-view check below: committing empties the tree but fills the
+  // Unpushed section, and pushing empties that in turn, so whether Git view
+  // still has anything to show depends on a fresh unpushed count.
+  // Cheap: only re-reads git log when the ahead count or head commit moved.
+  await refreshUnpushed(data);
+
   updateSidebarToggleState();
-  if (treeEl?.classList.contains('changed-only') && (!S.meta?.gitChanges || S.meta.gitChanges <= 0)) {
+  if (treeEl?.classList.contains('changed-only') && !hasGitView()) {
     await setSidebarMode('files');
   }
 
@@ -142,6 +150,7 @@ async function handleGitStatus(data) {
 
   // Patch rendered tree items in place without full DOM reload
   await patchTreeGitStatus(statuses, dirtyDirs, staged, yourStatuses, yourDirtyDirs);
+  updateScopeCounts(statuses, yourStatuses);
   updateGitPanel(data);
 
   // Close tabs that were opened in git diff view or currently in diff view if their changes are gone.
@@ -149,6 +158,9 @@ async function handleGitStatus(data) {
   if (!S.meta?.pr) {
     for (let i = S.tabs.length - 1; i >= 0; i--) {
       const t = S.tabs[i];
+      // A tab pinned to a commit shows a frozen diff; the working tree going
+      // clean is exactly when you want to still be reading it.
+      if (t.diffRef) continue;
       const code = statuses[t.path];
       const isDiff = !!code && code !== 'U';
       const wasDiff = !!(t.diffMode || t.openedInDiffView);
@@ -160,6 +172,7 @@ async function handleGitStatus(data) {
 
   // Check if any open tabs are affected by modifications
   const anyTabModified = S.tabs.some(t => {
+    if (t.diffRef) return false; // frozen at a commit; the working tree can't move it
     const code = statuses[t.path];
     return code && code !== 'U';
   });
@@ -171,6 +184,7 @@ async function handleGitStatus(data) {
     // Synchronize open tabs' diff badges
     let tabsChanged = false;
     for (const t of S.tabs) {
+      if (t.diffRef) continue;
       const code = statuses[t.path];
       const isDiff = !!code && code !== 'U';
       if (t.diffAvailable !== isDiff) {
@@ -184,7 +198,7 @@ async function handleGitStatus(data) {
 
     // Update active editor gutter and diff view if active document is affected
     const curDoc = doc_();
-    if (curDoc) {
+    if (curDoc && !curDoc.diffRef) {
       const curCode = statuses[curDoc.path];
       const hasDiff = !!curCode && curCode !== 'U';
 

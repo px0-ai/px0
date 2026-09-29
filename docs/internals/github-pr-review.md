@@ -176,9 +176,9 @@ Unlike a formal review submission, Push is not gated on `p.writeAccess` — that
 
 ## 8. Frontend Integration
 
-- **Hover Line Pencil Icon (`web/src/linecomment.js`)**:
-  - Displays a subtle `✏` button when hovering over line numbers in source or diff views.
-  - Clicking opens a popover offering **Leave Comment on GitHub** (drafts PR review comment) or **Leave Comment for Inline Edit** (dispatches local AI agent).
+- **Hover Line Thread Icon (`web/src/linecomment.js`)**:
+  - Displays a thread icon (a CSS-masked speech bubble on `.line-btn`) when hovering over line numbers in source or diff views.
+  - Clicking calls `openLineMenu()` in `selbar.js`, the selection menu aimed at one line. Rows GitHub knows about pass a `fromDiff` description with the diff side, which is what enables **Add Review Comment** there; other rows get only the local actions.
 - **PR Header Bar (`web/src/pr.js`)**:
   - Renders PR number, title, author, branch refs, and draft count badge.
   - Toggles `#pr-merged-badge` (purple pill) when `meta.merged` is true.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,8 +42,26 @@ type prSession struct {
 	worktree string // temp checkout, removed in Close
 	srcRepo  string // the repo the worktree was registered against ("" for a plain clone)
 
+	// pushedSHA is what the PR's branch holds on the remote after this session
+	// pushed to it ("" until the first push: the head the PR was checked out
+	// at). It bounds "unpushed", and nothing else. meta.HeadSHA deliberately
+	// stays at the head the review started from, so a push moves your commits
+	// out of "Unpushed" without folding them into "PR changes".
+	pushedSHA string
+
+	scopeDir string // temp dir holding the diff files handed to threads; removed in Close
+
 	comments []prComment
 	nextID   int64
+}
+
+// remoteHead returns the commit the PR's branch is at on the remote, as far as
+// this session knows. Callers hold p.mu.
+func (p *prSession) remoteHead() string {
+	if p.pushedSHA != "" {
+		return p.pushedSHA
+	}
+	return p.meta.HeadSHA
 }
 
 // ErrPRMergedCancelled is returned when opening an already-merged PR is cancelled.
@@ -57,7 +76,7 @@ var ErrPRMergedCancelled = errors.New("PR is already merged; opening cancelled")
 // why, so callers can surface it and a blank diff never reads as "no
 // changes". Shared by checkoutPR (initial checkout) and prSession.Pull
 // (re-sync after new commits land on the PR).
-func computeDiffBase(worktree, srcRepo string, target PRTarget, baseRef string, num int, onProgress func(string)) (diffBase, diffBaseWarning string) {
+func computeDiffBase(worktree, srcRepo, token string, target PRTarget, baseRef string, num int, onProgress func(string)) (diffBase, diffBaseWarning string) {
 	if onProgress != nil {
 		onProgress(fmt.Sprintf("Computing merge base with %s...", baseRef))
 	}
@@ -68,7 +87,7 @@ func computeDiffBase(worktree, srcRepo string, target PRTarget, baseRef string, 
 	if srcRepo == "" {
 		baseRemote = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
 	}
-	if out, err := exec.Command("git", "-C", worktree, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err != nil {
+	if out, err := gitAuthCmd(token, "-C", worktree, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err != nil {
 		fetchErr = strings.TrimSpace(string(out))
 		if fetchErr == "" {
 			fetchErr = err.Error()
@@ -159,13 +178,13 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		if cloneURL == "" {
 			cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
 		}
-		if out, err := exec.Command("git", "clone", "--filter=blob:none", "--branch", meta.HeadRef, "--single-branch", cloneURL, tmp).CombinedOutput(); err != nil {
+		if out, err := gitAuthCmd(token, "clone", "--filter=blob:none", "--branch", meta.HeadRef, "--single-branch", cloneURL, tmp).CombinedOutput(); err != nil {
 			cleanup()
 			return nil, fmt.Errorf("git clone PR head: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 	}
 
-	diffBase, diffBaseWarning := computeDiffBase(tmp, srcRepo, target, meta.BaseRef, num, onProgress)
+	diffBase, diffBaseWarning := computeDiffBase(tmp, srcRepo, token, target, meta.BaseRef, num, onProgress)
 
 	writeAccess := provider.CheckPushAccess(ctx, target, token)
 
@@ -190,12 +209,89 @@ func (p *prSession) Close() {
 	if p == nil {
 		return
 	}
+	if p.scopeDir != "" {
+		os.RemoveAll(p.scopeDir)
+	}
 	if p.srcRepo != "" {
 		exec.Command("git", "-C", p.srcRepo, "worktree", "remove", "--force", p.worktree).Run()
 		exec.Command("git", "-C", p.srcRepo, "update-ref", "-d", fmt.Sprintf("refs/px0/pr/%d", p.meta.Number)).Run()
 		exec.Command("git", "-C", p.srcRepo, "update-ref", "-d", fmt.Sprintf("refs/px0/base/%d", p.meta.Number)).Run()
 	}
 	os.RemoveAll(p.worktree)
+}
+
+// httpsRemoteURL rewrites an ssh-style remote (git@github.com:o/r.git,
+// ssh://git@github.com/o/r.git) to its https form; anything else is returned as is.
+func httpsRemoteURL(raw string) string {
+	switch {
+	case strings.HasPrefix(raw, "ssh://"):
+		rest := strings.TrimPrefix(raw, "ssh://")
+		if i := strings.IndexByte(rest, '@'); i >= 0 {
+			rest = rest[i+1:]
+		}
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			host := rest[:i]
+			if j := strings.IndexByte(host, ':'); j >= 0 { // ssh port means nothing to https
+				host = host[:j]
+			}
+			return "https://" + host + rest[i:]
+		}
+	case strings.Contains(raw, "@") && !strings.Contains(raw, "://"):
+		if at := strings.IndexByte(raw, '@'); at >= 0 {
+			if host, path, ok := strings.Cut(raw[at+1:], ":"); ok {
+				return "https://" + host + "/" + strings.TrimPrefix(path, "/")
+			}
+		}
+	}
+	return raw
+}
+
+// gitAuthCmd builds a git command that authenticates to github.com over https
+// with the forge token -- what a PAT-based URL does, minus the token in the URL
+// (and so in argv, in git's remote config, and in error text). The header
+// travels in the environment, is scoped to github.com, and terminal prompts are
+// off so a bad or missing token fails fast instead of hanging on a password
+// prompt. With no token it is plain git.
+func gitAuthCmd(token string, args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	if token == "" {
+		return cmd
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+	)
+	return cmd
+}
+
+func redactToken(s, token string) string {
+	if token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, token, "***")
+}
+
+// writeScopeFile puts content in a per-session temp dir (outside the worktree, so
+// it never shows up as an untracked change) and returns its path, or "" if it
+// could not be written.
+func (p *prSession) writeScopeFile(name, content string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.scopeDir == "" {
+		dir, err := os.MkdirTemp("", "px0-prdiff-*")
+		if err != nil {
+			return ""
+		}
+		p.scopeDir = dir
+	}
+	path := filepath.Join(p.scopeDir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return ""
+	}
+	return path
 }
 
 // errPRDiverged is returned by Pull when the checkout can't be fast-forwarded
@@ -215,15 +311,22 @@ func (p *prSession) Pull() (info string, err error) {
 	worktree, srcRepo, num := p.worktree, p.srcRepo, p.meta.Number
 	target, baseRef := p.target, p.meta.BaseRef
 	headRepoCloneURL, headRef := p.meta.HeadRepoCloneURL, p.meta.HeadRef
+	token := p.token
 	p.mu.Unlock()
 
 	if gitHasUncommittedChanges(worktree) {
 		return "", errors.New("commit or discard your local changes before pulling")
 	}
 
-	newRef := fmt.Sprintf("refs/px0/pr/%d", num)
-	if srcRepo != "" {
-		headRefspec := fmt.Sprintf("refs/pull/%d/head:%s", num, newRef)
+	// Fetch the PR branch itself, forced: it is the source of truth for the
+	// PR's head (refs/pull/N/head can lag behind a fresh push), and a
+	// force-pushed branch must not be refused as a non-fast-forward ref update.
+	// A local clone with no token keeps using its own origin instead, which is
+	// the remote that clone can already authenticate to.
+	newRef := "FETCH_HEAD"
+	if srcRepo != "" && token == "" {
+		newRef = fmt.Sprintf("refs/px0/pr/%d", num)
+		headRefspec := fmt.Sprintf("+refs/pull/%d/head:%s", num, newRef)
 		if out, err := exec.Command("git", "-C", srcRepo, "fetch", "--no-tags", "origin", headRefspec).CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git fetch PR head: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -232,35 +335,69 @@ func (p *prSession) Pull() (info string, err error) {
 		if cloneURL == "" {
 			cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
 		}
-		if out, err := exec.Command("git", "-C", worktree, "fetch", "--no-tags", cloneURL, headRef).CombinedOutput(); err != nil {
-			return "", fmt.Errorf("git fetch PR head: %w: %s", err, strings.TrimSpace(string(out)))
+		if out, err := gitAuthCmd(token, "-C", worktree, "fetch", "--no-tags", cloneURL, "+refs/heads/"+headRef).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git fetch PR head: %w: %s", err, redactToken(strings.TrimSpace(string(out)), token))
 		}
-		newRef = "FETCH_HEAD"
 	}
 
-	if exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", newRef, "HEAD").Run() == nil {
-		return "already up to date", nil
-	}
-	if exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", "HEAD", newRef).Run() != nil {
-		return "", errPRDiverged
-	}
-	if out, err := exec.Command("git", "-C", worktree, "reset", "--hard", newRef).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-
-	shaOut, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output()
+	headOut, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
-	diffBase, diffBaseWarning := computeDiffBase(worktree, srcRepo, target, baseRef, num, nil)
-
+	head := strings.TrimSpace(string(headOut))
 	p.mu.Lock()
-	p.meta.HeadSHA = strings.TrimSpace(string(shaOut))
+	knownHead := p.meta.HeadSHA
+	p.mu.Unlock()
+	nothingOfMine := head == knownHead // no local commits past the PR head we checked out
+
+	info = "pulled the latest changes"
+	upToDate := exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", newRef, "HEAD").Run() == nil
+	switch {
+	case upToDate:
+		info = "already up to date"
+	case exec.Command("git", "-C", worktree, "merge-base", "--is-ancestor", "HEAD", newRef).Run() == nil:
+		// plain fast-forward
+	case nothingOfMine:
+		// The PR branch was rewritten (force-push or rebase) and there is
+		// nothing of yours to lose: follow it.
+		info = "pulled the latest changes (the PR branch was force-pushed)"
+	default:
+		return "", errPRDiverged
+	}
+	if !upToDate {
+		if out, err := exec.Command("git", "-C", worktree, "reset", "--hard", newRef).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		shaOut, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output()
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse HEAD: %w", err)
+		}
+		p.mu.Lock()
+		p.meta.HeadSHA = strings.TrimSpace(string(shaOut))
+		p.pushedSHA = ""
+		p.mu.Unlock()
+	}
+
+	// Title, state, merged, base branch: refresh what GitHub says about the PR
+	// itself, so the bar doesn't keep showing the state from session start.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if p.provider == nil {
+		// nothing to ask
+	} else if fresh, err := p.provider.FetchPR(ctx, target, token); err == nil {
+		p.mu.Lock()
+		p.meta.Title, p.meta.State, p.meta.Merged, p.meta.MergedAt = fresh.Title, fresh.State, fresh.Merged, fresh.MergedAt
+		p.meta.Draft, p.meta.BaseRef = fresh.Draft, fresh.BaseRef
+		baseRef = p.meta.BaseRef
+		p.mu.Unlock()
+	}
+	diffBase, diffBaseWarning := computeDiffBase(worktree, srcRepo, token, target, baseRef, num, nil)
+	p.mu.Lock()
 	p.diffBase = diffBase
 	p.diffBaseWarning = diffBaseWarning
 	p.mu.Unlock()
 
-	return "pulled the latest changes", nil
+	return info, nil
 }
 
 // Push pushes the worktree's current commit to the PR's actual head branch
@@ -271,16 +408,30 @@ func (p *prSession) Push() error {
 	p.mu.Lock()
 	worktree := p.worktree
 	cloneURL, headRef := p.meta.HeadRepoCloneURL, p.meta.HeadRef
-	target := p.target
+	target, token := p.target, p.token
 	p.mu.Unlock()
 
 	if cloneURL == "" {
 		cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
 	}
+	// However this checkout was cloned (https or ssh), the push goes over https
+	// with the forge token, so it never stops to ask for a password.
+	pushURL := cloneURL
+	if token != "" {
+		pushURL = httpsRemoteURL(cloneURL)
+	}
 	refspec := fmt.Sprintf("HEAD:refs/heads/%s", headRef)
-	out, err := exec.Command("git", "-C", worktree, "push", cloneURL, refspec).CombinedOutput()
+	out, err := gitAuthCmd(token, "-C", worktree, "push", pushURL, refspec).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("git push: %w: %s", err, redactToken(strings.TrimSpace(string(out)), token))
+	}
+	// What you pushed is now part of the PR: the PR head moves up to it, so
+	// those commits leave "Your changes" and join "PR changes".
+	if sha, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output(); err == nil {
+		p.mu.Lock()
+		p.meta.HeadSHA = strings.TrimSpace(string(sha))
+		p.pushedSHA = ""
+		p.mu.Unlock()
 	}
 	return nil
 }
@@ -317,6 +468,7 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 		"diffBaseWarning": p.diffBaseWarning,
 		"headSHA":         p.meta.HeadSHA,
 		"url":             p.target.URL,
+		"files":           s.ix.PRFiles(),
 	})
 }
 

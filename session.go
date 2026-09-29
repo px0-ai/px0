@@ -12,9 +12,14 @@ import (
 	"sync"
 )
 
-// SessionTab represents an open editor tab pointing to a file path.
+// SessionTab represents an open editor tab pointing to a file path. Ref, when
+// set, is the commit SHA the tab is pinned to -- a tab opened from the
+// Unpushed sidebar section, showing that commit's own diff rather than the
+// working tree's. A commit that no longer exists simply restores as an
+// ordinary tab.
 type SessionTab struct {
 	Path string `json:"path"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 // WorkspaceSession stores the persistent UI state for a workspace:

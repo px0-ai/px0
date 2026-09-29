@@ -608,6 +608,18 @@ func TestChangedSinceReportsBothDirections(t *testing.T) {
 	}
 }
 
+// The job summary and API response list changed files, so their order must not
+// follow Go's randomised map iteration. Repeated to catch a lucky ordering.
+func TestChangedSinceIsSorted(t *testing.T) {
+	before := map[string]string{"b.go": "M", "d.go": "M"}
+	after := map[string]string{"c.go": "U", "a.go": "M", "d.go": "M"}
+	for i := 0; i < 20; i++ {
+		if got := strings.Join(changedSinceMaps(before, after), ","); got != "a.go,b.go,c.go" {
+			t.Fatalf("changed = %q, want a.go,b.go,c.go", got)
+		}
+	}
+}
+
 func TestLineRefAndPrompt(t *testing.T) {
 	if lineRef(4, 4) != "4" {
 		t.Fatalf("single line ref = %q", lineRef(4, 4))

@@ -203,7 +203,7 @@ func (gw *GitWatcher) Refresh() GitStatusPayload {
 		if len(recentCommits) > 0 {
 			headCommit = recentCommits[0].Hash
 		}
-		ahead, behind, _ = gitAheadBehind(gw.root)
+		ahead, behind = gw.aheadBehind()
 		gw.mu.Lock()
 		if headCommit != gw.lastHeadCommit || ahead != gw.lastAhead || behind != gw.lastBehind {
 			gw.lastHeadCommit = headCommit
@@ -238,6 +238,18 @@ func (gw *GitWatcher) Refresh() GitStatusPayload {
 		}
 	}
 	return payload
+}
+
+// aheadBehind counts local commits not yet on the remote. In a PR review the
+// checkout is a detached HEAD with no upstream, so "ahead" is measured from the
+// PR head it was checked out at (or last pushed to) -- exactly the reviewer's
+// own commits. Behind stays 0 there: knowing it needs a fetch, which Pull does.
+func (gw *GitWatcher) aheadBehind() (ahead, behind int) {
+	if head := gw.ix.PushedHead(); head != "" {
+		return gitCountSince(gw.root, head), 0
+	}
+	ahead, behind, _ = gitAheadBehind(gw.root)
+	return ahead, behind
 }
 
 // checkAndBroadcast runs UpdateGitStatus and broadcasts to subscribers if changed.
@@ -291,7 +303,7 @@ func (gw *GitWatcher) Subscribe() (<-chan []byte, func()) {
 			}
 		}
 		branch := gitCurrentBranch(gw.root)
-		ahead, behind, _ := gitAheadBehind(gw.root)
+		ahead, behind := gw.aheadBehind()
 		payload := GitStatusPayload{
 			Git:           true,
 			GitChanges:    count,

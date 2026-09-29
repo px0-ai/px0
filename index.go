@@ -58,6 +58,8 @@ type Index struct {
 	gitYourStatusMap map[string]string
 	diffBase         string
 	prHead           string
+	prFiles          map[string]string
+	pushedHead       string // PR mode: remote branch tip as of the last push; bounds "unpushed"
 	readyCh          chan struct{}
 }
 
@@ -86,8 +88,43 @@ func (ix *Index) DiffBase() string {
 // SetPRHead stores the checked-out PR head commit SHA in PR review mode.
 func (ix *Index) SetPRHead(head string) {
 	ix.mu.Lock()
-	ix.prHead = head
+	base := ix.diffBase
 	ix.mu.Unlock()
+	// The PR's own file set only moves with the head or the base, so it is
+	// worked out here once rather than on every git-status tick.
+	files := gitFilesBetween(ix.root, base, head)
+	ix.mu.Lock()
+	ix.prHead = head
+	ix.prFiles = files
+	ix.mu.Unlock()
+}
+
+// PRFiles returns the paths the PR itself changes (diffBase..PR head) with
+// their git status letters, as opposed to files only the reviewer has touched.
+// Empty outside PR review.
+func (ix *Index) PRFiles() map[string]string {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	out := make(map[string]string, len(ix.prFiles))
+	for k, v := range ix.prFiles {
+		out[k] = v
+	}
+	return out
+}
+
+// SetPushedHead records the PR branch's tip after a push (or pull), which is
+// the boundary "ahead"/"unpushed" are counted from. Unlike prHead it moves on push.
+func (ix *Index) SetPushedHead(head string) {
+	ix.mu.Lock()
+	ix.pushedHead = head
+	ix.mu.Unlock()
+}
+
+// PushedHead returns the unpushed boundary, or empty outside PR review mode.
+func (ix *Index) PushedHead() string {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return ix.pushedHead
 }
 
 // PRHead returns the checked-out PR head commit SHA, or empty if not in PR review mode.
@@ -387,7 +424,26 @@ func (ix *Index) Build() {
 			if ix.children == nil {
 				ix.children = map[string][]Node{}
 			}
-			ix.children[""] = kids
+			rootKids := make([]Node, len(kids))
+			copy(rootKids, kids)
+			for p, st := range gs {
+				if st == "D" && !strings.Contains(p, "/") {
+					yst := ""
+					if yourStatuses != nil {
+						yst = yourStatuses[p]
+					}
+					rootKids = append(rootKids, Node{
+						Name:       p,
+						Path:       p,
+						Dir:        false,
+						Status:     "D",
+						Staged:     staged[p],
+						YourStatus: yst,
+					})
+				}
+			}
+			sortNodes(rootKids)
+			ix.children[""] = rootKids
 			ix.mu.Unlock()
 		}
 
@@ -409,6 +465,8 @@ func (ix *Index) Build() {
 	walk(ix.root, "", root)
 	wg.Wait()
 
+	injectDeletedNodes(children, gs, staged, yourStatuses, dirtyDirs, yourDirtyDirs)
+
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
 	ix.mu.Lock()
@@ -425,6 +483,123 @@ func (ix *Index) Build() {
 		close(ix.readyCh)
 	}
 	ix.mu.Unlock()
+}
+
+// injectDeletedNodes ensures that files marked deleted in git status (which do not
+// exist on disk and were therefore omitted by the filesystem walk) are added to children
+// under their respective parent directories, and that any missing intermediate directory
+// nodes are created and marked dirty.
+func injectDeletedNodes(children map[string][]Node, gs map[string]string, staged map[string]bool, ys map[string]string, dirtyDirs map[string]bool, yourDirtyDirs map[string]bool) {
+	apply := func(p string, st string, isStaged bool, yst string) {
+		parts := strings.Split(p, "/")
+		for i := 0; i < len(parts)-1; i++ {
+			parentDir := ""
+			if i > 0 {
+				parentDir = strings.Join(parts[:i], "/")
+			}
+			subDir := strings.Join(parts[:i+1], "/")
+			name := parts[i]
+
+			kids := children[parentDir]
+			found := false
+			for _, k := range kids {
+				if k.Name == name && k.Dir {
+					found = true
+					break
+				}
+			}
+			if !found {
+				children[parentDir] = append(children[parentDir], Node{
+					Name:      name,
+					Path:      subDir,
+					Dir:       true,
+					Dirty:     dirtyDirs[subDir],
+					YourDirty: yourDirtyDirs != nil && yourDirtyDirs[subDir],
+				})
+				sortNodes(children[parentDir])
+			}
+			if _, ok := children[subDir]; !ok {
+				children[subDir] = []Node{}
+			}
+		}
+
+		dir := ""
+		name := p
+		if lastSlash := strings.LastIndexByte(p, '/'); lastSlash >= 0 {
+			dir = p[:lastSlash]
+			name = p[lastSlash+1:]
+		}
+
+		kids := children[dir]
+		found := false
+		for i := range kids {
+			if kids[i].Path == p && !kids[i].Dir {
+				kids[i].Status = st
+				kids[i].Staged = isStaged
+				kids[i].YourStatus = yst
+				found = true
+				break
+			}
+		}
+		if !found {
+			children[dir] = append(children[dir], Node{
+				Name:       name,
+				Path:       p,
+				Dir:        false,
+				Status:     st,
+				Staged:     isStaged,
+				YourStatus: yst,
+			})
+			sortNodes(children[dir])
+		}
+	}
+
+	for p, st := range gs {
+		if st == "D" {
+			yst := ""
+			if ys != nil {
+				yst = ys[p]
+			}
+			apply(p, st, staged != nil && staged[p], yst)
+		}
+	}
+	if ys != nil {
+		for p, st := range ys {
+			if st == "D" && (gs == nil || gs[p] != "D") {
+				apply(p, "", staged != nil && staged[p], st)
+			}
+		}
+	}
+}
+
+func cleanupEmptyDirs(children map[string][]Node, root string) {
+	changed := true
+	for changed {
+		changed = false
+		for dir, kids := range children {
+			if dir == "" || len(kids) > 0 {
+				continue
+			}
+			absDir := filepath.Join(root, filepath.FromSlash(dir))
+			if _, err := os.Stat(absDir); err != nil {
+				delete(children, dir)
+				parent := ""
+				if idx := strings.LastIndexByte(dir, '/'); idx >= 0 {
+					parent = dir[:idx]
+				}
+				pkids := children[parent]
+				pFiltered := pkids[:0]
+				for _, k := range pkids {
+					if k.Path != dir {
+						pFiltered = append(pFiltered, k)
+					}
+				}
+				children[parent] = pFiltered
+				changed = true
+				break
+			}
+		}
+	}
 }
 
 // UpdateGitStatus re-runs git status, updates in-memory status codes, staged
@@ -516,18 +691,36 @@ func (ix *Index) UpdateGitStatus() (count int, files []string, changed bool, sta
 	}
 
 	// Update nodes in-place across ix.children
-	for _, kids := range ix.children {
-		for i := range kids {
-			if kids[i].Dir {
-				kids[i].Dirty = newDirtyDirs[kids[i].Path]
-				kids[i].YourDirty = newYourDirtyDirs[kids[i].Path]
+	for dir, kids := range ix.children {
+		filtered := kids[:0]
+		for _, node := range kids {
+			if node.Dir {
+				node.Dirty = newDirtyDirs[node.Path]
+				node.YourDirty = newYourDirtyDirs[node.Path]
+				filtered = append(filtered, node)
 			} else {
-				kids[i].Status = gs[kids[i].Path]
-				kids[i].Staged = sg[kids[i].Path]
-				kids[i].YourStatus = ys[kids[i].Path]
+				newStatus := gs[node.Path]
+				newStaged := sg[node.Path]
+				newYourStatus := ys[node.Path]
+
+				if (node.Status == "D" || node.YourStatus == "D") && newStatus != "D" && newYourStatus != "D" {
+					absPath := filepath.Join(ix.root, filepath.FromSlash(node.Path))
+					if _, err := os.Stat(absPath); err != nil {
+						continue // committed deletion: remove from tree
+					}
+				}
+
+				node.Status = newStatus
+				node.Staged = newStaged
+				node.YourStatus = newYourStatus
+				filtered = append(filtered, node)
 			}
 		}
+		ix.children[dir] = filtered
 	}
+
+	injectDeletedNodes(ix.children, gs, sg, ys, newDirtyDirs, newYourDirtyDirs)
+	cleanupEmptyDirs(ix.children, ix.root)
 
 	ix.gitChanges = len(newGitFiles)
 	ix.gitFiles = newGitFiles

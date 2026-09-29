@@ -12,6 +12,7 @@ import { setReviewHandler, SEL_MENU_ITEMS } from './selbar.js';
 import { diffview, setPRSyncHandler } from './diff.js';
 import { reloadWorkspace } from './agent.js';
 import { openFile } from './tabs.js';
+import { refreshTree } from './tree.js';
 import { layout, render } from './renderer.js';
 import { openSettings } from './settings.js';
 
@@ -49,8 +50,11 @@ export async function refreshPRMeta() {
   if (!meta) return;
   try {
     const j = await api('/api/pr/meta');
+    const filesChanged = JSON.stringify(meta.files || []) !== JSON.stringify(j.files || []);
     meta = { ...meta, ...j };
+    S.meta.pr = meta; // the tree reads the PR's file set from here
     renderBar();
+    if (filesChanged) await refreshTree(); // rows carry a pr-file flag from that set
   } catch {
     // Best-effort.
   }

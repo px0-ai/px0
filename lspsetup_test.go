@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -105,5 +107,86 @@ func TestTailBufferKeepsTheEnd(t *testing.T) {
 	b.Write([]byte("ab"))
 	if got := b.String(); got != "456789ab" {
 		t.Errorf("tail = %q, want %q", got, "456789ab")
+	}
+}
+
+func TestLSPServersEndpoint(t *testing.T) {
+	s, root := newTestServer(t)
+	s.lsp = newLSPManager(root, true)
+
+	// Ensure we have Go and Python files
+	_ = os.WriteFile(filepath.Join(root, "app.py"), []byte("print('hello')\n"), 0o644)
+	s.ix.Build()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/lsp/servers", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var res struct {
+		Enabled    bool             `json:"enabled"`
+		AnyRunning bool             `json:"anyRunning"`
+		Servers    []map[string]any `json:"servers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("json parse error: %v", err)
+	}
+
+	foundGo := false
+	foundPy := false
+	for _, srv := range res.Servers {
+		name, _ := srv["name"].(string)
+		if name == "gopls" {
+			foundGo = true
+		}
+		if name == "pyright" || name == "pylsp" || name == "ruff" {
+			foundPy = true
+		}
+	}
+	if !foundGo {
+		t.Errorf("expected gopls in relevant servers for Go files")
+	}
+	if !foundPy {
+		t.Errorf("expected python language server in relevant servers for Python files")
+	}
+}
+
+func TestLSPStopAndStart(t *testing.T) {
+	s, root := newTestServer(t)
+	s.lsp = newLSPManager(root, true)
+	_ = os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644)
+
+	// Stop gopls
+	stopReq := httptest.NewRequest(http.MethodPost, "/api/lsp/stop?server=gopls", nil)
+	stopReq.Host = "127.0.0.1:8080"
+	stopReq.Header.Set("Origin", "http://127.0.0.1:8080")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, stopReq)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stop returned code %d", rec.Code)
+	}
+
+	state, _ := s.lsp.State("main.go")
+	if state != lspOff {
+		t.Errorf("expected lspOff after stop, got %v", state)
+	}
+
+	// Verify Stop All
+	stopAllReq := httptest.NewRequest(http.MethodPost, "/api/lsp/stop", nil)
+	stopAllReq.Host = "127.0.0.1:8080"
+	stopAllReq.Header.Set("Origin", "http://127.0.0.1:8080")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, stopAllReq)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stop all returned code %d", rec.Code)
+	}
+
+	if s.lsp.AnyRunning() {
+		t.Errorf("expected no servers running after stop all")
 	}
 }

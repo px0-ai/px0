@@ -10,12 +10,15 @@ import { showPanel } from './panels.js';
 import { revealDir } from './tree.js';
 import { findbar, runFind } from './find.js';
 import { hideHover } from './hover.js';
+import { buildTable } from './table.js';
 
 /* Markdown tabs open rendered. The server converts the file with goldmark and
    passes raw HTML through, so nothing it returns is trusted: mdSanitize rebuilds
    it against an allowlist in an inert document before any of it reaches the page.
    Every block carries the source line it starts on (data-line), which keeps the
-   preview in step with line-based navigation and with the source view. */
+   preview in step with line-based navigation and with the source view.
+   CSV and TSV tabs use the same overlay for a table (table.js), with its own
+   remembered setting; rows carry data-line the same way. */
 
 export const mdview = $('#mdview');
 const mdArticle = $('#md');
@@ -24,8 +27,15 @@ let mdShown = null;  // doc the preview is showing, null while it is hidden
 let mdDrawn = null;  // doc whose HTML is in the article; drawing can wait on a fetch
 let mdGen = 0;
 
+/* 'markdown', 'table', or '' for a tab with no rendered view. */
+export function previewKind(d = doc_()) {
+  return d ? (d.markdown ? 'markdown' : d.table ? 'table' : '') : '';
+}
+
 export function previewing(d = doc_()) {
-  return !!(d && d.markdown && S.mdPreview && !d.mdError && !d.diffMode);
+  const kind = previewKind(d);
+  const on = kind === 'markdown' ? S.mdPreview : kind === 'table' ? S.tablePreview : false;
+  return !!(on && !d.mdError && !d.diffMode);
 }
 
 /* Show or hide the preview to match the active tab. Call whenever that changes. */
@@ -43,10 +53,12 @@ export function syncPreview() {
 
 async function drawPreview(d) {
   const gen = ++mdGen;
-  if (d.mdHtml === undefined) {
+  const table = previewKind(d) === 'table';
+  if ((table ? d.tableData : d.mdHtml) === undefined) {
     try {
-      d.mdReq = d.mdReq || api('/api/markdown', { path: d.path });
-      d.mdHtml = (await d.mdReq).html;
+      d.mdReq = d.mdReq || api(table ? '/api/table' : '/api/markdown', { path: d.path });
+      const j = await d.mdReq;
+      if (table) d.tableData = j; else d.mdHtml = j.html;
     } catch (e) {
       d.mdError = e.message; // this tab falls back to its source
       if (gen === mdGen && mdShown === d) {
@@ -60,8 +72,12 @@ async function drawPreview(d) {
     }
     if (gen !== mdGen || mdShown !== d) return;
   }
-  mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
-  mdEnhance();
+  mdArticle.className = table ? 'csv' : 'md';
+  if (table) mdArticle.replaceChildren(buildTable(d.tableData, d.total));
+  else {
+    mdArticle.replaceChildren(mdSanitize(d.mdHtml, d.path));
+    mdEnhance();
+  }
   mdDrawn = d;
   const target = d.mdAnchor && mdFindAnchor(d.mdAnchor);
   if (target) mdScrollTo(target);
@@ -74,17 +90,17 @@ async function drawPreview(d) {
 
 export function togglePreview() {
   const d = doc_();
-  if (!d || !d.markdown) { showToast('!', 'Preview works on Markdown files'); return; }
+  if (!previewKind(d)) { showToast('!', 'Preview works on Markdown, CSV and TSV files'); return; }
   hideHover();
   if (previewing(d)) {
     const line = mdDrawn === d ? previewTopLine() : 1;
-    mdSetPref(false);
+    mdSetPref(d, false);
     syncPreview();
     sourceToLine(line);
   } else {
     d.mdError = '';
     d.mdLine = sourceTopLine();
-    mdSetPref(true);
+    mdSetPref(d, true);
     syncPreview();
   }
   if (!findbar.hidden) runFind(); else S.find = null;
@@ -92,9 +108,10 @@ export function togglePreview() {
   updateStatus();
 }
 
-function mdSetPref(on) {
-  S.mdPreview = on;
-  try { localStorage.setItem('px0.mdPreview', on ? 'true' : 'false'); } catch {}
+function mdSetPref(d, on) {
+  const table = previewKind(d) === 'table';
+  if (table) S.tablePreview = on; else S.mdPreview = on;
+  try { localStorage.setItem(table ? 'px0.tablePreview' : 'px0.mdPreview', on ? 'true' : 'false'); } catch {}
 }
 
 /* ---------- sanitising ---------- */
@@ -259,8 +276,14 @@ function mdAlert(q) {
 
 const MD_GAP = 16; // space left above a block scrolled into place
 
+/* A table's header row is sticky, so a row placed at the top must clear it. */
+function mdGap() {
+  const head = mdArticle.className === 'csv' && mdArticle.querySelector('thead');
+  return head ? head.getBoundingClientRect().height : MD_GAP;
+}
+
 function mdScrollTo(el) {
-  mdview.scrollTop += el.getBoundingClientRect().top - mdview.getBoundingClientRect().top - MD_GAP;
+  mdview.scrollTop += el.getBoundingClientRect().top - mdview.getBoundingClientRect().top - mdGap();
 }
 
 function mdFindAnchor(anchor) {
@@ -283,15 +306,19 @@ export function previewLine(n) {
     const l = +el.dataset.line;
     if (l <= n && l > at) { best = el; at = l; }
   }
-  if (best) mdScrollTo(best); else mdview.scrollTop = 0;
+  // A table's header row is sticky, so it always measures as already in place.
+  if (best && !best.closest('thead')) mdScrollTo(best); else mdview.scrollTop = 0;
 }
 
 /* Source line of the last block starting at or above the top of the preview,
    counting one that mdScrollTo has just placed there. */
 export function previewTopLine() {
-  const top = mdview.getBoundingClientRect().top + MD_GAP + 8;
+  const top = mdview.getBoundingClientRect().top + mdGap() + 8;
   let line = 1;
-  for (const el of mdArticle.querySelectorAll('[data-line]')) {
+  const blocks = mdArticle.querySelectorAll('[data-line]');
+  // Unscrolled, a table's first row sits just under the header, inside the cutoff.
+  if (mdArticle.className === 'csv' && mdview.scrollTop === 0) return blocks.length ? +blocks[0].dataset.line : 1;
+  for (const el of blocks) {
     if (el.getBoundingClientRect().top > top) break;
     line = +el.dataset.line;
   }
@@ -383,7 +410,13 @@ export function clearPreviewMarks() {
 export function findInPreview(q) {
   clearPreviewMarks();
   if (!q) return 0;
-  const marks = markNodes(mdArticle, q, false, 'mark');
+  // A table's line numbers and cap footer are chrome, not content: no hits there.
+  const marks = markNodes(mdArticle, q, false, 'mark').filter(m => {
+    if (!m.closest('.ln, .csv-cap')) return true;
+    m.replaceWith(...m.childNodes);
+    return false;
+  });
+  if (mdArticle.className === 'csv') mdArticle.normalize();
   for (const m of marks) m.classList.add('md-hit');
   return marks.length;
 }
@@ -422,6 +455,7 @@ export function initMarkdown() {
   });
 
   mdArticle.addEventListener('click', e => {
+    if (e.target.closest('.csv-open-source')) { togglePreview(); return; }
     const copy = e.target.closest('.md-copy');
     if (copy) {
       const pre = $('pre', copy.parentElement);
@@ -473,9 +507,206 @@ export function initMarkdown() {
       }
     });
   }
+  const copyMdBtn = $('#btn-copy-md');
+  if (copyMdBtn) {
+    copyMdBtn.addEventListener('click', () => copyFullMarkdown(copyMdBtn));
+  }
+
   on('tab:activated', () => syncPreview());
   on('tabs:cleared', () => syncPreview());
 }
+
+export function getDocRaw(d) {
+  if (!d) return Promise.resolve('');
+  if (d.rawText !== undefined) return Promise.resolve(d.rawText);
+  if (!d.rawTextPromise) {
+    const rawUrl = new URL('api/raw?path=' + encodeURIComponent(d.path), document.baseURI || location.href).href;
+    d.rawTextPromise = fetch(rawUrl)
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.text(); })
+      .then(t => { d.rawText = t; return t; })
+      .catch(e => { d.rawTextPromise = null; throw e; });
+  }
+  return d.rawTextPromise;
+}
+
+export async function copyFullMarkdown(btn = null) {
+  const d = doc_();
+  if (!d) return;
+  const trigger = btn || $('#btn-copy-md');
+  try {
+    const raw = await getDocRaw(d);
+    const lineCount = raw.split('\n').length;
+    copyToClipboard(raw, `Copied ${d.name} (${lineCount.toLocaleString()} lines)`, trigger);
+  } catch (err) {
+    showToast('!', 'Failed to read markdown: ' + err.message);
+  }
+}
+
+export function getFragmentPlainText(frag) {
+  const clone = frag.cloneNode(true);
+  const bad = clone.querySelectorAll?.('.md-copy, .line-btn, [hidden], svg, style, script');
+  if (bad) {
+    for (const b of bad) b.remove();
+  }
+  return (clone.textContent || '').replace(/\r\n/g, '\n');
+}
+
+export function getFragmentHtml(frag) {
+  const clone = frag.cloneNode(true);
+  const bad = clone.querySelectorAll?.('.md-copy, .line-btn, [hidden]');
+  if (bad) {
+    for (const b of bad) b.remove();
+  }
+  const div = document.createElement('div');
+  div.appendChild(clone);
+  return div.innerHTML;
+}
+
+export function getMarkdownRangeLines(range) {
+  let l1 = 0, l2 = 0;
+  const blocks = mdArticle.querySelectorAll('[data-line]');
+  for (const b of blocks) {
+    if (range.intersectsNode(b)) {
+      const line = +b.dataset.line;
+      if (!l1 || line < l1) l1 = line;
+      if (line > l2) l2 = line;
+    }
+  }
+  return { l1: l1 || 1, l2: l2 || l1 || 1 };
+}
+
+export function domToMarkdown(node) {
+  if (!node) return '';
+  if (node.nodeType === 3) return node.nodeValue;
+  if (node.nodeType !== 1 && node.nodeType !== 11) return '';
+
+  if (node.matches && (node.matches('.md-copy, .line-btn, [hidden], svg') || node.classList?.contains('md-copy'))) {
+    return '';
+  }
+
+  const tag = node.nodeType === 1 ? node.tagName.toLowerCase() : '';
+
+  if (tag === 'div' && node.classList.contains('md-pre')) {
+    const pre = node.querySelector('pre') || node;
+    const lang = node.dataset.lang || pre.dataset.lang || '';
+    const code = (node.querySelector('code') || pre).textContent || '';
+    return '\n```' + lang + '\n' + code.replace(/\r\n/g, '\n').trimEnd() + '\n```\n\n';
+  }
+
+  if (tag === 'pre') {
+    const lang = node.dataset.lang || node.closest('.md-pre')?.dataset.lang || '';
+    const code = (node.querySelector('code') || node).textContent || '';
+    return '\n```' + lang + '\n' + code.replace(/\r\n/g, '\n').trimEnd() + '\n```\n\n';
+  }
+
+  if (/^h[1-6]$/.test(tag)) {
+    const level = parseInt(tag[1], 10);
+    const hashes = '#'.repeat(level);
+    return '\n' + hashes + ' ' + innerDomToMarkdown(node).trim() + '\n\n';
+  }
+
+  if (tag === 'blockquote') {
+    let alertType = '';
+    for (const c of (node.className || '').split(/\s+/)) {
+      if (c.startsWith('md-alert-')) {
+        alertType = c.slice('md-alert-'.length).toUpperCase();
+        break;
+      }
+    }
+    let body = innerDomToMarkdown(node).trim();
+    if (alertType) body = `[!${alertType}]\n` + body;
+    const lines = body.split('\n').map(l => '> ' + l).join('\n');
+    return '\n' + lines + '\n\n';
+  }
+
+  if (tag === 'p') {
+    if (node.classList.contains('md-alert-title')) return '';
+    return innerDomToMarkdown(node).trim() + '\n\n';
+  }
+
+  if (tag === 'ul' || tag === 'ol') {
+    let idx = 1;
+    let out = '\n';
+    for (const child of node.children) {
+      if (child.tagName.toLowerCase() === 'li') {
+        const prefix = tag === 'ol' ? `${idx++}. ` : '- ';
+        let item = innerDomToMarkdown(child).trim();
+        item = item.split('\n').map((l, i) => i === 0 ? l : '  ' + l).join('\n');
+        out += prefix + item + '\n';
+      }
+    }
+    return out + '\n';
+  }
+
+  if (tag === 'li') {
+    let check = '';
+    const cb = node.querySelector('input[type="checkbox"]');
+    if (cb) check = cb.checked ? '[x] ' : '[ ] ';
+    return check + innerDomToMarkdown(node).trim();
+  }
+
+  if (tag === 'table') {
+    const trs = [...node.querySelectorAll('tr')];
+    if (!trs.length) return '';
+    let out = '\n';
+    let isHeader = true;
+    for (const tr of trs) {
+      const cells = [...tr.children].filter(c => /^t[hd]$/i.test(c.tagName));
+      if (!cells.length) continue;
+      const row = '| ' + cells.map(c => innerDomToMarkdown(c).trim().replace(/\|/g, '\\|').replace(/\n+/g, ' ')).join(' | ') + ' |';
+      out += row + '\n';
+      if (isHeader && tr.querySelector('th')) {
+        out += '| ' + cells.map(() => '---').join(' | ') + ' |\n';
+        isHeader = false;
+      }
+    }
+    return out + '\n';
+  }
+
+  if (tag === 'strong' || tag === 'b') {
+    const txt = innerDomToMarkdown(node);
+    return txt ? '**' + txt + '**' : '';
+  }
+  if (tag === 'em' || tag === 'i') {
+    if (node.closest('pre, code')) return node.textContent;
+    const txt = innerDomToMarkdown(node);
+    return txt ? '*' + txt + '*' : '';
+  }
+  if (tag === 'del' || tag === 's' || tag === 'strike') {
+    const txt = innerDomToMarkdown(node);
+    return txt ? '~~' + txt + '~~' : '';
+  }
+  if (tag === 'code') {
+    if (node.closest('pre')) return node.textContent;
+    return '`' + node.textContent + '`';
+  }
+  if (tag === 'a') {
+    const href = node.dataset.rawPath || node.dataset.path || node.getAttribute('href') || '';
+    const txt = innerDomToMarkdown(node).trim() || href;
+    return '[' + txt + '](' + href + ')';
+  }
+  if (tag === 'img') {
+    const src = node.dataset.rawPath || node.dataset.origSrc || node.getAttribute('src') || '';
+    const alt = node.getAttribute('alt') || '';
+    return '![' + alt + '](' + src + ')';
+  }
+  if (tag === 'hr') return '\n---\n\n';
+  if (tag === 'br') return '\n';
+  if (tag === 'input' && node.getAttribute('type') === 'checkbox') {
+    return node.checked ? '[x] ' : '[ ] ';
+  }
+
+  return innerDomToMarkdown(node);
+}
+
+function innerDomToMarkdown(node) {
+  let s = '';
+  for (const c of node.childNodes) {
+    s += domToMarkdown(c);
+  }
+  return s;
+}
+
 
 export function openLightbox(img) {
   const lb = $('#img-lightbox');

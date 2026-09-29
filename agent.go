@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -360,6 +361,7 @@ type agentJob struct {
 	Changed    []string         `json:"changed"`              // Files detected as modified after job execution
 	Ms         int64            `json:"ms"`                   // Elapsed runtime in milliseconds
 	Tracked    bool             `json:"tracked"`              // Whether telemetry tracking has been recorded
+	ThreadID   string           `json:"threadId,omitempty"`   // The thread this edit runs as, when it runs as one
 	BatchCount int              `json:"batchCount,omitempty"` // Number of items in batch review edit
 	Items      []agentBatchItem `json:"items,omitempty"`      // Detailed batch items if multi-file edit
 
@@ -439,6 +441,10 @@ type agentManager struct {
 	jobs     map[int64]*agentJob
 	seq      int64
 	onEdit   func()
+
+	// Set by the thread manager: inline and batch edits run as threads.
+	threadJob    func(id int64) *agentJob // id 0 means the most recent
+	threadCancel func(id int64) bool      // id 0 means every one running
 }
 
 // newAgentManager wires discovery and restores the remembered choice. A flag
@@ -613,6 +619,17 @@ func (m *agentManager) Model() string {
 	return m.models[m.selected]
 }
 
+// current returns the selected harness, its headless argv and its model, read
+// together so a run never mixes one harness's name with another's flags.
+func (m *agentManager) current() (string, []string, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.args == nil {
+		return "", nil, ""
+	}
+	return m.selected, append([]string(nil), m.args...), m.models[m.selected]
+}
+
 func (m *agentManager) Pinned() bool {
 	if m == nil {
 		return false
@@ -686,7 +703,6 @@ func (m *agentManager) Job(id int64) *agentJob {
 		return nil
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	j := m.jobs[id]
 	if id == 0 {
 		for _, cand := range m.jobs {
@@ -695,19 +711,38 @@ func (m *agentManager) Job(id int64) *agentJob {
 			}
 		}
 	}
-	if j == nil {
-		return nil
+	var cp *agentJob
+	if j != nil {
+		c := *j
+		c.Log = j.out.String()
+		c.Stdout = c.Log
+		if j.stderr != nil {
+			c.Stderr = j.stderr.String()
+		}
+		if c.Running {
+			c.Ms = time.Since(j.start).Milliseconds()
+		}
+		cp = &c
 	}
-	cp := *j
-	cp.Log = j.out.String()
-	cp.Stdout = cp.Log
-	if j.stderr != nil {
-		cp.Stderr = j.stderr.String()
+	lookup := m.threadJob
+	m.mu.Unlock()
+
+	// Inline and batch edits run as threads and share this id space, so one
+	// poll endpoint serves both. Asked for the latest, the newer of the two wins.
+	if lookup != nil {
+		if tj := lookup(id); tj != nil && (cp == nil || tj.ID > cp.ID) {
+			return tj
+		}
 	}
-	if cp.Running {
-		cp.Ms = time.Since(j.start).Milliseconds()
-	}
-	return &cp
+	return cp
+}
+
+// nextJobID hands out an id from the sequence every job shares.
+func (m *agentManager) nextJobID() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
+	return m.seq
 }
 
 // anyRunningLocked reports whether any job is still in flight. Callers hold m.mu.
@@ -1069,6 +1104,13 @@ func (m *agentManager) CancelJob(id int64) bool {
 		return false
 	}
 	m.mu.Lock()
+	tc := m.threadCancel
+	m.mu.Unlock()
+	fromThreads := tc != nil && tc(id)
+	if fromThreads && id != 0 {
+		return true
+	}
+	m.mu.Lock()
 	defer m.mu.Unlock()
 	if id != 0 {
 		j := m.jobs[id]
@@ -1096,7 +1138,7 @@ func (m *agentManager) CancelJob(id int64) bool {
 		cancel()
 		cancelled = true
 	}
-	return cancelled
+	return cancelled || fromThreads
 }
 
 func (m *agentManager) Close() { m.Cancel() }
@@ -1138,6 +1180,9 @@ func changedSinceMaps(before, after map[string]string) []string {
 			out = append(out, path)
 		}
 	}
+	// Map iteration order is random; sort so the job's summary and API
+	// response list the same files in the same order on every run.
+	sort.Strings(out)
 	return out
 }
 
@@ -1316,7 +1361,7 @@ func (s *Server) handleAgentEdit(w http.ResponseWriter, r *http.Request) {
 	l1, _ := strconv.Atoi(q.Get("l1"))
 	l2, _ := strconv.Atoi(q.Get("l2"))
 
-	job, err := s.agent.Start(abs, rel, l1, l2, q.Get("instruction"), q.Get("force") == "1")
+	job, err := s.threads.StartEdit([]agentBatchItem{{Abs: abs, Path: rel, L1: l1, L2: l2, Instruction: q.Get("instruction")}})
 	if err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) || errors.Is(err, errAgentDirty) {
@@ -1421,7 +1466,7 @@ func (s *Server) handleAgentBatchEdit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	job, err := s.agent.StartBatch(items, req.Force)
+	job, err := s.threads.StartEdit(items)
 	if err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) || errors.Is(err, errAgentDirty) {

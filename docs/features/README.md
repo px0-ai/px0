@@ -17,8 +17,10 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **Git Awareness, Diffs & Stage/Commit/Push/Pull** | `Cmd/Ctrl+D` | Real-time status stream, stat cache fast-path, split / unified diffs, a sidebar panel to stage/commit/push/fast-forward-pull, and AI-written commit messages | [Git Integration](git-integration.md) |
 | **GitHub PR Review** | `px0 <pr-url>`, `Alt+R` | Full-tree checkout of a pull request, merge-base diffing, draft comments with Approve / Request Changes / Comment, and committing/pushing/pulling straight from the checkout | [GitHub PR Review](github-pr-review.md) |
 | **Coding Agent Editing** | `Alt+E`, Right-click | Delegating edits to Claude Code, Gemini CLI, Cursor Agent, and more | [Agent Editing](agent-editing.md) |
+| **Threads** | `Alt+T` | Long-running, multi-turn conversations with your coding harness that can read and change any file, with per-turn changed files | [Threads](threads.md) |
 | **Semantic Code Intelligence** | `F12`, `Shift+F12`, `Alt+Shift+H` | Go to Definition, Find References, Call Trails, and Hover docs | [LSP & Intelligence](lsp-code-intelligence.md) |
 | **Markdown Preview** | `Alt+M` | Full GFM preview, syntax-highlighted code fences, and scroll sync | [Markdown Preview](markdown-preview.md) |
+| **CSV / TSV Table View** | `Alt+M` | Data files open as a table with a sticky header and source-line gutter | [Table View](table-view.md) |
 | **Image Viewer & Assets** | Click image file / lightbox | Standalone image tabs, zoom/pan transforms, and markdown lightbox | [Image Viewer](image-viewer.md) |
 | **Settings & Preferences** | `Cmd/Ctrl+,` | Graphical form editor, raw JSON sync, and instant live preview | [Settings & Configuration](settings-and-configuration.md) |
 | **Syntax Highlighting** | Automatic | Viewport-windowed Chroma lexing for ~280 languages | [Syntax Highlighting](syntax-highlighting.md) |
@@ -66,6 +68,7 @@ Modern developers spend substantial time verifying diffs and reviewing code gene
 px0 intentionally omits a heavyweight text editor in favor of direct collaboration with the user's preferred coding agents:
 
 - **[Editing with Coding Agents](agent-editing.md)**: Select any code block in a source file or git diff, press `Alt+E` (or right-click), describe the required change, and px0 delegates the task directly to your chosen agent harness (Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). Execution progress streams to the launch terminal, while px0 automatically detects file changes and reloads tabs in place upon completion.
+- **[Threads](threads.md)**: For questions and multi-file work, select code and press `Alt+T` to open a long-running conversation in the right sidebar. The harness can read and change any file, replies stream in with the files each turn touched, and every message continues the same conversation. Threads are saved and survive restarts.
 - **[Selection Toolbar & Context Actions](selection-actions.md)**: High-ergonomic footer toolbar providing instant buttons to copy canonical path:line references (`Alt+C`), copy formatted code snippets with surrounding context tailored for LLM chat windows (`Alt+A`), find usages (`Alt+U`), and dispatch inline edits (`Alt+E`).
 
 ---
@@ -75,6 +78,7 @@ px0 intentionally omits a heavyweight text editor in favor of direct collaborati
 Repositories contain documentation, architecture notes, and graphical assets alongside code:
 
 - **[Rendered Markdown Preview](markdown-preview.md)**: Read project documentation, RFCs, and README files in rendered GitHub Flavored Markdown (GFM) mode (`Alt+M`), complete with tables, task lists, footnotes, and GitHub-style alert callouts (`[!NOTE]`, `[!WARNING]`). Features bi-directional scroll synchronization and one-click copy buttons on code blocks.
+- **[CSV & TSV Table View](table-view.md)**: Open `.csv` and `.tsv` files as a table (`Alt+M` toggles the source). Quoted cells with commas and line breaks parse correctly, the header row stays pinned, and a gutter numbers each row by its source line so find and go-to-line still line up. Large files show the first 1,000 rows.
 - **[Image Viewer & Asset Inspection](image-viewer.md)**: Open image files (PNG, SVG, JPG, WebP, GIF, etc.) as native interactive tabs. Smoothly zoom up to 3200%, pan freely, toggle alpha background modes (checkerboard, dark matte, light matte), switch between bilinear smoothing and pixelated rendering, and click inline Markdown images to inspect them in a modal lightbox.
 
 ---
@@ -86,7 +90,7 @@ px0 adapts to developer habits and viewing environments without requiring manual
 - **[Settings & Preferences System](settings-and-configuration.md)**: Comprehensive settings manager accessible via `Cmd/Ctrl+,`. Offers a VS Code-style graphical UI with interactive attribute pills alongside a raw JSON editor (`~/.px0/settings.json`) that updates themes, typography, diff layouts, and search behavior in real time without refreshing the browser.
 - **[Themes & Styling](themes-and-styling.md)**: 14 built-in dark and light themes crafted for high readability and visual consistency across all panels, diffs, and markdown documents.
 - **[Vim Keybindings & Modal Navigation](vim-mode.md)**: Full modal navigation emulation supporting Normal, Visual, and Motion modes for developers accustomed to Vim, Neovim, or Helix.
-- **[File Explorer & Workspace Management](file-explorer.md)**: Dense, clean file tree with single-child folder compacting, `.gitignore` dimming, expand/collapse-all buttons, and tab lifecycle controls (`Alt+1..9`, `Ctrl+Tab`, `Alt+W`).
+- **[File Explorer & Workspace Management](file-explorer.md)**: Dense, clean file tree with single-child folder compacting, `.gitignore` dimming, expand/collapse-all buttons, tab shortcuts (`Alt+1..9`, `Ctrl+Tab`, `Alt+W`), and right-click tab close actions.
 
 ---
 

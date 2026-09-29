@@ -21,9 +21,10 @@ px0's file explorer eliminates unnecessary clicks by automatically collapsing si
 - **Expand All / Collapse All**: The explorer header has buttons to open project folders or close every folder. Expand All shows a progress state while loading nested folders in small batches. Ignored folders stay closed to avoid bulk-loading generated trees; you can still open them individually. Collapse All can stop an expansion while it runs. The resulting folder state is remembered between launches.
 - **Collapsible Sidebar (`Cmd/Ctrl+B`)**: Quickly toggle the entire file explorer sidebar on or off to maximize reading space for wide diffs or code inspection.
 - **Multi-Tab Document Bar**:
-  - Open multiple files side-by-side as tabs.
+  - Open multiple files in tabs and switch between them.
   - Switch tabs using keyboard shortcuts (`Ctrl+Tab`, `Alt+1` through `Alt+9`).
   - Close active tabs with `Alt+W` (or `Cmd/Ctrl+W`).
+  - Right-click a tab for **Close**, **Close All**, **Close Others**, **Close to the Right**, or **Close to the Left**. Actions without matching tabs are disabled.
   - Image tabs, Markdown previews, diff views, and external standard library files sit cleanly alongside source files.
 
 ---
@@ -51,6 +52,7 @@ On laptops or split-screen terminal workflows:
 | `Ctrl+Tab` | Tab Bar | Switch to Next Tab |
 | `Alt+1` … `Alt+9` | Tab Bar | Switch to Tab by Position |
 | Click Tab Close `✕` | Tab | Close Specific Tab |
+| Right-click Tab | Tab Bar | Open tab close menu |
 
 ---
 

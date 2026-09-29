@@ -1,5 +1,6 @@
 // web/src/inspector.js
 import { $, $$, esc, S, doc_, api } from './state.js';
+import { emit } from './bus.js';
 import { layout, render } from './renderer.js';
 import { updateStatus, setStatusNote } from './status.js';
 import { openFile, centerLine } from './tabs.js';
@@ -8,9 +9,15 @@ import { loadOutline, drawOutline } from './outline.js';
 import { displayPath, cancelSearch } from './search.js';
 import { groupHits, flashFind, canAskServer, lspCall, positionNow } from './lsp.js';
 
-export function showRightInspector(tab = 'refs') {
+export function firstInspectorTab() {
+  if ($('#tab-threads') && !$('#tab-threads').hidden) return 'threads';
+  const first = Array.from($$('.inspector-tab')).find(b => !b.hidden);
+  return first?.dataset.itab || 'threads';
+}
+
+export function showRightInspector(tab) {
   document.body.classList.remove('right-hidden');
-  setRightInspectorTab(tab);
+  setRightInspectorTab(tab || firstInspectorTab());
   layout();
   render();
 }
@@ -29,6 +36,8 @@ export function setRightInspectorTab(tab) {
   $('#pane-right-symbols')?.classList.toggle('active', tab === 'symbols');
   $('#pane-right-calls')?.classList.toggle('active', tab === 'calls');
   $('#pane-right-search')?.classList.toggle('active', tab === 'search');
+  $('#pane-right-threads')?.classList.toggle('active', tab === 'threads');
+  if (tab === 'threads') emit('threads:shown');
   if (tab === 'symbols') {
     loadOutline();
     $('#right-symbols-filter')?.focus();
@@ -127,6 +136,7 @@ export function initInspector() {
   }));
 
   $('#btn-close-right')?.addEventListener('click', hideRightInspector);
+  $('#btn-open-right')?.addEventListener('click', () => showRightInspector());
 
   /* Right inspector resizer */
   (() => {

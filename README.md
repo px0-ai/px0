@@ -6,25 +6,26 @@
 
 ---
 
-px0 is the IDE for humans and AI, optimized for quick, fast code reviews. It turns your browser into a zero-latency console with native Git and GitHub integrations, instant search across massive codebases, and seamless handoff to local AI coding harnesses.
+px0 is an IDE built for reviewing AI-generated code, optimized for speed. It turns your browser into a zero-latency console with native Git and GitHub integrations, instant search across massive codebases, and seamless handoff to local AI coding harnesses.
 
-As AI agents author more code directly from the terminal, engineering productivity is no longer constrained by how fast you type—it is constrained by how fast you can review, navigate, and verify changes. px0 replaces heavy, multi-gigabyte editing suites with an instant, distraction-free environment built specifically for this review loop.
+As AI agents author more code directly from the terminal, engineering productivity is no longer constrained by how fast you type - it is constrained by how fast you can review, navigate, and verify changes. px0 replaces heavy, multi-gigabyte editing suites with an instant, distraction-free environment built specifically for this review loop.
 
 - < 1 ms cold start
 - ~20–30 MB server daemon RAM (~100–180 MB total with browser tab, vs. VS Code's ~1,440 MB)
 - Single static Go binary with zero runtime dependencies (no Electron, no Node, no CGO)
 - ~280 languages tokenized natively via Chroma
 
-See full performance benchmarks and comparisons at [px0.ai/#bench](https://px0.ai/#bench).
+See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://px0.ai/benchmarks).
 
 ## Features
 
 - GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
+- Unpushed commit review: Read the commits your branch is ahead of its tracking branch by, one file diff at a time, before you push them.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
 - Remote-first: Run on any remote server, VM, or container and browse locally without SSH key setups or remote daemons.
 - Virtual rendering: Opens 400,000-line files smoothly by mounting only visible rows; frees memory back to the OS after 15 seconds of inactivity.
-- Rich code viewer: 14 built-in themes, rendered Markdown preview, image inspector, and optional zero-config LSP for Go-to-Definition and hover.
+- Rich code viewer: 14 built-in themes, rendered Markdown preview, CSV/TSV table view, image inspector, and optional zero-config LSP for Go-to-Definition and hover.
 
 ## Installation
 
@@ -68,6 +69,24 @@ px0 -host 0.0.0.0 -port 7777 ~/workspace
 # Behind a reverse proxy under a subpath
 px0 -base-path /rev-123/ -host 0.0.0.0 -port 7777 ~/workspace
 ```
+
+When px0 binds to `0.0.0.0`, it prints a `network` URL for every unique
+non-loopback IPv4 address on the machine, using the port selected by the
+listener:
+
+```text
+  url:        http://0.0.0.0:7777
+  network:    http://10.0.0.15:7777
+  network:    http://192.168.1.42:7777
+```
+
+Open the address that is reachable from your local machine. The list can
+include LAN, VPN, and container-network addresses, depending on the remote
+host's interfaces.
+
+Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel
+with zero remote setup overhead and strict read-only sandboxing
+(path traversal protection & DNS rebinding checks).
 
 ## Development
 
@@ -113,7 +132,7 @@ make build
 
 ## Design Partners
 
-When AI coding agents generate large diffs across repositories daily, code authoring is no longer the bottleneck—verification and review is.
+When AI coding agents generate large diffs across repositories every day, code authoring is no longer the bottleneck. Verification and review are.
 
 We are looking for engineering teams (10+ engineers or teams running active agent workflows) as design partners. Partners receive direct Slack Connect access to the core team, rapid turnaround on custom harness integrations, and direct input on the roadmap.
 

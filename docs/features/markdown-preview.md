@@ -49,8 +49,11 @@ If you spot a typo or want to modify a section:
 | Shortcut | Context | Action |
 | :--- | :--- | :--- |
 | `Alt+M` | Markdown Tab | Toggle between Rendered Preview and Raw Source |
-| `#md-switch` | Tab Bar Header | Click "Preview" or "Source" button |
+| `#md-switch` | Tab Bar Header | Click "Preview", "Source", or "Copy Markdown" button |
 | Status Bar | Footer Button | Click "Preview" indicator to toggle mode |
+| `Ctrl+C` / `Cmd+C` | In Preview | Copy formatted text (clean plain text & rich HTML) |
+| `[Copy Raw Markdown]` | In Preview | Copy raw Markdown syntax of selection |
+| `[Copy Markdown]` | Header Button | Instantly copy full raw Markdown of file |
 | `Ctrl+F` | In Preview | Search text within rendered Markdown article |
 | `Ctrl+A` | In Preview | Select rendered article text for clean copying |
 | `PageUp` / `PageDown` | In Preview | Smoothly scroll through preview article |

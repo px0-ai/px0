@@ -43,10 +43,13 @@ build: web
 
 test: web
 	node --test web/test/*.test.mjs
-	go test -v ./...
+	go test -v .
 
-dist: web
-	@./build.sh
+bench:
+	go test -bench=. -benchmem -run=^$$ .
+
+benchmark: build
+	./benchmark.sh
 
 publish:
 	@if [ -z "$(CLEAN_VERSION)" ]; then \

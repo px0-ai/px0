@@ -45,6 +45,8 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 - **Commit with AI**: A harness and model picker (the same one used for inline edits) sits above the commit box. **Commit with AI** dispatches the selected harness with the staged diff — plus any instructions from `git.commitMessageInstruction` in Settings — asks it to write only the commit message text, drops that into the box, and commits with it in the same action.
 - **Fast-Forward-Only Pull**: Pull always tries a clean fast-forward onto the remote (or, in a PR review session, the pull request's current head). If history has diverged at all, it refuses immediately with a clear message rather than ever starting a merge — there is never a conflict state to clean up.
 - **Push to the Right Place**: In a plain workspace, Push pushes the current branch to its configured upstream (offering to set one up on a first push). In a PR review session, Push targets the pull request's actual head branch on its actual repository — a fork included — never wherever the checkout happens to be sitting.
+- **Unpushed Commits**: Under the file tree, the Git changes view lists the commits on your branch that the tracking branch doesn't have yet (`@{u}..HEAD`), labelled with the ref they're ahead of (e.g. `origin/master`) so it's clear what "unpushed" means here. Click a commit to see the files it touched, badged the same way as working-tree changes; click a file to read that commit's own diff in the normal diff viewer. Committing no longer hides your work: the toggle stays available on a clean working tree, precisely because the commits are then the only thing left to review. If the branch has no upstream configured, the section simply doesn't appear — px0 never guesses a branch to measure against.
+- **Commit Hover Card**: Hovering a commit in that list shows its author, the full commit message, and its diffstat (insertions in green, deletions in red), with a **Copy SHA** button and — on a GitHub remote — a link on the author's name.
 
 ---
 
@@ -72,6 +74,13 @@ Once you've reviewed a change in the diff view, finish the commit right there:
 2. Write a message in the git panel's commit box, or click **Commit with AI** to have your configured coding harness write one from the staged diff and commit with it directly.
 3. Click **Push** to send the branch to its remote. If it's the first push on a new branch, px0 offers to set the upstream for you.
 
+### Reviewing Local Commits Before You Push
+When you've made several commits locally and want to read them over before sending them up:
+1. Switch to the **Git Changes** view. The **Unpushed** section under the tree lists every commit ahead of your tracking branch, newest first.
+2. Hover a commit to see who wrote it, its full message, and how much it changed.
+3. Click it to expand the files it touched, then click a file to read that commit's diff — just that commit's, unaffected by anything you've edited since.
+4. Fix anything that needs fixing, commit again (the list updates itself), and click **Push**. The section empties as the commits land.
+
 ### Catching Up With a Moving Remote
 When a teammate (or CI) has pushed new commits to the branch you're reviewing:
 1. Click **Pull** in the git panel.
@@ -90,6 +99,9 @@ When a teammate (or CI) has pushed new commits to the branch you're reviewing:
 | Space Icon | Diff Header | Toggle Ignore Leading/Trailing Whitespace |
 | `Mod+Shift+R` | Global | Force Workspace and Git Status Refresh |
 | Stage Tick | File Tree Row | Stage / unstage that file |
+| Commit Row | Unpushed Section | Expand / collapse the files that commit touched |
+| File Row | Unpushed Section | Open that file's diff for that commit |
+| Hover a Commit | Unpushed Section | Show author, full message and diffstat, with Copy SHA |
 | **Stage All** | Git Panel | Stage every changed file |
 | **Commit** | Git Panel | Commit whatever is currently staged with the written message |
 | **Commit with AI** | Git Panel | Write a commit message from the staged diff with the selected harness, then commit with it |

@@ -342,6 +342,52 @@ func TestPRSessionPush(t *testing.T) {
 	if !strings.Contains(out, "reviewer commit") {
 		t.Fatalf("expected upstream's refs/heads/feature to carry the pushed commit, got %q", out)
 	}
+	pushed := strings.TrimSpace(gitTestRun(t, worktree, "rev-parse", "HEAD"))
+	if p.meta.HeadSHA != pushed {
+		t.Fatalf("Push should move the PR head (meta.HeadSHA) to %s, got %q", pushed, p.meta.HeadSHA)
+	}
+	if p.remoteHead() != pushed {
+		t.Fatalf("remoteHead = %q, want %s", p.remoteHead(), pushed)
+	}
+}
+
+// TestPRAheadCountsFromPRHead covers the detached-HEAD case: a PR checkout has
+// no upstream, so commits made in the IDE must still count as unpushed
+// (measured from the PR head), and stop counting once that head moves.
+func TestPRAheadCountsFromPRHead(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	gitTestRun(t, root, "init", "-q", "-b", "main")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, root, "config", cfg[0], cfg[1])
+	}
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("1\n"), 0o644)
+	gitTestRun(t, root, "add", ".")
+	gitTestRun(t, root, "commit", "-qm", "pr commit")
+	head := strings.TrimSpace(gitTestRun(t, root, "rev-parse", "HEAD"))
+	gitTestRun(t, root, "checkout", "-q", "--detach")
+
+	if n := gitCountSince(root, head); n != 0 {
+		t.Fatalf("fresh checkout: ahead = %d, want 0", n)
+	}
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("2\n"), 0o644)
+	gitTestRun(t, root, "commit", "-qam", "my change")
+	if n := gitCountSince(root, head); n != 1 {
+		t.Fatalf("after IDE commit: ahead = %d, want 1", n)
+	}
+	cs := gitCommitsSince(root, head, 0)
+	if len(cs) != 1 || cs[0].Subject != "my change" {
+		t.Fatalf("unpushed = %+v", cs)
+	}
+	head = strings.TrimSpace(gitTestRun(t, root, "rev-parse", "HEAD"))
+	if n := gitCountSince(root, head); n != 0 {
+		t.Fatalf("after push moved the head: ahead = %d, want 0", n)
+	}
 }
 
 func TestFetchPRMetaMerged(t *testing.T) {
@@ -439,4 +485,113 @@ func TestGitHubProviderInterface(t *testing.T) {
 	}
 }
 
+// TestGitFilesBetween is the PR's own file set: what changed between the
+// merge-base and the PR head, never what the reviewer committed afterwards.
+func TestGitFilesBetween(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	gitTestRun(t, root, "init", "-q", "-b", "main")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, root, "config", cfg[0], cfg[1])
+	}
+	write := func(name string) { os.WriteFile(filepath.Join(root, name), []byte(name+"\n"), 0o644) }
+	write("base.txt")
+	gitTestRun(t, root, "add", ".")
+	gitTestRun(t, root, "commit", "-qm", "base")
+	base := strings.TrimSpace(gitTestRun(t, root, "rev-parse", "HEAD"))
+	write("pr.txt")
+	gitTestRun(t, root, "add", ".")
+	gitTestRun(t, root, "commit", "-qm", "pr")
+	head := strings.TrimSpace(gitTestRun(t, root, "rev-parse", "HEAD"))
+	write("mine.txt")
+	gitTestRun(t, root, "add", ".")
+	gitTestRun(t, root, "commit", "-qm", "mine")
 
+	got := gitFilesBetween(root, base, head)
+	if len(got) != 1 || got["pr.txt"] != "A" {
+		t.Fatalf("PR files = %v, want map[pr.txt:A]", got)
+	}
+}
+
+func TestHTTPSRemoteURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:o/r.git":          "https://github.com/o/r.git",
+		"ssh://git@github.com/o/r.git":    "https://github.com/o/r.git",
+		"ssh://git@github.com:22/o/r.git": "https://github.com/o/r.git",
+		"https://github.com/o/r.git":      "https://github.com/o/r.git",
+		"/tmp/some/local/upstream.git":    "/tmp/some/local/upstream.git",
+	} {
+		if got := httpsRemoteURL(in); got != want {
+			t.Errorf("httpsRemoteURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestPRSessionPullFollowsForcePush: a PR branch rewritten upstream is not a
+// fast-forward, but with nothing of the reviewer's in the checkout Pull follows
+// it instead of leaving stale content behind; with local commits it still refuses.
+func TestPRSessionPullFollowsForcePush(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+	upstream := filepath.Join(base, "upstream.git")
+	os.MkdirAll(upstream, 0o755)
+	gitTestRun(t, upstream, "init", "--bare", "-b", "feature")
+
+	work := filepath.Join(base, "work")
+	os.MkdirAll(work, 0o755)
+	gitTestRun(t, work, "init", "-q", "-b", "feature")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, work, "config", cfg[0], cfg[1])
+	}
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("one\n"), 0o644)
+	gitTestRun(t, work, "add", ".")
+	gitTestRun(t, work, "commit", "-qm", "one")
+	gitTestRun(t, work, "push", "-q", upstream, "feature")
+
+	wt := filepath.Join(base, "wt")
+	gitTestRun(t, base, "clone", "-q", upstream, "wt")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, wt, "config", cfg[0], cfg[1])
+	}
+	head := strings.TrimSpace(gitTestRun(t, wt, "rev-parse", "HEAD"))
+	p := &prSession{
+		worktree: wt,
+		target:   PRTarget{Owner: "o", Repo: "r"},
+		meta:     PRMeta{Number: 1, BaseRef: "main", HeadRef: "feature", HeadRepoCloneURL: upstream, HeadSHA: head},
+	}
+
+	// Rewrite the PR branch: amend and force-push.
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("rewritten\n"), 0o644)
+	gitTestRun(t, work, "commit", "-aqm", "one (amended)", "--amend")
+	gitTestRun(t, work, "push", "-qf", upstream, "feature")
+
+	if _, err := p.Pull(); err != nil {
+		t.Fatalf("Pull should follow a force-push when nothing local is at stake: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(wt, "f.txt")); string(got) != "rewritten\n" {
+		t.Fatalf("worktree still has stale content: %q", got)
+	}
+	if p.meta.HeadSHA == head {
+		t.Fatal("HeadSHA should have moved to the rewritten head")
+	}
+
+	// With a local commit in the way, the same situation is refused.
+	os.WriteFile(filepath.Join(wt, "f.txt"), []byte("mine\n"), 0o644)
+	gitTestRun(t, wt, "commit", "-aqm", "mine")
+	os.WriteFile(filepath.Join(work, "f.txt"), []byte("rewritten again\n"), 0o644)
+	gitTestRun(t, work, "commit", "-aqm", "again", "--amend")
+	gitTestRun(t, work, "push", "-qf", upstream, "feature")
+	if _, err := p.Pull(); !errors.Is(err, errPRDiverged) {
+		t.Fatalf("expected errPRDiverged with a local commit, got %v", err)
+	}
+}

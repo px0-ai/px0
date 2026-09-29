@@ -1,6 +1,7 @@
 dist/
 bench-repos/
 px0
+px0.exe
 *.test
 *.prof
 

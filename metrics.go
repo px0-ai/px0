@@ -14,11 +14,12 @@ import (
 // ProcessMetrics captures system resource usage of the px0 server process
 // and any child language server processes.
 type ProcessMetrics struct {
-	RSSBytes    uint64  `json:"rssBytes"`    // Resident set size in bytes
-	CPUUsage    float64 `json:"cpuUsage"`    // CPU utilization percentage (e.g. 1.2%)
-	Goroutine   int     `json:"goroutines"`  // Current number of active goroutines
-	LSPEnabled  bool    `json:"lspEnabled"`  // Whether LSP is active
-	LSPMemBytes uint64  `json:"lspMemBytes"` // Combined RSS of running language server child processes
+	RSSBytes     uint64  `json:"rssBytes"`     // Resident set size in bytes
+	PeakRSSBytes uint64  `json:"peakRSSBytes"` // Peak resident set size in bytes
+	CPUUsage     float64 `json:"cpuUsage"`     // CPU utilization percentage (e.g. 1.2%)
+	Goroutine    int     `json:"goroutines"`   // Current number of active goroutines
+	LSPEnabled   bool    `json:"lspEnabled"`   // Whether LSP is active
+	LSPMemBytes  uint64  `json:"lspMemBytes"`  // Combined RSS of running language server child processes
 }
 
 // metricsCollector periodically samples process CPU utilization by calculating
@@ -42,8 +43,14 @@ func getProcessMetrics(lsp *lspManager) ProcessMetrics {
 	var m ProcessMetrics
 	m.Goroutine = runtime.NumGoroutine()
 
-	// 1. RSS Memory
+	// 1. RSS Memory and Peak RSS
 	m.RSSBytes = readProcessRSS()
+	if _, peak, ok := getProcessRusage(); ok && peak > 0 {
+		m.PeakRSSBytes = peak
+	}
+	if m.PeakRSSBytes < m.RSSBytes {
+		m.PeakRSSBytes = m.RSSBytes
+	}
 
 	// 2. CPU Usage
 	m.CPUUsage = globalMetrics.sampleCPU()
@@ -60,7 +67,7 @@ func getProcessMetrics(lsp *lspManager) ProcessMetrics {
 }
 
 func readProcessRSS() uint64 {
-	// Try Linux /proc/self/statm
+	// 1. Try Linux /proc/self/statm
 	if data, err := os.ReadFile("/proc/self/statm"); err == nil {
 		fields := strings.Fields(string(data))
 		if len(fields) >= 2 {
@@ -74,7 +81,12 @@ func readProcessRSS() uint64 {
 		}
 	}
 
-	// Fallback to runtime.MemStats Sys/HeapAlloc if /proc not present (e.g. Darwin/Windows)
+	// 2. Try Darwin/BSD via ps for self PID
+	if rss := readRSSForPID(os.Getpid()); rss > 0 {
+		return rss
+	}
+
+	// 3. Fallback to runtime.MemStats Sys/HeapAlloc if /proc and ps not present (e.g. Windows)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return ms.Sys
@@ -147,7 +159,11 @@ func (c *metricsCollector) sampleCPU() float64 {
 
 // readProcessCPUTime returns total CPU time consumed by the process (user + system)
 func readProcessCPUTime() (time.Duration, error) {
-	// Linux /proc/self/stat
+	if cpuTime, _, ok := getProcessRusage(); ok {
+		return cpuTime, nil
+	}
+
+	// Linux /proc/self/stat fallback
 	if data, err := os.ReadFile("/proc/self/stat"); err == nil {
 		// The comm field is in parentheses and might contain spaces or parentheses: find last ')'
 		idx := strings.LastIndex(string(data), ")")

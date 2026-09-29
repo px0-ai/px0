@@ -117,11 +117,11 @@ type lspClient struct {
 func newLSPClient(def lspServerDef, root string) *lspClient {
 	return &lspClient{
 		def: def, root: root,
-		pending:  map[int64]chan rpcMessage{},
-		opened:   map[string]int{},
-		encoding: "utf-16",
-		readyCh:  make(chan struct{}),
-		logf:     func(string, ...any) {},
+		pending:     map[int64]chan rpcMessage{},
+		opened:      map[string]int{},
+		encoding:    "utf-16",
+		readyCh:     make(chan struct{}),
+		logf:        func(string, ...any) {},
 	}
 }
 
@@ -218,27 +218,27 @@ func (c *lspClient) reply(id json.RawMessage, method string) {
 }
 
 func (c *lspClient) onNotification(msg rpcMessage) {
-	if msg.Method != "$/progress" {
-		return
-	}
-	var p struct {
-		Value struct {
-			Kind string `json:"kind"`
-		} `json:"value"`
-	}
-	if json.Unmarshal(msg.Params, &p) != nil {
-		return
-	}
-	c.indexMu.Lock()
-	switch p.Value.Kind {
-	case "begin":
-		c.indexing++
-	case "end":
-		if c.indexing > 0 {
-			c.indexing--
+	switch msg.Method {
+	case "$/progress":
+		var p struct {
+			Value struct {
+				Kind string `json:"kind"`
+			} `json:"value"`
 		}
+		if json.Unmarshal(msg.Params, &p) != nil {
+			return
+		}
+		c.indexMu.Lock()
+		switch p.Value.Kind {
+		case "begin":
+			c.indexing++
+		case "end":
+			if c.indexing > 0 {
+				c.indexing--
+			}
+		}
+		c.indexMu.Unlock()
 	}
-	c.indexMu.Unlock()
 }
 
 func (c *lspClient) busy() bool {
@@ -368,7 +368,7 @@ func (c *lspClient) initialize(ctx context.Context) error {
 				"symbol":           map[string]any{"dynamicRegistration": false},
 			},
 			"textDocument": map[string]any{
-				"synchronization": map[string]any{"didSave": false, "dynamicRegistration": false},
+				"synchronization": map[string]any{"didSave": true, "dynamicRegistration": false},
 				"definition":      map[string]any{"linkSupport": true},
 				"typeDefinition":  map[string]any{"linkSupport": true},
 				"implementation":  map[string]any{"linkSupport": true},
@@ -448,6 +448,45 @@ func (c *lspClient) ensureOpen(abs, rel string) error {
 	return nil
 }
 
+// syncDoc re-reads an already opened file from disk and notifies the server of
+// changes, e.g. after a reindex or external edit.
+func (c *lspClient) syncDoc(abs, rel string) error {
+	uri := pathToURI(abs)
+	c.mu.Lock()
+	v, ok := c.opened[uri]
+	c.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		c.closeDoc(abs)
+		return err
+	}
+	v++
+	c.mu.Lock()
+	c.opened[uri] = v
+	c.mu.Unlock()
+
+	if err := c.notify("textDocument/didChange", map[string]any{
+		"textDocument": map[string]any{
+			"uri":     uri,
+			"version": v,
+		},
+		"contentChanges": []map[string]any{
+			{"text": string(data)},
+		},
+	}); err != nil {
+		return err
+	}
+	_ = c.notify("textDocument/didSave", map[string]any{
+		"textDocument": map[string]any{
+			"uri": uri,
+		},
+	})
+	return nil
+}
+
 // closeDoc notifies the server that the file was closed, allowing the server
 // to free ASTs and file memory.
 func (c *lspClient) closeDoc(abs string) {
@@ -460,6 +499,7 @@ func (c *lspClient) closeDoc(abs string) {
 	}
 	delete(c.opened, uri)
 	c.mu.Unlock()
+
 	c.notify("textDocument/didClose", map[string]any{
 		"textDocument": map[string]any{
 			"uri": uri,
