@@ -10,6 +10,8 @@ export const treeEl = $('#tree');
 const treeMenu = $('#tree-menu');
 let activeTreeTarget = null;
 export const openDirs = new Set();
+/* Folders the user closed in changed-only mode; expandDirtyDirs() skips them. */
+export const collapsedDirs = new Set();
 // A newer tree action invalidates responses from older directory requests.
 let expansionVersion = 0;
 
@@ -210,6 +212,7 @@ export async function revealDir(dir) {
       if (kids) {
         kids.classList.add('open');
         openDirs.add(p);
+        collapsedDirs.delete(p);
         const loaded = await drawTree(p, kids, p.split('/').length, isCurrent);
         if (!isCurrent()) return;
         if (loaded) kids.dataset.loaded = '1';
@@ -248,6 +251,7 @@ export async function expandDirtyDirs(container = treeEl, version = expansionVer
   for (const dirRow of dirtyRows) {
     if (!isCurrent()) return;
     const path = dirRow.dataset.dir;
+    if (collapsedDirs.has(path)) continue; // closed by the user
     const kids = container.querySelector('[data-kids="' + CSS.escape(path) + '"]');
     if (kids) {
       dirRow.classList.add('open');
@@ -306,6 +310,10 @@ export async function patchTreeGitStatus(statuses = {}, dirtyDirs = {}, staged =
     const p = dirRow.dataset.dir;
     dirRow.classList.toggle('dirty', !!dirtyDirs[p]);
     dirRow.classList.toggle('your-dirty', !!yourDirtyDirs[p]);
+  }
+  // clean again: forget the collapse so it expands next time it is dirty
+  for (const p of collapsedDirs) {
+    if (!dirtyDirs[p]) collapsedDirs.delete(p);
   }
 
   // 2. Clear stale dirty/status markers on files that are now clean
@@ -583,16 +591,24 @@ export function initTree() {
       kids.classList.toggle('open', open);
       if (open) {
         openDirs.add(path);
+        collapsedDirs.delete(path);
         if (!kids.dataset.loaded) {
           const loaded = await drawTree(path, kids, path.split('/').length);
-          if (loaded) kids.dataset.loaded = '1';
-          else {
+          if (loaded) {
+            kids.dataset.loaded = '1';
+            // fresh children start closed; open the dirty ones
+            if (treeEl.classList.contains('changed-only')) await expandDirtyDirs(kids);
+          } else {
             dirRow.classList.remove('open');
             kids.classList.remove('open');
             openDirs.delete(path);
           }
         }
-      } else openDirs.delete(path);
+      } else {
+        openDirs.delete(path);
+        // only remembered in changed-only mode; the full explorer never reopens folders
+        if (treeEl.classList.contains('changed-only')) collapsedDirs.add(path);
+      }
       persistOpenDirs();
       return;
     }

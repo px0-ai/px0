@@ -262,6 +262,12 @@ When developers use px0 to inspect AI agent changes or review git branches, they
 3. **Active Pointer Stability**: In `closeTab(i)`, closing tabs to the left of the currently active tab decrements `S.active` (`S.active--`) rather than jumping the user to an unintended tab.
 4. **Empty State & Explorer Fallback**: If all git changes are discarded while the sidebar is in changed-only mode (`#tree.changed-only`), px0 automatically toggles back to standard file explorer mode so the user is never left viewing an empty tree.
 
+### Changed-Only Mode and Collapsed Folders
+
+`expandDirtyDirs()` in [`web/src/tree.js`](../../web/src/tree.js) opens every dirty folder that is not already open. It runs when the sidebar enters changed-only mode, after a full `refreshTree()`, and at the end of every `patchTreeGitStatus()` call, so on every git-status tick: a stage or unstage click, a harness save, a terminal `git` command, or a `/api/git/refresh` on window focus whose snapshot differs from the last one applied (`gitstream.js` drops identical ones).
+
+`collapsedDirs` records a folder the user closes while `#tree.changed-only` is set, and `expandDirtyDirs()` skips it. The folder leaves the set when the user opens it again, when `revealDir()` expands it on the way to a file, or when a status payload no longer lists it in `dirtyDirs`. Collapses made in the full explorer are not recorded, so switching into changed-only mode still expands every dirty folder the first time. The set lives in memory only; a page reload restores the open folders from `/api/session` and expands everything dirty again.
+
 ## 8. Diffing Against an Arbitrary Base
 
 `gitDiff`/`gitHunks` above are thin `base="HEAD"` wrappers around `gitDiffAgainst`/`gitHunksAgainst`, which take an arbitrary base ref rather than assuming the working tree's `HEAD`. The one other caller is PR review (`px0 <url>`), which diffs a checked-out PR against its merge-base with the target branch instead. See [GitHub PR Review](github-pr-review.md).
