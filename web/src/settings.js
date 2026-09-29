@@ -416,7 +416,7 @@ export function applySettingLive(key, val) {
     case 'workbench.colorTheme': {
       const storedTheme = localStorage.getItem('px0.theme');
       const nextTheme = chooseThemePreference(storedTheme, val, DEFAULT_THEME);
-      if (nextTheme) setTheme(nextTheme, true);
+      if (nextTheme) setTheme(nextTheme, false);
       break;
     }
     case 'diffEditor.renderSideBySide': {

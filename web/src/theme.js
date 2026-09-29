@@ -4,6 +4,7 @@
 // /static/themes.css, so themes are discovered from the loaded stylesheets and
 // adding one needs no JavaScript change. See docs/internals/styling-and-themes.md.
 import { showToast } from './ui.js';
+import { apiPostJson } from './state.js';
 import { DEFAULT_THEME, chooseThemePreference } from './theme-preference.js';
 
 const KEY = 'px0.theme';
@@ -50,15 +51,7 @@ export function setTheme(id, persist = true) {
   document.documentElement.dataset.theme = id;
   if (persist) {
     try { localStorage.setItem(KEY, id); } catch {}
-    try {
-      const base = document.baseURI || (location.origin + '/');
-      const url = new URL('api/settings', base);
-      void fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 'workbench.colorTheme': id }),
-      }).catch(() => {});
-    } catch {}
+    void apiPostJson('api/settings', { 'workbench.colorTheme': id }).catch(() => {});
   }
   return true;
 }
