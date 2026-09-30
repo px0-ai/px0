@@ -11,6 +11,7 @@ px0 reads every colour in the user interface through a CSS custom property, know
 - Dynamic Concatenation (`/static/themes.css`): The Go server concatenates every file matching `web/themes/*.css` in alphanumeric order and serves the result dynamically at `/static/themes.css`. [`web/index.html`](../../web/index.html) links this file immediately after `style.css`.
 - Client-Side Discovery: At application boot, [`web/src/theme.js`](../../web/src/theme.js) scans the loaded document stylesheets for rules matching `:root[data-theme="<id>"]`. It extracts the human-readable display name from `--theme-name` and the color scheme hint from `color-scheme`.
 - State Persistence: The active theme is applied via the `data-theme` attribute on the `<html>` root element and persisted in `localStorage` under `px0.theme`. If a saved theme is removed, px0 falls back to the default `github-dark`.
+- Auto Mode: When `window.autoDetectColorScheme` is on, `theme.js` picks the preferred light or dark theme from `prefers-color-scheme` and listens for changes. The pair is cached in `localStorage` under `px0.autoTheme` so the first paint is correct, and `data-theme-auto` on `<html>` swaps the sidebar button icon.
 
 > [!NOTE]
 > Theme rules intentionally use `:root[data-theme="<id>"]` rather than a bare attribute selector `[data-theme="<id>"]`. The `:root` pseudo-class raises CSS specificity above the fallback rules in `style.css`, ensuring theme tokens always win regardless of stylesheet evaluation order.

@@ -70,6 +70,14 @@ type settingSchemaItem struct {
 
 func numPtr(v float64) *float64 { return &v }
 
+var themeOptions = []string{
+	"github-dark", "dark", "light",
+	"catppuccin-mocha", "catppuccin-latte",
+	"dracula", "gruvbox-dark", "gruvbox-light",
+	"monokai", "nord", "one-dark", "rose-pine",
+	"solarized-dark", "solarized-light",
+}
+
 var settingsSchema = []settingSchemaItem{
 	{
 		Key:         "editor.fontSize",
@@ -160,13 +168,33 @@ var settingsSchema = []settingSchemaItem{
 		Category:    "Workbench",
 		Type:        "select",
 		Default:     "github-dark",
-		Options: []string{
-			"github-dark", "dark", "light",
-			"catppuccin-mocha", "catppuccin-latte",
-			"dracula", "gruvbox-dark", "gruvbox-light",
-			"monokai", "nord", "one-dark", "rose-pine",
-			"solarized-dark", "solarized-light",
-		},
+		Options:     themeOptions,
+	},
+	{
+		Key:         "window.autoDetectColorScheme",
+		Title:       "Auto Detect Color Scheme",
+		Description: "Follow the system light/dark setting, using the preferred light and dark themes below.",
+		Category:    "Workbench",
+		Type:        "boolean",
+		Default:     false,
+	},
+	{
+		Key:         "workbench.preferredDarkColorTheme",
+		Title:       "Preferred Dark Theme",
+		Description: "The theme used when the system is in dark mode and Auto Detect Color Scheme is on.",
+		Category:    "Workbench",
+		Type:        "select",
+		Default:     "github-dark",
+		Options:     themeOptions,
+	},
+	{
+		Key:         "workbench.preferredLightColorTheme",
+		Title:       "Preferred Light Theme",
+		Description: "The theme used when the system is in light mode and Auto Detect Color Scheme is on.",
+		Category:    "Workbench",
+		Type:        "select",
+		Default:     "light",
+		Options:     themeOptions,
 	},
 	{
 		Key:         "diffEditor.renderSideBySide",

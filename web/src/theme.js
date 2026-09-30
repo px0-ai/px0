@@ -4,15 +4,18 @@
 // /static/themes.css, so themes are discovered from the loaded stylesheets and
 // adding one needs no JavaScript change. See docs/internals/styling-and-themes.md.
 import { showToast } from './ui.js';
-import { apiPostJson } from './state.js';
-import { DEFAULT_THEME, chooseThemePreference } from './theme-preference.js';
+import { S, apiPostJson } from './state.js';
+import { DEFAULT_THEME, DEFAULT_LIGHT_THEME, chooseThemePreference, pickAutoTheme } from './theme-preference.js';
 
 const KEY = 'px0.theme';
+const AUTO_KEY = 'px0.autoTheme';
+const darkQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
 const THEME_SELECTOR = /^(?::root|html)?\[data-theme=["']?([\w-]+)["']?\]$/;
 
 export { DEFAULT_THEME, chooseThemePreference };
 
 let themes = null;
+let auto = null;
 
 export function getStoredTheme() {
   try { return localStorage.getItem(KEY); } catch { return null; }
@@ -46,12 +49,49 @@ export function listThemes() {
 
 export const currentTheme = () => document.documentElement.dataset.theme;
 
+export const isAutoTheme = () => !!auto;
+
+function autoPair() {
+  const s = S.settings || {};
+  return { light: s['workbench.preferredLightColorTheme'], dark: s['workbench.preferredDarkColorTheme'] };
+}
+
+export const autoThemeId = () => {
+  const p = auto || autoPair();
+  return pickAutoTheme(!!darkQuery?.matches, p.light, p.dark);
+};
+
+export function autoThemeLabel() {
+  const t = listThemes().find(t => t.id === currentTheme());
+  return t ? `Auto (${t.name})` : 'Auto';
+}
+
+function applyAuto() {
+  if (!setTheme(autoThemeId(), false)) setTheme(DEFAULT_THEME, false);
+}
+
+export function setAutoTheme(on, pair = autoPair(), persist = true) {
+  auto = on ? { light: pair.light || DEFAULT_LIGHT_THEME, dark: pair.dark || DEFAULT_THEME } : null;
+  document.documentElement.toggleAttribute('data-theme-auto', on);
+  try { on ? localStorage.setItem(AUTO_KEY, JSON.stringify(auto)) : localStorage.removeItem(AUTO_KEY); } catch {}
+  if (on) applyAuto();
+  if (S.settings) S.settings['window.autoDetectColorScheme'] = on;
+  if (persist) void apiPostJson('api/settings', { 'window.autoDetectColorScheme': on }).catch(() => {});
+}
+
+darkQuery?.addEventListener('change', () => { if (auto) applyAuto(); });
+
 export function setTheme(id, persist = true) {
   if (!listThemes().some(t => t.id === id)) return false;
   document.documentElement.dataset.theme = id;
   if (persist) {
+    const body = { 'workbench.colorTheme': id };
+    if (auto) {
+      setAutoTheme(false, undefined, false);
+      body['window.autoDetectColorScheme'] = false;
+    }
     try { localStorage.setItem(KEY, id); } catch {}
-    void apiPostJson('api/settings', { 'workbench.colorTheme': id }).catch(() => {});
+    void apiPostJson('api/settings', body).catch(() => {});
   }
   return true;
 }
@@ -59,12 +99,22 @@ export function setTheme(id, persist = true) {
 export function cycleTheme() {
   const all = listThemes();
   if (!all.length) return;
-  const next = all[(all.findIndex(t => t.id === currentTheme()) + 1) % all.length];
-  setTheme(next.id);
-  showToast('Theme', next.name);
+  const choices = [{ id: 'auto' }, ...all];
+  const i = auto ? 0 : Math.max(0, choices.findIndex(t => t.id === currentTheme()));
+  const next = choices[(i + 1) % choices.length];
+  if (next.id === 'auto') {
+    setAutoTheme(true);
+    showToast('Theme', autoThemeLabel());
+  } else {
+    setTheme(next.id);
+    showToast('Theme', next.name);
+  }
 }
 
 export function initTheme() {
+  let pair = null;
+  try { pair = JSON.parse(localStorage.getItem(AUTO_KEY)); } catch {}
+  if (pair && typeof pair === 'object') return setAutoTheme(true, pair, false);
   const saved = getStoredTheme();
   const preferred = chooseThemePreference(saved, null);
   if (preferred && setTheme(preferred, false)) return;

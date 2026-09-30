@@ -2,12 +2,20 @@
 import { $, $$, esc, S, api, apiPost, apiPostJson } from './state.js';
 import { showToast } from './ui.js';
 import { applyEditorTypography, toggleWordWrap, toggleLineNumbers } from './renderer.js';
-import { setTheme, listThemes } from './theme.js';
+import { setTheme, listThemes, isAutoTheme, setAutoTheme } from './theme.js';
 import { chooseThemePreference, DEFAULT_THEME } from './theme-preference.js';
 import { setLayoutPref } from './diff.js';
 import { setVimModeEnabled, showVimHelp } from './vim.js';
 
 export let settingsModalEl = null;
+const THEME_OPTIONS = [
+  "github-dark", "dark", "light",
+  "catppuccin-mocha", "catppuccin-latte",
+  "dracula", "gruvbox-dark", "gruvbox-light",
+  "monokai", "nord", "one-dark", "rose-pine",
+  "solarized-dark", "solarized-light"
+];
+
 const BUILTIN_SCHEMA = [
   {
     key: "editor.fontSize",
@@ -149,13 +157,33 @@ const BUILTIN_SCHEMA = [
     category: "Workbench",
     type: "select",
     default: "github-dark",
-    options: [
-      "github-dark", "dark", "light",
-      "catppuccin-mocha", "catppuccin-latte",
-      "dracula", "gruvbox-dark", "gruvbox-light",
-      "monokai", "nord", "one-dark", "rose-pine",
-      "solarized-dark", "solarized-light"
-    ]
+    options: THEME_OPTIONS
+  },
+  {
+    key: "window.autoDetectColorScheme",
+    title: "Auto Detect Color Scheme",
+    description: "Follow the system light/dark setting, using the preferred light and dark themes below.",
+    category: "Workbench",
+    type: "boolean",
+    default: false
+  },
+  {
+    key: "workbench.preferredDarkColorTheme",
+    title: "Preferred Dark Theme",
+    description: "The theme used when the system is in dark mode and Auto Detect Color Scheme is on.",
+    category: "Workbench",
+    type: "select",
+    default: "github-dark",
+    options: THEME_OPTIONS
+  },
+  {
+    key: "workbench.preferredLightColorTheme",
+    title: "Preferred Light Theme",
+    description: "The theme used when the system is in light mode and Auto Detect Color Scheme is on.",
+    category: "Workbench",
+    type: "select",
+    default: "light",
+    options: THEME_OPTIONS
   },
   {
     key: "diffEditor.renderSideBySide",
@@ -307,6 +335,7 @@ let settingsFilterQuery = '';
 const COMMONLY_USED_KEYS = new Set([
   'editor.fontSize',
   'workbench.colorTheme',
+  'window.autoDetectColorScheme',
   'editor.wordWrap',
   'editor.lineNumbers',
   'editor.vimMode',
@@ -414,9 +443,23 @@ export function applySettingLive(key, val) {
       break;
     }
     case 'workbench.colorTheme': {
+      if (isAutoTheme()) break;
       const storedTheme = localStorage.getItem('px0.theme');
       const nextTheme = chooseThemePreference(storedTheme, val, DEFAULT_THEME);
       if (nextTheme) setTheme(nextTheme, false);
+      break;
+    }
+    case 'window.autoDetectColorScheme': {
+      if (val === true || val === 'true') setAutoTheme(true, undefined, false);
+      else if (isAutoTheme()) {
+        setAutoTheme(false, undefined, false);
+        setTheme(chooseThemePreference(localStorage.getItem('px0.theme'), S.settings['workbench.colorTheme'], DEFAULT_THEME), false);
+      }
+      break;
+    }
+    case 'workbench.preferredDarkColorTheme':
+    case 'workbench.preferredLightColorTheme': {
+      if (isAutoTheme()) setAutoTheme(true, undefined, false);
       break;
     }
     case 'diffEditor.renderSideBySide': {

@@ -123,6 +123,9 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
 /* Project links and the theme button, together at the right edge. */
 .side-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .side-actions .mini { margin-left: 0; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; }
+/* Half-filled circle instead of the palette while the theme follows the system. */
+:root:not([data-theme-auto]) #btn-theme .ico-auto,
+:root[data-theme-auto] #btn-theme .ico-palette { display: none; }
 .side-logo { flex: none; display: flex; align-items: center; padding: 2px 3px; border-radius: var(--r); }
 .side-logo:hover { background: var(--bg4); }
 .side-logo img { height: 13px; width: auto; }
