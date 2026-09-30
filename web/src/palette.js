@@ -11,7 +11,7 @@ import { revealFile } from './tree.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
 import { showCalls } from './calls.js';
 import { showHelp } from './shortcuts.js';
-import { listThemes, currentTheme, setTheme, cycleTheme } from './theme.js';
+import { listThemes, currentTheme, setTheme, cycleTheme, isAutoTheme, setAutoTheme, autoThemeId } from './theme.js';
 import { togglePreview } from './markdown.js';
 import { openSettings, isAutoRevealEnabled } from './settings.js';
 import { showVimHelp, isVimEnabled, setVimModeEnabled } from './vim.js';
@@ -105,7 +105,7 @@ export const PAL_MODES = {
 };
 
 export function openPalette(mode, seed) {
-  pal = { mode, items: [], sel: 0, restoreTheme: mode === 'theme' ? currentTheme() : null };
+  pal = { mode, items: [], sel: 0, restoreTheme: mode === 'theme' ? currentTheme() : null, wasAuto: isAutoTheme() };
   overlay.hidden = false;
   palInput.value = seed !== undefined ? seed : ({ symbol: '@', line: ':', command: '>' }[mode] || '');
   $('#pal-mode').textContent = PAL_MODES[mode].tag;
@@ -152,8 +152,9 @@ export const refreshPalette = debounce(async () => {
       .slice(0, 400).map(s => ({ kind: 'sym', n: s.line, label: s.name, sub: s.kind, right: String(s.line) }));
   } else if (mode === 'theme') {
     const lq = q.toLowerCase();
-    pal.items = listThemes().filter(t => (t.name + ' ' + t.id).toLowerCase().includes(lq))
-      .map(t => ({ kind: 'theme', id: t.id, label: t.name, sub: t.scheme, right: t.id === pal.restoreTheme ? 'current' : '' }));
+    pal.items = [{ id: 'auto', name: 'Auto', scheme: 'follows system' }, ...listThemes()]
+      .filter(t => (t.name + ' ' + t.id).toLowerCase().includes(lq))
+      .map(t => ({ kind: 'theme', id: t.id, label: t.name, sub: t.scheme, right: (pal.wasAuto ? t.id === 'auto' : t.id === pal.restoreTheme) ? 'current' : '' }));
   } else if (mode === 'openpr') {
     pal.items = q ? [{ kind: 'openpr', target: q, label: 'Open PR: ' + esc(q), sub: 'Enter to open in a new tab', raw: true }] : [];
   } else {
@@ -169,7 +170,7 @@ export const refreshPalette = debounce(async () => {
       };
     });
   }
-  pal.sel = mode === 'theme' ? Math.max(0, pal.items.findIndex(it => it.id === currentTheme())) : 0;
+  pal.sel = mode === 'theme' ? Math.max(0, pal.items.findIndex(it => it.id === (pal.wasAuto ? 'auto' : currentTheme()))) : 0;
   drawPalette();
 }, 40);
 
@@ -196,7 +197,7 @@ export function drawPalette() {
     (it.right ? '<span class="pr">' + esc(it.right) + '</span>' : '') + '</div>').join('');
   const s = palList.children[pal.sel];
   if (s) s.scrollIntoView({ block: 'nearest' });
-  if (pal.mode === 'theme') setTheme(pal.items[pal.sel].id, false); // live preview
+  if (pal.mode === 'theme') { const id = pal.items[pal.sel].id; setTheme(id === 'auto' ? autoThemeId() : id, false); } // live preview
 }
 
 export function movePalette(delta) {
@@ -220,7 +221,7 @@ export async function acceptPalette() {
     const d = doc_(); if (!d) return;
     d.cur = it.n; centerLine(it.n); render(); updateStatus(); pushHistory(d.path, it.n);
   } else if (it.kind === 'cmd') it.cmd.run();
-  else if (it.kind === 'theme') setTheme(it.id);
+  else if (it.kind === 'theme') it.id === 'auto' ? setAutoTheme(true) : setTheme(it.id);
   else if (it.kind === 'openpr') launchPR(it.target);
 }
 

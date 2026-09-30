@@ -38,6 +38,7 @@ px0 ships with 14 curated themes ready for immediate use:
 ## Key Capabilities
 
 - **Instant Live Switching**: Changing your theme in Settings or the Command Palette applies immediately across all tabs and panels without reloading the page.
+- **Follow System Light/Dark Mode**: The **Auto** theme tracks your operating system's appearance and switches between your preferred light and dark themes as it changes, without reloading the page.
 - **Universal Token Coverage**: Themes govern all UI subsystems uniformly:
   - Source code syntax tokens (keywords, strings, types, functions, comments).
   - Git diff backgrounds and line gutters (added, deleted, modified).
@@ -62,6 +63,11 @@ px0 ships with 14 curated themes ready for immediate use:
 3. Select your preferred theme from the dropdown or click one of the interactive theme pill buttons.
 
 Your choice is saved in `~/.px0/settings.json` and remembered across all future sessions.
+
+### Following Your System Light/Dark Mode
+1. Choose **Auto** from the Command Palette theme list, or click the sidebar theme button until it shows the half-filled circle icon.
+2. To change the themes Auto uses, open Settings and set **Workbench: Preferred Light Theme** (`workbench.preferredLightColorTheme`) and **Workbench: Preferred Dark Theme** (`workbench.preferredDarkColorTheme`).
+3. Picking any specific theme turns Auto off.
 
 ---
 
