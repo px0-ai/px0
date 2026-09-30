@@ -107,6 +107,7 @@ export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
  * @property {Set<number>} [pending]
  * @property {Set<number>} [refining]
  * @property {number} scrollTop
+ * @property {number} [diffScroll]
  * @property {number} cur - Active line number
  * @property {number} [col] - Active column number
  * @property {any} [outline]

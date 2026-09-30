@@ -18,18 +18,22 @@ import (
 // working tree's. A commit that no longer exists simply restores as an
 // ordinary tab.
 type SessionTab struct {
-	Path string `json:"path"`
-	Ref  string `json:"ref,omitempty"`
+	Path       string `json:"path"`
+	Ref        string `json:"ref,omitempty"`
+	View       string `json:"view,omitempty"`
+	ScrollTop  int    `json:"scrollTop,omitempty"`
+	DiffScroll int    `json:"diffScroll,omitempty"`
 }
 
 // WorkspaceSession stores the persistent UI state for a workspace:
 // the list of open tabs, the currently active tab index, expanded directory tree paths,
 // and any unsaved PR review comment drafts.
 type WorkspaceSession struct {
-	Tabs     []SessionTab `json:"tabs"`
-	Active   int          `json:"active"`
-	OpenDirs []string     `json:"openDirs"`
-	Drafts   []prComment  `json:"drafts,omitempty"`
+	Tabs     []SessionTab               `json:"tabs"`
+	Active   int                        `json:"active"`
+	OpenDirs []string                   `json:"openDirs"`
+	UI       map[string]json.RawMessage `json:"ui,omitempty"`
+	Drafts   []prComment                `json:"drafts,omitempty"`
 }
 
 // sessionFilePath returns the path to the JSON file where workspace session state is saved.
@@ -75,6 +79,7 @@ func newSessionManager(basePath, root string) *sessionManager {
 		data: WorkspaceSession{
 			Tabs:     []SessionTab{},
 			OpenDirs: []string{},
+			UI:       map[string]json.RawMessage{},
 		},
 	}
 	sm.load()
@@ -97,6 +102,9 @@ func (sm *sessionManager) load() {
 		}
 		if s.OpenDirs == nil {
 			s.OpenDirs = []string{}
+		}
+		if s.UI == nil {
+			s.UI = map[string]json.RawMessage{}
 		}
 		sm.data = s
 	}
@@ -127,7 +135,6 @@ func (sm *sessionManager) Update(fn func(*WorkspaceSession)) WorkspaceSession {
 
 // handleSession handles GET and POST requests for /api/session.
 // GET returns the current workspace session state.
-// POST updates tab list, active tab, and open directories, saving changes to disk.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -137,9 +144,10 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var payload struct {
-			Tabs     *[]SessionTab `json:"tabs"`
-			Active   *int          `json:"active"`
-			OpenDirs *[]string     `json:"openDirs"`
+			Tabs     *[]SessionTab              `json:"tabs"`
+			Active   *int                       `json:"active"`
+			OpenDirs *[]string                  `json:"openDirs"`
+			UI       map[string]json.RawMessage `json:"ui"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 			fail(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -154,6 +162,12 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			}
 			if payload.OpenDirs != nil {
 				ws.OpenDirs = *payload.OpenDirs
+			}
+			for key, value := range payload.UI {
+				if ws.UI == nil {
+					ws.UI = map[string]json.RawMessage{}
+				}
+				ws.UI[key] = value
 			}
 		})
 		writeJSON(w, updated)

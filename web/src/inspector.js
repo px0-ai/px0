@@ -8,6 +8,8 @@ import { pushHistory } from './history.js';
 import { loadOutline, drawOutline } from './outline.js';
 import { displayPath, cancelSearch } from './search.js';
 import { groupHits, flashFind, canAskServer, lspCall, positionNow } from './lsp.js';
+import { renderProblemsPane, loadProblems } from './problems.js';
+import { saveSessionUI } from './session-ui.js';
 
 export function firstInspectorTab() {
   if ($('#tab-threads') && !$('#tab-threads').hidden) return 'threads';
@@ -17,6 +19,7 @@ export function firstInspectorTab() {
 
 export function showRightInspector(tab) {
   document.body.classList.remove('right-hidden');
+  saveSessionUI('rightHidden', false);
   setRightInspectorTab(tab || firstInspectorTab());
   layout();
   render();
@@ -25,11 +28,13 @@ export function showRightInspector(tab) {
 export function hideRightInspector() {
   cancelSearch();
   document.body.classList.add('right-hidden');
+  saveSessionUI('rightHidden', true);
   layout();
   render();
 }
 
-export function setRightInspectorTab(tab) {
+export function setRightInspectorTab(tab, { persist = true, focus = true } = {}) {
+  if (persist) saveSessionUI('rightTab', tab);
   if (tab !== 'search') cancelSearch();
   $$('.inspector-tab').forEach(b => b.classList.toggle('active', b.dataset.itab === tab));
   $('#pane-right-refs')?.classList.toggle('active', tab === 'refs');
@@ -40,9 +45,14 @@ export function setRightInspectorTab(tab) {
   if (tab === 'threads') emit('threads:shown');
   if (tab === 'symbols') {
     loadOutline();
-    $('#right-symbols-filter')?.focus();
+    if (focus) $('#right-symbols-filter')?.focus();
   }
-  if (tab === 'search') $('#q')?.focus();
+  if (tab === 'problems') {
+    const d = doc_();
+    if (d && !d.problemsLoaded) loadProblems(d);
+    else renderProblemsPane();
+  }
+  if (tab === 'search' && focus) $('#q')?.focus();
 }
 
 export function renderRightResults(word, hits, server, isExact) {

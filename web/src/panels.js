@@ -7,9 +7,21 @@ import { treeEl, refreshTree, setSidebarMode, hasGitView } from './tree.js';
 import { reloadOpenTabs } from './tabs.js';
 import { showToast } from './ui.js';
 import { refreshUnpushed } from './unpushed.js';
+import { saveSessionUI } from './session-ui.js';
+
+export function setSidebarHidden(hidden) {
+  document.body.classList.toggle('side-hidden', hidden);
+  saveSessionUI('sidebarHidden', hidden);
+}
+
+export function toggleSidebar() {
+  setSidebarHidden(!document.body.classList.contains('side-hidden'));
+  layout();
+  render();
+}
 
 export async function showPanel(name) {
-  document.body.classList.remove('side-hidden');
+  setSidebarHidden(false);
   if (name === 'files') {
     await setSidebarMode('files');
   }
@@ -53,6 +65,12 @@ export function initPanels() {
       if (!dragging) return;
       $('#side').style.width = Math.max(170, Math.min(620, e.clientX)) + 'px';
     });
-    addEventListener('mouseup', () => { if (dragging) { dragging = false; rz.classList.remove('drag'); layout(); render(); } });
+    addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      rz.classList.remove('drag');
+      saveSessionUI('sidebarWidth', parseInt($('#side').style.width, 10));
+      layout(); render();
+    });
   })();
 }

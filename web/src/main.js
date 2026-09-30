@@ -1,5 +1,5 @@
 // web/src/main.js
-import { $, S, api, applyKeyLabels } from './state.js';
+import { $, $$, S, api, applyKeyLabels } from './state.js';
 import { measure, layout, render, initRenderer, updateEditorOptionControls } from './renderer.js';
 import { initTabs, openFile, restoreWorkspaceTabs, switchTab } from './tabs.js';
 import { initCursor } from './cursor.js';
@@ -9,7 +9,7 @@ import { drawTree, treeEl, initTree, revealFile, refreshTree, restoreOpenDirs, s
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
 import { initPanels } from './panels.js';
-import { initInspector, showRightInspector } from './inspector.js';
+import { initInspector, showRightInspector, setRightInspectorTab } from './inspector.js';
 import { initCalls } from './calls.js';
 import { initFind } from './find.js';
 import { initPalette } from './palette.js';
@@ -24,7 +24,7 @@ import { initSettings } from './settings.js';
 import { initVim } from './vim.js';
 import { initImageViewer } from './imageview.js';
 import { initGitStream } from './gitstream.js';
-import { initGitPanel } from './gitpanel.js';
+import { initGitPanel, toggleCommitMsgBox } from './gitpanel.js';
 import { initPR } from './pr.js';
 import { initLineComment } from './linecomment.js';
 import { initUnpushed, refreshUnpushed } from './unpushed.js';
@@ -108,9 +108,21 @@ initPRScope();
   updateStatus();
   try {
     const session = await api('/api/session');
+    const ui = session?.ui || {};
     if (session && Array.isArray(session.openDirs) && session.openDirs.length > 0) {
       restoreOpenDirs(session.openDirs);
     }
+    if (typeof ui.sidebarHidden === 'boolean') document.body.classList.toggle('side-hidden', ui.sidebarHidden);
+    if (Number.isFinite(ui.sidebarWidth)) $('#side').style.width = Math.max(170, Math.min(620, ui.sidebarWidth)) + 'px';
+    if (typeof ui.rightTab === 'string' && $$('.inspector-tab').some(tab => tab.dataset.itab === ui.rightTab && !tab.hidden)) {
+      setRightInspectorTab(ui.rightTab, { persist: false, focus: false });
+    }
+    if (typeof ui.rightHidden === 'boolean') document.body.classList.toggle('right-hidden', ui.rightHidden);
+    if (typeof ui.gitPanelCollapsed === 'boolean') $('#git-panel')?.classList.toggle('collapsed', ui.gitPanelCollapsed);
+    if (Number.isFinite(ui.gitPanelHeight)) $('#git-panel')?.style.setProperty('height', Math.max(60, Math.min(innerHeight * 0.8, ui.gitPanelHeight)) + 'px');
+    if (typeof ui.unpushedCollapsed === 'boolean') $('#unpushed')?.classList.toggle('collapsed', ui.unpushedCollapsed);
+    if (Number.isFinite(ui.unpushedHeight)) $('#unpushed')?.style.setProperty('height', Math.max(60, Math.min(innerHeight * 0.7, ui.unpushedHeight)) + 'px');
+    if (typeof ui.commitMessageOpen === 'boolean') toggleCommitMsgBox(ui.commitMessageOpen, false, false);
   } catch {}
   await refreshTree();
   initGitStream();
@@ -140,6 +152,7 @@ initPRScope();
   };
 
   let hasGitChanges = await applyGitSidebarState();
+  let restoredWorkspaceTabs = false;
 
   const params = new URLSearchParams(window.location.search);
   const initialPath = params.get('path');
@@ -156,8 +169,8 @@ initPRScope();
       window.history.replaceState({}, '', cleanUrl);
     } catch {}
   } else {
-    await restoreWorkspaceTabs();
-    if (hasGitChanges) await selectChangedFileTab();
+    restoredWorkspaceTabs = await restoreWorkspaceTabs();
+    if (hasGitChanges && !restoredWorkspaceTabs) await selectChangedFileTab();
   }
 
   if (document.fonts && document.fonts.ready) {
@@ -176,7 +189,7 @@ initPRScope();
           updateStatus();
           if (!initialPath) {
             hasGitChanges = await applyGitSidebarState();
-            if (hasGitChanges) await selectChangedFileTab();
+            if (hasGitChanges && !restoredWorkspaceTabs) await selectChangedFileTab();
           }
         }
       } catch {

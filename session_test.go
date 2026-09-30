@@ -37,12 +37,13 @@ func TestSessionAPIEndpoints(t *testing.T) {
 	// 2. POST /rev-999/api/session with tabs and openDirs
 	active := 1
 	payload := map[string]any{
-		"tabs": []map[string]string{
-			{"path": "foo.go"},
+		"tabs": []map[string]any{
+			{"path": "foo.go", "view": "source", "scrollTop": 9820, "diffScroll": 640},
 			{"path": "bar.go"},
 		},
 		"active":   active,
 		"openDirs": []string{"pkg", "cmd"},
+		"ui":       map[string]any{"sidebarHidden": true, "gitPanelHeight": 240},
 	}
 	b, _ := json.Marshal(payload)
 	postReq := httptest.NewRequest(http.MethodPost, "/rev-999/api/session", bytes.NewReader(b))
@@ -70,11 +71,40 @@ func TestSessionAPIEndpoints(t *testing.T) {
 	if sess2.Tabs[0].Path != "foo.go" || sess2.Tabs[1].Path != "bar.go" {
 		t.Errorf("unexpected tab paths: %+v", sess2.Tabs)
 	}
+	if sess2.Tabs[0].ScrollTop != 9820 || sess2.Tabs[0].DiffScroll != 640 || sess2.Tabs[0].View != "source" {
+		t.Errorf("unexpected restored scroll positions: %+v", sess2.Tabs[0])
+	}
 	if sess2.Active != 1 {
 		t.Errorf("expected active tab 1, got %d", sess2.Active)
 	}
 	if len(sess2.OpenDirs) != 2 || sess2.OpenDirs[0] != "pkg" || sess2.OpenDirs[1] != "cmd" {
 		t.Errorf("unexpected openDirs: %+v", sess2.OpenDirs)
+	}
+	var sidebarHidden bool
+	if err := json.Unmarshal(sess2.UI["sidebarHidden"], &sidebarHidden); err != nil || !sidebarHidden {
+		t.Errorf("expected sidebarHidden to be persisted, got %s (err: %v)", sess2.UI["sidebarHidden"], err)
+	}
+
+	partial, _ := json.Marshal(map[string]any{"ui": map[string]any{"gitPanelCollapsed": true}})
+	partialReq := httptest.NewRequest(http.MethodPost, "/rev-999/api/session", bytes.NewReader(partial))
+	partialReq.Host = "127.0.0.1:7777"
+	partialReq.Header.Set("Origin", "http://127.0.0.1:7777")
+	partialReq.Header.Set("Content-Type", "application/json")
+	partialRec := httptest.NewRecorder()
+	s2.ServeHTTP(partialRec, partialReq)
+	if partialRec.Code != http.StatusOK {
+		t.Fatalf("partial UI update failed: code %d, body %s", partialRec.Code, partialRec.Body.String())
+	}
+	merged := s2.session.Get()
+	if len(merged.Tabs) != 2 || len(merged.OpenDirs) != 2 {
+		t.Errorf("partial UI update overwrote session state: %+v", merged)
+	}
+	if _, ok := merged.UI["sidebarHidden"]; !ok {
+		t.Errorf("partial UI update removed existing UI state: %+v", merged.UI)
+	}
+	var gitPanelCollapsed bool
+	if err := json.Unmarshal(merged.UI["gitPanelCollapsed"], &gitPanelCollapsed); err != nil || !gitPanelCollapsed {
+		t.Errorf("expected gitPanelCollapsed to be merged, got %s (err: %v)", merged.UI["gitPanelCollapsed"], err)
 	}
 }
 

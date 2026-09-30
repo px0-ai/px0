@@ -11,6 +11,7 @@ import { reloadOpenTabs } from './tabs.js';
 import { openSettings } from './settings.js';
 import { layout, render } from './renderer.js';
 import { refreshUnpushed } from './unpushed.js';
+import { saveSessionUI } from './session-ui.js';
 
 const panel = () => $('#git-panel');
 
@@ -18,7 +19,9 @@ export function initGitPanel() {
   if (!panel()) return;
 
   $('#git-panel-collapse')?.addEventListener('click', () => {
-    panel()?.classList.toggle('collapsed');
+    const p = panel();
+    p?.classList.toggle('collapsed');
+    if (p) saveSessionUI('gitPanelCollapsed', p.classList.contains('collapsed'));
     layout(); render();
   });
 
@@ -29,6 +32,7 @@ export function initGitPanel() {
       dragging = true;
       rz.classList.add('drag');
       panel().classList.remove('collapsed');
+      saveSessionUI('gitPanelCollapsed', false);
       e.preventDefault();
     });
     addEventListener('mousemove', e => {
@@ -42,6 +46,7 @@ export function initGitPanel() {
       if (!dragging) return;
       dragging = false;
       rz.classList.remove('drag');
+      saveSessionUI('gitPanelHeight', Math.round(panel().getBoundingClientRect().height));
       layout(); render();
     });
   }
@@ -201,18 +206,19 @@ export async function unstagePath(path) {
 
 // The message box stays collapsed behind a text link since most commits use
 // "Stage all + Commit with AI"; open it on demand to write a message by hand.
-function toggleCommitMsgBox(open) {
+export function toggleCommitMsgBox(open, persist = true, focus = true) {
   const ta = $('#git-commit-msg');
   const link = $('#git-write-msg-link');
   if (!ta) return;
   ta.hidden = open === undefined ? !ta.hidden : !open;
+  if (persist) saveSessionUI('commitMessageOpen', !ta.hidden);
   if (link) link.textContent = ta.hidden ? 'write message' : 'hide message';
   const gen = $('#git-generate-link');
   if (gen) {
     gen.hidden = ta.hidden;
     if (gen.previousElementSibling) gen.previousElementSibling.hidden = ta.hidden;
   }
-  if (!ta.hidden) ta.focus();
+  if (!ta.hidden && focus) ta.focus();
 }
 
 async function doCommit() {
