@@ -34,7 +34,7 @@ const (
 
 func isMarkdown(rel string) bool {
 	switch strings.ToLower(filepath.Ext(rel)) {
-	case ".md", ".markdown":
+	case ".md", ".markdown", ".mdx":
 		return true
 	}
 	return false
