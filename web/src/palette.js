@@ -1,6 +1,6 @@
 // web/src/palette.js
 import { $, esc, S, doc_, api, debounce, withKeys } from './state.js';
-import { render, toggleWordWrap } from './renderer.js';
+import { render, toggleWordWrap, setEditorZoom } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
 import { updateStatus, openLspMenu } from './status.js';
 import { pushHistory } from './history.js';
@@ -93,6 +93,7 @@ export const COMMANDS = [
   { name: 'Preferences: Toggle Vim Keybindings', run: () => setVimModeEnabled(!isVimEnabled(), true) },
   { name: 'Help: Vim Keybindings Cheat Sheet', run: showVimHelp },
   { name: 'Keyboard Shortcuts', run: showHelp },
+  { name: 'Reset Editor Zoom', run: () => setEditorZoom(1) },
 ];
 
 export const PAL_MODES = {

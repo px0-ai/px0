@@ -199,7 +199,7 @@ If the HTML has not arrived yet, the line waits in `d.mdLine` and `drawPreview` 
 
 `togglePreview` converts the reader's position in each direction:
 
-- Preview to source. `previewTopLine()` gives the line, then `sourceToLine(line)` scrolls the code view. The virtual scroller places rows at multiples of `LH` (20 px), but rows render at `--lh` (21 px) and grow when wrapped. `sourceToLine` therefore paints, measures where the row actually landed, and corrects `scrollTop`, up to three times.
+- Preview to source. `previewTopLine()` gives the line, then `sourceToLine(line)` scrolls the code view. The virtual scroller places rows at multiples of `LH`, but wrapped rows grow taller. `sourceToLine` therefore paints, measures where the row actually landed, and corrects `scrollTop`, up to three times.
 - Source to preview. `sourceTopLine()` reads the first painted row below the viewport's top, stores it in `d.mdLine`, and `drawPreview` applies it.
 
 ## 7. Links and History
