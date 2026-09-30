@@ -12,6 +12,7 @@ import { wordAtPoint } from './cursor.js';
 import { gotoDefinition } from './lsp.js';
 import { hoverAt } from './hover.js';
 import { pushHistory } from './history.js';
+import { COMMIT_STATUS, loadCommitFiles, cachedCommitFiles } from './commitfiles.js';
 
 export const diffview = $('#diffview');
 const diffContent = $('#diffcontent');
@@ -164,6 +165,7 @@ function renderDiff(d) {
       diffContent.append(p);
       return;
     }
+    frag.append(commitStrip(d));
     frag.append(createDiffSection(d, 'commit', 'In commit ' + d.diffRef.slice(0, 7),
       'this commit only, not the working tree', (bodyEl) => appendHunks(bodyEl, hunks, d.diffMode, false)));
     diffContent.append(frag);
@@ -295,6 +297,44 @@ export function setPRSyncHandler(fn) { prSyncHandler = fn; }
    a given line, so it hands the line off to whatever tabs.js registered. */
 let sourceJumpHandler = null;
 export function setSourceJumpHandler(fn) { sourceJumpHandler = fn; }
+
+/* And for the commit strip's ‹ › buttons: tabs.js opens the file stepped to. */
+let commitStepHandler = null;
+export function setCommitStepHandler(fn) { commitStepHandler = fn; }
+
+// The nearest file from i in direction dir that can be opened: binary files
+// have no text diff and /api/file refuses them, so stepping passes over them.
+function commitStepTarget(files, i, dir) {
+  for (let k = i + dir; k >= 0 && k < files.length; k += dir) if (!files[k].binary) return k;
+  return -1;
+}
+
+/* Where a pinned tab's file sits in its commit, with ‹ › to step through the
+   rest. The file list is fetched on first need and filled in when it lands. */
+function commitStrip(d) {
+  const el = document.createElement('div');
+  el.className = 'diff-commit-strip';
+  const fill = files => {
+    const i = files.findIndex(f => f.path === d.path);
+    if (i < 0) { el.remove(); return; }
+    const f = files[i];
+    const g = COMMIT_STATUS[f.status] || ['git-M', f.status];
+    const path = f.from ? esc(f.from) + ' → ' + esc(f.path) : esc(f.path);
+    el.innerHTML =
+      '<span class="gs ' + g[0] + '" title="' + esc(g[1]) + '">' + esc(f.status) + '</span>' +
+      '<span class="dcs-path" title="' + path + '">' + path + '</span>' +
+      (f.binary ? '' : (f.add ? '<span class="up-file-add">+' + f.add + '</span>' : '') + (f.del ? '<span class="up-file-del">&minus;' + f.del + '</span>' : '')) +
+      '<span class="grow"></span>' +
+      '<span class="dcs-pos">' + (i + 1) + ' / ' + files.length + '</span>' +
+      '<button type="button" class="dcs-step" data-commit-step="-1" title="Previous file in this commit"' + (commitStepTarget(files, i, -1) < 0 ? ' disabled' : '') + '>‹</button>' +
+      '<button type="button" class="dcs-step" data-commit-step="1" title="Next file in this commit"' + (commitStepTarget(files, i, 1) < 0 ? ' disabled' : '') + '>›</button>';
+    el.dataset.i = i;
+  };
+  const have = cachedCommitFiles(d.diffRef);
+  if (have) fill(have);
+  else loadCommitFiles(d.diffRef).then(files => { if (el.isConnected || doc_() === d) fill(files); }, () => el.remove());
+  return el;
+}
 
 // The working-tree line number of whichever diff row currently sits at the
 // top of the scrolled viewport -- what "Source" should land on so switching
@@ -523,6 +563,14 @@ export function initDiff() {
   // the diff shows what changed, but reading it usually means seeing it in
   // context, not just the hunk. Clicking a symbol highlights and opens hover actions.
   diffContent.addEventListener('click', e => {
+    const step = e.target.closest('[data-commit-step]');
+    if (step) {
+      const d = doc_();
+      const files = d && cachedCommitFiles(d.diffRef);
+      const next = files?.[commitStepTarget(files, +step.closest('.diff-commit-strip').dataset.i, +step.dataset.commitStep)];
+      if (!step.disabled && next && commitStepHandler) commitStepHandler(d, next);
+      return;
+    }
     if (e.target.closest('.line-btn')) return;
     const cell = e.target.closest('.diff-ln-nav');
     if (cell) {

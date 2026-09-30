@@ -42,6 +42,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 - **Per-File Stage Tick**: Every changed row in the file tree carries a small tick button next to its status badge. Clicking it stages or unstages that file (`git add` / `git reset`) without opening a terminal; the tick updates live as the same status stream that drives the badges reconciles it.
 - **Git Panel (Stage, Commit, Push, Pull)**: A resizable panel at the bottom of the sidebar shows the current branch, a live `staged / changed` count, a monospace commit message box, and Stage All / Commit / Pull / Push buttons.
 - **Commit with AI**: A harness and model picker (the same one used for inline edits) sits above the commit box. **Commit with AI** dispatches the selected harness with the staged diff — plus any instructions from `git.commitMessageInstruction` in Settings — asks it to write only the commit message text, drops that into the box, and commits with it in the same action.
+- **Browse Recent Commits**: The git panel lists the latest commits. Click a commit to expand it in place: its author, when it was made, and every file it changed, each with an `A`/`M`/`D`/`R` status letter and `+`/`−` line counts. Click a file to read that commit's own diff, the same way the Unpushed list does: the tab is pinned to the commit and marked `@03beaf0`. A strip above the diff shows where the file sits in the commit (`3 / 17`); ‹ › step to the neighbouring file, swapping the tab in place rather than opening one per file. Click the short hash at the end of a row to copy it. Merge commits are shown against their first parent. In both lists, a large commit shows 100 files at a time, with a **Show 100 more** row below.
 - **Fast-Forward-Only Pull**: Pull always tries a clean fast-forward onto the remote (or, in a PR review session, the pull request's current head). If history has diverged at all, it refuses immediately with a clear message rather than ever starting a merge — there is never a conflict state to clean up.
 - **Push to the Right Place**: In a plain workspace, Push pushes the current branch to its configured upstream (offering to set one up on a first push). In a PR review session, Push targets the pull request's actual head branch on its actual repository — a fork included — never wherever the checkout happens to be sitting.
 - **Unpushed Commits**: Under the file tree, the Git changes view lists the commits on your branch that the tracking branch doesn't have yet (`@{u}..HEAD`), labelled with the ref they're ahead of (e.g. `origin/master`) so it's clear what "unpushed" means here. Click a commit to see the files it touched, badged the same way as working-tree changes; click a file to read that commit's own diff in the normal diff viewer. Committing no longer hides your work: the toggle stays available on a clean working tree, precisely because the commits are then the only thing left to review. If the branch has no upstream configured, the section simply doesn't appear — px0 never guesses a branch to measure against.
@@ -106,6 +107,13 @@ When a teammate (or CI) has pushed new commits to the branch you're reviewing:
 | **Commit with AI** | Git Panel | Write a commit message from the staged diff with the selected harness, then commit with it |
 | **Pull** | Git Panel | Fast-forward onto the remote (or, in PR review, the PR's current head); refuses on divergence |
 | **Push** | Git Panel | Push the current branch (or, in PR review, to the PR's head branch) |
+| Click a commit | Recent Commits | Expand / collapse its changed files |
+| Click a changed file | Recent Commits | Open that file's diff within the commit, in a tab pinned to it |
+| **Show 100 more** | Recent Commits, Unpushed | List the next 100 files of a large commit |
+| Double-click a commit / `Enter` | Recent Commits | Open the commit's first changed file |
+| Hash chip | Recent Commits | Copy the short SHA |
+| `↑` / `↓`, `→` / `←` | Recent Commits | Move between commits and files; expand / collapse |
+| ‹ › | Pinned tab's diff strip | Previous / next file in the commit |
 
 ---
 

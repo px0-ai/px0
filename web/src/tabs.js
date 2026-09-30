@@ -13,7 +13,7 @@ import { clearLink } from './hover.js';
 import { clearFind } from './find.js';
 import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
-import { syncDiffView, layoutPref, diffScrollTop, setDiffMode, setSourceJumpHandler, scrollDiffToLine } from './diff.js';
+import { syncDiffView, layoutPref, diffScrollTop, setDiffMode, setSourceJumpHandler, setCommitStepHandler, scrollDiffToLine } from './diff.js';
 import { syncImageView } from './imageview.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
@@ -458,6 +458,16 @@ export async function reopenClosedTab() {
   }
 }
 
+// Registered with diff.js: the commit strip's ‹ › open the next file of the
+// commit and close the one stepped away from, so stepping swaps a tab in place
+// rather than leaving one open per file.
+async function stepCommitFile(from, file) {
+  const ref = from.diffRef;
+  await openFile(file.path, { ref, view: 'diff' });
+  const i = S.tabs.indexOf(from);
+  if (i >= 0 && from !== doc_() && from.diffRef === ref) closeTab(i);
+}
+
 export function drawTabs() {
   $('#tabs').innerHTML = S.tabs.map((t, i) =>
     '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.deleted ? ' tab-deleted' : '') + '" data-i="' + i +
@@ -540,6 +550,7 @@ export function hideImage() {
 
 export function initTabs() {
   setSourceJumpHandler(jumpToSourceLine);
+  setCommitStepHandler(stepCommitFile);
   tabMenu = document.createElement('div');
   tabMenu.id = 'tab-menu';
   tabMenu.setAttribute('role', 'menu');

@@ -19,7 +19,7 @@ See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://p
 
 ## Features
 
-- GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
+- GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, expand recent commits to browse what each one changed, and stage, commit, or push from the browser.
 - Unpushed commit review: Read the commits your branch is ahead of its tracking branch by, one file diff at a time, before you push them.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
