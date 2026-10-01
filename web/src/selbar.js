@@ -542,4 +542,3 @@ export function initSelectionBar() {
   document.addEventListener('scroll', closeSelMenu, true);
   on('tab:activated', clearSelectAll);
 }
-

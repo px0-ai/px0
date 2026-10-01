@@ -703,4 +703,3 @@ func highlightDiff(rel, diffText string) []DiffHunk {
 
 	return hunks
 }
-

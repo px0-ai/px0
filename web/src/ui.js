@@ -120,4 +120,3 @@ export async function copyRichToClipboard(plainText, htmlText, notify = 'Copied'
   if (notify) showToast('✓', notify);
   if (triggerEl) flashActionSuccess(triggerEl, 'Copied');
 }
-

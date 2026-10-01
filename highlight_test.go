@@ -346,4 +346,3 @@ func TestHighlightDiff(t *testing.T) {
 		t.Errorf("row 3 missing keyword or string class: %s", h.Rows[3].HTML)
 	}
 }
-

@@ -1284,7 +1284,3 @@ func TestContentSecurityPolicyHeader(t *testing.T) {
 		}
 	}
 }
-
-
-
-

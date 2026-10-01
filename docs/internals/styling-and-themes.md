@@ -150,4 +150,3 @@ CSV and TSV tabs render inside `#mdview` with the article's class switched from 
 | Missing cells | hatched `--bg3` |
 | Find matches | `--mark`, `--mark-active` / `--on-mark-active` |
 | Row-cap footer | `--dim` text, `--accent-fg` button |
-

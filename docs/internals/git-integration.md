@@ -112,6 +112,17 @@ Unlike the main code view, the diff is **not** rendered through the virtualized 
 
 Every rendered row that exists in the working tree carries its line in `data-l`, on both halves of a split context row; a deleted row carries `data-at`, the working-tree line it sat before. `selbar.js` reads these so a selection anywhere in the diff can drive the selection bar, the right-click menu and Edit with Agent (see [Harness Editing & Agent Dispatch](agent-editing.md)).
 
+### Expandable Context (`web/src/diff.js`)
+
+The unchanged lines git leaves out between hunks are not lost — `renderDiff` stitches the hunks back together at every seam (before the first hunk and between each pair), and the file's tail after the last. Each gap renders from `d.diffExpand`, a sorted list of merged `[start, end]` ranges the reader has opened:
+
+- The expander lives where GitHub puts it: a blue gutter cell on each hunk header (`expandCell`, unfold-up on the first hunk, unfold-both on later ones) opens the hidden run above it from its bottom edge — the side adjacent to the hunk — twenty lines (`EXPAND_STEP`) per click, so the cell rides up the header as content grows toward the reader. The tail after the last hunk gets a standalone `.diff-expand` row wearing the same cell (unfold-down, opening from its top edge). There are no ellipsis rows between hunks and no expand-all button; the whole diff DOM is plain, not virtualized.
+- Clicking fetches the range from `/api/file` — the same endpoint the source viewport uses, so expanded rows arrive already syntax-highlighted — and caches it per line in `d.diffCtx` (a `Map`). The raw diff text is never re-fetched.
+- Expanded lines render as ordinary `ctx` rows through the same builders, stamped with `data-l` (and `data-oldL`) so selection and Edit with Agent work on them exactly as on git's own context lines. The old-file number is derived arithmetically: a gap is unchanged by definition, so `oldL = lastOld + (l − lastNew)` at the seam — no extra parse.
+- Ranges merge in `mergeExpand` (sorted, coalesced on overlap/adjacency), so a gap has at most one hidden run left; the header cell disappears once its gap is fully open. In-flight fetches are tracked in `d.diffPending` so a double click cannot fetch the same range twice.
+- The scroll position is pinned on the hunk header below the expanded gap (all new rows land above it), so the reader never loses their place mid-file. Expansions at the file's top or tail grow where the reader is looking, so there is nothing to compensate.
+- `syncDiffView(force)` clears `diffExpand` / `diffCtx` alongside the diff text: a refreshed diff (a harness edit landed, or a `git` stream event) re-collapses everything, since stale expansions would be anchored to lines that may no longer exist.
+
 Both layouts share the same hunk-header, line-number, marker, and code-cell builders; only the row-shape (one column vs. two) differs, so a fix to how a line renders never needs to be made twice.
 
 ## 5. Real-Time Streaming & Adaptive Monitoring Engine
