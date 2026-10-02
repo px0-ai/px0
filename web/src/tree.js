@@ -670,8 +670,13 @@ export function initTree() {
       // and has been toggled the other way.
       const t = S.tabs.find(x => x.path === f.dataset.file);
       if (t) focusDiffScope(t);
-      openFile(f.dataset.file).then(() => { if (t) syncDiffView(); });
+      openFile(f.dataset.file, { preview: true }).then(() => { if (t) syncDiffView(); });
     }
+  });
+
+  treeEl.addEventListener('dblclick', e => {
+    const f = e.target.closest('[data-file]');
+    if (f) openFile(f.dataset.file, { preview: false });
   });
 
   on('tab:activated', ({ doc }) => {

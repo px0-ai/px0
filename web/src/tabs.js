@@ -66,6 +66,16 @@ function openTabMenu(index, x, y) {
   tabMenu.style.top = Math.max(4, Math.min(y, innerHeight - h - 4)) + 'px';
 }
 
+// Releases a tab-doc's large fields to assist garbage collection when it's
+// being discarded (closed, or replaced in place as the preview tab).
+function releaseTabDoc(d) {
+  d.lines = null;
+  d.chunks?.clear?.();
+  d.pending?.clear?.();
+  d.refining?.clear?.();
+  d.outline = null;
+}
+
 /* opts.ref pins the tab to one commit: every diff it shows is that commit's
    own change to the file, frozen no matter what happens in the working tree
    afterwards. The Unpushed sidebar section is what passes it. Opening the same
@@ -73,7 +83,7 @@ function openTabMenu(index, x, y) {
    puts the tab back on the working tree, which is what "open this file" means
    everywhere else in px0. */
 export async function openFile(path, opts = {}) {
-  const { line, push = true, col, view, soft = false, ref = '' } = opts;
+  const { line, push = true, col, view, soft = false, ref = '', preview = false } = opts;
   const prev = doc_();
   const wantsDiff = view === 'diff';
   const wantsSource = view === 'source';
@@ -136,15 +146,39 @@ export async function openFile(path, opts = {}) {
       diffDismissed: initialDismissed,
       openedInDiffView: initialOpenedInDiff,
       diffRef: ref,
+      preview: false,
     };
     if (!isImg) {
       for (let i = 0; i < j.lines.length; i++) d.lines[j.start + i] = j.lines[i];
     }
     d.lsp = (!isImg && j.lsp) || { state: 'off', server: '' };
-    S.tabs.push(d);
-    idx = S.tabs.length - 1;
+    if (preview && S.previewTabsEnabled && S.previewTab) {
+      const pi = S.tabs.indexOf(S.previewTab);
+      if (pi >= 0) {
+        releaseTabDoc(S.previewTab);
+        d.preview = true;
+        S.tabs[pi] = d;
+        S.previewTab = d;
+        idx = pi;
+      }
+    }
+    if (idx < 0) {
+      if (preview && S.previewTabsEnabled) {
+        d.preview = true;
+        S.previewTab = d;
+      }
+      S.tabs.push(d);
+      idx = S.tabs.length - 1;
+    }
     if (!isImg && j.refine) refineChunk(d, start / CHUNK);
     if (!isImg) loadGutter(d);
+  } else if (!preview) {
+    // Persistent open (double-click, edit, etc.) pins an already-open tab.
+    const existing = S.tabs[idx];
+    if (existing.preview) {
+      existing.preview = false;
+      if (S.previewTab === existing) S.previewTab = null;
+    }
   }
   if (prev && prev !== S.tabs[idx]) prev.scrollTop = vp.scrollTop;
   if (prev !== S.tabs[idx]) { clearSelectAll(); clearFind(); }
@@ -323,6 +357,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
       prCollapsed: keep.prCollapsed,
       youCollapsed: keep.youCollapsed,
       diffRef: tgt.ref,
+      preview: !!keep.preview,
     };
 
     for (let k = 0; k < j.lines.length; k++) {
@@ -331,6 +366,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
     d.lsp = j.lsp || { state: 'off', server: '' };
 
     S.tabs[idx] = d;
+    if (S.previewTab === keep) S.previewTab = d;
     if (j.refine) refineChunk(d, tgt.start / CHUNK);
   }
 
@@ -405,12 +441,8 @@ function closeTabs(indices) {
       if (closedTabs.length > MAX_CLOSED) closedTabs.shift();
       evictions.push(api('/api/close', { path: closed.path }));
     }
-    // Release large arrays to assist garbage collection
-    closed.lines = null;
-    closed.chunks?.clear?.();
-    closed.pending?.clear?.();
-    closed.refining?.clear?.();
-    closed.outline = null;
+    if (S.previewTab === closed) S.previewTab = null;
+    releaseTabDoc(closed);
     if (i < S.active) {
       S.active--;
     } else if (i === S.active) {
@@ -460,7 +492,7 @@ export async function reopenClosedTab() {
 
 export function drawTabs() {
   $('#tabs').innerHTML = S.tabs.map((t, i) =>
-    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.deleted ? ' tab-deleted' : '') + '" data-i="' + i +
+    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.deleted ? ' tab-deleted' : '') + (t.diffAvailable ? ' git-modified' : '') + (t.preview ? ' tab-preview' : '') + '" data-i="' + i +
     '" title="' + esc(t.path) + (t.diffRef ? ' — in commit ' + esc(t.diffRef.slice(0, 7)) : '') + '">' +
     (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
     '<span class="tn">' + esc(t.name) + '</span>' +
@@ -502,7 +534,7 @@ export function saveWorkspaceState() {
   if (saveSessionTimer) clearTimeout(saveSessionTimer);
   saveSessionTimer = setTimeout(async () => {
     try {
-      const tabs = S.tabs.map(t => ({ path: t.path, ref: t.diffRef || '' }));
+      const tabs = S.tabs.map(t => ({ path: t.path, ref: t.diffRef || '', preview: !!t.preview }));
       await apiPostJson('/api/session', { tabs, active: S.active });
     } catch {}
   }, 200);
@@ -513,7 +545,7 @@ export async function restoreWorkspaceTabs() {
     const session = await api('/api/session');
     if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) return false;
     for (const t of session.tabs) {
-      if (t.path) await openFile(t.path, { push: false, ref: t.ref || '' });
+      if (t.path) await openFile(t.path, { push: false, ref: t.ref || '', preview: !!t.preview });
     }
     if (typeof session.active === 'number' && session.active >= 0 && session.active < S.tabs.length) {
       switchTab(session.active);

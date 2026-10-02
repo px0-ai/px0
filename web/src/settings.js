@@ -198,6 +198,14 @@ const BUILTIN_SCHEMA = [
     default: true
   },
   {
+    key: "workbench.editor.enablePreviewTabs",
+    title: "Preview Tabs",
+    description: "Controls whether single-clicking a file in the explorer opens it in a reusable preview tab (double-click or editing pins it).",
+    category: "Workbench",
+    type: "boolean",
+    default: false
+  },
+  {
     key: "explorer.compactFolders",
     title: "Compact Folders",
     description: "Controls whether the file tree renders single-child directory chains compactly.",
@@ -432,6 +440,10 @@ export function applySettingLive(key, val) {
     case 'table.preview.open': {
       S.tablePreview = val === true || val === 'true';
       try { localStorage.setItem('px0.tablePreview', S.tablePreview ? 'true' : 'false'); } catch {}
+      break;
+    }
+    case 'workbench.editor.enablePreviewTabs': {
+      S.previewTabsEnabled = val === true || val === 'true';
       break;
     }
     case 'editor.vimMode': {

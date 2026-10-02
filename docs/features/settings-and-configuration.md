@@ -42,6 +42,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `workbench.colorTheme` | Workbench | `"catppuccin-mocha"` | 14 built-in theme IDs | Active color theme |
 | `markdown.preview.open` | Workbench | `true` | `true`, `false` | Open Markdown files in rendered preview |
 | `table.preview.open` | Workbench | `true` | `true`, `false` | Open CSV and TSV files as a table |
+| `workbench.editor.enablePreviewTabs` | Workbench | `false` | `true`, `false` | Single-click opens a reusable preview tab; double-click pins it |
 | `diffEditor.renderSideBySide` | Diff Editor | `true` | `true`, `false` | Split vs. unified diff view default |
 | `diffEditor.ignoreTrimWhitespace` | Diff Editor | `true` | `true`, `false` | Ignore whitespace differences in diffs |
 | `git.gutterIndicators` | Git | `true` | `true`, `false` | Visual change markers in gutter |
