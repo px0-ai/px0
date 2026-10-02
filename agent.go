@@ -161,6 +161,13 @@ var agentPresets = []agentPreset{
 			"gemini-2.5-flash",
 		},
 	},
+	{
+		Name:         "copilot",
+		Args:         []string{"copilot", "--allow-all-tools", "--no-ask-user", "-s", "-p", "{prompt}"},
+		ModelFlag:    "--model",
+		DefaultModel: "gpt-5.4-mini",
+		Models:       []string{"gpt-5.4-mini", "auto", "claude-haiku-4.5", "claude-sonnet-4.6", "gpt-5.5"},
+	},
 }
 
 var (
