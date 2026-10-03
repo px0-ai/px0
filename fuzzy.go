@@ -1,8 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -31,6 +32,9 @@ func isBoundary(b byte) bool {
 // "fzf feel" work without an O(n*m) dynamic program.
 func fuzzyScore(q, origQ string, e *FileEntry, pos []int) (int, []int, bool) {
 	p, lp := e.Path, e.lower
+	if len(q) > len(lp) {
+		return 0, nil, false // query cannot fit inside the path
+	}
 	qi, end := 0, -1
 	for i := 0; i < len(lp) && qi < len(q); i++ {
 		if lp[i] == q[qi] {
@@ -77,8 +81,8 @@ func fuzzyScore(q, origQ string, e *FileEntry, pos []int) (int, []int, bool) {
 	}
 	// Prefer the shallower, shorter of two otherwise-equal paths.
 	score -= len(p) / 8
-	score -= strings.Count(p, "/") * 2
-	if idx := strings.Index(e.lower[e.nameStart:], q); idx >= 0 {
+	score -= e.depth * 2 // precomputed at index time; was strings.Count(p, "/") per match
+	if idx := strings.Index(lp[e.nameStart:], q); idx >= 0 {
 		score += 40 // whole query appears verbatim in the basename
 		if idx == 0 {
 			score += 20
@@ -87,18 +91,148 @@ func fuzzyScore(q, origQ string, e *FileEntry, pos []int) (int, []int, bool) {
 	return score, pos, true
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+// topK is a hand-rolled min-heap of the best matches seen so far, where
+// "less" means "worse": the heap root is always the result we'd drop first.
+// Bounded at limit, so ranking is O(n log limit) instead of sorting every
+// match, and we only allocate Pos slices for results that actually survive.
+// Hand-rolled (not container/heap) so every comparison inlines and no
+// interface boxing allocates per candidate.
+type topK struct {
+	items []FuzzyResult
+	limit int
 }
+
+// worse reports whether a is a worse result than b: lower score, or equal
+// score with a larger path (inverse of the final rank order).
+func worse(a, b FuzzyResult) bool {
+	if a.score != b.score {
+		return a.score < b.score
+	}
+	return a.Path > b.Path
+}
+
+func (h *topK) len() int { return len(h.items) }
+
+// keep reports whether (score, path) beats the worst result currently
+// retained. Call only when the heap is full.
+func (h *topK) keep(score int, path string) bool {
+	w := h.items[0]
+	return score > w.score || (score == w.score && path < w.Path)
+}
+
+func (h *topK) push(r FuzzyResult) {
+	h.items = append(h.items, r)
+	i := len(h.items) - 1
+	for i > 0 {
+		p := (i - 1) / 2
+		if !worse(h.items[i], h.items[p]) {
+			break
+		}
+		h.items[i], h.items[p] = h.items[p], h.items[i]
+		i = p
+	}
+}
+
+func (h *topK) pop() FuzzyResult {
+	n := len(h.items) - 1
+	h.items[0], h.items[n] = h.items[n], h.items[0]
+	r := h.items[n]
+	h.items = h.items[:n]
+	i := 0
+	for {
+		l, rr := 2*i+1, 2*i+2
+		m := i
+		if l < n && worse(h.items[l], h.items[m]) {
+			m = l
+		}
+		if rr < n && worse(h.items[rr], h.items[m]) {
+			m = rr
+		}
+		if m == i {
+			break
+		}
+		h.items[i], h.items[m] = h.items[m], h.items[i]
+		i = m
+	}
+	return r
+}
+
+// pathMask returns a 64-bit bitmask of the characters in a lowercased path:
+// a-z → bits 0-25, 0-9 → bits 26-35, common separators → bits 36-41, and
+// everything else (including non-ASCII bytes) → bit 63. Prefilter: if the
+// query's mask has any bit the path's mask lacks, the query cannot match,
+// so the file is skipped without running the subsequence scan.
+func pathMask(lower string) uint64 {
+	var m uint64
+	for i := 0; i < len(lower); i++ {
+		c := lower[i]
+		var b uint64
+		switch {
+		case c >= 'a' && c <= 'z':
+			b = uint64(c - 'a')
+		case c >= '0' && c <= '9':
+			b = 26 + uint64(c-'0')
+		case c == '/':
+			b = 36
+		case c == '_':
+			b = 37
+		case c == '-':
+			b = 38
+		case c == '.':
+			b = 39
+		case c == ' ':
+			b = 40
+		case c == '@':
+			b = 41
+		default:
+			b = 63
+		}
+		m |= 1 << b
+	}
+	return m
+}
+
+// scoreChunk scores files[lo:hi] and returns the best limit matches as a heap.
+func scoreChunk(files []FileEntry, q, origQ string, qmask uint64, lo, hi, limit int) *topK {
+	h := &topK{limit: limit}
+	scratch := make([]int, 0, 64)
+	for i := lo; i < hi; i++ {
+		e := &files[i]
+		// mask == 0 means "not computed" (entry built without pathMask):
+		// scan it the slow way rather than silently excluding it.
+		if e.mask != 0 && qmask&^e.mask != 0 {
+			continue // query needs a character this path doesn't contain
+		}
+		s, pos, ok := fuzzyScore(q, origQ, e, scratch)
+		if !ok {
+			continue
+		}
+		if h.len() == limit && !h.keep(s, files[i].Path) {
+			continue // can't make the cut — skip the Pos copy
+		}
+		if h.len() == limit {
+			h.pop()
+		}
+		cp := make([]int, len(pos))
+		copy(cp, pos)
+		h.push(FuzzyResult{Path: files[i].Path, Name: files[i].Name, Pos: cp, score: s})
+	}
+	return h
+}
+
+// parallelThreshold bounds the per-query goroutine fan-out: below this many
+// files the spawn/sync overhead exceeds the parallel gain, so we score inline.
+const parallelThreshold = 4096
 
 // FuzzyFind ranks every indexed path against query and returns the best limit.
 func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 	origQ := strings.ReplaceAll(strings.TrimSpace(query), " ", "")
 	q := strings.ToLower(origQ)
+	qmask := pathMask(q)
 
+	if limit <= 0 {
+		return nil
+	}
 	if q == "" {
 		out := make([]FuzzyResult, 0, limit)
 		for i := range files {
@@ -110,47 +244,45 @@ func FuzzyFind(files []FileEntry, query string, limit int) []FuzzyResult {
 		return out
 	}
 
-	workers := runtime.NumCPU()
-	chunk := (len(files) + workers - 1) / workers
-	if chunk == 0 {
-		chunk = 1
-	}
-	parts := make([][]FuzzyResult, workers)
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		lo := w * chunk
-		if lo >= len(files) {
-			break
+	var heaps []*topK
+	if len(files) < parallelThreshold {
+		heaps = []*topK{scoreChunk(files, q, origQ, qmask, 0, len(files), limit)}
+	} else {
+		workers := runtime.NumCPU()
+		chunk := (len(files) + workers - 1) / workers
+		nchunks := 0
+		for lo := 0; lo < len(files); lo += chunk {
+			nchunks++
 		}
-		hi := min(lo+chunk, len(files))
-		wg.Add(1)
-		go func(w, lo, hi int) {
-			defer wg.Done()
-			local := make([]FuzzyResult, 0, 64)
-			scratch := make([]int, 0, 64)
-			for i := lo; i < hi; i++ {
-				s, pos, ok := fuzzyScore(q, origQ, &files[i], scratch)
-				if !ok {
-					continue
-				}
-				cp := make([]int, len(pos))
-				copy(cp, pos)
-				local = append(local, FuzzyResult{Path: files[i].Path, Name: files[i].Name, Pos: cp, score: s})
-			}
-			parts[w] = local
-		}(w, lo, hi)
+		heaps = make([]*topK, nchunks)
+		var wg sync.WaitGroup
+		for w := 0; w < nchunks; w++ {
+			lo := w * chunk
+			hi := min(lo+chunk, len(files))
+			wg.Add(1)
+			go func(w, lo, hi int) {
+				defer wg.Done()
+				heaps[w] = scoreChunk(files, q, origQ, qmask, lo, hi, limit)
+			}(w, lo, hi)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 
-	var all []FuzzyResult
-	for _, p := range parts {
-		all = append(all, p...)
+	// Merge the per-chunk heaps (at most nchunks*limit candidates) and take
+	// the top limit in final rank order.
+	total := 0
+	for _, h := range heaps {
+		total += h.len()
 	}
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].score != all[j].score {
-			return all[i].score > all[j].score
+	all := make([]FuzzyResult, 0, total)
+	for _, h := range heaps {
+		all = append(all, h.items...)
+	}
+	slices.SortFunc(all, func(a, b FuzzyResult) int {
+		if a.score != b.score {
+			return cmp.Compare(b.score, a.score) // higher score first
 		}
-		return all[i].Path < all[j].Path
+		return strings.Compare(a.Path, b.Path)
 	})
 	if len(all) > limit {
 		all = all[:limit]
