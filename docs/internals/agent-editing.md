@@ -114,13 +114,30 @@ Every supported harness starts an interactive session by default and blocks on a
 | Harness | Default Model | Argv |
 | --- | --- | --- |
 | `claude` | `haiku` | `claude --permission-mode acceptEdits --model haiku -p {prompt}` |
+| `codex` | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
+| `copilot` | `claude-sonnet-4.6` | `copilot --allow-all-tools --model claude-sonnet-4.6 --no-ask-user -p {prompt}` |
 | `gemini` | `gemini-2.5-flash-lite` | `gemini --approval-mode auto_edit -m gemini-2.5-flash-lite -p {prompt}` |
+| `qwen` | `gemini-2.5-flash` | `qwen -m gemini-2.5-flash -p {prompt}` |
+| `droid` | `claude-opus-4-8` | `droid exec --auto high -m claude-opus-4-8 {prompt}` |
 | `cursor-agent` | `gemini-3.6-flash-minimal` | `cursor-agent --force --model gemini-3.6-flash-minimal -p {prompt}` |
 | `agy` | `gemini-3.6-flash-low` | `agy --dangerously-skip-permissions --mode accept-edits --model gemini-3.6-flash-low -p {prompt}` |
 | `opencode` | `opencode/big-pickle` | `opencode run -m opencode/big-pickle {prompt}` |
-| `codex` | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
+| `crush` | *(none)* | `crush run -m <model> -q {prompt}` |
+| `cline` | *(none)* | `cline --auto-approve true -m <model> {prompt}` |
+| `cn` | *(none)* | `cn --auto --model <model> -p {prompt}` |
 | `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+
+Every argv and login command in this table was read off that tool's own `--help`
+rather than assumed, which is why the flag spellings look inconsistent: they are
+whatever each CLI actually accepts. A harness that changes its flags is a
+one-line fix by the user through a command template, not a px0 release waiting
+on a known-good version of somebody else's binary.
+
+`crush`, `cline`, and `cn` carry no model list. Each only exposes models for the
+providers a user has actually configured, so a static list would be a set of ids
+the tool rejects. They leave both `Models` and `DefaultModel` empty, the model
+dropdown is omitted, and the harness picks.
 
 By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list, while letting users choose any available model from the harness menu or picker.
 
@@ -188,8 +205,13 @@ px0 dispatched the harness, so it knows when the work ended. Completion is detec
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/api/agent/harnesses` | GET | Re-scan and list every known harness with its installed state. |
+| `/api/agent/harnesses` | GET | Re-scan and list every known harness with its installed state, models, and credential state. |
 | `/api/agent/select` | POST | Choose a harness and remember it. An empty name turns editing off. |
+| `/api/agent/auth` | GET | Auth state for every harness and the provider key list. See [section 9](#9-credentials-delegated-sign-in-and-bring-your-own-key). |
+| `/api/agent/auth/mode` | POST | Record `auto`, `oauth`, or `key` for one harness. |
+| `/api/agent/signin` | POST | Run the harness's own login command and return a job. |
+| `/api/agent/signout` | POST | Run the harness's own logout command and return a job. |
+| `/api/agent/credential` | POST | Store or clear one provider key. JSON body, never a query string. |
 | `/api/agent/edit` | POST | Dispatch an instruction for `path:l1-l2`. `409` when the range overlaps a job already running, or onto uncommitted work without `force=1`. |
 | `/api/agent/job` | GET | Snapshot of job `?id=`, or the most recently started job when `id` is omitted, polled while running. |
 | `/api/agent/cancel` | POST | Stop every harness currently running. Whatever each already wrote stays. |
@@ -228,10 +250,132 @@ The edit endpoint runs a general-purpose coding agent with shell access as the u
 
 The explicit first-run pick matters for the same reason. Auto-enabling on discovery would mean any px0 instance on a machine with a harness installed is a code execution endpoint that nobody opted into.
 
-## 9. Limits
+## 9. Credentials: Delegated Sign-In and Bring Your Own Key
+
+Every harness px0 drives already knows how to authenticate itself, and the
+credential belongs to that tool: a token refreshed on its own schedule, stored
+in its own format, revocable from its own CLI. So **px0 never implements OAuth**.
+Reimplementing any of it would mean px0 holding a copy of a subscription session
+it could not keep alive, and several providers disallow third-party clients on
+subscription credentials besides.
+
+What px0 provides is the other half of the story, plus honest reporting.
+
+### Sign-In Is Delegated, Not Reimplemented
+
+`StartSignIn` resolves the harness's own login subcommand and runs it. The user
+watches the real flow — device code, browser handoff, callback — because it *is*
+the tool's own flow. There is no token exchange in px0 to get wrong, and no
+credential for px0 to store. The resulting job is polled through the same
+`/api/agent/job` an edit uses, so one endpoint serves every kind of run.
+
+A harness with no login subcommand (`claude`, `gemini`, `qwen`, `agy`) signs
+itself in on first use. There is nothing to delegate, so the API refuses with a
+message pointing at a terminal rather than offering a button that cannot work.
+
+### Status Is Probed, Never Read
+
+`authStatusFor` reports one of `signed-in`, `signed-out`, `key`, `local`, or
+`unknown`, from three cheap signals in order:
+
+1. A key px0 could actually inject.
+2. A credential file the harness is known to write on a successful login —
+   `CredFiles`, stat-ed and **never opened**. Parsing somebody's token store to
+   draw a status dot is not worth the blast radius, and a file's presence is
+   evidence enough.
+3. Nothing conclusive, which is reported as `unknown`.
+
+`unknown` is a real answer, not a gap. Reporting "signed out" for a session that
+is actually live sends the user off to authenticate again for no reason, so the
+probing degrades to "I cannot tell" rather than guessing.
+
+A key only counts as an answer when it would actually be used. In `oauth` mode
+the key is ignored, so reporting it would put a "key" badge next to a credential
+that never reaches the harness, and the run would then fail on a missing login
+the user had been told was fine.
+
+`Detect` runs on every picker open, and `lookPathIn` — which walks `PATH` plus
+the npm prefix for each binary — is what dominates it, not the credential
+probing. So `Detect` resolves each preset's binary exactly once, at the top of
+its loop, and builds the display argv through `presetArgv`, which touches no
+filesystem. Routing the display string back through `resolveAgentSpec` would
+resolve every binary a second time, which is worth knowing before adding an
+eighteenth preset.
+
+### Bring Your Own Key
+
+Keys live in `credentials.json` beside `settings.json`, `0600`, written through
+a temporary file and a rename so a crash cannot leave a half-written secret
+briefly world-readable. Clearing the last key removes the file rather than
+leaving an empty one, so "no keys" is unambiguous on disk. The read-modify-write
+in `setCredential` is held under one lock, so two saves racing — a picker open
+in two tabs — cannot lose one another's key.
+
+Entries are stored and returned verbatim, including ids px0 no longer offers. A
+key written by an older build, or for a provider since renamed, is somebody's
+real credential; filtering it out on read would turn every later save of an
+unrelated key into a silent deletion, which is the worst available failure for a
+secret. An unrecognised entry is simply not surfaced.
+
+`resolveCredential` prefers a key px0 holds, then falls back to the caller's own
+environment, so exporting `ANTHROPIC_API_KEY` once keeps working with no setup
+at all. Several vendors accept more than one variable name (`GOOGLE_API_KEY` as
+well as `GEMINI_API_KEY`), and all of them are honoured.
+
+A key reaches a harness the way a shell hands one over: as an environment
+variable in the child process (`harnessEnvironment`). It is never appended to
+argv — where it would be visible to every process listing on the machine — never
+written to a job log, and never returned to the browser in full. `/api/agent/auth`
+reports a provider by whether a key resolves and where from, with the value
+masked to four characters either side, and to nothing at all when the key is too
+short to hide anything behind. Revealing the ends is only a mask when there is
+enough left hidden: applied to a nine-character key it would hand back eight of
+the nine, so anything under 24 characters comes back as stars.
+
+### The Default Is Deliberately Conservative
+
+`willInjectKeys` is the whole safety story, and it defaults to injecting nothing:
+
+| Mode | Injects a key? |
+| --- | --- |
+| `auto` (default) | Only for harnesses with no subscription login to fall back on. |
+| `key` | Always, for every provider the harness accepts. |
+| `oauth` | Never. |
+
+A working Claude subscription quietly billed to a different account is a failure
+nobody would notice until an invoice arrived, so a subscription-driven harness is
+never handed a key unless the user asks for that harness, explicitly, in the
+picker. The per-harness choice is remembered in `settings.json` as `authModes`.
+
+A variable the caller has already set to something **non-empty** always wins; one
+that is merely present but empty does not. A shell that exports
+`ANTHROPIC_API_KEY=`, or a CI runner that exports every known name as empty,
+would otherwise suppress a key the user deliberately stored.
+
+`/api/agent/credential` accepts its key in a JSON **body**, never a query
+string, and sits behind `localPost` like every other mutation — a key in a URL
+ends up in browser history and in whatever request log is in front of px0.
+
+### Endpoints
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/agent/auth` | GET | Auth state for every harness, plus the provider key list (masked). |
+| `/api/agent/auth/mode` | POST | Record `auto`, `oauth`, or `key` for one harness. |
+| `/api/agent/signin` | POST | Run the harness's own login command; returns a job. |
+| `/api/agent/signout` | POST | Run the harness's own logout command; returns a job. |
+| `/api/agent/credential` | POST | Store or clear one provider key (JSON body; empty key clears). |
+
+A harness named by a command template has no preset, so it has no auth story to
+describe and no keys declared: it inherits the caller's environment unchanged,
+which is what a template author expects.
+
+## 10. Limits
 
 - The job keeps the last 32 KB of each of stdout and stderr (`tailBuffer`), enough to explain a failure without holding a full transcript.
 - A run is abandoned after 10 minutes.
 - Changes to gitignored files are invisible to `git status`, so they are never reloaded.
-- Inline edit instructions live in memory for the life of the process. Only the harness choice is persisted, and never inside a workspace. Conversations that should persist are [threads](threads.md).
+- Inline edit instructions live in memory for the life of the process. Only the harness choice, its model, and its auth mode are persisted, and never inside a workspace. Conversations that should persist are [threads](threads.md).
 - Leaving the tab while an edit is in flight is guarded by a `beforeunload` prompt, but closing the browser process outright or losing power still abandons the harness mid-run with no undo to fall back on.
+- Auth status is a heuristic over credential-file presence. It can report `signed-in` for a session the user has since revoked, and `unknown` for a harness whose store px0 has no path for. Neither affects whether a run works — the harness will say so itself, in its own output.
+- Windows does not model POSIX file modes, so the `0600` on `credentials.json` is best-effort there. A user who needs the stronger guarantee should use a filesystem ACL.

@@ -147,7 +147,28 @@ type Doc struct {
 	bytes int
 }
 
+// normaliseNewlines makes every line ending a plain \n.
+//
+// A lone \r has to go too, not just \r\n. Chroma counts a bare carriage return
+// as a line break, so a file containing one -- an old-Mac file, a Windows file
+// with mixed endings, a generated bundle assembled from both -- lexes to more
+// lines than it has. px0 splits on \n alone, so Total, the line table and the
+// lexer's own line count then disagree, and every chunk after the first bare CR
+// is rendered against the wrong source line. Normalising once, here, keeps the
+// line table and the lexer describing the same text.
+func normaliseNewlines(src string) string {
+	if !strings.ContainsRune(src, '\r') {
+		return src
+	}
+	src = strings.ReplaceAll(src, "\r\n", "\n")
+	if strings.ContainsRune(src, '\r') {
+		src = strings.ReplaceAll(src, "\r", "\n")
+	}
+	return src
+}
+
 func newDoc(src, rel string) *Doc {
+	src = normaliseNewlines(src)
 	raw := strings.Split(src, "\n")
 	d := &Doc{
 		src: src, Total: len(raw), chunks: map[int][]string{},
@@ -564,7 +585,9 @@ func Open(abs, rel string) (*Doc, error) {
 	if isBinary(data) {
 		return nil, fmt.Errorf("binary file")
 	}
-	d := newDoc(strings.ReplaceAll(string(data), "\r\n", "\n"), rel)
+	// newDoc normalises line endings, including a lone \r, which chroma counts
+	// as a line break.
+	d := newDoc(string(data), rel)
 	d.key = key
 	cache.put(key, d)
 	return d, nil

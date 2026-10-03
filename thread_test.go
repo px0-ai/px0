@@ -166,15 +166,12 @@ func TestThreadClaudeSessionResume(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "argv.log")
 	// A stand-in named claude: records its argv and emits stream-json.
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n" +
-		`printf '{"type":"system","subtype":"init","session_id":"x"}\n'` + "\n" +
-		`printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}\n'` + "\n" +
-		`printf '{"type":"assistant","message":{"content":[{"type":"text","text":"All good."}]}}\n'` + "\n" +
-		`printf '{"type":"result","is_error":false,"result":"All good."}\n'` + "\n"
-	bin := filepath.Join(dir, "claude")
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := writeNamedHarness(t, "claude",
+		`printf '%s\n' "$*" >> `+log+"\n"+
+			`printf '{"type":"system","subtype":"init","session_id":"x"}\n'`+"\n"+
+			`printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}\n'`+"\n"+
+			`printf '{"type":"assistant","message":{"content":[{"type":"text","text":"All good."}]}}\n'`+"\n"+
+			`printf '{"type":"result","is_error":false,"result":"All good."}\n'`)
 	s := agentServer(t, root, bin)
 
 	_, m := agentPostJSON(t, s, "/api/threads/create", map[string]any{"message": "look around"})

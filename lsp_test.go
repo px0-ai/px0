@@ -114,15 +114,23 @@ func TestExternalAllowlist(t *testing.T) {
 	m := newLSPManager(root, false)
 	s := NewServer(ix, m)
 
-	if _, _, ok := s.resolvePath("/etc/passwd"); ok {
-		t.Error("resolvePath allowed an arbitrary absolute path")
+	// The paths here are built for the host platform. Hardcoded POSIX absolute
+	// paths are not absolute on Windows, where "/etc/passwd" is a rooted but
+	// volume-less path: it is neither refused as absolute nor outside the root,
+	// so the test was asserting the wrong thing on every platform but Linux.
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if _, _, ok := s.resolvePath(outside); ok {
+		t.Errorf("resolvePath allowed an arbitrary absolute path: %s", outside)
 	}
-	m.allow("/usr/lib/go/src/strings/builder.go")
-	abs, _, ok := s.resolvePath("/usr/lib/go/src/strings/builder.go")
-	if !ok || abs != "/usr/lib/go/src/strings/builder.go" {
-		t.Errorf("resolvePath refused an allowlisted path: %q %v", abs, ok)
+
+	allowed := filepath.Join(t.TempDir(), "stdlib", "builder.go")
+	m.allow(allowed)
+	abs, _, ok := s.resolvePath(allowed)
+	if !ok || abs != allowed {
+		t.Errorf("resolvePath refused an allowlisted path: %q %v", allowed, ok)
 	}
-	if _, _, ok := s.resolvePath("/usr/lib/go/src/strings/other.go"); ok {
+	sibling := filepath.Join(filepath.Dir(allowed), "other.go")
+	if _, _, ok := s.resolvePath(sibling); ok {
 		t.Error("allowlisting one file allowed a sibling")
 	}
 	if _, _, ok := s.resolvePath("../../../etc/shadow"); ok {

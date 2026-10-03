@@ -48,10 +48,16 @@ func gitProbe(root string) gitInfo {
 	var info gitInfo
 	if _, err := exec.LookPath("git"); err == nil {
 		if out, err := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel").Output(); err == nil {
-			top := strings.TrimSpace(string(out))
+			// Git for Windows reports the toplevel with forward slashes
+			// ("C:/src/px0"). Everything downstream in px0 treats a root as a
+			// native path, and filepath.Join Cleans its result, so a slash-form
+			// root silently fails every "is this path under the root" prefix
+			// test -- safePath then refuses the entire workspace. Normalize
+			// once, here, where the value enters the program.
+			top := filepath.Clean(filepath.FromSlash(strings.TrimSpace(string(out))))
 			gd := filepath.Join(top, ".git")
 			if gdOut, err := exec.Command("git", "-C", root, "rev-parse", "--git-dir").Output(); err == nil {
-				rawGd := strings.TrimSpace(string(gdOut))
+				rawGd := filepath.Clean(filepath.FromSlash(strings.TrimSpace(string(gdOut))))
 				if filepath.IsAbs(rawGd) {
 					gd = rawGd
 				} else {
@@ -276,7 +282,16 @@ func gitStagedStat(root string) string {
 }
 
 const (
-	maxStagedDiffBytes = 32 * 1024 // 32 KB limit on staged diff to stay safely under ARG_MAX / MAX_ARG_STRLEN
+	// maxStagedDiffBytes caps the diff handed to a harness asked to write a
+	// commit message. 32 KB is a judgement about how much diff is enough to
+	// summarise, not a platform limit, and it is deliberately not treated as
+	// one: the prompt built from it also carries a file list and a diffstat,
+	// and for a harness fed on argv that total has to fit the OS command line.
+	//
+	// The limit that actually bites is in agent.go, not here. This cap does
+	// mean the whole prompt stays well inside a modern context window, which is
+	// the constraint worth defending.
+	maxStagedDiffBytes = 32 * 1024
 )
 
 var lockfileExclusions = []string{
@@ -337,13 +352,29 @@ func gitHasUncommittedChanges(root string) bool {
 	return len(strings.TrimSpace(string(out))) > 0
 }
 
+// literalPathspec makes a repository-relative path mean that exact path.
+//
+// A "--" separator is not enough: git still parses a leading ":" in a pathspec
+// as magic, so a file legitimately named ":!a.txt" or ":(exclude)main.go"
+// changes what the command operates on. Verified on git 2.x: "git add -- ':!a.txt'"
+// stages every other file in the tree, which turns one click on a stage tick
+// into a whole-index rewrite in a repository that merely contains such a name.
+// The ":(literal)" prefix disables all magic for this pathspec.
+func literalPathspec(relpath string) string {
+	if relpath == "" {
+		return "."
+	}
+	if !strings.HasPrefix(relpath, ":") {
+		return relpath
+	}
+	return ":(literal)" + relpath
+}
+
 // gitStage adds relpath to the index. An empty relpath (the served root
 // itself) means "stage everything", so a bare "Stage All" action can reuse
 // this instead of a separate endpoint.
 func gitStage(root, relpath string) error {
-	if relpath == "" {
-		relpath = "."
-	}
+	relpath = literalPathspec(relpath)
 	out, err := exec.Command("git", "-C", root, "add", "--", relpath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(out)))
@@ -353,7 +384,7 @@ func gitStage(root, relpath string) error {
 
 // gitUnstage removes relpath from the index without touching the working tree.
 func gitUnstage(root, relpath string) error {
-	out, err := exec.Command("git", "-C", root, "reset", "--", relpath).CombinedOutput()
+	out, err := exec.Command("git", "-C", root, "reset", "--", literalPathspec(relpath)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git reset: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -556,7 +587,7 @@ func gitDiffAgainst(root, relpath, base string) string {
 	if !gitAvailable(root) {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", root, "diff", "--no-color", base, "--", relpath).Output()
+	out, err := exec.Command("git", "-C", root, "diff", "--no-color", base, "--", literalPathspec(relpath)).Output()
 	if err != nil {
 		return ""
 	}
@@ -572,7 +603,7 @@ func gitDiffBetween(root, relpath, from, to string) string {
 	if !gitAvailable(root) {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", root, "diff", "--no-color", from, to, "--", relpath).Output()
+	out, err := exec.Command("git", "-C", root, "diff", "--no-color", from, to, "--", literalPathspec(relpath)).Output()
 	if err != nil {
 		return ""
 	}

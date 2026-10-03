@@ -6,23 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
-
-// writeHarness creates an executable stand-in for a coding harness, outside the
-// workspace so that it does not show up as a change the run made.
-func writeHarness(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "harness.sh")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
 
 // isolateSettings points the settings file at a temp dir, so a test never reads
 // or overwrites the choice the developer running it has made.
@@ -111,17 +102,18 @@ func TestAgentSpecResolution(t *testing.T) {
 		t.Fatal("a missing binary should be refused at startup, not on first use")
 	}
 
-	m, err := newAgentManager(root, "echo {prompt}", nil)
+	spec, want := echoHarness(t)
+	m, err := newAgentManager(root, spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Name() != "echo" {
-		t.Fatalf("name = %q, want echo", m.Name())
+	if m.Name() != want {
+		t.Fatalf("name = %q, want %q", m.Name(), want)
 	}
 	if !m.Pinned() {
 		t.Fatal("-agent should pin the harness")
 	}
-	if err := m.Select("echo {prompt}"); err == nil {
+	if err := m.Select(spec); err == nil {
 		t.Fatal("a pinned harness must not be changeable from the UI")
 	}
 
@@ -170,12 +162,13 @@ func TestAgentSelectPersistsOutsideWorkspace(t *testing.T) {
 		t.Fatal("selecting something that is not installed should fail")
 	}
 
-	// echo stands in for a harness binary that exists on every machine.
-	if err := m.Select("echo {prompt}"); err != nil {
+	// The test binary stands in for a harness that exists on every machine.
+	spec, want := echoHarness(t)
+	if err := m.Select(spec); err != nil {
 		t.Fatal(err)
 	}
-	if m.Name() != "echo" {
-		t.Fatalf("selected = %q, want echo", m.Name())
+	if m.Name() != want {
+		t.Fatalf("selected = %q, want %q", m.Name(), want)
 	}
 
 	if _, err := os.Stat(filepath.Join(cfg, "px0", "settings.json")); err != nil {
@@ -190,8 +183,8 @@ func TestAgentSelectPersistsOutsideWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.Name() != "echo" {
-		t.Fatalf("restored = %q, want echo", restored.Name())
+	if restored.Name() != want {
+		t.Fatalf("restored = %q, want %q", restored.Name(), want)
 	}
 
 	if err := restored.Select(""); err != nil {
@@ -250,8 +243,11 @@ func TestAgentEditRefusedUntilHarnessChosen(t *testing.T) {
 		t.Fatalf("error = %q", body["error"])
 	}
 
-	// Picking one over HTTP is enough to make editing work.
-	if code, _ = agentPost(t, s, "/api/agent/select?name="+"echo+%7Bprompt%7D"); code != 200 {
+	// Picking one over HTTP is enough to make editing work. The spec is
+	// URL-encoded because a Windows test binary path contains a backslash and
+	// often a space.
+	spec, _ := echoHarness(t)
+	if code, _ = agentPost(t, s, "/api/agent/select?name="+url.QueryEscape(spec)); code != 200 {
 		t.Fatalf("select = %d, want 200", code)
 	}
 	if code, _ = agentPost(t, s, "/api/agent/edit?path=a.go&l1=1&l2=1&instruction=hi"); code != 200 {
@@ -380,14 +376,36 @@ func TestAgentModelSelectionAndDefaults(t *testing.T) {
 	}
 	rows := m.Detect()
 	for _, h := range rows {
+		// A preset may ship a default model with no static list. That is the
+		// deliberate shape for the harnesses whose catalogue is the authority
+		// (cursor-agent, agy, opencode): a hand-maintained list goes stale, and
+		// discovery replaces it wholesale a moment after startup. One known-good
+		// default beats a catalogue of guesses, so the invariant is that the
+		// default is real and passable, not that a list exists.
 		if len(h.Models) == 0 {
-			t.Fatalf("%s should list models", h.Name)
+			continue
 		}
 		if h.Model == "" {
-			t.Fatalf("%s should have a default model", h.Name)
+			t.Fatalf("%s has models but no default", h.Name)
 		}
 		if h.Model != h.Models[0] {
 			t.Fatalf("%s default model %q != least capable model %q", h.Name, h.Model, h.Models[0])
+		}
+	}
+}
+
+// A default model is only meaningful if it can actually be passed to the
+// harness, which needs a flag to pass it with.
+func TestPresetModelDeclarationIsConsistent(t *testing.T) {
+	for _, p := range agentPresets {
+		if p.ModelFlag == "" && p.DefaultModel != "" {
+			t.Errorf("%s declares a default model %q but has no model flag", p.Name, p.DefaultModel)
+		}
+		// Where a static list exists, the default has to be in it: resolveAgentSpec
+		// substitutes it into argv, so a default the harness does not offer fails
+		// on the first run with an error that looks like a px0 bug.
+		if len(p.Models) > 0 && p.DefaultModel != "" && !contains(p.Models, p.DefaultModel) {
+			t.Errorf("%s default model %q is not in its own model list %v", p.Name, p.DefaultModel, p.Models)
 		}
 	}
 }
@@ -403,7 +421,7 @@ func TestPresetArgvOrder(t *testing.T) {
 		}
 
 		// When resolved with default model, {prompt} must remain at the very end
-		_, resolved, _, err := resolveAgentSpec(p.Name, "")
+		_, resolved, _, _, err := resolveAgentSpec(p.Name, "")
 		if err != nil {
 			continue // tool may not be installed in test env
 		}
@@ -415,12 +433,11 @@ func TestPresetArgvOrder(t *testing.T) {
 }
 
 func TestClaudeModelDiscovery(t *testing.T) {
-	dir := t.TempDir()
-	fakeClaude := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\necho 'Current model: Sonnet 5'\necho 'Usage: /model <name>. Available: sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID.'\n"
-	if err := os.WriteFile(fakeClaude, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// Discovery runs `claude -p /model` and parses the "Available:" list out of
+	// the reply, so the stand-in has to print that reply whatever it is asked.
+	fakeClaude := writeNamedHarness(t, "claude",
+		`printf 'Current model: Sonnet 5\n'`+"\n"+
+			`printf 'Usage: /model <name>. Available: sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID.\n'`)
 
 	discoveredModelsMu.Lock()
 	delete(discoveredModels, "claude")
@@ -551,14 +568,23 @@ func TestAgentCancelJob(t *testing.T) {
 		t.Fatalf("cancelled = false, want true")
 	}
 
-	// Job should be stopped
-	time.Sleep(100 * time.Millisecond)
-	code, job := get(t, s, fmt.Sprintf("/api/agent/job?id=%d", id))
-	if code != http.StatusOK {
-		t.Fatalf("job = %d, want 200", code)
-	}
-	if running, _ := job["running"].(bool); running {
-		t.Fatalf("job still running after cancel")
+	// The job should stop. Cancellation is asynchronous -- the signal is sent,
+	// then the process has to be reaped and the turn's state settled -- so poll
+	// for it rather than sampling once after a fixed delay and calling a slow
+	// reaper a failure.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		code, job := get(t, s, fmt.Sprintf("/api/agent/job?id=%d", id))
+		if code != http.StatusOK {
+			t.Fatalf("job = %d, want 200", code)
+		}
+		if running, _ := job["running"].(bool); !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job still running %v after cancel", job)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -667,16 +693,33 @@ func TestShellQuoteAndCommand(t *testing.T) {
 
 func TestAllPresetArgvFormatting(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	// The separator is os.PathListSeparator, not a colon: a hardcoded ":" builds
+	// one PATH entry on Windows, so nothing on it is ever found and every preset
+	// fails to resolve.
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// A stub has to be something the host will actually run. An extensionless
+	// #!/bin/sh file is only executable on Unix; on Windows LookPath needs a
+	// name it recognises, and an .exe is the only one that does not drag a
+	// shell into the resolution path.
+	ext := ""
+	body := []byte("#!/bin/sh\nexit 0\n")
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+		body = nil // the test binary exits 0 on its own when it cannot parse args
+	}
 	for _, p := range agentPresets {
-		binPath := filepath.Join(dir, p.Args[0])
-		if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		binPath := filepath.Join(dir, p.Args[0]+ext)
+		if body != nil {
+			if err := os.WriteFile(binPath, body, 0755); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := copyFile(testBinaryPath(t), binPath); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for _, p := range agentPresets {
-		name, resolved, model, err := resolveAgentSpec(p.Name, "")
+		name, resolved, model, _, err := resolveAgentSpec(p.Name, "")
 		if err != nil {
 			t.Fatalf("resolveAgentSpec(%q) error: %v", p.Name, err)
 		}
@@ -689,16 +732,21 @@ func TestAllPresetArgvFormatting(t *testing.T) {
 		if resolved[len(resolved)-1] != "{prompt}" {
 			t.Errorf("%s final arg = %q, want {prompt}", p.Name, resolved[len(resolved)-1])
 		}
-		// Ensure model flag was inserted properly
-		hasModel := false
-		for i, a := range resolved {
-			if a == p.ModelFlag && i+1 < len(resolved) && resolved[i+1] == p.DefaultModel {
-				hasModel = true
-				break
+		// The model flag is only meaningful where the preset has a default to
+		// pass. crush, cline and cn declare a flag but deliberately ship no
+		// default -- a wrong id is worse than none -- so there is nothing to
+		// insert for them until the user picks one.
+		if p.DefaultModel != "" {
+			hasModel := false
+			for i, a := range resolved {
+				if a == p.ModelFlag && i+1 < len(resolved) && resolved[i+1] == p.DefaultModel {
+					hasModel = true
+					break
+				}
 			}
-		}
-		if !hasModel {
-			t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
+			if !hasModel {
+				t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
+			}
 		}
 	}
 }
@@ -749,7 +797,8 @@ func TestAgentBatchEditRejectsIntraBatchOverlap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\nvar X = 1\nvar Y = 2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m, err := newAgentManager(root, "echo {prompt}", nil)
+	spec, _ := echoHarness(t)
+	m, err := newAgentManager(root, spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

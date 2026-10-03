@@ -625,6 +625,15 @@ async function showPicker(session) {
     return;
   }
 
+  // Credential state is a second request because it is a different question:
+  // the harness list says what is installed, this says what it can authenticate
+  // with. A failure here must not take the whole picker down with it.
+  let creds = [];
+  try {
+    const a = await api('/api/agent/auth');
+    creds = a.credentials || [];
+  } catch (e) { /* the picker still works without a key list */ }
+
   const ready = list.filter(h => h.installed);
   if (!ready.length) {
     showToast('!', 'Could not find any coding harness like Claude Code, OpenCode, Codex, Antigravity, Aider, etc. Install one and restart px0.', 6000);
@@ -635,27 +644,111 @@ async function showPicker(session) {
   }
 
   session.pickEl.innerHTML = '<div class="hint">This harness will edit files in this workspace.</div>' +
-    optionsHtml(ready, settingsPath);
+    optionsHtml(ready, settingsPath, creds);
 
   session.pickEl.querySelectorAll('[data-pick]').forEach(b => {
     b.addEventListener('click', () => pick(session, b.dataset.pick));
   });
-  session.pickEl.querySelectorAll('.agent-model-select').forEach(sel => {
+  session.pickEl.querySelectorAll('.agent-model-select[data-harness]').forEach(sel => {
     sel.addEventListener('change', async (e) => {
       e.stopPropagation();
       await select(sel.dataset.harness, sel.value, msg => showErr(session, msg));
       showPicker(session);
     });
   });
+
+  session.pickEl.querySelectorAll('[data-auth-mode]').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      e.stopPropagation();
+      try {
+        await apiPost('/api/agent/auth/mode', { harness: sel.dataset.authMode, mode: sel.value });
+        showPicker(session);
+      } catch (err) {
+        showErr(session, err.message);
+      }
+    });
+  });
+
+  session.pickEl.querySelectorAll('[data-signin]').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); runAuth(session, '/api/agent/signin', b.dataset.signin, b); });
+  });
+  session.pickEl.querySelectorAll('[data-signout]').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); runAuth(session, '/api/agent/signout', b.dataset.signout, b); });
+  });
+
+  const saveBtn = session.pickEl.querySelector('[data-savekey]');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const row = saveBtn.closest('.agent-key-row');
+      const provider = row.querySelector('[data-key-provider]').value;
+      const input = row.querySelector('.agent-key-input');
+      const key = input.value.trim();
+      if (!key) { showErr(session, 'Paste a key first, or pick a provider that already has one.'); return; }
+      try {
+        // The JSON body, not the query string: a key in a URL ends up in
+        // browser history and in whatever request log is in front of px0.
+        await apiPostJson('/api/agent/credential', { provider, key });
+        S.meta.agents = null;
+        // The value never came back from the server, so clear the field on the
+        // way out rather than leaving a secret sitting in the DOM.
+        input.value = '';
+        showPicker(session);
+        showToast('*', 'Saved your ' + provider + ' key.', 4000);
+      } catch (err) {
+        showErr(session, err.message);
+      }
+    });
+  }
 }
 
-function optionsHtml(ready, settingsPath) {
+// Sign-in runs the harness's own login command and streams what it printed,
+// which is the whole point: a device code, a browser handoff, a callback URL
+// all happen in the tool the user already trusts with that account.
+async function runAuth(session, url, harness, btn) {
+  const out = session.pickEl.querySelector('.agent-auth-out');
+  const say = (msg, cls) => { if (out) out.innerHTML = '<div class="agent-auth-log ' + (cls || '') + '">' + esc(msg) + '</div>'; };
+  btn.disabled = true;
+  say('Starting ' + (url.endsWith('signout') ? 'sign out' : 'sign in') + ' for ' + harness + '…');
+  let job;
+  try {
+    job = await apiPost(url, { harness });
+  } catch (e) {
+    say(e.message, 'err');
+    btn.disabled = false;
+    return;
+  }
+  for (;;) {
+    await new Promise(r => setTimeout(r, 700));
+    let j;
+    try { j = await api('/api/agent/job?id=' + job.id); } catch (e) { continue; }
+    if (!j) continue;
+    if (j.running) {
+      const tail = (j.log || j.stdout || '').trim().split('\n').slice(-6).join('\n');
+      if (tail) say(tail);
+      continue;
+    }
+    btn.disabled = false;
+    const failed = !!j.error;
+    const tail = ((j.log || '') + '\n' + (j.stderr || '')).trim().split('\n').slice(-14).join('\n');
+    say(failed ? ('Failed: ' + j.error + (tail ? '\n' + tail : '')) : (tail || 'Done.'), failed ? 'err' : '');
+    // Credentials changed on disk, so the badges are stale either way.
+    S.meta.agents = null;
+    setTimeout(() => showPicker(session), failed ? 0 : 900);
+    return;
+  }
+}
+
+function optionsHtml(ready, settingsPath, creds) {
   let html = '';
   for (const h of ready) {
     const isSelected = h.name === chosen();
     html += '<div class="agent-opt-wrap">' +
       '<button class="agent-opt' + (isSelected ? ' on' : '') + '" data-pick="' + esc(h.name) + '">' +
+      '<span class="agent-opt-head">' +
       '<span class="agent-opt-name">' + esc(h.name) + '</span>' +
+      authBadge(h.auth) +
+      '</span>' +
       '<code class="agent-opt-cmd">' + esc(h.cmd) + '</code></button>';
     if (isSelected && h.models && h.models.length > 0) {
       html += '<div class="agent-model-row">' +
@@ -667,11 +760,96 @@ function optionsHtml(ready, settingsPath) {
       }
       html += '</select></div>';
     }
+    if (isSelected) html += authPanel(h, creds);
     html += '</div>';
   }
   if (settingsPath) html += '<div class="agent-note">Remembered in ' + esc(settingsPath) + '</div>';
   return html;
 }
+
+// One word of credential state per harness. `unknown` is shown as its own thing
+// rather than folded into "signed out": px0 does not read a harness's token
+// store, so telling somebody they are signed out when they are not is worse
+// than saying it cannot tell.
+const AUTH_TEXT = {
+  'signed-in': 'Signed in',
+  'signed-out': 'Not signed in',
+  'key': 'API key',
+  'local': 'Local',
+  'unknown': 'Unknown',
+};
+
+function authBadge(auth) {
+  if (!auth || !auth.state) return '';
+  const label = AUTH_TEXT[auth.state] || auth.state;
+  return '<span class="agent-auth-badge s-' + esc(auth.state) + '" title="' + esc(auth.detail || label) + '">' + esc(label) + '</span>';
+}
+
+// The controls for the selected harness: which credential path it should use,
+// a delegated sign-in, and the keys it will accept.
+//
+// A sign-in button only appears when the harness really has a login command to
+// delegate to. For the tools that sign themselves in on first run there is
+// nothing to run, and a dead button would be a small lie.
+function authPanel(h, creds) {
+  const auth = h.auth || {};
+  const modes = h.authModes || [];
+  let html = '<div class="agent-auth-panel">';
+
+  if (auth.detail) {
+    html += '<div class="agent-auth-detail">' + esc(auth.detail) + '</div>';
+  }
+
+  if (modes.length > 1) {
+    html += '<div class="agent-model-row">' +
+      '<span class="agent-model-label">Credentials:</span>' +
+      '<select class="agent-model-select" data-auth-mode="' + esc(h.name) + '">';
+    for (const m of modes) {
+      const sel = m === (auth.mode || 'auto') ? ' selected' : '';
+      html += '<option value="' + esc(m) + '"' + sel + '>' + esc(AUTH_MODE_TEXT[m] || m) + '</option>';
+    }
+    html += '</select></div>';
+  }
+
+  if (auth.login) {
+    const out = auth.signOut
+      ? '<button class="agent-auth-btn" data-signout="' + esc(h.name) + '">Sign out</button>'
+      : '';
+    html += '<div class="agent-model-row">' +
+      '<span class="agent-model-label">Account:</span>' +
+      '<button class="agent-auth-btn" data-signin="' + esc(h.name) + '">Sign in</button>' + out +
+      '</div>';
+  } else if (auth.kind === 'oauth' && !auth.login) {
+    html += '<div class="agent-auth-detail">This harness signs in the first time it runs, in its own terminal.</div>';
+  }
+
+  // Only the keys this harness actually reads, so the panel cannot suggest a
+  // provider that would be ignored.
+  const usable = (creds || []).filter(c => (auth.keys || []).includes(c.id));
+  if (usable.length) {
+    html += '<div class="agent-key-row">' +
+      '<span class="agent-model-label">Your key:</span>' +
+      '<select class="agent-model-select" data-key-provider>';
+    for (const c of usable) {
+      const sel = c.hasKey ? ' selected' : '';
+      html += '<option value="' + esc(c.id) + '"' + sel + '>' +
+        esc(c.label) + (c.hasKey && c.masked ? ' · ' + esc(c.masked) : '') + '</option>';
+    }
+    html += '</select>' +
+      '<input class="agent-key-input" type="password" placeholder="paste key" autocomplete="off" spellcheck="false">' +
+      '<button class="agent-auth-btn" data-savekey>Save</button>' +
+      '</div>';
+  }
+
+  html += '<div class="agent-auth-out"></div>';
+  return html + '</div>';
+}
+
+const AUTH_MODE_TEXT = {
+  'auto': 'Harness default',
+  'oauth': 'Use my sign-in',
+  'key': 'Use my API key',
+};
 
 async function pick(session, name) {
   if (await select(name, msg => showErr(session, msg))) showCompose(session);

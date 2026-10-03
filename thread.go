@@ -585,10 +585,16 @@ func (tm *threadManager) runTurn(ctx context.Context, cancel context.CancelFunc,
 	if native {
 		argv = threadArgv(r.name, r.base, sessionID, live)
 	}
-	args := make([]string, len(argv))
-	for i, tok := range argv {
-		args[i] = strings.ReplaceAll(tok, "{prompt}", prompt)
+	// Same rule as an inline edit: a prompt that fits in stdin goes there,
+	// because a prompt in argv is bounded by the OS command-line limit and a
+	// long conversation history runs into it. Threads do their own clamping
+	// rather than sharing the inline budget, because what is oversized here is
+	// the accumulated transcript, not one diff.
+	useStdin := harnessPromptStdin(r.name)
+	if !useStdin {
+		prompt, _ = clampPrompt(prompt, argv[0])
 	}
+	args := buildArgv(argv, prompt, useStdin)
 
 	if uiVerbose {
 		uiVerbosePrompt(0, r.name, prompt, os.Stdout)
@@ -601,12 +607,21 @@ func (tm *threadManager) runTurn(ctx context.Context, cancel context.CancelFunc,
 
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = tm.root
+	// A thread turn is a harness run like any other, so it gets the same
+	// credential injection. Without this every inline edit, batch edit and
+	// conversation ran keyless while the picker reported the key as in play,
+	// because only the agentManager's own exec path set an environment.
+	cmd.Env = tm.agent.childEnvFor(r.name)
 	cmd.Stdout = sink
 	cmd.Stderr = stderr
 	cmd.WaitDelay = 2 * time.Second
 	setProcessGroup(cmd)
-	// stdin stays empty for the same reason as an inline edit: a harness that
-	// wants to ask something should fail fast, not hang.
+	// The prompt rides stdin for a harness that reads it. For one that does
+	// not, stdin stays closed so a harness that tries to ask something fails
+	// fast rather than hanging until the turn timeout.
+	if useStdin {
+		cmd.Stdin = strings.NewReader(prompt)
+	}
 
 	err := cmd.Run()
 	sink.flush()

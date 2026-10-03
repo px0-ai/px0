@@ -18,6 +18,11 @@ type settings struct {
 	Agent  string            `json:"agent,omitempty"`
 	Models map[string]string `json:"models,omitempty"`
 
+	// AuthModes remembers, per harness, whether a run should use that harness's
+	// own login ("oauth"), be handed a key px0 holds ("key"), or follow the
+	// preset's preference ("auto"). Unset means auto.
+	AuthModes map[string]string `json:"authModes,omitempty"`
+
 	EditorFontSize              *float64 `json:"editor.fontSize,omitempty"`
 	EditorFontFamily            *string  `json:"editor.fontFamily,omitempty"`
 	EditorLineHeight            *float64 `json:"editor.lineHeight,omitempty"`
@@ -321,7 +326,7 @@ var settingsSchema = []settingSchemaItem{
 	{
 		Key:         "agent.harness",
 		Title:       "Coding Harness",
-		Description: "Coding agent harness invoked for code edits (e.g. claude, gemini, cursor-agent, agy, opencode, codex, aider, goose).",
+		Description: "Coding agent harness invoked for code edits (e.g. claude, codex, copilot, gemini, qwen, droid, cursor-agent, agy, opencode, crush, cline, cn, aider, goose).",
 		Category:    "Agent / AI",
 		Type:        "string",
 		Default:     "",
@@ -539,33 +544,68 @@ func readRawSettingsJSON() string {
 	return string(data)
 }
 
-// writeSettings saves the agent and models choices while preserving other settings.
-func writeSettings(s settings) error {
-	p := settingsPath()
-	if p == "" {
+// settingsPatch is a write-side view of the settings a caller wants to change.
+// A nil field means "leave this alone"; a non-nil field whose value is empty
+// means "remove it".
+//
+// The distinction matters because settings is also the read shape, where an
+// absent key and an empty value are indistinguishable. Sharing one struct for
+// both directions is what let a caller that only meant to record an auth mode
+// silently delete the selected harness and every per-harness model: it passed
+// settings{AuthModes: modes}, and the writer read the zero Agent and nil Models
+// as instructions to clear them.
+type settingsPatch struct {
+	Agent     *string
+	Models    map[string]string
+	ClearModels bool
+	AuthModes map[string]string
+}
+
+// writeSettings applies a patch, preserving every key the patch does not name.
+func writeSettings(p settingsPatch) error {
+	path := settingsPath()
+	if path == "" {
 		return errors.New("no home directory to save settings in")
 	}
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
 
 	raw := readSettingsRawMap()
-	if s.Agent != "" {
-		raw["agent"] = s.Agent
-		raw["agent.harness"] = s.Agent
-	} else {
-		delete(raw, "agent")
-		delete(raw, "agent.harness")
+	if p.Agent != nil {
+		if *p.Agent == "" {
+			delete(raw, "agent")
+			delete(raw, "agent.harness")
+		} else {
+			raw["agent"] = *p.Agent
+			raw["agent.harness"] = *p.Agent
+		}
 	}
 
-	if s.Models != nil && len(s.Models) > 0 {
-		raw["models"] = s.Models
-		raw["agent.models"] = s.Models
-	} else if s.Agent == "" {
+	if p.Models != nil {
+		if len(p.Models) == 0 {
+			delete(raw, "models")
+			delete(raw, "agent.models")
+		} else {
+			raw["models"] = p.Models
+			raw["agent.models"] = p.Models
+		}
+	} else if p.ClearModels {
 		delete(raw, "models")
 		delete(raw, "agent.models")
 	}
 
-	return writeRawMapLocked(p, raw)
+	// Auth modes are written only when the caller carries them. SetAuthMode
+	// passes the whole remembered map through, so a mode set for one harness is
+	// never dropped because another harness was just re-selected.
+	if p.AuthModes != nil {
+		if len(p.AuthModes) == 0 {
+			delete(raw, "authModes")
+		} else {
+			raw["authModes"] = p.AuthModes
+		}
+	}
+
+	return writeRawMapLocked(path, raw)
 }
 
 // updateSettingsMap merges key-value pairs into settings.json without losing existing keys.

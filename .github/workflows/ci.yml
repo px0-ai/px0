@@ -3,12 +3,24 @@ name: CI
 on:
   push:
     branches: [master]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   build-and-test:
-    name: Bundle, build & test
-    runs-on: ubuntu-latest
+    name: Bundle, build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not optional here. px0 is a cross-platform tool whose
+        # path handling, argv limits and process control all differ, and a
+        # Linux-only run cannot see any of it: the git-reported workspace root
+        # arrives slash-form on Windows and silently breaks every path check,
+        # the shell-based test fixtures cannot execute at all, and core.autocrlf
+        # rewrites the bytes the tests assert on. Each of those shipped.
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout repository
@@ -33,5 +45,13 @@ jobs:
       - name: Build px0
         run: go build -trimpath -o px0 .
 
+      - name: Vet
+        run: go vet ./...
+
+      # There is deliberately no `gofmt -l` gate yet. Every committed blob in
+      # this repository carries CRLF line endings, so gofmt reports all ~50 Go
+      # files as unformatted on every platform. Turning the gate on means
+      # renormalising the whole tree in its own commit first; until then the
+      # check would only ever be red. New files should be written with LF.
       - name: Run tests
-        run: go test -v ./...
+        run: go test -count=1 ./...

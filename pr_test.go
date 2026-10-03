@@ -174,6 +174,7 @@ func TestPRSessionCloseRefCleanup(t *testing.T) {
 	run("init")
 	run("config", "user.name", "test")
 	run("config", "user.email", "test@test.local")
+	run("config", "core.autocrlf", "false")
 	run("commit", "--allow-empty", "-m", "initial")
 
 	run("update-ref", "refs/px0/pr/99", "HEAD")
@@ -220,7 +221,7 @@ func TestPRSessionPullFastForwardAndDiverge(t *testing.T) {
 	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
 
 	gitTestRun(t, base, "clone", upstream, "src")
-	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}, {"core.autocrlf", "false"}} {
 		gitTestRun(t, srcRepo, "config", cfg[0], cfg[1])
 	}
 	if err := os.WriteFile(filepath.Join(srcRepo, "base.txt"), []byte("base\n"), 0o644); err != nil {
@@ -320,7 +321,7 @@ func TestPRSessionPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitTestRun(t, worktree, "init", "-q", "-b", "feature")
-	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}, {"core.autocrlf", "false"}} {
 		gitTestRun(t, worktree, "config", cfg[0], cfg[1])
 	}
 	if err := os.WriteFile(filepath.Join(worktree, "f.txt"), []byte("pushed\n"), 0o644); err != nil {

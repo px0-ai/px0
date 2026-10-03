@@ -117,8 +117,9 @@ func TestSettingsPreserveNonAgentValues(t *testing.T) {
 	}
 
 	// Step 2: Agent selects a harness (which calls writeSettings)
-	err = writeSettings(settings{
-		Agent: "claude",
+	harness := "claude"
+	err = writeSettings(settingsPatch{
+		Agent: &harness,
 		Models: map[string]string{
 			"claude": "sonnet",
 		},
@@ -159,7 +160,10 @@ func TestSettingsPreserveNonAgentValues(t *testing.T) {
 func TestSettingsAPIEndpoints(t *testing.T) {
 	isolateSettings(t)
 	root := t.TempDir()
-	srv := agentServer(t, root, "echo")
+	// The harness is never run here; it only has to resolve, and "echo" is a
+	// cmd.exe builtin rather than an executable on Windows.
+	harness, _ := echoHarness(t)
+	srv := agentServer(t, root, harness)
 
 	// 1. GET /api/settings
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
