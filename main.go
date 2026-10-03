@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"flag"
@@ -30,7 +31,8 @@ var version = strings.TrimSpace(rawVersion)
 func main() {
 	var (
 		port         = flag.Int("port", 7777, "port to listen on (0 picks a free one)")
-		host         = flag.String("host", "127.0.0.1", "address to bind")
+		host         = flag.String("host", "127.0.0.1", "address to bind (non-loopback needs consent or -allow-lan)")
+		allowLan     = flag.Bool("allow-lan", false, "bind a non-loopback address without the interactive exposure consent prompt")
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
@@ -133,6 +135,8 @@ func main() {
 		targetDur = time.Since(tStart)
 		root, initialFile, initialLine = r, f, l
 	}
+	// concent check for non-loopback host binding is done before listening to the port, so that user can abort before any port is bound
+	requireLanConsent(*host, *allowLan)
 
 	tListen := time.Now()
 	ln, addr, err := listen(*host, *port)
@@ -450,6 +454,55 @@ func networkURLsFromAddrs(addr, initialFile string, initialLine int, addrs []net
 
 	sort.Strings(urls)
 	return urls
+}
+
+// this protect against a accendental exposure of px0 to network without consent.
+// as it don't hava any authentication, it can be a security risk if exposed to network without consent
+// any one can commit code to the repo and push it to the remote repo without any authentication
+// if its localhost or loopback address, it will not ask for consent
+// if its non-loopback address, it will ask for consent to expose px0 to network
+const (
+	red    = "\033[31m"
+	yellow = "\033[33m"
+	reset  = "\033[0m"
+)
+
+func requireLanConsent(host string, allowLan bool) {
+	h := strings.Trim(host, "[]")
+
+	if h == "localhost" || (net.ParseIP(h) != nil && net.ParseIP(h).IsLoopback()) {
+		return
+	}
+
+	if allowLan {
+		fmt.Fprintln(os.Stderr, "WARNING: px0 is exposed to the network without authentication.")
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "%sWARNING: px0 will be reachable from the network.%s\n", yellow, reset)
+	fmt.Fprintf(os.Stderr, "%spx0 has NO authentication.%s\n", red, reset)
+	fmt.Fprintln(os.Stderr, "Anyone who can reach this server may have full access")
+	fmt.Fprintln(os.Stderr, "to this service and its available operations.")
+	fmt.Fprintln(os.Stderr)
+
+	if st, err := os.Stdin.Stat(); err != nil || (st.Mode()&os.ModeCharDevice) == 0 {
+		fatal(fmt.Errorf(
+			"not a terminal: refusing to expose %s without consent "+
+				"(re-run with -allow-lan, or bind a loopback address)",
+			host,
+		))
+	}
+
+	fmt.Fprintf(os.Stderr, "Type %syes%s to continue: ", yellow, reset)
+
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		fatal(fmt.Errorf("failed to read consent: %w", err))
+	}
+	// exiting on other then "yes" (in-sensitive) to avoid accidental exposure of px0 to the network
+	if !strings.EqualFold(strings.TrimSpace(line), "yes") {
+		fatal(fmt.Errorf("aborted: px0 not started"))
+	}
 }
 
 // listen binds the requested port, walking forward if it is already taken so a
