@@ -56,3 +56,47 @@ func TestHeadingIDsFollowGitHub(t *testing.T) {
 		}
 	}
 }
+
+func TestFrontmatter(t *testing.T) {
+	cases := []struct {
+		name string
+		src  []byte
+		want string
+	}{
+		{
+			name: "yaml_basic",
+			src:  []byte("---\ntitle: test\ntags: [a, b]\n---\n# Hello\n"),
+			want: `<h1 id="hello" data-line="5">Hello</h1>`,
+		},
+		{
+			name: "toml_basic",
+			src:  []byte("+++\ntitle = \"test\"\n+++\n# Hello\n"),
+			want: `<h1 id="hello" data-line="4">Hello</h1>`,
+		},
+		{
+			name: "eof",
+			src:  []byte("---\ntitle: test\n---"),
+			want: ``,
+		},
+		{
+			name: "delimiter_like_content",
+			src:  []byte("---\ntitle: test\nfoo: ---\nbar: +++\n---\n# Hello\n"),
+			want: `<h1 id="hello" data-line="6">Hello</h1>`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := renderMarkdown(tc.src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out, "title:") || strings.Contains(out, "title =") {
+				t.Errorf("frontmatter was not stripped! OUT:\n%s", out)
+			}
+			if tc.want != "" && !strings.Contains(out, tc.want) {
+				t.Errorf("expected to find %q in OUT:\n%s", tc.want, out)
+			}
+		})
+	}
+}
