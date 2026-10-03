@@ -66,6 +66,9 @@ type GitProvider interface {
 	// An empty return means the session stays read-only.
 	ResolveToken(cfg settings) (token, source string)
 
+	// SSHURL returns the SSH clone URL for the target repository.
+	SSHURL(target PRTarget) string
+
 	// FetchPR fetches pull/merge request metadata from the forge API.
 	FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error)
 
@@ -86,15 +89,49 @@ type GitProvider interface {
 	// ReplyToReviewComment posts an immediate, threaded reply to an existing
 	// inline review comment.
 	ReplyToReviewComment(ctx context.Context, target PRTarget, token string, commentID int64, body string) (PRComment, error)
+
+	// TokenHint returns a user-facing hint on how to configure an auth token for this provider.
+	TokenHint() string
+}
+
+// PartialSubmitError is returned by GitProvider.SubmitReview when a multi-step
+// review submission fails mid-sequence after one or more actions succeeded.
+type PartialSubmitError struct {
+	PostedIDs []int64
+	Step      string
+	Err       error
+}
+
+func (e *PartialSubmitError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("review submission failed at step %s: %v", e.Step, e.Err)
+	}
+	return fmt.Sprintf("review submission failed at step %s", e.Step)
+}
+
+func (e *PartialSubmitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 var defaultProviders = []GitProvider{
 	&GitHubProvider{},
+	&BitbucketProvider{},
 }
 
 // RegisterProvider registers a custom or additional GitProvider.
 func RegisterProvider(p GitProvider) {
 	defaultProviders = append(defaultProviders, p)
+}
+
+// IsURL reports whether raw appears to be a URL (contains "://").
+func IsURL(raw string) bool {
+	return strings.Contains(raw, "://")
 }
 
 // DetectPRURL checks if rawURL is a recognized pull request URL for any supported provider.
@@ -131,5 +168,5 @@ func ParsePRURL(rawURL string) (GitProvider, PRTarget, error) {
 			return p, target, nil
 		}
 	}
-	return nil, PRTarget{}, fmt.Errorf("unsupported or unrecognized PR URL: %q (expected full GitHub URL like https://github.com/owner/repo/pull/123)", rawURL)
+	return nil, PRTarget{}, fmt.Errorf("unsupported or unrecognized PR URL: %q (expected GitHub URL like https://github.com/owner/repo/pull/123 or Bitbucket URL like https://bitbucket.org/workspace/repo/pull-requests/123)", rawURL)
 }

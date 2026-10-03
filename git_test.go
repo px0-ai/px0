@@ -55,8 +55,9 @@ func gitRepo(tb testing.TB) string {
 	run("config", "user.email", "t@example.com")
 	run("config", "user.name", "T")
 	run("config", "commit.gpgsign", "false")
+	run("config", "core.hooksPath", "/dev/null")
 	run("add", "-A")
-	run("commit", "-qm", "init")
+	run("commit", "-qm", "test: init")
 	// Dirty it: modify, stage a new file, leave one untracked, delete, rename.
 	write("sub/mod.go", "line two\n")
 	write("add.go", "added\n")
@@ -187,11 +188,12 @@ func TestGitCleanRepo(t *testing.T) {
 	runCmd("init")
 	runCmd("config", "user.email", "test@test.com")
 	runCmd("config", "user.name", "test")
+	runCmd("config", "core.hooksPath", "/dev/null")
 	if err := os.WriteFile(filepath.Join(dir, "clean.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runCmd("add", "clean.go")
-	runCmd("commit", "-m", "init")
+	runCmd("commit", "-m", "test: init")
 
 	ix := NewIndex(dir)
 	ix.Build()
@@ -893,7 +895,7 @@ func TestGitStageUnstageCommit(t *testing.T) {
 		t.Fatalf("expected add.go staged after gitStage, got %v", staged)
 	}
 
-	if err := gitCommit(root, "commit add.go"); err != nil {
+	if err := gitCommit(root, "test: commit add.go"); err != nil {
 		t.Fatalf("gitCommit: %v", err)
 	}
 	if staged := gitStagedPaths(root); staged["add.go"] {

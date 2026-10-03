@@ -56,6 +56,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `agent.harness` | Coding Agent | `""` | `claude`, `gemini`, `agy`, etc. | Preferred CLI coding harness |
 | `agent.timeoutSeconds` | Coding Agent | `120` | `10` – `600` (seconds) | Max runtime for agent edits |
 | `github.token` | GitHub | `""` | any string | Personal access token for `px0 pr` review; takes precedence over `GITHUB_TOKEN` and `gh auth token`. Masked in the Settings UI. |
+| `bitbucket.token` | Bitbucket | `""` | any string | Personal access token or app password (`username:app_password`) for Bitbucket PR review; takes precedence over `BITBUCKET_TOKEN`. Masked in the Settings UI. |
 | `server.basePath` | Server | `"/"` | any path prefix (e.g. `"/rev-123/"`) | Base URL path prefix to serve endpoints and assets from. Overridden by the `-base-path` CLI flag. |
 
 ---

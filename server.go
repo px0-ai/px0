@@ -1628,7 +1628,7 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.pr != nil {
-		if err := s.pr.Push(); err != nil {
+		if err := s.pr.Push(r.Context()); err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
@@ -1672,7 +1672,7 @@ func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.pr != nil {
-		info, err := s.pr.Pull()
+		info, err := s.pr.Pull(r.Context())
 		if err != nil {
 			status := http.StatusBadGateway
 			if errors.Is(err, errPRDiverged) {

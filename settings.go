@@ -33,6 +33,7 @@ type settings struct {
 	TablePreviewOpen            *bool    `json:"table.preview.open,omitempty"`
 	TelemetryEnabled            *bool    `json:"telemetry.enabled,omitempty"`
 	GitHubToken                 *string  `json:"github.token,omitempty"`
+	BitbucketToken              *string  `json:"bitbucket.token,omitempty"`
 	GitCommitMessageInstruction *string  `json:"git.commitMessageInstruction,omitempty"`
 	ServerBasePath              *string  `json:"server.basePath,omitempty"`
 	ExplorerAutoReveal          *bool    `json:"explorer.autoReveal,omitempty"`
@@ -358,6 +359,15 @@ var settingsSchema = []settingSchemaItem{
 		Title:       "GitHub Token",
 		Description: "Personal access token used to check out and review pull requests (px0 <url>). Takes precedence over the GITHUB_TOKEN environment variable and 'gh auth token'.",
 		Category:    "GitHub",
+		Type:        "string",
+		Default:     "",
+		Secret:      true,
+	},
+	{
+		Key:         "bitbucket.token",
+		Title:       "Bitbucket Token",
+		Description: "App password (username:app_password) or API token used to check out and review pull requests (px0 <url>). Takes precedence over the BITBUCKET_TOKEN environment variable.",
+		Category:    "Bitbucket",
 		Type:        "string",
 		Default:     "",
 		Secret:      true,

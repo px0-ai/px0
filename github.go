@@ -54,6 +54,14 @@ func (g *GitHubProvider) ResolveToken(cfg settings) (token, source string) {
 	return resolveGitHubToken(cfg)
 }
 
+func (g *GitHubProvider) SSHURL(target PRTarget) string {
+	return fmt.Sprintf("git@github.com:%s/%s.git", target.Owner, target.Repo)
+}
+
+func (g *GitHubProvider) TokenHint() string {
+	return "set GITHUB_TOKEN or gh auth login"
+}
+
 func (g *GitHubProvider) FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error) {
 	return fetchPRMeta(ctx, target.Owner, target.Repo, target.Number, token)
 }
@@ -191,6 +199,7 @@ func fetchPRMeta(ctx context.Context, owner, repo string, num int, token string)
 			SHA  string `json:"sha"`
 			Repo struct {
 				CloneURL string `json:"clone_url"`
+				SSHURL   string `json:"ssh_url"`
 				FullName string `json:"full_name"`
 			} `json:"repo"`
 		} `json:"head"`

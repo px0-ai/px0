@@ -2767,6 +2767,12 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   border-color: var(--err); color: var(--err); font-weight: 600;
 }
 .pr-btn-request-changes:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 26%, transparent); }
+.pr-write-access-note {
+  font-size: 11.5px;
+  color: var(--dim);
+  align-self: center;
+  margin-left: 6px;
+}
 
 
 /* ---------- threads: long-running conversations in the right sidebar ---------- */
