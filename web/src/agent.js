@@ -56,7 +56,7 @@ let activeBatchTargets = null;
 const installed = () => (S.meta?.agents || []).filter(h => h.installed);
 const chosen = () => (S.meta && S.meta.agent) || '';
 const chosenModel = () => (S.meta && S.meta.agentModel) || '';
-const offersHarnessDefault = h => h.name === 'pi' || !h.model;
+const offersHarnessDefault = h => h.name === 'pi' || h.name === 'codex' || !h.model;
 function appendHarnessDefault(select, harness) {
   if (!offersHarnessDefault(harness)) return;
   const opt = document.createElement('option');

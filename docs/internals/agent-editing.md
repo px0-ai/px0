@@ -105,7 +105,7 @@ $XDG_CONFIG_HOME/px0/settings.json     # when XDG_CONFIG_HOME is set
 
 This follows `stateFilePath` in [`update.go`](../../update.go) and sits beside the anonymous ID written by [`telemetry.go`](../../telemetry.go). px0 never writes its own state into a working tree: there is no `.px0/` directory in the repository.
 
-A corrupt or stale settings file is never an error. If the saved harness has since been uninstalled it simply resolves to nothing selected, and the picker appears again.
+A stale or corrupt settings file is not fatal. An uninstalled saved harness resolves to nothing selected. A saved OpenCode model without the required `provider/model` format also leaves the harness unselected until the user chooses OpenCode again.
 
 The spec is persisted exactly as the user gave it. A command template shortens to its binary name for display, so saving the display name would break the round trip.
 
@@ -119,14 +119,14 @@ Every supported harness starts an interactive session by default and blocks on a
 | `gemini` | `gemini-2.5-flash-lite` | `gemini --approval-mode auto_edit -m gemini-2.5-flash-lite -p {prompt}` |
 | `cursor-agent` | `gemini-3.6-flash-minimal` | `cursor-agent --force --model gemini-3.6-flash-minimal -p {prompt}` |
 | `agy` | `gemini-3.6-flash-low` | `agy --dangerously-skip-permissions --mode accept-edits --model gemini-3.6-flash-low -p {prompt}` |
-| `opencode` | `opencode/big-pickle` | `opencode run -m opencode/big-pickle {prompt}` |
-| `codex` | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
+| `opencode` | `opencode/big-pickle` | `opencode run --agent build -m opencode/big-pickle --auto {prompt}` |
+| `codex` | Codex CLI configuration | `codex -a never exec --sandbox workspace-write {prompt}` |
 | `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
 | `pi` | Pi's configured model | `pi --approve -p {prompt}` |
 | `omp` | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
 
-The existing eight presets supply a default model and allow a model override. Pi deliberately has no static model: absent an override, px0 omits `--model` and uses Pi's configured/authenticated default. Selecting **Harness default** clears a saved Pi override from `settings.json`. OMP defaults to the `@smol` role and offers `@default`, `@slow`, and `@plan` before discovered chat models. Both presets keep `{prompt}` as the final token; px0 inserts a selected `--model <selector>` before `-p`.
+The presets supply fast defaults and allow model overrides. Pi deliberately has no static model: absent an override, px0 omits `--model` and uses Pi's configured/authenticated default. Selecting **Harness default** clears a saved Pi override from `settings.json`. OMP defaults to the `@smol` role and offers `@default`, `@slow`, and `@plan` before discovered chat models. Codex likewise delegates model selection to the installed CLI when no `-m` override is selected; explicit Codex models depend on account access. OpenCode requires a `provider/model` selector, and its `build` agent plus `--auto` flag allow unattended edits even if the user's default agent is read-only. Presets keep `{prompt}` as the final token; px0 inserts a selected model flag before the prompt option.
 
 A full command template is accepted anywhere a harness name is, and must contain `{prompt}`:
 

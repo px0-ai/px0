@@ -560,7 +560,7 @@ func writeSettings(s settings) error {
 	if s.Models != nil && len(s.Models) > 0 {
 		raw["models"] = s.Models
 		raw["agent.models"] = s.Models
-	} else if s.Agent == "" {
+	} else {
 		delete(raw, "models")
 		delete(raw, "agent.models")
 	}

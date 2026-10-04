@@ -111,7 +111,7 @@ var agentPresets = []agentPreset{
 	},
 	{
 		Name:         "opencode",
-		Args:         []string{"opencode", "run", "{prompt}"},
+		Args:         []string{"opencode", "run", "--agent", "build", "--auto", "{prompt}"},
 		ModelFlag:    "-m",
 		DefaultModel: "opencode/big-pickle",
 		Models: []string{
@@ -127,10 +127,9 @@ var agentPresets = []agentPreset{
 		},
 	},
 	{
-		Name:         "codex",
-		Args:         []string{"codex", "exec", "--ask-for-approval", "never", "{prompt}"},
-		ModelFlag:    "-m",
-		DefaultModel: "gpt-5-codex",
+		Name:      "codex",
+		Args:      []string{"codex", "-a", "never", "exec", "--sandbox", "workspace-write", "{prompt}"},
+		ModelFlag: "-m",
 		Models: []string{
 			"gpt-5-codex",
 			"gpt-5-mini",
@@ -570,6 +569,14 @@ func newAgentManager(root, flagSpec string, lsp *lspManager) (*agentManager, err
 		}
 		return m, nil
 	}
+	// A stale OpenCode alias cannot resolve as a provider/model. Leave the
+	// remembered harness unselected rather than silently switching models.
+	if !validOpenCodeModelOverride(m.models["opencode"]) {
+		delete(m.models, "opencode")
+		if s.Agent == "opencode" {
+			return m, nil
+		}
+	}
 
 	if s.Agent != "" {
 		if name, args, chosenModel, err := resolveAgentSpec(s.Agent, m.models[s.Agent]); err == nil {
@@ -580,6 +587,15 @@ func newAgentManager(root, flagSpec string, lsp *lspManager) (*agentManager, err
 		}
 	}
 	return m, nil
+}
+
+// OpenCode's -m accepts provider/model selectors, not bare model aliases.
+func validOpenCodeModelOverride(model string) bool {
+	if model == "" {
+		return true
+	}
+	provider, name, ok := strings.Cut(model, "/")
+	return ok && provider != "" && name != "" && !strings.ContainsAny(model, " \t\n")
 }
 
 // resolveAgentSpec turns a preset name or a command template into argv, and
@@ -595,6 +611,9 @@ func resolveAgentSpec(spec, model string) (string, []string, string, error) {
 	var chosenModel string
 	for _, p := range agentPresets {
 		if strings.EqualFold(spec, p.Name) {
+			if p.Name == "opencode" && !validOpenCodeModelOverride(model) {
+				return "", nil, "", fmt.Errorf("OpenCode model %q is not a provider/model selector; choose a full selector such as opencode/claude-haiku-4-5", model)
+			}
 			name = p.Name
 			chosenModel = model
 			if chosenModel == "" {
@@ -777,6 +796,8 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 		delete(m.models, display)
 	} else if chosenModel != "" {
 		m.models[display] = chosenModel
+	} else {
+		delete(m.models, display)
 	}
 	savedModels := make(map[string]string, len(m.models))
 	for k, v := range m.models {
@@ -1427,18 +1448,11 @@ func (s *Server) handleAgentSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.URL.Query().Get("name")
-	models, modelSupplied := r.URL.Query()["model"]
-	var err error
-	if modelSupplied {
-		model := ""
-		if len(models) > 0 {
-			model = models[0]
-		}
-		err = s.agent.Select(name, model)
-	} else {
-		err = s.agent.Select(name)
+	var modelOpt []string
+	if models, ok := r.URL.Query()["model"]; ok {
+		modelOpt = models
 	}
-	if err != nil {
+	if err := s.agent.Select(name, modelOpt...); err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) {
 			code = http.StatusConflict

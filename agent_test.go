@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -381,6 +382,12 @@ func TestAgentModelSelectionAndDefaults(t *testing.T) {
 	rows := m.Detect()
 	for i, h := range rows {
 		p := agentPresets[i]
+		if h.Name == "codex" {
+			if h.Model != "" || len(h.Models) == 0 {
+				t.Fatalf("codex should offer models without choosing one, got %+v", h)
+			}
+			continue
+		}
 		if p.DefaultModel == "" {
 			if len(p.Models) != 0 {
 				t.Fatalf("%s has no default model but lists static models %v", p.Name, p.Models)
@@ -815,6 +822,101 @@ func TestShellQuoteAndCommand(t *testing.T) {
 	}
 }
 
+func TestCodexExecUsesSupportedApprovalAndWorkspaceSandbox(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, argv, _, err := resolveAgentSpec("codex", "gpt-5-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(dir, "codex"), "-a", "never", "exec", "--sandbox", "workspace-write", "-m", "gpt-5-mini", "{prompt}"}
+	if !reflect.DeepEqual(argv, want) {
+		t.Fatalf("codex argv = %q, want %q", argv, want)
+	}
+}
+
+func TestCodexConfiguredDefaultCanRestoreAfterOverride(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Select("codex"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Model() != "" || strings.Contains(strings.Join(m.args, " "), " -m ") {
+		t.Fatalf("configured Codex default should omit -m: %v", m.args)
+	}
+	if err := m.Select("codex", "gpt-5-mini"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(m.args, " "), " -m gpt-5-mini ") {
+		t.Fatalf("explicit Codex model missing: %v", m.args)
+	}
+	if err := m.Select("codex", ""); err != nil {
+		t.Fatal(err)
+	}
+	if m.Model() != "" || strings.Contains(strings.Join(m.args, " "), " -m ") {
+		t.Fatalf("clearing override should restore Codex default: %v", m.args)
+	}
+	if _, ok := readSettings().Models["codex"]; ok {
+		t.Fatal("cleared Codex override remains in settings")
+	}
+}
+
+func TestOpenCodeInvalidSavedModelRequiresFreshSelection(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "opencode"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSettings(settings{Agent: "opencode", Models: map[string]string{"opencode": "haiku"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name() != "" {
+		t.Fatalf("stale model should require choosing a harness, got %q", m.Name())
+	}
+	if err := m.Select("opencode"); err != nil {
+		t.Fatalf("reselecting OpenCode should use a valid default: %v", err)
+	}
+	if got := m.Model(); got != "opencode/big-pickle" {
+		t.Fatalf("reselected model = %q, want opencode/big-pickle", got)
+	}
+	if got := readSettings().Models["opencode"]; got != "opencode/big-pickle" {
+		t.Fatalf("persisted model = %q, want opencode/big-pickle", got)
+	}
+}
+
+func TestOpenCodeRejectsUnqualifiedModelBeforeRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "opencode"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err := resolveAgentSpec("opencode", "haiku")
+	if err == nil || !strings.Contains(err.Error(), "provider/model") {
+		t.Fatalf("bare OpenCode model should be rejected with format guidance, got %v", err)
+	}
+	_, argv, model, err := resolveAgentSpec("opencode", "opencode/claude-haiku-4-5")
+	if err != nil || model != "opencode/claude-haiku-4-5" || !reflect.DeepEqual(argv[1:], []string{"run", "--agent", "build", "-m", model, "--auto", "{prompt}"}) {
+		t.Fatalf("valid OpenCode model = %q argv %q err %v", model, argv, err)
+	}
+}
+
 func TestAllPresetArgvFormatting(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
@@ -850,8 +952,8 @@ func TestAllPresetArgvFormatting(t *testing.T) {
 			if hasModel || strings.Contains(strings.Join(resolved, " "), p.ModelFlag) {
 				t.Errorf("%s resolved args %v should use the harness default without %q", p.Name, resolved, p.ModelFlag)
 			}
-		} else if !hasModel {
-			t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
+		} else if hasModel != (p.DefaultModel != "") {
+			t.Errorf("%s resolved args %v model flag presence = %v, want %v", p.Name, resolved, hasModel, p.DefaultModel != "")
 		}
 		switch p.Name {
 		case "pi":

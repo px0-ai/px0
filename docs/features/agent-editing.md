@@ -22,14 +22,14 @@ px0 auto-detects and integrates with all leading terminal coding harnesses:
 | **Gemini CLI** | `gemini-2.5-flash-lite` | `gemini --approval-mode auto_edit -m gemini-2.5-flash-lite -p {prompt}` |
 | **Cursor Agent** | `gemini-3.6-flash-minimal` | `cursor-agent --force --model gemini-3.6-flash-minimal -p {prompt}` |
 | **Antigravity** | `gemini-3.6-flash-low` | `agy --dangerously-skip-permissions --mode accept-edits --model gemini-3.6-flash-low -p {prompt}` |
-| **OpenCode** | `opencode/big-pickle` | `opencode run -m opencode/big-pickle {prompt}` |
-| **OpenAI Codex** | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
+| **OpenCode** | `opencode/big-pickle` | `opencode run --agent build -m opencode/big-pickle --auto {prompt}` |
+| **OpenAI Codex** | CLI-configured default | `codex -a never exec --sandbox workspace-write {prompt}` |
 | **Aider** | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | **Goose** | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
 | **Pi** | Harness default (configured in Pi) | `pi --approve -p {prompt}` |
 | **OMP** | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
 
-px0 defaults to fast and cost-effective models for harnesses with a static default. Pi instead uses the user's configured/authenticated model without a `--model` flag until an override is selected; the model picker can return to **Harness default**. OMP defaults to its `@smol` role. You can select another available model from the harness menu.
+The presets use fast, cost-effective defaults where the harness provides one, while still allowing model selection from the harness menu. Pi and Codex can use their installed CLI's configured/authenticated default when no override is selected; choosing **Harness default** clears a saved override. OMP defaults to the `@smol` role, and OpenCode model choices must use a `provider/model` selector.
 
 ---
 
