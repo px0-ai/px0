@@ -82,13 +82,32 @@ Diff rows carry where they point in the working tree:
 
 ## 3. Discovery, Selection and the Settings File
 
-`Detect` walks the preset list and resolves each harness with `lookPathIn(name, lspBinDirs())`, the same helper the language-server manager uses. That search covers PATH plus the directories these tools actually install into, such as `~/.local/bin` and npm's global prefix. It runs on every `/api/agent/harnesses` call, so a harness installed after startup appears without a restart.
+`Detect` walks the supported-harness registry and resolves each executable with `lookPathIn(name, lspBinDirs())`, the same helper the language-server manager uses. The registry contains exactly Claude Code (`claude`), Gemini CLI (`gemini`), Cursor Agent (`cursor-agent`), Antigravity (`agy`), Pi (`pi`), OMP (`omp`), OpenCode (`opencode`), Codex (`codex`), Aider (`aider`), and Goose (`goose`). px0 keeps this registry because each harness needs a reviewed unattended-edit argv and model flag. It does not treat arbitrary executables as supported harnesses. Detection runs on every `/api/agent/harnesses` request, so installing or removing a harness does not require a restart.
 
-Pi models come from `pi --list-models`: px0 reads the whitespace table after its `provider model` header and offers deduplicated `provider/model` selectors in CLI order. An empty result, command failure, or timeout leaves Pi's list empty without forcing a model. OMP models come from `omp models --json`: px0 keeps only `kind: "chat"` selectors, after the four built-in role aliases. An invalid/empty result, command failure, or timeout leaves the aliases available. Both commands have a five-second limit and are cached by the existing asynchronous discovery path.
+Installed harnesses expose a model-discovery status and a runtime-only model list:
 
-Discovery alone never enables editing. Finding `claude` on PATH is not consent to let it rewrite a workspace, so the first edit opens a picker and the choice is explicit. Once made, it is remembered and the picker stays out of the way.
+| Harness | Catalog probe | Result |
+| --- | --- | --- |
+| Cursor Agent | `cursor-agent models` | The model identifier before an optional ` - ` description |
+| Antigravity | `agy models` | The first model slug on each non-progress line |
+| Pi | `pi --list-models` | `provider/model` selectors from the table after the `provider model` header |
+| OMP | `omp models --json` | Nonempty entries from the `models` array whose `kind` is `chat` |
+| OpenCode | `opencode models` | One whitespace-free `provider/model` selector per line |
+| Codex | `codex app-server --listen stdio://` | Visible `model` values returned by the JSON-RPC `model/list` method |
+| Claude Code | None | Harness default only |
+| Gemini CLI | None | Harness default only |
+| Aider | None | Harness default only |
+| Goose | None | Harness default only |
 
-The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). Changing either dropdown updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
+Every probe has a five-second timeout. Successful results are trimmed and deduplicated while preserving CLI order. Codex discovery initializes the JSON-RPC session, sends the `initialized` notification, requests `model/list` with `includeHidden: false`, and follows `nextCursor` until the server returns no cursor. It matches replies by request ID and ignores unrelated notifications.
+
+`modelStatus` is `unsupported`, `loading`, `ready`, or `failed`. Harnesses without a safe account-aware, non-interactive catalog are `unsupported`. The first lookup starts one asynchronous probe per installed harness and returns `loading`; concurrent lookups share that work. Valid nonempty results become `ready`. A timeout, command error, malformed response, or empty result becomes `failed` with no models. Unsupported and failed discovery never falls back to embedded model IDs. In both states px0 omits the model flag and lets the harness use its own default.
+
+The browser polls `/api/agent/harnesses` every 200 ms while any installed harness is `loading`. Opening a picker first requests `/api/agent/harnesses?refresh=1`, which starts one new probe generation when that harness has no probe running. Polling uses the endpoint without `refresh=1`, so it cannot continually restart discovery. A changed executable path invalidates its previous catalog, and late results from an older path or generation cannot replace newer results.
+
+Discovery alone never enables editing. Finding `claude` on PATH is not consent to let it rewrite a workspace, so the first edit opens a picker and the choice is explicit. The picker always offers `Harness default`. A `ready` harness also lists only the model IDs reported by its installed, authenticated CLI. While discovery is `loading`, non-default choices remain disabled. An `unsupported` or `failed` harness offers only `Harness default`.
+
+The chosen harness and its effective model override are selectable in the compose box's metadata row (`.agent-meta`). Changing either dropdown updates the configuration via `/api/agent/select`. When `-agent` pins a command template, the selector indicates that it is fixed for this run and no model catalog is attached.
 
 The choice is written to:
 
@@ -105,28 +124,28 @@ $XDG_CONFIG_HOME/px0/settings.json     # when XDG_CONFIG_HOME is set
 
 This follows `stateFilePath` in [`update.go`](../../update.go) and sits beside the anonymous ID written by [`telemetry.go`](../../telemetry.go). px0 never writes its own state into a working tree: there is no `.px0/` directory in the repository.
 
-A stale or corrupt settings file is not fatal. An uninstalled saved harness resolves to nothing selected. A saved OpenCode model without the required `provider/model` format also leaves the harness unselected until the user chooses OpenCode again.
+A stale or corrupt settings file is not fatal. An uninstalled saved harness resolves to nothing selected. Saved model IDs remain pending and are never added to argv until a `ready` catalog contains the exact ID. A successful catalog that omits a pending ID removes it from persisted settings. An `unsupported`, `loading`, or `failed` catalog retains the pending value for a later successful refresh but runs the harness default. Selecting `Harness default` removes both pending and effective overrides. New nonempty selections require a `ready` catalog and exact membership; loading returns HTTP 409, while unsupported, failed, and unknown choices return HTTP 400.
 
 The spec is persisted exactly as the user gave it. A command template shortens to its binary name for display, so saving the display name would break the round trip.
 
 ## 4. The Invocation Contract
 
-Every supported harness starts an interactive session by default and blocks on an approval prompt. A naive spawn therefore hangs forever, producing no output and no error. Each preset carries both the flag that makes the run headless and the flag that lets it apply edits unattended:
+Every supported harness starts an interactive session by default and blocks on an approval prompt. A naive spawn therefore hangs forever, producing no output and no error. Each registry row carries the flags that make the run headless and allow unattended edits. No preset supplies a model ID:
 
 | Harness | Default Model | Argv |
 | --- | --- | --- |
-| `claude` | `haiku` | `claude --permission-mode acceptEdits --model haiku -p {prompt}` |
-| `gemini` | `gemini-2.5-flash-lite` | `gemini --approval-mode auto_edit -m gemini-2.5-flash-lite -p {prompt}` |
-| `cursor-agent` | `gemini-3.6-flash-minimal` | `cursor-agent --force --model gemini-3.6-flash-minimal -p {prompt}` |
-| `agy` | `gemini-3.6-flash-low` | `agy --dangerously-skip-permissions --mode accept-edits --model gemini-3.6-flash-low -p {prompt}` |
-| `opencode` | `opencode/big-pickle` | `opencode run --agent build -m opencode/big-pickle --auto {prompt}` |
-| `codex` | Codex CLI configuration | `codex -a never exec --sandbox workspace-write {prompt}` |
-| `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
-| `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
-| `pi` | Pi's configured model | `pi --approve -p {prompt}` |
-| `omp` | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
+| `claude` | Harness default | `claude --permission-mode acceptEdits -p {prompt}` |
+| `gemini` | Harness default | `gemini --approval-mode auto_edit -p {prompt}` |
+| `cursor-agent` | Harness default | `cursor-agent --force -p {prompt}` |
+| `agy` | Harness default | `agy --dangerously-skip-permissions --mode accept-edits -p {prompt}` |
+| `opencode` | Harness default | `opencode run --agent build --auto {prompt}` |
+| `codex` | Harness default | `codex -a never exec --sandbox workspace-write {prompt}` |
+| `aider` | Harness default | `aider --yes-always --no-auto-commits --message {prompt}` |
+| `goose` | Harness default | `goose run --no-session -t {prompt}` |
+| `pi` | Harness default | `pi --approve -p {prompt}` |
+| `omp` | Harness default | `omp --no-session --approval-mode yolo -p {prompt}` |
 
-The presets supply fast defaults and allow model overrides. Pi deliberately has no static model: absent an override, px0 omits `--model` and uses Pi's configured/authenticated default. Selecting **Harness default** clears a saved Pi override from `settings.json`. OMP defaults to the `@smol` role and offers `@default`, `@slow`, and `@plan` before discovered chat models. Codex likewise delegates model selection to the installed CLI when no `-m` override is selected; explicit Codex models depend on account access. OpenCode requires a `provider/model` selector, and its `build` agent plus `--auto` flag allow unattended edits even if the user's default agent is read-only. Presets keep `{prompt}` as the final token; px0 inserts a selected model flag before the prompt option.
+An empty override always delegates model selection to the harness. px0 inserts the harness's model flag before `{prompt}` only for an explicit model that the current `ready` runtime catalog validates. OpenCode's `build` agent and `--auto` flag allow unattended edits even if the user's default agent is read-only. Registry argv keep `{prompt}` as the final token.
 
 A full command template is accepted anywhere a harness name is, and must contain `{prompt}`:
 
@@ -192,7 +211,7 @@ px0 dispatched the harness, so it knows when the work ended. Completion is detec
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/api/agent/harnesses` | GET | Re-scan and list every known harness with its installed state. |
+| `/api/agent/harnesses` | GET | Re-scan every supported harness and return installed state, executable path, runtime models, effective override, and discovery status. `?refresh=1` refreshes terminal model catalogs once. |
 | `/api/agent/select` | POST | Choose a harness and remember it. An empty name turns editing off. |
 | `/api/agent/edit` | POST | Dispatch an instruction for `path:l1-l2`. `409` when the range overlaps a job already running, or onto uncommitted work without `force=1`. |
 | `/api/agent/job` | GET | Snapshot of job `?id=`, or the most recently started job when `id` is omitted, polled while running. |

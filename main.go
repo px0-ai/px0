@@ -229,13 +229,9 @@ func main() {
 		if agent != nil {
 			tAgent := time.Now()
 			var found []string
-			for _, h := range agent.Detect() {
+			for _, h := range agent.Detect(false) {
 				if h.Installed {
-					item := h.Name
-					if h.Model != "" {
-						item = fmt.Sprintf("%s (%s)", h.Name, h.Model)
-					}
-					found = append(found, item)
+					found = append(found, h.Name)
 				}
 			}
 			agentDur := time.Since(tAgent)

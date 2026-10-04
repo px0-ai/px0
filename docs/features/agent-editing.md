@@ -14,22 +14,24 @@ px0 decouples code viewing from code authoring. It provides a sub-millisecond, l
 
 ## Supported Harnesses & Models
 
-px0 auto-detects and integrates with all leading terminal coding harnesses:
+px0 auto-detects ten supported terminal coding harnesses and the models exposed by each installed, authenticated CLI:
 
-| Harness | Default Model | Execution Template |
-| :--- | :--- | :--- |
-| **Claude Code** | `haiku` | `claude --permission-mode acceptEdits --model haiku -p {prompt}` |
-| **Gemini CLI** | `gemini-2.5-flash-lite` | `gemini --approval-mode auto_edit -m gemini-2.5-flash-lite -p {prompt}` |
-| **Cursor Agent** | `gemini-3.6-flash-minimal` | `cursor-agent --force --model gemini-3.6-flash-minimal -p {prompt}` |
-| **Antigravity** | `gemini-3.6-flash-low` | `agy --dangerously-skip-permissions --mode accept-edits --model gemini-3.6-flash-low -p {prompt}` |
-| **OpenCode** | `opencode/big-pickle` | `opencode run --agent build -m opencode/big-pickle --auto {prompt}` |
-| **OpenAI Codex** | CLI-configured default | `codex -a never exec --sandbox workspace-write {prompt}` |
-| **Aider** | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
-| **Goose** | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
-| **Pi** | Harness default (configured in Pi) | `pi --approve -p {prompt}` |
-| **OMP** | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
+| Harness | Default Model | Runtime Model Catalog | Execution Template |
+| :--- | :--- | :--- | :--- |
+| **Claude Code** | Harness default | Default only | `claude --permission-mode acceptEdits -p {prompt}` |
+| **Gemini CLI** | Harness default | Default only | `gemini --approval-mode auto_edit -p {prompt}` |
+| **Cursor Agent** | Harness default | `cursor-agent models` | `cursor-agent --force -p {prompt}` |
+| **Antigravity** | Harness default | `agy models` | `agy --dangerously-skip-permissions --mode accept-edits -p {prompt}` |
+| **OpenCode** | Harness default | `opencode models` | `opencode run --agent build --auto {prompt}` |
+| **OpenAI Codex** | Harness default | Codex app-server `model/list` | `codex -a never exec --sandbox workspace-write {prompt}` |
+| **Aider** | Harness default | Default only | `aider --yes-always --no-auto-commits --message {prompt}` |
+| **Goose** | Harness default | Default only | `goose run --no-session -t {prompt}` |
+| **Pi** | Harness default | `pi --list-models` | `pi --approve -p {prompt}` |
+| **OMP** | Harness default | `omp models --json` | `omp --no-session --approval-mode yolo -p {prompt}` |
 
-The presets use fast, cost-effective defaults where the harness provides one, while still allowing model selection from the harness menu. Pi and Codex can use their installed CLI's configured/authenticated default when no override is selected; choosing **Harness default** clears a saved override. OMP defaults to the `@smol` role, and OpenCode model choices must use a `provider/model` selector.
+The model dropdown always includes `Harness default`, which omits the model flag and delegates selection to the harness. For Cursor Agent, Antigravity, OpenCode, Codex, Pi, and OMP, the dropdown adds only IDs reported by the installed CLI for the current account and configuration. Discovery runs asynchronously with a five-second limit. Opening the picker refreshes the catalogs, so account or configuration changes do not require restarting px0.
+
+Claude Code, Gemini CLI, Aider, and Goose remain default-only until their CLIs expose a safe account-aware, non-interactive model catalog. Failed discovery also offers only `Harness default`. Saved overrides are used only after a successful catalog reports the exact model ID; an unavailable saved model never reaches the harness argv. Choosing `Harness default` clears the saved override.
 
 ---
 

@@ -598,14 +598,6 @@ func (s *Server) SetPR(p *prSession) {
 	}
 }
 
-// agentHarnesses is the picker's list, empty when editing is unavailable.
-func (s *Server) agentHarnesses() []agentHarness {
-	if s.agent == nil {
-		return []agentHarness{}
-	}
-	return s.agent.Detect()
-}
-
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	expected := s.BasePath()
 	if r.URL.Path != expected && r.URL.Path != strings.TrimSuffix(expected, "/") {
