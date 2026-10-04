@@ -53,4 +53,4 @@ Threads are stored on disk and survive restarts. A reply that was still running 
 
 ## Requirements
 
-Threads use the coding harness you have selected, the same as inline edits, and are unavailable with `-no-agent`. Harnesses that px0 can hand a session id (Claude Code, and Cursor Agent) keep their own memory of the conversation. With any other harness, px0 sends the earlier transcript along with each message, which works but uses more tokens on long threads.
+Threads use the coding harness you have selected, the same as inline edits, and are unavailable with `-no-agent`. Claude Code, Cursor Agent, Antigravity, Gemini CLI, and Pi use native harness sessions; Pi passes the same `--session-id` on every turn. Other harnesses, including OMP, receive earlier `User:` / `Assistant:` messages through bounded transcript replay. Pi and OMP currently stream final text as plain lines, not structured tool events.

@@ -8,7 +8,7 @@ px0 is intentionally designed as a read-optimized viewer rather than a tradition
 
 In modern AI-native development workflows, developers spend less time typing repetitive syntax and more time reviewing, directing, and guiding intelligent agents. Traditional IDEs carry massive authoring baggage—gigabytes of Electron RAM, plugin conflicts, and heavy text manipulation engines.
 
-px0 decouples code viewing from code authoring. It provides a sub-millisecond, low-resource reading experience (~20–30 MB RSS) while seamlessly integrating with whichever CLI coding agent you already run on your machine (such as Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose). You select the code, provide an instruction, and px0 coordinates the background execution, streams the progress to your terminal, and automatically refreshes modified files upon completion.
+px0 decouples code viewing from code authoring. It provides a sub-millisecond, low-resource reading experience (~20-30 MB RSS) while integrating with local CLI coding agents such as Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, Goose, Pi, and OMP. You select the code, provide an instruction, and px0 coordinates the background execution, streams the progress to your terminal, and automatically refreshes modified files upon completion.
 
 ---
 
@@ -26,8 +26,10 @@ px0 auto-detects and integrates with all leading terminal coding harnesses:
 | **OpenAI Codex** | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
 | **Aider** | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | **Goose** | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+| **Pi** | Harness default (configured in Pi) | `pi --approve -p {prompt}` |
+| **OMP** | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
 
-By default, px0 selects fast and cost-effective models for each harness, but allows you to select any supported model directly from the harness menu.
+px0 defaults to fast and cost-effective models for harnesses with a static default. Pi instead uses the user's configured/authenticated model without a `--model` flag until an override is selected; the model picker can return to **Harness default**. OMP defaults to its `@smol` role. You can select another available model from the harness menu.
 
 ---
 
@@ -88,7 +90,7 @@ The same harness and model you pick here are also used by the sidebar git panel'
 
 Agent preferences are managed in Settings (`Cmd/Ctrl+,`) or stored in `~/.px0/settings.json`:
 
-- **Agent: Harness** (`agent.harness`): The default CLI tool to execute (`claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`).
+- **Agent: Harness** (`agent.harness`): The default CLI tool to execute (`claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`, `pi`, `omp`).
 - **Agent: Timeout Seconds** (`agent.timeoutSeconds`): Maximum execution time before px0 terminates the background process (defaults to `120` seconds, range `10`–`600`).
 - **CLI Flags**:
   - `px0 -agent <name>`: Force a specific agent harness for the current session.

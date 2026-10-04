@@ -56,6 +56,15 @@ let activeBatchTargets = null;
 const installed = () => (S.meta?.agents || []).filter(h => h.installed);
 const chosen = () => (S.meta && S.meta.agent) || '';
 const chosenModel = () => (S.meta && S.meta.agentModel) || '';
+const offersHarnessDefault = h => h.name === 'pi' || !h.model;
+function appendHarnessDefault(select, harness) {
+  if (!offersHarnessDefault(harness)) return;
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = 'Harness default';
+  select.appendChild(opt);
+}
+
 const targetRef = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
 const rangesOverlap = (a, b) => a.path === b.path && a.l1 <= b.l2 && b.l1 <= a.l2;
 
@@ -86,7 +95,6 @@ function updateSessionMeta(session) {
   if (!session.harnessSelect || !session.modelSelect) return;
   const ready = (S.meta?.agents || []).filter(h => h.installed);
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   // Populate harness select
   session.harnessSelect.innerHTML = '';
@@ -119,11 +127,12 @@ function updateSessionMeta(session) {
   session.modelSelect.innerHTML = '';
   const models = activeH?.models || [];
   if (models.length > 0) {
+    appendHarnessDefault(session.modelSelect, activeH);
     for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m;
       opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
+      if (m === activeH.model) opt.selected = true;
       session.modelSelect.appendChild(opt);
     }
     session.modelSelect.hidden = false;
@@ -140,7 +149,7 @@ export async function loadAgentAsync() {
     const j = await api('/api/agent/harnesses');
     S.meta.agents = j.harnesses || [];
     S.meta.agent = j.selected || S.meta.agent || '';
-    S.meta.agentModel = j.model || S.meta.agentModel || '';
+    S.meta.agentModel = j.model ?? '';
     S.meta.agentPinned = !!j.pinned;
     applyAgentMeta();
   } catch {}
@@ -150,7 +159,6 @@ function syncBatchMeta() {
   if (!batchHarness || !batchModel) return;
   const ready = installed();
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   batchHarness.innerHTML = '';
   if (!ready.length) {
@@ -179,11 +187,12 @@ function syncBatchMeta() {
   batchModel.innerHTML = '';
   const models = activeH?.models || [];
   if (models.length > 0) {
+    appendHarnessDefault(batchModel, activeH);
     for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m;
       opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
+      if (m === activeH.model) opt.selected = true;
       batchModel.appendChild(opt);
     }
     batchModel.hidden = false;
@@ -201,7 +210,6 @@ function syncGitPanelMeta() {
   if (!gitHarness || !gitModel) return;
   const ready = installed();
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   gitHarness.innerHTML = '';
   if (!ready.length) {
@@ -229,11 +237,12 @@ function syncGitPanelMeta() {
   gitModel.innerHTML = '';
   const models = activeH?.models || [];
   if (models.length > 0) {
+    appendHarnessDefault(gitModel, activeH);
     for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m;
       opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
+      if (m === activeH.model) opt.selected = true;
       gitModel.appendChild(opt);
     }
     gitModel.hidden = false;
@@ -627,9 +636,9 @@ async function showPicker(session) {
 
   const ready = list.filter(h => h.installed);
   if (!ready.length) {
-    showToast('!', 'Could not find any coding harness like Claude Code, OpenCode, Codex, Antigravity, Aider, etc. Install one and restart px0.', 6000);
+    showToast('!', 'Could not find a coding harness. Install Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, Goose, Pi, or OMP and restart px0.', 6000);
     session.pickEl.innerHTML = '<div class="hint" style="line-height: 1.5; padding: 4px 2px;">' +
-      'Could not find any coding harness like <b>Claude Code</b>, <b>OpenCode</b>, <b>Codex</b>, <b>Antigravity</b> (<code>agy</code>), <b>Aider</b>, <b>Goose</b>, <b>Gemini CLI</b>, or <b>Cursor Agent</b>.<br><br>' +
+      'Could not find a coding harness: <b>Claude Code</b>, <b>Gemini CLI</b>, <b>Cursor Agent</b>, <b>Antigravity</b> (<code>agy</code>), <b>OpenCode</b>, <b>Codex</b>, <b>Aider</b>, <b>Goose</b>, <b>Pi</b>, or <b>OMP</b>.<br><br>' +
       'Please install a coding harness, make sure it is on your <code>PATH</code>, and restart px0 after that.</div>';
     return;
   }
@@ -661,8 +670,9 @@ function optionsHtml(ready, settingsPath) {
       html += '<div class="agent-model-row">' +
         '<span class="agent-model-label">Model:</span>' +
         '<select class="agent-model-select" data-harness="' + esc(h.name) + '">';
+      if (offersHarnessDefault(h)) html += '<option value=""' + (!h.model ? ' selected' : '') + '>Harness default</option>';
       for (const m of h.models) {
-        const sel = m === (h.model || chosenModel()) ? ' selected' : '';
+        const sel = m === h.model ? ' selected' : '';
         html += '<option value="' + esc(m) + '"' + sel + '>' + esc(m) + '</option>';
       }
       html += '</select></div>';
@@ -681,12 +691,13 @@ async function pick(session, name) {
 async function select(name, model, onError) {
   if (typeof model === 'function') {
     onError = model;
-    model = '';
+    model = undefined;
   }
   try {
     const params = { name };
-    if (model) params.model = model;
-    const j = await apiPost('/api/agent/select', params);
+    if (model !== undefined) params.model = model;
+    // request() omits empty query values; preserve the explicit default choice.
+    const j = await apiPost(model === '' ? '/api/agent/select?model=' : '/api/agent/select', params);
     S.meta.agent = j.selected || '';
     S.meta.agentModel = j.model || '';
     S.meta.agents = j.harnesses || S.meta.agents;

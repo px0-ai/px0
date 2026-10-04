@@ -98,6 +98,18 @@ var agentPresets = []agentPreset{
 		},
 	},
 	{
+		Name:      "pi",
+		Args:      []string{"pi", "--approve", "-p", "{prompt}"},
+		ModelFlag: "--model",
+	},
+	{
+		Name:         "omp",
+		Args:         []string{"omp", "--no-session", "--approval-mode", "yolo", "-p", "{prompt}"},
+		ModelFlag:    "--model",
+		DefaultModel: "@smol",
+		Models:       []string{"@smol", "@default", "@slow", "@plan"},
+	},
+	{
 		Name:         "opencode",
 		Args:         []string{"opencode", "run", "{prompt}"},
 		ModelFlag:    "-m",
@@ -169,6 +181,71 @@ var (
 	discoveringModels  = map[string]bool{}
 )
 
+func parsePiModels(data []byte) []string {
+	var models []string
+	seen := make(map[string]bool)
+	seenHeader := false
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && strings.EqualFold(fields[0], "provider") && strings.EqualFold(fields[1], "model") {
+			seenHeader = true
+			continue
+		}
+		if !seenHeader || len(fields) < 2 {
+			continue
+		}
+		provider, model := fields[0], fields[1]
+		if strings.Trim(provider, "-=") == "" || strings.Trim(model, "-=") == "" {
+			continue
+		}
+		selector := provider + "/" + model
+		if !seen[selector] {
+			seen[selector] = true
+			models = append(models, selector)
+		}
+	}
+	return models
+}
+
+func parseOMPModels(data []byte) []string {
+	var catalog struct {
+		Models []struct {
+			Selector string `json:"selector"`
+			Kind     string `json:"kind"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return nil
+	}
+	var models []string
+	seen := make(map[string]bool)
+	for _, entry := range catalog.Models {
+		selector := strings.TrimSpace(entry.Selector)
+		if entry.Kind != "chat" || selector == "" || seen[selector] {
+			continue
+		}
+		seen[selector] = true
+		models = append(models, selector)
+	}
+	return models
+}
+
+func mergeModels(preferred, discovered []string) []string {
+	models := make([]string, 0, len(preferred)+len(discovered))
+	seen := make(map[string]bool, cap(models))
+	for _, list := range [][]string{preferred, discovered} {
+		for _, model := range list {
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			models = append(models, model)
+		}
+	}
+	return models
+}
+
 func discoverHarnessModels(name, bin string, staticModels []string) []string {
 	discoveredModelsMu.Lock()
 	if cached, ok := discoveredModels[name]; ok {
@@ -188,6 +265,24 @@ func discoverHarnessModels(name, bin string, staticModels []string) []string {
 func runModelDiscovery(name, bin string, staticModels []string) {
 	models := append([]string(nil), staticModels...)
 	switch name {
+	case "pi":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "--list-models").Output()
+		cancel()
+		if err == nil {
+			if list := parsePiModels(out); len(list) > 0 {
+				models = list
+			}
+		}
+	case "omp":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, bin, "models", "--json").Output()
+		cancel()
+		if err == nil {
+			if list := parseOMPModels(out); len(list) > 0 {
+				models = mergeModels(staticModels, list)
+			}
+		}
 	case "agy":
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		out, err := exec.CommandContext(ctx, bin, "models").Output()
@@ -640,7 +735,8 @@ func (m *agentManager) Pinned() bool {
 }
 
 // Select remembers a harness for this workspace and every later run. Passing an
-// empty name turns editing back off.
+// empty name turns editing back off. Omitting modelOpt retains the saved model;
+// supplying an empty model explicitly clears the override.
 func (m *agentManager) Select(name string, modelOpt ...string) error {
 	m.mu.Lock()
 	if m.pinned {
@@ -657,15 +753,15 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 		return writeSettings(settings{})
 	}
 
+	modelSupplied := len(modelOpt) > 0
 	reqModel := ""
-	if len(modelOpt) > 0 {
+	if modelSupplied {
 		reqModel = strings.TrimSpace(modelOpt[0])
-	}
-	m.mu.Lock()
-	if reqModel == "" {
+	} else {
+		m.mu.Lock()
 		reqModel = m.models[name]
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 
 	display, args, chosenModel, err := resolveAgentSpec(name, reqModel)
 	if err != nil {
@@ -677,7 +773,9 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 	if m.models == nil {
 		m.models = map[string]string{}
 	}
-	if chosenModel != "" {
+	if modelSupplied && reqModel == "" {
+		delete(m.models, display)
+	} else if chosenModel != "" {
 		m.models[display] = chosenModel
 	}
 	savedModels := make(map[string]string, len(m.models))
@@ -693,7 +791,13 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 	uiStatus("ok", "agent", fmt.Sprintf("%s%s", display, modelNote), 0, os.Stdout)
 	// Persist the spec as given, not the display name: a command template
 	// shortens to its binary for display and would not survive the round trip.
-	return writeSettings(settings{Agent: name, Models: savedModels})
+	updates := map[string]any{"agent": name}
+	if len(savedModels) == 0 {
+		updates["models"] = nil
+	} else {
+		updates["models"] = savedModels
+	}
+	return updateSettingsMap(updates)
 }
 
 // Job returns a snapshot of job id, or of the most recently started job when
@@ -1323,8 +1427,18 @@ func (s *Server) handleAgentSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.URL.Query().Get("name")
-	model := r.URL.Query().Get("model")
-	if err := s.agent.Select(name, model); err != nil {
+	models, modelSupplied := r.URL.Query()["model"]
+	var err error
+	if modelSupplied {
+		model := ""
+		if len(models) > 0 {
+			model = models[0]
+		}
+		err = s.agent.Select(name, model)
+	} else {
+		err = s.agent.Select(name)
+	}
+	if err != nil {
 		code := 400
 		if errors.Is(err, errAgentBusy) {
 			code = http.StatusConflict

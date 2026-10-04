@@ -26,9 +26,9 @@ import (
 // harness session on every new message.
 //
 // Continuity works two ways. A harness with a session id px0 can control
-// (claude, cursor-agent) resumes its own session, so the harness keeps its own
-// context. Every other harness, and any harness switched to mid-thread, is
-// replayed the earlier transcript inside the prompt.
+// (claude, cursor-agent, agy, gemini, or pi) resumes its own session, so the
+// harness keeps its own context. Every other harness, and any harness switched
+// to mid-thread, is replayed the earlier transcript inside the prompt.
 //
 // There is no overlap guard between threads or against inline edits: two
 // harnesses writing the same lines is last write wins.
@@ -353,7 +353,7 @@ func (tm *threadManager) SetScope(id, scope string) error {
 
 // threadNative reports whether px0 can hand this harness its own session.
 func threadNative(name string) bool {
-	return name == "claude" || name == "cursor-agent" || name == "agy" || name == "gemini"
+	return name == "claude" || name == "cursor-agent" || name == "agy" || name == "gemini" || name == "pi"
 }
 
 // threadArgv adds the session and output flags a thread turn needs to the
@@ -385,6 +385,10 @@ func threadArgv(name string, template []string, sessionID string, resume bool) [
 			extra = append(extra, "--resume", sessionID)
 		} else if sessionID != "" {
 			extra = append(extra, "--session-id", sessionID)
+		}
+	case "pi":
+		if sessionID != "" {
+			extra = []string{"--session-id", sessionID}
 		}
 	}
 	out := make([]string, 0, len(template)+len(extra))
@@ -549,7 +553,7 @@ func (tm *threadManager) runTurn(ctx context.Context, cancel context.CancelFunc,
 
 	if sessionID == "" {
 		switch r.name {
-		case "claude", "gemini":
+		case "claude", "gemini", "pi":
 			sessionID = newUUID()
 		case "cursor-agent":
 			sessionID = tm.createCursorChat(ctx, r.base[0])
@@ -629,7 +633,8 @@ func (tm *threadManager) runTurn(ctx context.Context, cancel context.CancelFunc,
 		if t.SessionID == "" && sink.sessionID != "" {
 			t.SessionID = sink.sessionID
 		}
-		if (sink.started && (r.name == "claude" || r.name == "agy" || r.name == "gemini")) || (r.name == "cursor-agent" && native && err == nil) {
+		if (sink.started && (r.name == "claude" || r.name == "agy" || r.name == "gemini")) ||
+			((r.name == "cursor-agent" || r.name == "pi") && native && err == nil) {
 			t.SessionLive = true
 		}
 		r.turn.Running = false

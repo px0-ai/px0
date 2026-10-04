@@ -84,6 +84,8 @@ Diff rows carry where they point in the working tree:
 
 `Detect` walks the preset list and resolves each harness with `lookPathIn(name, lspBinDirs())`, the same helper the language-server manager uses. That search covers PATH plus the directories these tools actually install into, such as `~/.local/bin` and npm's global prefix. It runs on every `/api/agent/harnesses` call, so a harness installed after startup appears without a restart.
 
+Pi models come from `pi --list-models`: px0 reads the whitespace table after its `provider model` header and offers deduplicated `provider/model` selectors in CLI order. An empty result, command failure, or timeout leaves Pi's list empty without forcing a model. OMP models come from `omp models --json`: px0 keeps only `kind: "chat"` selectors, after the four built-in role aliases. An invalid/empty result, command failure, or timeout leaves the aliases available. Both commands have a five-second limit and are cached by the existing asynchronous discovery path.
+
 Discovery alone never enables editing. Finding `claude` on PATH is not consent to let it rewrite a workspace, so the first edit opens a picker and the choice is explicit. Once made, it is remembered and the picker stays out of the way.
 
 The chosen harness and its model are directly selectable in the compose box's metadata row (`.agent-meta`). Changing either dropdown updates the configuration via `/api/agent/select`. When `-agent` pinned the harness, the selector indicates that it is fixed for this run.
@@ -121,8 +123,10 @@ Every supported harness starts an interactive session by default and blocks on a
 | `codex` | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
 | `aider` | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | `goose` | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+| `pi` | Pi's configured model | `pi --approve -p {prompt}` |
+| `omp` | `@smol` | `omp --no-session --approval-mode yolo --model @smol -p {prompt}` |
 
-By default, px0 uses the least capable (fastest and cheapest) model from each harness's available model list, while letting users choose any available model from the harness menu or picker.
+The existing eight presets supply a default model and allow a model override. Pi deliberately has no static model: absent an override, px0 omits `--model` and uses Pi's configured/authenticated default. Selecting **Harness default** clears a saved Pi override from `settings.json`. OMP defaults to the `@smol` role and offers `@default`, `@slow`, and `@plan` before discovered chat models. Both presets keep `{prompt}` as the final token; px0 inserts a selected `--model <selector>` before `-p`.
 
 A full command template is accepted anywhere a harness name is, and must contain `{prompt}`:
 

@@ -379,12 +379,19 @@ func TestAgentModelSelectionAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := m.Detect()
-	for _, h := range rows {
+	for i, h := range rows {
+		p := agentPresets[i]
+		if p.DefaultModel == "" {
+			if len(p.Models) != 0 {
+				t.Fatalf("%s has no default model but lists static models %v", p.Name, p.Models)
+			}
+			if h.Model != "" {
+				t.Fatalf("%s detected model = %q, want harness default", h.Name, h.Model)
+			}
+			continue
+		}
 		if len(h.Models) == 0 {
 			t.Fatalf("%s should list models", h.Name)
-		}
-		if h.Model == "" {
-			t.Fatalf("%s should have a default model", h.Name)
 		}
 		if h.Model != h.Models[0] {
 			t.Fatalf("%s default model %q != least capable model %q", h.Name, h.Model, h.Models[0])
@@ -449,6 +456,149 @@ func TestClaudeModelDiscovery(t *testing.T) {
 	}
 	if !foundFable {
 		t.Fatalf("expected 'fable' in discovered models: %v", models)
+	}
+}
+
+func TestPiAndOMPModelDiscovery(t *testing.T) {
+	// Detect may still be discovering installed harnesses from an earlier test.
+	// Let those goroutines finish before replacing the shared cache with fixtures.
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		discoveredModelsMu.Lock()
+		busy := discoveringModels["pi"] || discoveringModels["omp"]
+		discoveredModelsMu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("model discovery did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	dir := t.TempDir()
+	piArgs := filepath.Join(dir, "pi.args")
+	fakePi := filepath.Join(dir, "pi")
+	piScript := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" > %q
+cat <<'EOF'
+provider model context
+anthropic claude-sonnet 200k
+google gemini-flash 1m
+anthropic claude-sonnet 200k
+malformed
+EOF
+`, piArgs)
+	if err := os.WriteFile(fakePi, []byte(piScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ompArgs := filepath.Join(dir, "omp.args")
+	fakeOMP := filepath.Join(dir, "omp")
+	ompScript := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" > %q
+cat <<'EOF'
+{"models":[{"selector":"openai/gpt-fast","kind":"chat"},{"selector":"embed/small","kind":"embedding"},{"selector":"@smol","kind":"chat"},{"selector":"openai/gpt-fast","kind":"chat"},{"selector":"anthropic/sonnet","kind":"chat"},{"selector":"","kind":"chat"}]}
+EOF
+`, ompArgs)
+	if err := os.WriteFile(fakeOMP, []byte(ompScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	aliases := []string{"@smol", "@default", "@slow", "@plan"}
+	runModelDiscovery("pi", fakePi, nil)
+	runModelDiscovery("omp", fakeOMP, aliases)
+
+	discoveredModelsMu.Lock()
+	piModels := append([]string(nil), discoveredModels["pi"]...)
+	ompModels := append([]string(nil), discoveredModels["omp"]...)
+	discoveredModelsMu.Unlock()
+	if got, want := strings.Join(piModels, ","), "anthropic/claude-sonnet,google/gemini-flash"; got != want {
+		t.Fatalf("Pi models = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(ompModels, ","), "@smol,@default,@slow,@plan,openai/gpt-fast,anthropic/sonnet"; got != want {
+		t.Fatalf("OMP models = %q, want %q", got, want)
+	}
+	if data, err := os.ReadFile(piArgs); err != nil || strings.TrimSpace(string(data)) != "--list-models" {
+		t.Fatalf("Pi discovery argv = %q, err=%v", data, err)
+	}
+	if data, err := os.ReadFile(ompArgs); err != nil || strings.TrimSpace(string(data)) != "models --json" {
+		t.Fatalf("OMP discovery argv = %q, err=%v", data, err)
+	}
+
+	cacheSentinel := filepath.Join(dir, "pi-ran-after-cache")
+	malformedPi := fmt.Sprintf("#!/bin/sh\ntouch %q\nprintf 'not a model table\\n'\n", cacheSentinel)
+	if err := os.WriteFile(fakePi, []byte(malformedPi), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if cached := discoverHarnessModels("pi", fakePi, nil); strings.Join(cached, ",") != strings.Join(piModels, ",") {
+		t.Fatalf("cached Pi models = %v, want %v", cached, piModels)
+	}
+	if _, err := os.Stat(cacheSentinel); !os.IsNotExist(err) {
+		t.Fatalf("cached discovery reran Pi: %v", err)
+	}
+	if err := os.WriteFile(fakeOMP, []byte("#!/bin/sh\nprintf '{invalid json}\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runModelDiscovery("pi", fakePi, nil)
+	runModelDiscovery("omp", fakeOMP, aliases)
+	discoveredModelsMu.Lock()
+	piModels = append([]string(nil), discoveredModels["pi"]...)
+	ompModels = append([]string(nil), discoveredModels["omp"]...)
+	discoveredModelsMu.Unlock()
+	if len(piModels) != 0 {
+		t.Fatalf("malformed Pi output should use harness default, got %v", piModels)
+	}
+	if got := strings.Join(ompModels, ","); got != strings.Join(aliases, ",") {
+		t.Fatalf("malformed OMP output = %q, want aliases %q", got, strings.Join(aliases, ","))
+	}
+}
+
+func TestPiModelOverrideCanBeCleared(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "pi"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Select("pi", "anthropic/claude-sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(m.args, " "); !strings.Contains(got, "--model anthropic/claude-sonnet -p {prompt}") {
+		t.Fatalf("selected Pi argv = %q, want explicit model", got)
+	}
+	if got := readSettings().Models["pi"]; got != "anthropic/claude-sonnet" {
+		t.Fatalf("persisted Pi model = %q, want explicit model", got)
+	}
+
+	s := NewServer(NewIndex(t.TempDir()), nil)
+	s.SetAgent(m)
+	t.Cleanup(func() {
+		if s.gitWatcher != nil {
+			s.gitWatcher.Stop()
+		}
+	})
+	if code, _ := agentPost(t, s, "/api/agent/select?name=pi"); code != http.StatusOK {
+		t.Fatalf("select without model = %d, want 200", code)
+	}
+	if got := strings.Join(m.args, " "); !strings.Contains(got, "--model anthropic/claude-sonnet") {
+		t.Fatalf("omitted model did not retain override in argv %q", got)
+	}
+	if code, _ := agentPost(t, s, "/api/agent/select?name=pi&model="); code != http.StatusOK {
+		t.Fatalf("clear model = %d, want 200", code)
+	}
+	if got := strings.Join(m.args, " "); strings.Contains(got, "--model") {
+		t.Fatalf("cleared Pi argv still has model flag: %q", got)
+	}
+	if got := m.Model(); got != "" {
+		t.Fatalf("cleared Pi model = %q, want harness default", got)
+	}
+	if _, ok := readSettings().Models["pi"]; ok {
+		t.Fatalf("cleared Pi override remains in settings: %v", readSettings().Models)
 	}
 }
 
@@ -689,7 +839,6 @@ func TestAllPresetArgvFormatting(t *testing.T) {
 		if resolved[len(resolved)-1] != "{prompt}" {
 			t.Errorf("%s final arg = %q, want {prompt}", p.Name, resolved[len(resolved)-1])
 		}
-		// Ensure model flag was inserted properly
 		hasModel := false
 		for i, a := range resolved {
 			if a == p.ModelFlag && i+1 < len(resolved) && resolved[i+1] == p.DefaultModel {
@@ -697,8 +846,29 @@ func TestAllPresetArgvFormatting(t *testing.T) {
 				break
 			}
 		}
-		if !hasModel {
+		if p.DefaultModel == "" {
+			if hasModel || strings.Contains(strings.Join(resolved, " "), p.ModelFlag) {
+				t.Errorf("%s resolved args %v should use the harness default without %q", p.Name, resolved, p.ModelFlag)
+			}
+		} else if !hasModel {
 			t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
+		}
+		switch p.Name {
+		case "pi":
+			if got, want := strings.Join(resolved[1:], " "), "--approve -p {prompt}"; got != want {
+				t.Errorf("Pi argv = %q, want %q", got, want)
+			}
+			_, explicit, _, err := resolveAgentSpec("pi", "anthropic/claude-sonnet")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := strings.Join(explicit[1:], " "), "--approve --model anthropic/claude-sonnet -p {prompt}"; got != want {
+				t.Errorf("Pi explicit-model argv = %q, want %q", got, want)
+			}
+		case "omp":
+			if got, want := strings.Join(resolved[1:], " "), "--no-session --approval-mode yolo --model @smol -p {prompt}"; got != want {
+				t.Errorf("OMP argv = %q, want %q", got, want)
+			}
 		}
 	}
 }
@@ -953,6 +1123,3 @@ func TestCommitMessagePrompt(t *testing.T) {
 		t.Errorf("prompt contains file beyond 100:\n%s", p2)
 	}
 }
-
-
-
