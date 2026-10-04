@@ -16,7 +16,7 @@ Detailed walkthroughs of all px0 features, capabilities, developer workflows, an
 - **[Symbol Outline & Navigation](features/symbol-outline.md)**: In-file structural symbol trees with LSP and regex fallbacks (`Cmd/Ctrl+Shift+O`).
 - **[In-File Find & Caret Navigation](features/in-file-search.md)**: Active document search (`Cmd/Ctrl+F`), line jumps (`Cmd/Ctrl+G`), and caret motion.
 - **[Git Awareness & Visual Diff Viewer](features/git-integration.md)**: Status badges, dirty ancestor trees, gutter markers, and side-by-side / unified diffs (`Cmd/Ctrl+D`).
-- **[Editing with Coding Agents](features/agent-editing.md)**: Delegating code changes to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, and Goose.
+- **[Editing with Coding Agents](features/agent-editing.md)**: Delegating code changes to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, Goose, and GitHub Copilot CLI.
 - **[LSP & Semantic Code Intelligence](features/lsp-code-intelligence.md)**: Go to Definition (`F12`), References (`Shift+F12`), Call Trails (`Alt+Shift+H`), and Hover cards.
 - **[Rendered Markdown Preview](features/markdown-preview.md)**: GFM rendering, syntax-highlighted code fences with copy buttons, and synchronized scrolling (`Alt+M`).
 - **[Image Viewer & Asset Inspection](features/image-viewer.md)**: First-class image tabs, zoom/pan transforms, alpha contrast modes, and markdown lightbox.
