@@ -56,6 +56,51 @@ let activeBatchTargets = null;
 const installed = () => (S.meta?.agents || []).filter(h => h.installed);
 const chosen = () => (S.meta && S.meta.agent) || '';
 const chosenModel = () => (S.meta && S.meta.agentModel) || '';
+function appendHarnessDefault(select, harness) {
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = 'Harness default';
+  opt.selected = !harness?.model;
+  select.appendChild(opt);
+}
+
+function modelStatusTitle(harness) {
+  switch (harness?.modelStatus) {
+    case 'loading': return 'Discovering models…';
+    case 'unsupported': return 'This CLI has no non-interactive model catalog';
+    case 'failed': return 'Model discovery failed. Reopen the picker to retry.';
+    default: return 'Model for ' + harness.name;
+  }
+}
+
+function populateModelSelect(select, harness, busy = false) {
+  select.innerHTML = '';
+  select.hidden = false;
+
+  if (harness?.modelStatus === 'loading') {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Discovering models…';
+    opt.disabled = true;
+    opt.selected = true;
+    select.appendChild(opt);
+    select.disabled = true;
+  } else {
+    appendHarnessDefault(select, harness);
+    if (harness?.modelStatus === 'ready') {
+      for (const model of harness.models || []) {
+        const opt = document.createElement('option');
+        opt.value = model;
+        opt.textContent = model;
+        opt.selected = model === harness.model;
+        select.appendChild(opt);
+      }
+    }
+    select.disabled = busy;
+  }
+  select.title = modelStatusTitle(harness);
+}
+
 const targetRef = ({ path, l1, l2 }) => path + ':' + (l1 === l2 ? l1 : l1 + '-' + l2);
 const rangesOverlap = (a, b) => a.path === b.path && a.l1 <= b.l2 && b.l1 <= a.l2;
 
@@ -86,7 +131,6 @@ function updateSessionMeta(session) {
   if (!session.harnessSelect || !session.modelSelect) return;
   const ready = (S.meta?.agents || []).filter(h => h.installed);
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   // Populate harness select
   session.harnessSelect.innerHTML = '';
@@ -116,33 +160,37 @@ function updateSessionMeta(session) {
 
   // Populate model select for the currently selected harness
   const activeH = ready.find(h => h.name === (session.harnessSelect.value || currentHarness)) || ready[0];
-  session.modelSelect.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      session.modelSelect.appendChild(opt);
-    }
-    session.modelSelect.hidden = false;
-    session.modelSelect.disabled = isBusy;
-    session.modelSelect.title = 'Model for ' + activeH.name;
-  } else {
-    session.modelSelect.hidden = true;
+  populateModelSelect(session.modelSelect, activeH, isBusy);
+}
+
+const modelPollDelay = 200;
+const modelsAreLoading = harnesses => harnesses.some(h => h.installed && h.modelStatus === 'loading');
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function applyHarnessResponse(j) {
+  S.meta.agents = j.harnesses || [];
+  S.meta.agent = j.selected ?? S.meta.agent ?? '';
+  S.meta.agentModel = j.model ?? '';
+  S.meta.agentPinned = !!j.pinned;
+  applyAgentMeta();
+}
+
+async function pollHarnesses(refresh, onUpdate) {
+  let first = true;
+  while (true) {
+    const j = await api('/api/agent/harnesses' + (first && refresh ? '?refresh=1' : ''));
+    first = false;
+    applyHarnessResponse(j);
+    if (onUpdate) onUpdate(j);
+    if (!modelsAreLoading(j.harnesses || [])) return j;
+    await pause(modelPollDelay);
   }
 }
 
 // Loads harnesses and models asynchronously after the browser UI has loaded.
 export async function loadAgentAsync() {
   try {
-    const j = await api('/api/agent/harnesses');
-    S.meta.agents = j.harnesses || [];
-    S.meta.agent = j.selected || S.meta.agent || '';
-    S.meta.agentModel = j.model || S.meta.agentModel || '';
-    S.meta.agentPinned = !!j.pinned;
-    applyAgentMeta();
+    await pollHarnesses(false);
   } catch {}
 }
 
@@ -150,7 +198,6 @@ function syncBatchMeta() {
   if (!batchHarness || !batchModel) return;
   const ready = installed();
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   batchHarness.innerHTML = '';
   if (!ready.length) {
@@ -176,22 +223,7 @@ function syncBatchMeta() {
   batchHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (batchHarness.value || currentHarness)) || ready[0];
-  batchModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      batchModel.appendChild(opt);
-    }
-    batchModel.hidden = false;
-    batchModel.disabled = isBusy;
-    batchModel.title = 'Model for ' + activeH.name;
-  } else {
-    batchModel.hidden = true;
-  }
+  populateModelSelect(batchModel, activeH, isBusy);
 }
 
 // Harness/model pickers for the sidebar git panel's "Generate" commit
@@ -201,7 +233,6 @@ function syncGitPanelMeta() {
   if (!gitHarness || !gitModel) return;
   const ready = installed();
   const currentHarness = chosen();
-  const currentModel = chosenModel();
 
   gitHarness.innerHTML = '';
   if (!ready.length) {
@@ -226,21 +257,7 @@ function syncGitPanelMeta() {
   gitHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (gitHarness.value || currentHarness)) || ready[0];
-  gitModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      gitModel.appendChild(opt);
-    }
-    gitModel.hidden = false;
-    gitModel.title = 'Model for ' + activeH.name;
-  } else {
-    gitModel.hidden = true;
-  }
+  populateModelSelect(gitModel, activeH);
 }
 
 function getReadySessions() {
@@ -325,6 +342,9 @@ export function openAgentEdit(info) {
   syncBoxVisibility();
   if (chosen() && installed().some(h => h.name === chosen())) {
     showCompose(session);
+    // A remembered harness skips the first-time picker. Refresh its catalog
+    // when the composer reopens so account changes are visible without restart.
+    pollHarnesses(true).catch(() => {});
   } else {
     showPicker(session);
   }
@@ -592,7 +612,10 @@ function setBusy(session, busy, msg) {
   if (session.cancelBtn) session.cancelBtn.hidden = !busy;
   session.closeBtn.disabled = false;
   if (session.harnessSelect) session.harnessSelect.disabled = busy || !!(S.meta && S.meta.agentPinned);
-  if (session.modelSelect) session.modelSelect.disabled = busy;
+  if (session.modelSelect) {
+    const activeH = installed().find(h => h.name === (session.harnessSelect?.value || chosen()));
+    session.modelSelect.disabled = busy || activeH?.modelStatus === 'loading';
+  }
   if (session.hintEl && msg) session.hintEl.textContent = msg;
 }
 
@@ -609,27 +632,27 @@ async function showPicker(session) {
   session.pickEl.hidden = false;
   session.pickEl.innerHTML = '<div class="hint">Looking for coding harnesses…</div>';
 
-  let list = S.meta?.agents || [];
-  let settingsPath = '';
-  // Re-scan, so a harness installed since startup shows up without a restart.
+  let received = false;
   try {
-    const j = await api('/api/agent/harnesses');
-    list = j.harnesses || [];
-    settingsPath = j.settings || '';
-    S.meta.agents = list;
-    S.meta.agent = j.selected || '';
-    S.meta.agentModel = j.model || '';
-    S.meta.agentPinned = !!j.pinned;
+    await pollHarnesses(true, j => {
+      received = true;
+      renderPicker(session, j);
+    });
   } catch (e) {
-    session.pickEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc(e.message) + '</div>';
-    return;
+    if (!received) {
+      session.pickEl.innerHTML = '<div class="hint">Could not look for harnesses: ' + esc(e.message) + '</div>';
+    }
   }
+}
 
+function renderPicker(session, response) {
+  const list = response.harnesses || [];
+  const settingsPath = response.settings || '';
   const ready = list.filter(h => h.installed);
   if (!ready.length) {
-    showToast('!', 'Could not find any coding harness like Claude Code, OpenCode, Codex, Antigravity, Aider, etc. Install one and restart px0.', 6000);
+    showToast('!', 'Could not find a coding harness. Install Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, Goose, Pi, or OMP and restart px0.', 6000);
     session.pickEl.innerHTML = '<div class="hint" style="line-height: 1.5; padding: 4px 2px;">' +
-      'Could not find any coding harness like <b>Claude Code</b>, <b>OpenCode</b>, <b>Codex</b>, <b>Antigravity</b> (<code>agy</code>), <b>Aider</b>, <b>Goose</b>, <b>Gemini CLI</b>, or <b>Cursor Agent</b>.<br><br>' +
+      'Could not find a coding harness: <b>Claude Code</b>, <b>Gemini CLI</b>, <b>Cursor Agent</b>, <b>Antigravity</b> (<code>agy</code>), <b>OpenCode</b>, <b>Codex</b>, <b>Aider</b>, <b>Goose</b>, <b>Pi</b>, or <b>OMP</b>.<br><br>' +
       'Please install a coding harness, make sure it is on your <code>PATH</code>, and restart px0 after that.</div>';
     return;
   }
@@ -641,10 +664,10 @@ async function showPicker(session) {
     b.addEventListener('click', () => pick(session, b.dataset.pick));
   });
   session.pickEl.querySelectorAll('.agent-model-select').forEach(sel => {
-    sel.addEventListener('change', async (e) => {
+    sel.addEventListener('change', async e => {
       e.stopPropagation();
-      await select(sel.dataset.harness, sel.value, msg => showErr(session, msg));
-      showPicker(session);
+      const selected = await select(sel.dataset.harness, sel.value, msg => showErr(session, msg));
+      if (selected) renderPicker(session, { harnesses: S.meta.agents, settings: settingsPath });
     });
   });
 }
@@ -657,13 +680,23 @@ function optionsHtml(ready, settingsPath) {
       '<button class="agent-opt' + (isSelected ? ' on' : '') + '" data-pick="' + esc(h.name) + '">' +
       '<span class="agent-opt-name">' + esc(h.name) + '</span>' +
       '<code class="agent-opt-cmd">' + esc(h.cmd) + '</code></button>';
-    if (isSelected && h.models && h.models.length > 0) {
+    if (isSelected) {
+      const status = h.modelStatus || 'unsupported';
+      const title = modelStatusTitle(h);
       html += '<div class="agent-model-row">' +
         '<span class="agent-model-label">Model:</span>' +
-        '<select class="agent-model-select" data-harness="' + esc(h.name) + '">';
-      for (const m of h.models) {
-        const sel = m === (h.model || chosenModel()) ? ' selected' : '';
-        html += '<option value="' + esc(m) + '"' + sel + '>' + esc(m) + '</option>';
+        '<select class="agent-model-select" data-harness="' + esc(h.name) + '"' +
+        (status === 'loading' ? ' disabled' : '') + ' title="' + esc(title) + '">';
+      if (status === 'loading') {
+        html += '<option value="" disabled selected>Discovering models…</option>';
+      } else {
+        html += '<option value=""' + (!h.model ? ' selected' : '') + '>Harness default</option>';
+        if (status === 'ready') {
+          for (const m of h.models || []) {
+            const sel = m === h.model ? ' selected' : '';
+            html += '<option value="' + esc(m) + '"' + sel + '>' + esc(m) + '</option>';
+          }
+        }
       }
       html += '</select></div>';
     }
@@ -681,12 +714,13 @@ async function pick(session, name) {
 async function select(name, model, onError) {
   if (typeof model === 'function') {
     onError = model;
-    model = '';
+    model = undefined;
   }
   try {
     const params = { name };
-    if (model) params.model = model;
-    const j = await apiPost('/api/agent/select', params);
+    if (model !== undefined) params.model = model;
+    // request() omits empty query values; preserve the explicit default choice.
+    const j = await apiPost(model === '' ? '/api/agent/select?model=' : '/api/agent/select', params);
     S.meta.agent = j.selected || '';
     S.meta.agentModel = j.model || '';
     S.meta.agents = j.harnesses || S.meta.agents;
@@ -775,7 +809,10 @@ function setBatchBusy(busy, msg) {
   if (batchOpen) batchOpen.hidden = !(busy && batchThreadId);
   if (batchClear) batchClear.disabled = busy;
   if (batchHarness) batchHarness.disabled = busy || !!(S.meta && S.meta.agentPinned);
-  if (batchModel) batchModel.disabled = busy;
+  if (batchModel) {
+    const activeH = installed().find(h => h.name === (batchHarness?.value || chosen()));
+    batchModel.disabled = busy || activeH?.modelStatus === 'loading';
+  }
   if (batchHint) {
     if (msg) batchHint.textContent = msg;
     else syncBatchBar();

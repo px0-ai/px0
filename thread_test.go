@@ -71,6 +71,16 @@ func TestThreadArgv(t *testing.T) {
 	if got := strings.Join(threadArgv("cursor-agent", []string{"/bin/cursor-agent", "-p", "{prompt}"}, "C", true), " "); !strings.Contains(got, "--resume C") {
 		t.Fatalf("cursor argv = %s", got)
 	}
+	piTpl := []string{"/bin/pi", "--approve", "-p", "{prompt}"}
+	for _, live := range []bool{false, true} {
+		got := strings.Join(threadArgv("pi", piTpl, "P", live), " ")
+		if !strings.Contains(got, "--session-id P") || strings.Contains(got, "--resume") {
+			t.Fatalf("pi argv (live=%v) = %s", live, got)
+		}
+	}
+	if !threadNative("pi") || threadNative("omp") {
+		t.Fatalf("native continuity: pi=%v omp=%v", threadNative("pi"), threadNative("omp"))
+	}
 	if got := threadArgv("codex", tpl, "", false); len(got) != len(tpl) {
 		t.Fatalf("unsupported harness argv changed: %v", got)
 	}
@@ -205,6 +215,135 @@ func TestThreadClaudeSessionResume(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "--resume "+sid) || strings.Contains(lines[1], "Earlier in this conversation") {
 		t.Fatalf("second run should resume without replay: %s", lines[1])
+	}
+}
+
+func TestThreadPiSessionContinuity(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "argv.log")
+	promptLog := filepath.Join(dir, "prompts.log")
+	bin := filepath.Join(dir, "pi")
+	script := "#!/bin/sh\n" +
+		"prompt=\n" +
+		"for arg in \"$@\"; do\n" +
+		"  printf '%s\\034' \"$arg\" >> " + argvLog + "\n" +
+		"  prompt=$arg\n" +
+		"done\n" +
+		"printf '\\035' >> " + argvLog + "\n" +
+		"printf '%s\\035' \"$prompt\" >> " + promptLog + "\n" +
+		"printf 'Plain Pi reply.\\n'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := agentServer(t, root, bin)
+
+	_, m := agentPostJSON(t, s, "/api/threads/create", map[string]any{"message": "first message"})
+	id := m["id"].(string)
+	th := waitThreadIdle(t, s, id)
+	if th.Turns[0].Reply != "Plain Pi reply.\n" {
+		t.Fatalf("Pi output should stay plain text, got %q", th.Turns[0].Reply)
+	}
+	if code, _ := agentPostJSON(t, s, "/api/threads/send", map[string]any{"id": id, "message": "only the new message"}); code != 200 {
+		t.Fatalf("send = %d", code)
+	}
+	th = waitThreadIdle(t, s, id)
+	if th.SessionID == "" || !th.SessionLive {
+		t.Fatalf("Pi session = %q live=%v", th.SessionID, th.SessionLive)
+	}
+
+	argvData, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argvRuns := strings.Split(strings.TrimSuffix(string(argvData), "\x1d"), "\x1d")
+	if len(argvRuns) != 2 {
+		t.Fatalf("Pi ran %d times, want 2: %q", len(argvRuns), argvData)
+	}
+	for i, run := range argvRuns {
+		args := strings.Split(strings.TrimSuffix(run, "\x1c"), "\x1c")
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "--session-id "+th.SessionID) || strings.Contains(joined, "--resume") {
+			t.Fatalf("Pi run %d argv = %q", i+1, args)
+		}
+	}
+
+	promptData, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts := strings.Split(strings.TrimSuffix(string(promptData), "\x1d"), "\x1d")
+	if len(prompts) != 2 || !strings.Contains(prompts[0], "first message") {
+		t.Fatalf("recorded prompts = %q", prompts)
+	}
+	if prompts[1] != "only the new message" {
+		t.Fatalf("live Pi follow-up should contain only the new message, got %q", prompts[1])
+	}
+}
+
+func TestThreadPiFailedFirstTurnReplays(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	state := filepath.Join(dir, "ran")
+	promptLog := filepath.Join(dir, "prompts.log")
+	sidLog := filepath.Join(dir, "sessions.log")
+	bin := filepath.Join(dir, "pi")
+	script := "#!/bin/sh\n" +
+		"prompt=\n" +
+		"sid=\n" +
+		"while [ \"$#\" -gt 0 ]; do\n" +
+		"  case \"$1\" in\n" +
+		"    --session-id) sid=$2; shift 2 ;;\n" +
+		"    *) prompt=$1; shift ;;\n" +
+		"  esac\n" +
+		"done\n" +
+		"printf '%s\\n' \"$sid\" >> " + sidLog + "\n" +
+		"printf '%s\\035' \"$prompt\" >> " + promptLog + "\n" +
+		"if [ ! -e " + state + " ]; then\n" +
+		"  : > " + state + "\n" +
+		"  printf 'Partial reply.\\n'\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"printf 'Recovered.\\n'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := agentServer(t, root, bin)
+
+	_, m := agentPostJSON(t, s, "/api/threads/create", map[string]any{"message": "failed request"})
+	id := m["id"].(string)
+	th := waitThreadIdle(t, s, id)
+	if th.Turns[0].Error == "" || th.SessionLive {
+		t.Fatalf("failed first turn should leave Pi non-live: %+v", th.Turns[0])
+	}
+	if code, _ := agentPostJSON(t, s, "/api/threads/send", map[string]any{"id": id, "message": "try again"}); code != 200 {
+		t.Fatalf("send = %d", code)
+	}
+	th = waitThreadIdle(t, s, id)
+	if th.Turns[1].Error != "" || !th.SessionLive {
+		t.Fatalf("successful retry should make Pi live: %+v", th.Turns[1])
+	}
+
+	sidData, err := os.ReadFile(sidLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sids := strings.Fields(string(sidData))
+	if len(sids) != 2 || sids[0] == "" || sids[0] != sids[1] || sids[0] != th.SessionID {
+		t.Fatalf("retry session ids = %q, thread = %q", sids, th.SessionID)
+	}
+	promptData, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts := strings.Split(strings.TrimSuffix(string(promptData), "\x1d"), "\x1d")
+	if len(prompts) != 2 {
+		t.Fatalf("recorded prompts = %q", prompts)
+	}
+	for _, want := range []string{"Earlier in this conversation", "User: failed request", "Assistant: Partial reply.", "try again"} {
+		if !strings.Contains(prompts[1], want) {
+			t.Fatalf("retry prompt missing %q:\n%s", want, prompts[1])
+		}
 	}
 }
 

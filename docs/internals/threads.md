@@ -41,15 +41,15 @@ A turn is a fresh process, so continuity is carried one of two ways:
 
 | Mode | Harnesses | How |
 | --- | --- | --- |
-| Native session | `claude`, `cursor-agent`, `agy`, `gemini` | px0 owns or tracks the session id. `claude`: `--session-id <uuid>` on the first turn, `--resume <uuid>` after. `agy`: captures `conversation_id` on first turn, then `--conversation <id>` every turn. `gemini`: `--session-id <uuid>` on first turn, `--resume <uuid>` after. `cursor-agent`: `create-chat` returns an id, then `--resume <id>` every turn. The harness keeps its own context, so a later turn sends only the new message. |
-| Replay | every other harness | Each turn's prompt carries the earlier turns as `User:` / `Assistant:` text, plus the files each turn changed, capped at `threadReplayMax` bytes (most recent kept). |
+| Native session | `claude`, `cursor-agent`, `agy`, `gemini`, `pi` | px0 owns or tracks the session id. `claude`: `--session-id <uuid>` on the first turn, `--resume <uuid>` after. `agy`: captures `conversation_id` on first turn, then `--conversation <id>` every turn. `gemini`: `--session-id <uuid>` on first turn, `--resume <uuid>` after. `cursor-agent`: `create-chat` returns an id, then `--resume <id>` every turn. `pi`: `--session-id <uuid>` on every turn, creating or reopening that session. Once live, the harness keeps its own context, so a later turn sends only the new message. |
+| Replay | `omp` and every other non-native harness | Each turn's prompt carries earlier turns as `User:` / `Assistant:` text, plus the files each turn changed, capped at `threadReplayMax` bytes (most recent kept). OMP's `--no-session` keeps each replay process ephemeral. |
 
 `threadArgv` injects the session flags right after the binary (flag order does not matter to these CLIs), so the preset argv, including the model flag and permission mode, is unchanged. Only harnesses whose flags were verified are in the native list; adding one is a case in `threadArgv` and `threadNative`.
 
 Two rules keep this honest:
 
 - **A session belongs to the harness that made it.** `SessionHarness` records the owner. Switching harness mid-thread clears the session, and the new harness is primed by replay.
-- **Only a live session is trusted.** `SessionLive` is set once the harness has really started the session (claude/agy/gemini reported a session id, or cursor-agent finished a turn). If a first turn failed before that, the next turn replays instead of resuming a session that may not exist.
+- **Only a live session is trusted.** `SessionLive` is set once the harness has really started the session (claude/agy/gemini reported a session id, or cursor-agent/pi finished a turn successfully). If a first turn failed before that, the next turn replays instead of trusting a session that may not exist.
 
 The anchor and ground rules ("you may read and edit any file, reply with a concise summary") go into the prompt only when the harness has no memory of them: the first turn, or a replay.
 
@@ -60,7 +60,7 @@ The anchor and ground rules ("you may read and edit any file, reply with a conci
 - `claude` (`parseClaudeEvent`): assistant text blocks and tool uses (`toolLabel`).
 - `agy` (`parseAgyEvent`): `step_update` text deltas stream tokens live; `step_update` tool calls stream step labels in real time.
 - `gemini` (`parseGeminiEvent`): assistant message deltas stream tokens live; `tool_use` events stream step labels in real time.
-- Every other harness has its stdout treated as the reply, line by line. stderr goes to a `tailBuffer` and is appended to the error only when the turn failed with no reply.
+- Every other harness, including Pi and OMP, has its stdout treated as the reply, line by line. Pi and OMP do not emit structured tool events in this mode; stderr goes to a `tailBuffer` and is appended to the error only when the turn failed with no reply.
 
 The feed is Server-Sent Events at `/api/threads/stream`:
 
@@ -125,7 +125,7 @@ A thread in a PR session carries `scope` (`pr`, `mine`, `selection`) and `scopeS
 
 ## 9. Limits
 
-- Only `claude` and `cursor-agent` resume natively. Others are replayed, and replay is capped at 16 KB of history.
+- `claude`, `cursor-agent`, `agy`, `gemini`, and `pi` use native sessions. OMP and other harnesses use replay, capped at 16 KB of history.
 - Reply streaming is per assistant message, not per token.
 - `cursor-agent`'s native path is built from its documented `create-chat` and `--resume` flags and was not run end to end here, since that harness needs a paid plan for named models.
 - Changes to gitignored files are invisible to `git status`, so they are not listed or reloaded.

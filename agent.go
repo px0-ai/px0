@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,299 +33,15 @@ const (
 	agentLogBytes = 32 << 10
 )
 
-// agentPreset is a harness px0 knows and the argv that runs it headless. Each
-// of these starts an interactive session by default and would sit forever
-// waiting for approval, so every preset carries the flag that turns that off
-// and the one that lets it apply edits without asking.
-type agentPreset struct {
-	Name         string
-	Args         []string
-	ModelFlag    string
-	DefaultModel string
-	Models       []string
-}
-
-var agentPresets = []agentPreset{
-	{
-		Name:         "claude",
-		Args:         []string{"claude", "--permission-mode", "acceptEdits", "-p", "{prompt}"},
-		ModelFlag:    "--model",
-		DefaultModel: "haiku",
-		Models:       []string{"haiku", "sonnet", "opus"},
-	},
-	{
-		Name:         "gemini",
-		Args:         []string{"gemini", "--approval-mode", "auto_edit", "-p", "{prompt}"},
-		ModelFlag:    "-m",
-		DefaultModel: "gemini-2.5-flash-lite",
-		Models:       []string{"gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"},
-	},
-	{
-		Name:         "cursor-agent",
-		Args:         []string{"cursor-agent", "--force", "-p", "{prompt}"},
-		ModelFlag:    "--model",
-		DefaultModel: "gemini-3.6-flash-minimal",
-		Models: []string{
-			"gemini-3.6-flash-minimal",
-			"gemini-3.6-flash-low",
-			"gemini-3.7-flash-low",
-			"gemini-3.8-flash-low",
-			"gpt-5.4-nano-none",
-			"gpt-5.4-mini-none",
-			"claude-sonnet-5-low",
-			"claude-opus-4-8-thinking-low",
-		},
-	},
-	{
-		Name:         "agy",
-		Args:         []string{"agy", "--dangerously-skip-permissions", "--mode", "accept-edits", "-p", "{prompt}"},
-		ModelFlag:    "--model",
-		DefaultModel: "gemini-3.6-flash-low",
-		Models: []string{
-			"gemini-3.6-flash-low",
-			"gemini-3.6-flash-medium",
-			"gemini-3.6-flash-high",
-			"gemini-3.7-flash-low",
-			"gemini-3.7-flash-medium",
-			"gemini-3.7-flash-high",
-			"gemini-3.8-flash-low",
-			"gemini-3.8-flash-medium",
-			"gemini-3.8-flash-high",
-			"gemini-3.1-pro-low",
-			"gemini-3.1-pro-high",
-		},
-	},
-	{
-		Name:         "opencode",
-		Args:         []string{"opencode", "run", "{prompt}"},
-		ModelFlag:    "-m",
-		DefaultModel: "opencode/big-pickle",
-		Models: []string{
-			"opencode/big-pickle",
-			"opencode/gpt-5-nano",
-			"opencode/minimax-m2.5-free",
-			"opencode/trinity-large-preview-free",
-			"github-copilot/claude-haiku-4.5",
-			"github-copilot/claude-sonnet-4.5",
-			"github-copilot/claude-opus-4.5",
-			"google/gemini-2.5-flash",
-			"google/gemini-2.5-pro",
-		},
-	},
-	{
-		Name:         "codex",
-		Args:         []string{"codex", "exec", "--ask-for-approval", "never", "{prompt}"},
-		ModelFlag:    "-m",
-		DefaultModel: "gpt-5-codex",
-		Models: []string{
-			"gpt-5-codex",
-			"gpt-5-mini",
-			"gpt-5.1-codex",
-			"gpt-5.1-codex-max",
-			"gpt-5.1-codex-mini",
-			"gpt-5.2-codex",
-			"gpt-4.1",
-			"o3-mini",
-			"o1",
-		},
-	},
-	{
-		Name:         "aider",
-		Args:         []string{"aider", "--yes-always", "--no-auto-commits", "--message", "{prompt}"},
-		ModelFlag:    "--model",
-		DefaultModel: "claude-3-7-sonnet",
-		Models: []string{
-			"claude-3-7-sonnet",
-			"claude-3-5-haiku",
-			"claude-3-opus",
-			"gpt-4o",
-			"gpt-4o-mini",
-			"o3-mini",
-			"gemini/gemini-2.5-flash",
-			"deepseek/deepseek-chat",
-			"ollama/qwen2.5-coder",
-		},
-	},
-	{
-		Name:         "goose",
-		Args:         []string{"goose", "run", "--no-session", "-t", "{prompt}"},
-		ModelFlag:    "--model",
-		DefaultModel: "gpt-4o",
-		Models: []string{
-			"gpt-4o",
-			"gpt-4o-mini",
-			"claude-3-5-sonnet",
-			"claude-3-5-haiku",
-			"gemini-2.5-flash",
-		},
-	},
-}
-
-var (
-	discoveredModelsMu sync.Mutex
-	discoveredModels   = map[string][]string{}
-	discoveringModels  = map[string]bool{}
-)
-
-func discoverHarnessModels(name, bin string, staticModels []string) []string {
-	discoveredModelsMu.Lock()
-	if cached, ok := discoveredModels[name]; ok {
-		discoveredModelsMu.Unlock()
-		return cached
-	}
-	isDiscovering := discoveringModels[name]
-	if !isDiscovering && bin != "" {
-		discoveringModels[name] = true
-		go runModelDiscovery(name, bin, staticModels)
-	}
-	discoveredModelsMu.Unlock()
-
-	return staticModels
-}
-
-func runModelDiscovery(name, bin string, staticModels []string) {
-	models := append([]string(nil), staticModels...)
-	switch name {
-	case "agy":
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, bin, "models").Output()
-		cancel()
-		if err == nil {
-			var list []string
-			scanner := bufio.NewScanner(bytes.NewReader(out))
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if strings.HasPrefix(line, "Fetching") || line == "" {
-					continue
-				}
-				parts := strings.Fields(line)
-				if len(parts) > 0 && !strings.Contains(parts[0], " ") {
-					list = append(list, parts[0])
-				}
-			}
-			if len(list) > 0 {
-				def := "gemini-3.6-flash-low"
-				reordered := []string{def}
-				for _, m := range list {
-					if m != def {
-						reordered = append(reordered, m)
-					}
-				}
-				models = reordered
-			}
-		}
-	case "cursor-agent":
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, bin, "--list-models").Output()
-		cancel()
-		if err == nil {
-			var list []string
-			scanner := bufio.NewScanner(bytes.NewReader(out))
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if line == "" || strings.HasPrefix(line, "Tip:") {
-					continue
-				}
-				parts := strings.SplitN(line, " - ", 2)
-				if len(parts) > 0 {
-					id := strings.TrimSpace(parts[0])
-					if id != "" && !strings.Contains(id, " ") {
-						list = append(list, id)
-					}
-				}
-			}
-			if len(list) > 0 {
-				def := "gemini-3.6-flash-minimal"
-				reordered := []string{def}
-				for _, m := range list {
-					if m != def {
-						reordered = append(reordered, m)
-					}
-				}
-				models = reordered
-			}
-		}
-	case "claude":
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		cmd := exec.CommandContext(ctx, bin, "-p", "/model")
-		cmd.Stdin = strings.NewReader("")
-		out, err := cmd.Output()
-		cancel()
-		if err == nil {
-			var list []string
-			text := string(out)
-			if idx := strings.Index(text, "Available:"); idx != -1 {
-				avail := text[idx+len("Available:"):]
-				if dot := strings.IndexByte(avail, '.'); dot != -1 {
-					avail = avail[:dot]
-				}
-				for _, part := range strings.Split(avail, ",") {
-					m := strings.TrimSpace(part)
-					m = strings.TrimPrefix(m, "or ")
-					if m != "" && !strings.Contains(m, " ") {
-						list = append(list, m)
-					}
-				}
-			}
-			if len(list) > 0 {
-				def := "haiku"
-				reordered := []string{}
-				hasDef := false
-				for _, m := range list {
-					if m == def {
-						hasDef = true
-					} else {
-						reordered = append(reordered, m)
-					}
-				}
-				if hasDef {
-					models = append([]string{def}, reordered...)
-				} else {
-					models = list
-				}
-			}
-		}
-	case "opencode":
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		out, err := exec.CommandContext(ctx, bin, "models").Output()
-		cancel()
-		if err == nil {
-			var list []string
-			scanner := bufio.NewScanner(bytes.NewReader(out))
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if line == "" || strings.Contains(line, " ") {
-					continue
-				}
-				list = append(list, line)
-			}
-			if len(list) > 0 {
-				def := "opencode/big-pickle"
-				reordered := []string{def}
-				for _, m := range list {
-					if m != def {
-						reordered = append(reordered, m)
-					}
-				}
-				models = reordered
-			}
-		}
-	}
-
-	discoveredModelsMu.Lock()
-	discoveredModels[name] = models
-	discoveringModels[name] = false
-	discoveredModelsMu.Unlock()
-}
-
 // agentHarness is one row of the picker.
 type agentHarness struct {
-	Name      string   `json:"name"`
-	Cmd       string   `json:"cmd"`
-	Installed bool     `json:"installed"`
-	Path      string   `json:"path,omitempty"`
-	Models    []string `json:"models,omitempty"`
-	Model     string   `json:"model,omitempty"`
+	Name        string   `json:"name"`
+	Cmd         string   `json:"cmd"`
+	Installed   bool     `json:"installed"`
+	Path        string   `json:"path,omitempty"`
+	Models      []string `json:"models,omitempty"`
+	ModelStatus string   `json:"modelStatus"`
+	Model       string   `json:"model,omitempty"`
 }
 
 // agentRange anchors a range on a file for overlap checks.
@@ -433,14 +147,16 @@ type agentManager struct {
 	root string
 	lsp  *lspManager
 
-	mu       sync.Mutex
-	selected string            // preset name, or the template itself when pinned
-	args     []string          // resolved argv, nil when nothing is selected
-	pinned   bool              // -agent was given, so the UI cannot change it
-	models   map[string]string // harness name -> selected model
-	jobs     map[int64]*agentJob
-	seq      int64
-	onEdit   func()
+	mu        sync.Mutex
+	selected  string
+	args      []string
+	pinned    bool
+	models    map[string]string // pending persisted overrides
+	effective map[string]string // validated overrides only
+	catalog   modelCatalog
+	jobs      map[int64]*agentJob
+	seq       int64
+	onEdit    func()
 
 	// Set by the thread manager: inline and batch edits run as threads.
 	threadJob    func(id int64) *agentJob // id 0 means the most recent
@@ -453,35 +169,26 @@ type agentManager struct {
 // stale settings file should just leave nothing selected.
 func newAgentManager(root, flagSpec string, lsp *lspManager) (*agentManager, error) {
 	m := &agentManager{
-		root:   root,
-		lsp:    lsp,
-		models: map[string]string{},
+		root: root, lsp: lsp,
+		models: map[string]string{}, effective: map[string]string{},
 	}
 	s := readSettings()
-	if s.Models != nil {
-		for k, v := range s.Models {
+	for k, v := range s.Models {
+		if v != "" {
 			m.models[k] = v
 		}
 	}
-
 	if spec := strings.TrimSpace(flagSpec); spec != "" {
-		name, args, chosenModel, err := resolveAgentSpec(spec, m.models[spec])
+		name, args, _, err := resolveAgentSpec(spec, "")
 		if err != nil {
 			return nil, err
 		}
 		m.selected, m.args, m.pinned = name, args, true
-		if chosenModel != "" {
-			m.models[name] = chosenModel
-		}
 		return m, nil
 	}
-
 	if s.Agent != "" {
-		if name, args, chosenModel, err := resolveAgentSpec(s.Agent, m.models[s.Agent]); err == nil {
+		if name, args, _, err := resolveAgentSpec(s.Agent, ""); err == nil {
 			m.selected, m.args = name, args
-			if chosenModel != "" {
-				m.models[name] = chosenModel
-			}
 		}
 	}
 	return m, nil
@@ -502,9 +209,6 @@ func resolveAgentSpec(spec, model string) (string, []string, string, error) {
 		if strings.EqualFold(spec, p.Name) {
 			name = p.Name
 			chosenModel = model
-			if chosenModel == "" {
-				chosenModel = p.DefaultModel
-			}
 			promptIdx := -1
 			for i, arg := range p.Args {
 				if arg == "{prompt}" {
@@ -563,37 +267,52 @@ func agentPresetNames() []string {
 
 // Detect reports every harness px0 knows and whether it is installed right
 // now, so a tool installed since startup shows up without a restart.
-func (m *agentManager) Detect() []agentHarness {
-	m.mu.Lock()
-	savedModels := make(map[string]string, len(m.models))
-	for k, v := range m.models {
-		savedModels[k] = v
-	}
-	m.mu.Unlock()
-
+func (m *agentManager) Detect(refresh bool) []agentHarness {
 	out := make([]agentHarness, 0, len(agentPresets))
 	for _, p := range agentPresets {
 		bin, ok := lookPathIn(p.Args[0], lspBinDirs())
-		models := discoverHarnessModels(p.Name, bin, p.Models)
-		curModel := savedModels[p.Name]
-		if curModel == "" {
-			curModel = p.DefaultModel
+		models, status := m.catalog.Snapshot(p, bin, refresh)
+		m.mu.Lock()
+		model := ""
+		if ok && status == modelDiscoveryReady {
+			for _, id := range models {
+				if id == m.models[p.Name] {
+					model = id
+					break
+				}
+			}
 		}
-
-		cmdStr := strings.Join(p.Args, " ")
-		if _, args, _, err := resolveAgentSpec(p.Name, curModel); err == nil {
-			cmdStr = strings.Join(args, " ")
+		if status == modelDiscoveryReady && m.models[p.Name] != "" && model == "" {
+			delete(m.models, p.Name)
+			saved := make(map[string]string, len(m.models))
+			for k, v := range m.models {
+				saved[k] = v
+			}
+			var savedValue any = saved
+			if len(saved) == 0 {
+				savedValue = nil
+			}
+			if err := updateSettingsMap(map[string]any{"models": savedValue}); err != nil {
+				uiStatus("err", "agent: failed to save model catalog", err.Error(), 0, os.Stdout)
+			}
 		}
-
-		h := agentHarness{
-			Name:      p.Name,
-			Cmd:       cmdStr,
-			Installed: ok,
-			Path:      bin,
-			Models:    models,
-			Model:     curModel,
+		if model == "" {
+			delete(m.effective, p.Name)
+		} else {
+			m.effective[p.Name] = model
 		}
-		out = append(out, h)
+		if m.selected == p.Name {
+			if _, args, _, err := resolveAgentSpec(p.Name, model); err == nil {
+				m.args = args
+			} else {
+				m.args = nil
+			}
+		}
+		m.mu.Unlock()
+		out = append(out, agentHarness{
+			Name: p.Name, Cmd: strings.Join(p.Args, " "), Installed: ok,
+			Path: bin, Models: models, ModelStatus: string(status), Model: model,
+		})
 	}
 	return out
 }
@@ -616,7 +335,7 @@ func (m *agentManager) Model() string {
 	if m.selected == "" {
 		return ""
 	}
-	return m.models[m.selected]
+	return m.effective[m.selected]
 }
 
 // current returns the selected harness, its headless argv and its model, read
@@ -627,7 +346,7 @@ func (m *agentManager) current() (string, []string, string) {
 	if m.args == nil {
 		return "", nil, ""
 	}
-	return m.selected, append([]string(nil), m.args...), m.models[m.selected]
+	return m.selected, append([]string(nil), m.args...), m.effective[m.selected]
 }
 
 func (m *agentManager) Pinned() bool {
@@ -639,8 +358,11 @@ func (m *agentManager) Pinned() bool {
 	return m.pinned
 }
 
-// Select remembers a harness for this workspace and every later run. Passing an
-// empty name turns editing back off.
+var errAgentModelsLoading = errors.New("agent models are still loading")
+
+// Select persists a harness and an optional, catalog-validated model override.
+// Omitting model retains an effective override; an explicit empty model clears
+// both pending and effective choices.
 func (m *agentManager) Select(name string, modelOpt ...string) error {
 	m.mu.Lock()
 	if m.pinned {
@@ -656,17 +378,45 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 		m.mu.Unlock()
 		return writeSettings(settings{})
 	}
-
+	modelSupplied := len(modelOpt) > 0
 	reqModel := ""
-	if len(modelOpt) > 0 {
+	if modelSupplied {
 		reqModel = strings.TrimSpace(modelOpt[0])
+	} else {
+		m.mu.Lock()
+		reqModel = m.effective[name]
+		m.mu.Unlock()
 	}
-	m.mu.Lock()
-	if reqModel == "" {
-		reqModel = m.models[name]
+	if reqModel != "" {
+		var preset *agentPreset
+		for i := range agentPresets {
+			if strings.EqualFold(name, agentPresets[i].Name) {
+				preset = &agentPresets[i]
+				break
+			}
+		}
+		if preset == nil {
+			return fmt.Errorf("model overrides require an installed supported harness")
+		}
+		bin, ok := lookPathIn(preset.Args[0], lspBinDirs())
+		if !ok {
+			return fmt.Errorf("%s is not installed", preset.Name)
+		}
+		models, status := m.catalog.Snapshot(*preset, bin, false)
+		if status == modelDiscoveryLoading {
+			return errAgentModelsLoading
+		}
+		found := false
+		for _, id := range models {
+			if id == reqModel && status == modelDiscoveryReady {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("model %q is not available for %s", reqModel, preset.Name)
+		}
 	}
-	m.mu.Unlock()
-
 	display, args, chosenModel, err := resolveAgentSpec(name, reqModel)
 	if err != nil {
 		uiStatus("err", fmt.Sprintf("agent: failed to select harness %q", name), err.Error(), 0, os.Stdout)
@@ -674,16 +424,24 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 	}
 	m.mu.Lock()
 	m.selected, m.args = display, args
-	if m.models == nil {
-		m.models = map[string]string{}
-	}
-	if chosenModel != "" {
+	if modelSupplied && reqModel == "" {
+		delete(m.models, display)
+		delete(m.effective, display)
+	} else if chosenModel != "" {
 		m.models[display] = chosenModel
+		m.effective[display] = chosenModel
 	}
 	savedModels := make(map[string]string, len(m.models))
 	for k, v := range m.models {
 		savedModels[k] = v
 	}
+	updates := map[string]any{"agent": name}
+	if len(savedModels) == 0 {
+		updates["models"] = nil
+	} else {
+		updates["models"] = savedModels
+	}
+	saveErr := updateSettingsMap(updates)
 	m.mu.Unlock()
 
 	modelNote := ""
@@ -691,9 +449,7 @@ func (m *agentManager) Select(name string, modelOpt ...string) error {
 		modelNote = fmt.Sprintf(" (%s)", chosenModel)
 	}
 	uiStatus("ok", "agent", fmt.Sprintf("%s%s", display, modelNote), 0, os.Stdout)
-	// Persist the spec as given, not the display name: a command template
-	// shortens to its binary for display and would not survive the round trip.
-	return writeSettings(settings{Agent: name, Models: savedModels})
+	return saveErr
 }
 
 // Job returns a snapshot of job id, or of the most recently started job when
@@ -919,8 +675,8 @@ func (m *agentManager) StartBatch(items []agentBatchItem, force bool) (*agentJob
 	}
 	m.jobs[job.ID] = job
 	modelStr := ""
-	if m.models != nil && m.models[name] != "" {
-		modelStr = fmt.Sprintf(" (%s)", m.models[name])
+	if m.effective[name] != "" {
+		modelStr = fmt.Sprintf(" (%s)", m.effective[name])
 	}
 	m.mu.Unlock()
 
@@ -973,8 +729,8 @@ func (m *agentManager) StartPrompt(label, prompt string) (*agentJob, error) {
 	}
 	m.jobs[job.ID] = job
 	modelStr := ""
-	if m.models != nil && m.models[name] != "" {
-		modelStr = fmt.Sprintf(" (%s)", m.models[name])
+	if m.effective[name] != "" {
+		modelStr = fmt.Sprintf(" (%s)", m.effective[name])
 	}
 	m.mu.Unlock()
 
@@ -1307,7 +1063,7 @@ func (s *Server) handleAgentHarnesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"harnesses": s.agent.Detect(),
+		"harnesses": s.agent.Detect(r.URL.Query().Get("refresh") == "1"),
 		"selected":  s.agent.Name(),
 		"model":     s.agent.Model(),
 		"pinned":    s.agent.Pinned(),
@@ -1323,17 +1079,20 @@ func (s *Server) handleAgentSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.URL.Query().Get("name")
-	model := r.URL.Query().Get("model")
-	if err := s.agent.Select(name, model); err != nil {
+	var modelOpt []string
+	if models, ok := r.URL.Query()["model"]; ok {
+		modelOpt = models
+	}
+	if err := s.agent.Select(name, modelOpt...); err != nil {
 		code := 400
-		if errors.Is(err, errAgentBusy) {
+		if errors.Is(err, errAgentBusy) || errors.Is(err, errAgentModelsLoading) {
 			code = http.StatusConflict
 		}
 		fail(w, code, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{
-		"harnesses": s.agent.Detect(),
+		"harnesses": s.agent.Detect(false),
 		"selected":  s.agent.Name(),
 		"model":     s.agent.Model(),
 		"pinned":    s.agent.Pinned(),

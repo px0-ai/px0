@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,66 @@ func isolateSettings(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	return dir
+}
+
+func writeAgentExecutable(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func stubOtherAgentExecutables(t *testing.T, dir, keep string) {
+	t.Helper()
+	for _, preset := range agentPresets {
+		if preset.Args[0] != keep {
+			writeAgentExecutable(t, dir, preset.Args[0], "exit 1\n")
+		}
+	}
+}
+
+func harnessNamed(t *testing.T, rows []agentHarness, name string) agentHarness {
+	t.Helper()
+	for _, row := range rows {
+		if row.Name == name {
+			return row
+		}
+	}
+	t.Fatalf("harness %q not found in %+v", name, rows)
+	return agentHarness{}
+}
+
+func waitHarnessStatus(t *testing.T, m *agentManager, name, want string) agentHarness {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		row := harnessNamed(t, m.Detect(false), name)
+		if row.ModelStatus == want {
+			return row
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	row := harnessNamed(t, m.Detect(false), name)
+	t.Fatalf("%s model status = %q, want %q", name, row.ModelStatus, want)
+	return agentHarness{}
+}
+
+func responseHarnessNamed(t *testing.T, body map[string]any, name string) map[string]any {
+	t.Helper()
+	rows, ok := body["harnesses"].([]any)
+	if !ok {
+		t.Fatalf("harnesses response = %#v", body["harnesses"])
+	}
+	for _, raw := range rows {
+		row, ok := raw.(map[string]any)
+		if ok && row["name"] == name {
+			return row
+		}
+	}
+	t.Fatalf("harness %q not found in response %#v", name, body)
+	return nil
 }
 
 // agentPost speaks the way the browser does: POST, with an Origin that matches
@@ -135,13 +196,20 @@ func TestAgentSpecResolution(t *testing.T) {
 	}
 }
 
-func TestAgentDetectListsKnownHarnesses(t *testing.T) {
+func TestAgentDetectListsKnownHarnessesWithInstalledPaths(t *testing.T) {
 	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	wantPaths := make(map[string]string, len(agentPresets))
+	for _, preset := range agentPresets {
+		wantPaths[preset.Name] = writeAgentExecutable(t, dir, preset.Args[0], "exit 1\n")
+	}
+
 	m, err := newAgentManager(t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := m.Detect()
+	got := m.Detect(false)
 	if len(got) != len(agentPresets) {
 		t.Fatalf("detected %d rows, want one per preset (%d)", len(got), len(agentPresets))
 	}
@@ -149,11 +217,11 @@ func TestAgentDetectListsKnownHarnesses(t *testing.T) {
 		if h.Name != agentPresets[i].Name {
 			t.Fatalf("row %d = %q, want %q", i, h.Name, agentPresets[i].Name)
 		}
-		if !strings.Contains(h.Cmd, "{prompt}") {
-			t.Fatalf("%s cmd should show the template, got %q", h.Name, h.Cmd)
+		if !h.Installed || h.Path != wantPaths[h.Name] {
+			t.Errorf("%s installed/path = %v %q, want true %q", h.Name, h.Installed, h.Path, wantPaths[h.Name])
 		}
-		if h.Installed && h.Path == "" {
-			t.Fatalf("%s reported installed with no path", h.Name)
+		if !strings.Contains(h.Cmd, "{prompt}") {
+			t.Errorf("%s cmd should show the template, got %q", h.Name, h.Cmd)
 		}
 	}
 }
@@ -372,26 +440,6 @@ func TestAgentAllowsEditOverUncommittedFileWithoutForce(t *testing.T) {
 	}
 }
 
-func TestAgentModelSelectionAndDefaults(t *testing.T) {
-	isolateSettings(t)
-	m, err := newAgentManager(t.TempDir(), "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := m.Detect()
-	for _, h := range rows {
-		if len(h.Models) == 0 {
-			t.Fatalf("%s should list models", h.Name)
-		}
-		if h.Model == "" {
-			t.Fatalf("%s should have a default model", h.Name)
-		}
-		if h.Model != h.Models[0] {
-			t.Fatalf("%s default model %q != least capable model %q", h.Name, h.Model, h.Models[0])
-		}
-	}
-}
-
 func TestPresetArgvOrder(t *testing.T) {
 	for _, p := range agentPresets {
 		n := len(p.Args)
@@ -401,55 +449,234 @@ func TestPresetArgvOrder(t *testing.T) {
 		if p.Args[n-1] != "{prompt}" {
 			t.Fatalf("preset %s args %v: want {prompt} at the very end", p.Name, p.Args)
 		}
-
-		// When resolved with default model, {prompt} must remain at the very end
-		_, resolved, _, err := resolveAgentSpec(p.Name, "")
-		if err != nil {
-			continue // tool may not be installed in test env
-		}
-		rn := len(resolved)
-		if rn < 2 || resolved[rn-1] != "{prompt}" {
-			t.Fatalf("resolved %s args %v: want {prompt} at the very end", p.Name, resolved)
-		}
 	}
 }
 
-func TestClaudeModelDiscovery(t *testing.T) {
+func TestSavedModelPromotesOnlyAfterReadyDiscovery(t *testing.T) {
+	isolateSettings(t)
 	dir := t.TempDir()
-	fakeClaude := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\necho 'Current model: Sonnet 5'\necho 'Usage: /model <name>. Available: sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID.'\n"
-	if err := os.WriteFile(fakeClaude, []byte(script), 0o755); err != nil {
+	t.Setenv("PATH", dir)
+	writeAgentExecutable(t, dir, "pi", `if [ "$1" = "--list-models" ]; then
+	printf 'provider model context\nanthropic claude-sonnet 200k\n'
+fi
+`)
+	stubOtherAgentExecutables(t, dir, "pi")
+	if err := writeSettings(settings{
+		Agent:  "pi",
+		Models: map[string]string{"pi": "anthropic/claude-sonnet"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	discoveredModelsMu.Lock()
-	delete(discoveredModels, "claude")
-	delete(discoveringModels, "claude")
-	discoveredModelsMu.Unlock()
-
-	runModelDiscovery("claude", fakeClaude, []string{"haiku", "sonnet", "opus"})
-
-	discoveredModelsMu.Lock()
-	models := discoveredModels["claude"]
-	discoveredModelsMu.Unlock()
-
-	if len(models) == 0 {
-		t.Fatal("expected discovered models for claude, got none")
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if models[0] != "haiku" {
-		t.Fatalf("expected least capable default 'haiku' at index 0, got %q", models[0])
+	if m.Name() != "pi" {
+		t.Fatalf("restored harness = %q, want pi", m.Name())
 	}
-	// Check that fable, best, sonnet[1m] etc are parsed
-	foundFable := false
-	for _, m := range models {
-		if m == "fable" {
-			foundFable = true
-			break
+	if m.Model() != "" || strings.Contains(strings.Join(m.args, " "), "--model") {
+		t.Fatalf("saved model was dispatched before validation: model=%q argv=%v", m.Model(), m.args)
+	}
+	first := harnessNamed(t, m.Detect(false), "pi")
+	if first.ModelStatus != "loading" || first.Model != "" {
+		t.Fatalf("first Pi snapshot = %+v, want loading with no effective model", first)
+	}
+	ready := waitHarnessStatus(t, m, "pi", "ready")
+	if !reflect.DeepEqual(ready.Models, []string{"anthropic/claude-sonnet"}) {
+		t.Fatalf("discovered models = %v", ready.Models)
+	}
+	if m.Model() != "anthropic/claude-sonnet" {
+		t.Fatalf("promoted model = %q", m.Model())
+	}
+	if got := strings.Join(m.args, " "); !strings.Contains(got, "--model anthropic/claude-sonnet -p {prompt}") {
+		t.Fatalf("promoted Pi argv = %q", got)
+	}
+}
+
+func TestSavedModelIsPrunedAfterAuthoritativeDiscovery(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	writeAgentExecutable(t, dir, "pi", `printf 'provider model context\ngoogle gemini-flash 1m\n'`)
+	stubOtherAgentExecutables(t, dir, "pi")
+	if err := writeSettings(settings{
+		Agent:  "pi",
+		Models: map[string]string{"pi": "anthropic/removed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitHarnessStatus(t, m, "pi", "ready")
+	if m.Name() != "pi" || m.Model() != "" || strings.Contains(strings.Join(m.args, " "), "--model") {
+		t.Fatalf("invalid saved model affected selected harness: name=%q model=%q argv=%v", m.Name(), m.Model(), m.args)
+	}
+	if _, ok := readSettings().Models["pi"]; ok {
+		t.Fatalf("absent model remains persisted: %v", readSettings().Models)
+	}
+}
+
+func TestFailedDiscoveryRetainsPendingSavedModel(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	writeAgentExecutable(t, dir, "pi", "exit 7\n")
+	stubOtherAgentExecutables(t, dir, "pi")
+	if err := writeSettings(settings{
+		Agent:  "pi",
+		Models: map[string]string{"pi": "anthropic/retry-later"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitHarnessStatus(t, m, "pi", "failed")
+	if len(failed.Models) != 0 || m.Model() != "" || strings.Contains(strings.Join(m.args, " "), "--model") {
+		t.Fatalf("failed discovery must use harness default: row=%+v model=%q argv=%v", failed, m.Model(), m.args)
+	}
+	if got := readSettings().Models["pi"]; got != "anthropic/retry-later" {
+		t.Fatalf("pending model after failure = %q, want retained", got)
+	}
+}
+
+func TestExplicitHarnessDefaultClearsSavedModel(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	writeAgentExecutable(t, dir, "pi", `printf 'provider model context\nanthropic claude-sonnet 200k\n'`)
+	stubOtherAgentExecutables(t, dir, "pi")
+	if err := writeSettings(settings{
+		Agent:  "pi",
+		Models: map[string]string{"pi": "anthropic/claude-sonnet"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitHarnessStatus(t, m, "pi", "ready")
+	if err := m.Select("pi", ""); err != nil {
+		t.Fatal(err)
+	}
+	if m.Model() != "" || strings.Contains(strings.Join(m.args, " "), "--model") {
+		t.Fatalf("Harness default did not clear effective model: model=%q argv=%v", m.Model(), m.args)
+	}
+	if _, ok := readSettings().Models["pi"]; ok {
+		t.Fatalf("Harness default did not clear persisted model: %v", readSettings().Models)
+	}
+}
+
+func TestAgentSelectEndpointRejectsLoadingAndUnlistedModels(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+"/bin"+string(os.PathListSeparator)+"/usr/bin")
+	writeAgentExecutable(t, dir, "pi", `sleep 0.1
+printf 'provider model context\nanthropic listed 200k\n'
+`)
+	stubOtherAgentExecutables(t, dir, "pi")
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(NewIndex(t.TempDir()), nil)
+	s.SetAgent(m)
+	t.Cleanup(func() {
+		if s.gitWatcher != nil {
+			s.gitWatcher.Stop()
+		}
+	})
+
+	if code, _ := agentPost(t, s, "/api/agent/select?name=pi&model=anthropic/listed"); code != http.StatusConflict {
+		t.Fatalf("select while discovering = %d, want 409", code)
+	}
+	waitHarnessStatus(t, m, "pi", "ready")
+	if code, _ := agentPost(t, s, "/api/agent/select?name=pi&model=anthropic/missing"); code != http.StatusBadRequest {
+		t.Fatalf("select unlisted model = %d, want 400", code)
+	}
+	if code, _ := agentPost(t, s, "/api/agent/select?name=pi&model=anthropic/listed"); code != http.StatusOK {
+		t.Fatalf("select listed model = %d, want 200", code)
+	}
+}
+
+func TestAgentHarnessEndpointReportsDiscoveryAndRefresh(t *testing.T) {
+	isolateSettings(t)
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+"/bin"+string(os.PathListSeparator)+"/usr/bin")
+	modelsFile := filepath.Join(dir, "models")
+	writeModels := func(model string) {
+		t.Helper()
+		body := "provider model context\nanthropic " + model + " 200k\n"
+		if err := os.WriteFile(modelsFile, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if !foundFable {
-		t.Fatalf("expected 'fable' in discovered models: %v", models)
+	writeModels("first")
+	writeAgentExecutable(t, dir, "pi", fmt.Sprintf(`sleep 0.05
+while IFS= read -r line; do
+	printf '%%s\n' "$line"
+done < %q
+`, modelsFile))
+	stubOtherAgentExecutables(t, dir, "pi")
+
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
+	s := NewServer(NewIndex(t.TempDir()), nil)
+	s.SetAgent(m)
+	t.Cleanup(func() {
+		if s.gitWatcher != nil {
+			s.gitWatcher.Stop()
+		}
+	})
+
+	code, body := get(t, s, "/api/agent/harnesses")
+	if code != http.StatusOK {
+		t.Fatalf("initial harnesses = %d %v", code, body)
+	}
+	if row := responseHarnessNamed(t, body, "pi"); row["modelStatus"] != "loading" {
+		t.Fatalf("initial Pi row = %#v, want loading", row)
+	}
+	waitEndpoint := func(wantModel string) map[string]any {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			code, got := get(t, s, "/api/agent/harnesses")
+			if code != http.StatusOK {
+				t.Fatalf("harnesses = %d %v", code, got)
+			}
+			row := responseHarnessNamed(t, got, "pi")
+			if row["modelStatus"] == "ready" {
+				models, ok := row["models"].([]any)
+				if !ok || len(models) != 1 || models[0] != wantModel {
+					t.Fatalf("ready Pi models = %#v, want [%q]", row["models"], wantModel)
+				}
+				return row
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("Pi endpoint did not become ready with %q", wantModel)
+		return nil
+	}
+	waitEndpoint("anthropic/first")
+
+	writeModels("second")
+	code, body = get(t, s, "/api/agent/harnesses?refresh=1")
+	if code != http.StatusOK {
+		t.Fatalf("refresh harnesses = %d %v", code, body)
+	}
+	if row := responseHarnessNamed(t, body, "pi"); row["modelStatus"] != "loading" {
+		t.Fatalf("refresh Pi row = %#v, want loading", row)
+	}
+	waitEndpoint("anthropic/second")
 }
 
 // Editing in the diff view means editing a file that is already modified. Its
@@ -665,41 +892,56 @@ func TestShellQuoteAndCommand(t *testing.T) {
 	}
 }
 
-func TestAllPresetArgvFormatting(t *testing.T) {
+func TestCodexExecUsesSupportedApprovalAndWorkspaceSandbox(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, argv, _, err := resolveAgentSpec("codex", "gpt-5-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(dir, "codex"), "-a", "never", "exec", "--sandbox", "workspace-write", "-m", "gpt-5-mini", "{prompt}"}
+	if !reflect.DeepEqual(argv, want) {
+		t.Fatalf("codex argv = %q, want %q", argv, want)
+	}
+}
+
+func TestAllPresetDefaultsOmitModelFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
 	for _, p := range agentPresets {
-		binPath := filepath.Join(dir, p.Args[0])
-		if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-			t.Fatal(err)
-		}
+		writeAgentExecutable(t, dir, p.Args[0], "exit 0\n")
 	}
 
 	for _, p := range agentPresets {
 		name, resolved, model, err := resolveAgentSpec(p.Name, "")
 		if err != nil {
-			t.Fatalf("resolveAgentSpec(%q) error: %v", p.Name, err)
+			t.Fatalf("resolveAgentSpec(%q): %v", p.Name, err)
 		}
-		if name != p.Name {
-			t.Errorf("name = %q, want %q", name, p.Name)
-		}
-		if model != p.DefaultModel {
-			t.Errorf("model = %q, want %q", model, p.DefaultModel)
+		if name != p.Name || model != "" {
+			t.Errorf("%s resolved name/model = %q %q, want %q and Harness default", p.Name, name, model, p.Name)
 		}
 		if resolved[len(resolved)-1] != "{prompt}" {
 			t.Errorf("%s final arg = %q, want {prompt}", p.Name, resolved[len(resolved)-1])
 		}
-		// Ensure model flag was inserted properly
-		hasModel := false
-		for i, a := range resolved {
-			if a == p.ModelFlag && i+1 < len(resolved) && resolved[i+1] == p.DefaultModel {
-				hasModel = true
-				break
+		for _, arg := range resolved {
+			if p.ModelFlag != "" && arg == p.ModelFlag {
+				t.Errorf("%s default argv %v contains model flag %q", p.Name, resolved, p.ModelFlag)
 			}
 		}
-		if !hasModel {
-			t.Errorf("%s resolved args %v missing model flag %q %q", p.Name, resolved, p.ModelFlag, p.DefaultModel)
-		}
+	}
+
+	_, explicit, model, err := resolveAgentSpec("pi", "anthropic/claude-sonnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "anthropic/claude-sonnet" {
+		t.Fatalf("explicit Pi model = %q", model)
+	}
+	if got, want := strings.Join(explicit[1:], " "), "--approve --model anthropic/claude-sonnet -p {prompt}"; got != want {
+		t.Errorf("Pi explicit-model argv = %q, want %q", got, want)
 	}
 }
 
@@ -953,6 +1195,3 @@ func TestCommitMessagePrompt(t *testing.T) {
 		t.Errorf("prompt contains file beyond 100:\n%s", p2)
 	}
 }
-
-
-
