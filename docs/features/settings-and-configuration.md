@@ -58,6 +58,12 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `github.token` | GitHub | `""` | any string | Personal access token for `px0 pr` review; takes precedence over `GITHUB_TOKEN` and `gh auth token`. Masked in the Settings UI. |
 | `server.basePath` | Server | `"/"` | any path prefix (e.g. `"/rev-123/"`) | Base URL path prefix to serve endpoints and assets from. Overridden by the `-base-path` CLI flag. |
 
+Stable workspace ports are enabled by default. Assignments are stored outside
+the workspace in `~/.px0/ports.json` (or
+`$XDG_CONFIG_HOME/px0/ports.json`) and are keyed by the canonical workspace
+path. `-stable-port` is an explicit alias, and `-reuse` opens an already-running
+instance for that workspace. Use `-port 0` to opt into an OS-assigned port.
+
 ---
 
 ## Accessing Settings

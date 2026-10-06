@@ -50,7 +50,7 @@ sequenceDiagram
 ### Key Stages in [`main.go`](../../main.go)
 
 1. Target Resolution: Directories become workspace roots. For a file target, its repository or project root is detected as the workspace, and its relative path (with optional line number) is retained for the initial browser tab.
-1. Socket Binding: `listen(*host, *port)` binds an ephemeral or user-specified TCP socket immediately.
+1. Socket Binding: with no explicit `-port` flag, px0 acquires the per-user port-registry lock, reuses the workspace assignment from `~/.px0/ports.json`, or allocates and atomically persists a free port in the `7800`–`7899` range before continuing. Explicit `-port` values retain the legacy listener behavior; `-port 0` opts into an OS-assigned port.
 1. Network URL Discovery: When the listener binds to `0.0.0.0`, `net.InterfaceAddrs()` supplies the host's interface addresses. px0 keeps unique non-loopback IPv4 addresses, sorts them for deterministic output, and prints each with the listener's final port. Initial file and line query parameters are preserved in every advertised URL.
 1. Instant Root Tree Extraction: Before descending into subdirectories, `ix.Build()` extracts and populates the root directory entries (`dir=""`), publishing them directly to `ix.children[""]`. When the browser makes its initial request to `/api/tree`, it immediately renders the root tree nodes without waiting for the deep repository scan to finish.
 
