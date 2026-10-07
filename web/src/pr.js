@@ -98,13 +98,22 @@ async function refreshComments() {
   }
 }
 
+function prProvider(prMeta = meta || S.meta?.pr) {
+  if (prMeta?.provider) return prMeta.provider;
+  if (prMeta?.url && /bitbucket\.org/i.test(prMeta.url)) return 'bitbucket';
+  return 'github';
+}
+
 function renderBar() {
   const b = prBar();
   if (!b || !meta) return;
   b.hidden = false;
   $('#pr-badge').textContent = '#' + meta.number;
   const link = $('#pr-link');
-  if (link) link.href = meta.url || '#';
+  if (link) {
+    link.href = meta.url || '#';
+    link.title = prProvider(meta) === 'bitbucket' ? 'Open on Bitbucket' : 'Open on GitHub';
+  }
   const mb = $('#pr-merged-badge');
   if (mb) mb.hidden = !meta.merged;
   $('#pr-title').textContent = meta.title;
@@ -114,7 +123,14 @@ function renderBar() {
     ? (comments.length + (comments.length === 1 ? ' draft comment' : ' draft comments'))
     : '';
   const ro = $('#pr-readonly-note');
-  if (ro) ro.hidden = !meta.readOnly;
+  if (ro) {
+    ro.hidden = !meta.readOnly;
+    const isBitbucket = prProvider(meta) === 'bitbucket';
+    ro.textContent = isBitbucket ? 'No Bitbucket token \u2014 click to connect' : 'No GitHub token \u2014 click to connect';
+    ro.title = isBitbucket
+      ? 'Set BITBUCKET_TOKEN -- or click to connect'
+      : "Set GITHUB_TOKEN, set GH_TOKEN, or run 'gh auth login' -- or click to connect";
+  }
   const dw = $('#pr-diff-warning');
   if (dw) {
     dw.hidden = !meta.diffBaseWarning;
@@ -132,18 +148,27 @@ function renderBar() {
   const cmtBtn = $('#pr-submit-comment');
   if (cmtBtn) {
     cmtBtn.disabled = false;
+    const isBitbucket = prProvider(meta) === 'bitbucket';
     cmtBtn.title = meta.readOnly
-      ? 'No GitHub token configured -- click to connect and submit'
+      ? (isBitbucket ? 'No Bitbucket token configured -- click to connect and submit' : 'No GitHub token configured -- click to connect and submit')
       : 'Submit review with drafts, without approval or change requests';
   }
   const composeEl = $('#pr-issue-compose');
   if (composeEl) composeEl.hidden = false;
 }
 
-export function nudgeGitHubToken() {
-  showToast('!', 'No GitHub token configured: set GITHUB_TOKEN, set GH_TOKEN, or run `gh auth login` -- or connect in Settings.', 5000);
-  openSettings('ui', 'GitHub', 'github.token');
+export function nudgeToken(prMeta = meta || S.meta?.pr) {
+  const isBitbucket = prProvider(prMeta) === 'bitbucket';
+  if (isBitbucket) {
+    showToast('!', 'No Bitbucket token configured: set BITBUCKET_TOKEN -- or connect in Settings.', 5000);
+    openSettings('ui', 'Bitbucket', 'bitbucket.token');
+  } else {
+    showToast('!', 'No GitHub token configured: set GITHUB_TOKEN, set GH_TOKEN, or run `gh auth login` -- or connect in Settings.', 5000);
+    openSettings('ui', 'GitHub', 'github.token');
+  }
 }
+
+export const nudgeGitHubToken = nudgeToken;
 
 function wireBarButtons() {
   $('#pr-batch-apply')?.addEventListener('click', batchApplyComments);
@@ -151,12 +176,12 @@ function wireBarButtons() {
   $('#pr-submit-request-changes')?.addEventListener('click', () => submitReview('REQUEST_CHANGES'));
   $('#pr-submit-approve')?.addEventListener('click', () => submitReview('APPROVE'));
   $('#pr-issue-compose-send')?.addEventListener('click', sendNewIssueComment);
-  $('#pr-readonly-note')?.addEventListener('click', nudgeGitHubToken);
+  $('#pr-readonly-note')?.addEventListener('click', () => nudgeToken());
 }
 
 async function sendNewIssueComment() {
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const ta = $('#pr-issue-compose-body');
@@ -252,7 +277,7 @@ async function pollPRBatch(id, count) {
 
 async function submitReview(event) {
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const bodyEl = $('#pr-review-body');
@@ -612,7 +637,7 @@ function wireCommentsPanel() {
 async function sendThreadReply(row) {
   if (!row) return;
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const ta = row.querySelector('.reply-input');

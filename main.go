@@ -180,7 +180,7 @@ func main() {
 		}
 		uiKV("PR", prTitle, 11, os.Stdout)
 		if pr.token == "" {
-			uiKV("access", uiDim(fmt.Sprintf("read-only (no %s token: set GITHUB_TOKEN or gh auth login to submit reviews)", pr.provider.Name()), os.Stdout), 11, os.Stdout)
+			uiKV("access", uiDim(fmt.Sprintf("read-only (no %s token: %s to submit reviews)", pr.provider.Name(), pr.provider.TokenHint()), os.Stdout), 11, os.Stdout)
 		}
 	}
 	uiKV("workspace", root, 11, os.Stdout)

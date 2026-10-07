@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +63,32 @@ func TestParsePRURLUnsupported(t *testing.T) {
 	}
 	if _, _, err := ParsePRURL("https://example.com/foo/bar"); err == nil {
 		t.Error("expected error for unsupported forge URL")
+	} else {
+		if !strings.Contains(err.Error(), "GitHub") || !strings.Contains(err.Error(), "Bitbucket") {
+			t.Errorf("expected error to mention GitHub and Bitbucket, got: %v", err)
+		}
+	}
+}
+
+func TestParsePRURLBitbucketUnregistered(t *testing.T) {
+	orig := defaultProviders
+	defaultProviders = []GitProvider{&GitHubProvider{}}
+	defer func() { defaultProviders = orig }()
+
+	_, _, err := ParsePRURL("https://bitbucket.org/blgtech/hrms/pull-requests/371")
+	if err == nil {
+		t.Error("expected error parsing Bitbucket URL without registered provider")
+	} else {
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "unsupported or unrecognized PR URL") {
+			t.Errorf("expected 'unsupported or unrecognized PR URL' in error, got: %v", err)
+		}
+		if !strings.Contains(errMsg, "GitHub") || !strings.Contains(errMsg, "Bitbucket") {
+			t.Errorf("expected error to mention GitHub and Bitbucket, got: %v", err)
+		}
+		if strings.Contains(errMsg, "lstat") || strings.Contains(errMsg, "no such file or directory") {
+			t.Errorf("error should not mention filesystem paths, got: %v", err)
+		}
 	}
 }
 
@@ -167,6 +195,7 @@ func TestPRSessionCloseRefCleanup(t *testing.T) {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -174,7 +203,7 @@ func TestPRSessionCloseRefCleanup(t *testing.T) {
 	run("init")
 	run("config", "user.name", "test")
 	run("config", "user.email", "test@test.local")
-	run("commit", "--allow-empty", "-m", "initial")
+	run("commit", "--allow-empty", "-m", "test: initial")
 
 	run("update-ref", "refs/px0/pr/99", "HEAD")
 	run("update-ref", "refs/px0/base/99", "HEAD")
@@ -319,7 +348,7 @@ func TestPRSessionPush(t *testing.T) {
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitTestRun(t, worktree, "init", "-q", "-b", "feature")
+	gitTestRun(t, worktree, "init", "-q", "-b", "feature/pr-1")
 	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
 		gitTestRun(t, worktree, "config", cfg[0], cfg[1])
 	}
@@ -332,13 +361,13 @@ func TestPRSessionPush(t *testing.T) {
 	p := &prSession{
 		worktree: worktree,
 		target:   PRTarget{Owner: "o", Repo: "r"},
-		meta:     PRMeta{Number: 1, HeadRef: "feature", HeadRepoCloneURL: upstream},
+		meta:     PRMeta{Number: 1, HeadRef: "feature/pr-1", HeadRepoCloneURL: upstream},
 	}
 	if err := p.Push(); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
 
-	out := gitTestRun(t, upstream, "log", "--oneline", "-1", "refs/heads/feature")
+	out := gitTestRun(t, upstream, "log", "--oneline", "-1", "refs/heads/feature/pr-1")
 	if !strings.Contains(out, "reviewer commit") {
 		t.Fatalf("expected upstream's refs/heads/feature to carry the pushed commit, got %q", out)
 	}
@@ -406,7 +435,7 @@ func TestFetchPRMetaMerged(t *testing.T) {
 			"head": {
 				"ref": "fix-race",
 				"sha": "fedcba987654",
-				"repo": {"clone_url": "https://github.com/alice/px0.git", "full_name": "alice/px0"}
+				"repo": {"clone_url": "https://github.com/alice/px0.git", "ssh_url": "git@github.com:alice/px0.git", "full_name": "alice/px0"}
 			}
 		}`
 		return &http.Response{
@@ -429,6 +458,9 @@ func TestFetchPRMetaMerged(t *testing.T) {
 	if meta.MergedAt != "2026-09-20T10:00:00Z" {
 		t.Errorf("meta.MergedAt = %q, want timestamp", meta.MergedAt)
 	}
+	if meta.HeadRepoCloneURL != "https://github.com/alice/px0.git" {
+		t.Errorf("meta.HeadRepoCloneURL = %q, want https://github.com/alice/px0.git", meta.HeadRepoCloneURL)
+	}
 }
 
 func TestCheckoutPRMergedAlwaysProceeds(t *testing.T) {
@@ -436,20 +468,7 @@ func TestCheckoutPRMergedAlwaysProceeds(t *testing.T) {
 	defer func() { githubHTTPClient.Transport = orig }()
 
 	githubHTTPClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		body := `{
-			"number": 77,
-			"title": "Already merged PR",
-			"state": "closed",
-			"merged": true,
-			"merged_at": "2026-09-21T08:00:00Z",
-			"user": {"login": "bob"},
-			"base": {"ref": "main"},
-			"head": {
-				"ref": "feature-x",
-				"sha": "1234567890ab",
-				"repo": {"clone_url": "https://github.com/px0-ai/px0.git", "full_name": "px0-ai/px0"}
-			}
-		}`
+		body := `{"number": 77, "title": "Already merged PR", "state": "closed", "merged": true, "merged_at": "2026-09-21T08:00:00Z", "user": {"login": "bob"}, "base": {"ref": "main"}, "head": {"ref": "feature-x", "sha": "1234567890ab", "repo": {"clone_url": "https://github.com/px0-ai/px0.git", "full_name": "px0-ai/px0"}}}`
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(body)),
@@ -482,6 +501,9 @@ func TestGitHubProviderInterface(t *testing.T) {
 	}
 	if tgt.Owner != "foo" || tgt.Repo != "bar" || tgt.Number != 99 || tgt.Provider != "github" {
 		t.Errorf("unexpected target: %+v", tgt)
+	}
+	if ssh := gp.SSHURL(PRTarget{Owner: "a", Repo: "b"}); ssh != "git@github.com:a/b.git" {
+		t.Errorf("gp.SSHURL = %q, want git@github.com:a/b.git", ssh)
 	}
 }
 
@@ -518,6 +540,258 @@ func TestGitFilesBetween(t *testing.T) {
 	}
 }
 
+// mockSSHProvider implements GitProvider for testing checkoutPR with custom URLs.
+type mockSSHProvider struct {
+	GitHubProvider
+	sshURL string
+	meta   PRMeta
+}
+
+func (m *mockSSHProvider) SSHURL(target PRTarget) string {
+	if m.sshURL != "" {
+		return m.sshURL
+	}
+	return m.GitHubProvider.SSHURL(target)
+}
+
+func (m *mockSSHProvider) FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error) {
+	return m.meta, nil
+}
+
+func (m *mockSSHProvider) CheckPushAccess(ctx context.Context, target PRTarget, token string) bool {
+	return true
+}
+
+func TestSSH_GitHubProviderSSHURL(t *testing.T) {
+	var gp GitProvider = &GitHubProvider{}
+	got := gp.SSHURL(PRTarget{Owner: "a", Repo: "b"})
+	want := "git@github.com:a/b.git"
+	if got != want {
+		t.Errorf("provider.SSHURL = %q, want %q", got, want)
+	}
+}
+
+func TestSSH_FetchPRMetaExtractsSSHURL(t *testing.T) {
+	orig := githubHTTPClient.Transport
+	defer func() { githubHTTPClient.Transport = orig }()
+
+	githubHTTPClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{
+			"number": 12,
+			"title": "SSH test",
+			"state": "open",
+			"user": {"login": "charlie"},
+			"base": {"ref": "main"},
+			"head": {
+				"ref": "ssh-feature",
+				"sha": "aaa111",
+				"repo": {
+					"clone_url": "https://github.com/charlie/px0.git",
+					"ssh_url": "git@github.com:charlie/px0.git",
+					"full_name": "charlie/px0"
+				}
+			}
+		}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	meta, err := fetchPRMeta(context.Background(), "px0-ai", "px0", 12, "")
+	if err != nil {
+		t.Fatalf("fetchPRMeta failed: %v", err)
+	}
+	if meta.HeadRepoCloneURL != "https://github.com/charlie/px0.git" {
+		t.Errorf("HeadRepoCloneURL = %q, want https://github.com/charlie/px0.git", meta.HeadRepoCloneURL)
+	}
+}
+
+// U2 Scenario 1: Clone path with HeadRepoCloneURL set to a local file:// upstream
+// still checks out and computes the diff base.
+func TestPRSession_U2_CloneWithFileUpstreamDiffBase(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+	upstream := filepath.Join(base, "upstream.git")
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
+
+	initClone := filepath.Join(base, "init")
+	gitTestRun(t, base, "clone", upstream, "init")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, initClone, "config", cfg[0], cfg[1])
+	}
+	if err := os.WriteFile(filepath.Join(initClone, "base.txt"), []byte("base commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, initClone, "add", "base.txt")
+	gitTestRun(t, initClone, "commit", "-qm", "initial base commit")
+	gitTestRun(t, initClone, "push", "origin", "main")
+
+	baseSHA := strings.TrimSpace(gitTestRun(t, initClone, "rev-parse", "HEAD"))
+
+	gitTestRun(t, initClone, "checkout", "-qb", "feature")
+	if err := os.WriteFile(filepath.Join(initClone, "feature.txt"), []byte("feature commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, initClone, "add", "feature.txt")
+	gitTestRun(t, initClone, "commit", "-qm", "feature work commit")
+	gitTestRun(t, initClone, "push", "origin", "feature")
+
+	headSHA := strings.TrimSpace(gitTestRun(t, initClone, "rev-parse", "HEAD"))
+
+	upstreamURL := "file://" + upstream
+	mock := &mockSSHProvider{
+		sshURL: upstreamURL,
+		meta: PRMeta{
+			Number:           101,
+			BaseRef:          "main",
+			HeadRef:          "feature",
+			HeadSHA:          headSHA,
+			HeadRepoCloneURL: upstreamURL,
+		},
+	}
+	target := PRTarget{Provider: "test", Owner: "owner", Repo: "repo", Number: 101}
+	emptyCwd := t.TempDir()
+
+	sess, err := checkoutPR(context.Background(), mock, target, emptyCwd, nil)
+	if err != nil {
+		t.Fatalf("checkoutPR failed: %v", err)
+	}
+	defer sess.Close()
+
+	if sess.diffBase != baseSHA {
+		t.Errorf("sess.diffBase = %q, want baseSHA %q", sess.diffBase, baseSHA)
+	}
+	if sess.diffBaseWarning != "" {
+		t.Errorf("sess.diffBaseWarning = %q, want empty", sess.diffBaseWarning)
+	}
+	if sess.Root() == "" {
+		t.Errorf("sess.Root() is empty")
+	}
+}
+
+// U2 Scenario 2: A PRMeta with an empty HeadRepoCloneURL falls back to git@github.com:owner/repo.git.
+func TestSSH_U2_EmptyHeadRepoCloneURLFallback(t *testing.T) {
+	gp := &GitHubProvider{}
+	target := PRTarget{Owner: "owner", Repo: "repo"}
+
+	wantFallback := "git@github.com:owner/repo.git"
+	if got := gp.SSHURL(target); got != wantFallback {
+		t.Errorf("gp.SSHURL(%+v) = %q, want %q", target, got, wantFallback)
+	}
+
+	p := &prSession{
+		target:   target,
+		provider: gp,
+		meta:     PRMeta{HeadRepoCloneURL: "", HeadRef: "main"},
+		worktree: t.TempDir(),
+	}
+	err := p.Push()
+	if err == nil {
+		t.Fatal("expected push to fail on empty/uninitialized worktree")
+	}
+	if strings.Contains(err.Error(), "https://") {
+		t.Errorf("push should not use https: %v", err)
+	}
+
+	diffBase, diffBaseWarning := computeDiffBase(gp, t.TempDir(), "", target, "", "main", 1, nil)
+	if diffBase != "HEAD" {
+		t.Errorf("diffBase = %q, want HEAD on failed fetch", diffBase)
+	}
+	if !strings.Contains(diffBaseWarning, "could not resolve a merge-base") {
+		t.Errorf("diffBaseWarning = %q, want merge-base warning", diffBaseWarning)
+	}
+}
+
+// U2 Scenario 3: Push with a token converts an SSH remote to HTTPS
+// (restored master's httpsRemoteURL conversion).
+func TestPush_U2_HTTPSRewriteWithToken(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+	worktree := filepath.Join(base, "wt")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, worktree, "init", "-q", "-b", "feature/test")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, worktree, "config", cfg[0], cfg[1])
+	}
+	os.WriteFile(filepath.Join(worktree, "f.txt"), []byte("data\n"), 0o644)
+	gitTestRun(t, worktree, "add", "f.txt")
+	gitTestRun(t, worktree, "commit", "-qm", "commit")
+
+	for _, sshURL := range []string{
+		"git@127.0.0.1:owner/repo.git",
+		"ssh://git@127.0.0.1:1/owner/repo.git",
+		"ssh://git@127.0.0.1:2222/owner/repo.git",
+	} {
+		p := &prSession{
+			worktree: worktree,
+			target:   PRTarget{Owner: "owner", Repo: "repo"},
+			meta:     PRMeta{HeadRepoCloneURL: sshURL, HeadRef: "feature/test"},
+			token:    "dummy-token",
+			provider: &GitHubProvider{},
+		}
+		err := p.Push()
+		if err == nil {
+			t.Fatalf("expected push to fail for %s", sshURL)
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "https://") {
+			t.Errorf("Push() with SSH remote %s and token should convert to HTTPS, got: %v", sshURL, errMsg)
+		}
+	}
+}
+
+// U2 Scenario 4: With no SSH key available, the git command fails within the
+// command timeout and the error mentions SSH, not a token.
+func TestSSH_U2_NoKeyFailsFastMentionsSSHNotToken(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+
+	cmd := gitSSHCmd("ls-remote", "git@nonexistent.invalid:owner/repo.git")
+	emptyHome := t.TempDir()
+	cmd.Env = append(cmd.Env, "HOME="+emptyHome, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+
+	var hasPrompt0 bool
+	for _, env := range cmd.Env {
+		if env == "GIT_TERMINAL_PROMPT=0" {
+			hasPrompt0 = true
+		}
+	}
+	if !hasPrompt0 {
+		t.Errorf("cmd.Env missing GIT_TERMINAL_PROMPT=0")
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected git command to fail, output: %s", string(out))
+	}
+
+	outStr := strings.ToLower(string(out))
+	if !strings.Contains(outStr, "ssh") && !strings.Contains(outStr, "host") && !strings.Contains(outStr, "fatal") {
+		t.Errorf("expected error output to mention ssh/host/fatal, got: %s", string(out))
+	}
+	if strings.Contains(outStr, "token") || strings.Contains(outStr, "x-access-token") || strings.Contains(outStr, "extraheader") {
+		t.Errorf("error output should not mention token: %s", string(out))
+	}
+}
+
 func TestHTTPSRemoteURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"git@github.com:o/r.git":          "https://github.com/o/r.git",
@@ -529,6 +803,50 @@ func TestHTTPSRemoteURL(t *testing.T) {
 		if got := httpsRemoteURL(in); got != want {
 			t.Errorf("httpsRemoteURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// U2 Scenario 5: gitAuthCmd with a token sets the extraheader; without a token
+// it does not.
+func TestSSH_U2_GitHubTokenDoesNotChangeGitAuthCmdEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret_token_123456789")
+
+	// With no token parameter: no extraheader should be set.
+	cmdNoToken := gitAuthCmd("", "status")
+	for _, env := range cmdNoToken.Env {
+		if strings.Contains(env, "extraheader") {
+			t.Errorf("cmdNoToken.Env contains extraheader: %s", env)
+		}
+	}
+
+	// With a token parameter: the extraheader must be set.
+	token := "my-test-token"
+	cmdWithToken := gitAuthCmd(token, "status")
+	var hasExtraheader, hasExpectedAuth bool
+	wantAuth := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+	for _, env := range cmdWithToken.Env {
+		if env == "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader" {
+			hasExtraheader = true
+		}
+		if env == "GIT_CONFIG_VALUE_0="+wantAuth {
+			hasExpectedAuth = true
+		}
+	}
+	if !hasExtraheader {
+		t.Errorf("cmdWithToken.Env missing extraheader key for token auth")
+	}
+	if !hasExpectedAuth {
+		t.Errorf("cmdWithToken.Env missing expected auth header value")
+	}
+
+	var hasPrompt0 bool
+	for _, e := range cmdWithToken.Env {
+		if e == "GIT_TERMINAL_PROMPT=0" {
+			hasPrompt0 = true
+		}
+	}
+	if !hasPrompt0 {
+		t.Errorf("cmdWithToken.Env missing GIT_TERMINAL_PROMPT=0")
 	}
 }
 
@@ -557,6 +875,7 @@ func TestPRSessionPullFollowsForcePush(t *testing.T) {
 	gitTestRun(t, work, "add", ".")
 	gitTestRun(t, work, "commit", "-qm", "one")
 	gitTestRun(t, work, "push", "-q", upstream, "feature")
+	gitTestRun(t, upstream, "branch", "main", "feature")
 
 	wt := filepath.Join(base, "wt")
 	gitTestRun(t, base, "clone", "-q", upstream, "wt")
@@ -568,6 +887,7 @@ func TestPRSessionPullFollowsForcePush(t *testing.T) {
 		worktree: wt,
 		target:   PRTarget{Owner: "o", Repo: "r"},
 		meta:     PRMeta{Number: 1, BaseRef: "main", HeadRef: "feature", HeadRepoCloneURL: upstream, HeadSHA: head},
+		provider: &mockSSHProvider{sshURL: upstream},
 	}
 
 	// Rewrite the PR branch: amend and force-push.
@@ -593,5 +913,883 @@ func TestPRSessionPullFollowsForcePush(t *testing.T) {
 	gitTestRun(t, work, "push", "-qf", upstream, "feature")
 	if _, err := p.Pull(); !errors.Is(err, errPRDiverged) {
 		t.Fatalf("expected errPRDiverged with a local commit, got %v", err)
+	}
+}
+
+type mockReviewSubmitProvider struct {
+	BitbucketProvider
+	submitFunc func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error
+}
+
+func (m *mockReviewSubmitProvider) SubmitReview(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+	if m.submitFunc != nil {
+		return m.submitFunc(ctx, target, token, headSHA, comments, event, body)
+	}
+	return nil
+}
+
+// U5 Scenario: failure on 3rd of 5 drafts keeps unposted drafts in session
+func TestPRSubmit_U5_FailureOn3rdDraftKeepsUnpostedDraftsInSession(t *testing.T) {
+	tempDir := t.TempDir()
+	sessionMgr := newSessionManager("", tempDir)
+
+	mockProv := &mockReviewSubmitProvider{
+		submitFunc: func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+			// Simulate failure on 3rd draft of 5:
+			// first 2 succeeded (IDs 1, 2), 3rd failed
+			return &PartialSubmitError{
+				PostedIDs: []int64{1, 2},
+				Step:      "draft",
+				Err:       errors.New("API error on 3rd draft"),
+			}
+		},
+	}
+
+	initialDrafts := []prComment{
+		{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "d1"},
+		{ID: 2, Path: "b.go", Line: 20, Side: "RIGHT", Body: "d2"},
+		{ID: 3, Path: "c.go", Line: 30, Side: "RIGHT", Body: "d3"},
+		{ID: 4, Path: "d.go", Line: 40, Side: "RIGHT", Body: "d4"},
+		{ID: 5, Path: "e.go", Line: 50, Side: "RIGHT", Body: "d5"},
+	}
+
+	sessionMgr.Update(func(ws *WorkspaceSession) {
+		ws.Drafts = append([]prComment(nil), initialDrafts...)
+	})
+
+	sess := &prSession{
+		provider:    mockProv,
+		target:      PRTarget{Provider: "bitbucket", Owner: "myws", Repo: "myrepo", Number: 10},
+		token:       "token-abc",
+		writeAccess: true,
+		meta:        PRMeta{Number: 10, HeadSHA: "headsha"},
+		comments:    append([]prComment(nil), initialDrafts...),
+	}
+
+	srv := &Server{
+		pr:      sess,
+		session: sessionMgr,
+		mux:     http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	bodyJSON := `{"event": "COMMENT", "body": "feedback"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pr/submit", strings.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("HTTP status = %d, want %d; body = %s", rec.Code, http.StatusBadGateway, rec.Body.String())
+	}
+
+	// Verify unposted drafts (IDs 3, 4, 5) remain in p.comments
+	sess.mu.Lock()
+	remainingComments := append([]prComment(nil), sess.comments...)
+	sess.mu.Unlock()
+
+	if len(remainingComments) != 3 {
+		t.Fatalf("len(p.comments) = %d, want 3", len(remainingComments))
+	}
+	wantIDs := []int64{3, 4, 5}
+	for i, c := range remainingComments {
+		if c.ID != wantIDs[i] {
+			t.Errorf("remaining comment[%d].ID = %d, want %d", i, c.ID, wantIDs[i])
+		}
+	}
+
+	// Verify unposted drafts (IDs 3, 4, 5) remain in s.session.Drafts
+	sessionDrafts := sessionMgr.Get().Drafts
+	if len(sessionDrafts) != 3 {
+		t.Fatalf("len(s.session.Drafts) = %d, want 3", len(sessionDrafts))
+	}
+	for i, c := range sessionDrafts {
+		if c.ID != wantIDs[i] {
+			t.Errorf("session draft[%d].ID = %d, want %d", i, c.ID, wantIDs[i])
+		}
+	}
+}
+
+// U5 Scenario: failure on verdict clears all drafts and reports verdict step
+func TestPRSubmit_U5_FailureOnVerdictClearsAllDraftsAndReportsVerdictStep(t *testing.T) {
+	tempDir := t.TempDir()
+	sessionMgr := newSessionManager("", tempDir)
+
+	mockProv := &mockReviewSubmitProvider{
+		submitFunc: func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+			// All 3 drafts succeeded, but verdict failed
+			return &PartialSubmitError{
+				PostedIDs: []int64{10, 20, 30},
+				Step:      "verdict",
+				Err:       errors.New("bitbucket: submit review verdict: 403 forbidden"),
+			}
+		},
+	}
+
+	initialDrafts := []prComment{
+		{ID: 10, Path: "a.go", Line: 1, Side: "RIGHT", Body: "d10"},
+		{ID: 20, Path: "b.go", Line: 2, Side: "RIGHT", Body: "d20"},
+		{ID: 30, Path: "c.go", Line: 3, Side: "RIGHT", Body: "d30"},
+	}
+
+	sessionMgr.Update(func(ws *WorkspaceSession) {
+		ws.Drafts = append([]prComment(nil), initialDrafts...)
+	})
+
+	sess := &prSession{
+		provider:    mockProv,
+		target:      PRTarget{Provider: "bitbucket", Owner: "myws", Repo: "myrepo", Number: 10},
+		token:       "token-abc",
+		writeAccess: true,
+		meta:        PRMeta{Number: 10, HeadSHA: "headsha"},
+		comments:    append([]prComment(nil), initialDrafts...),
+	}
+
+	srv := &Server{
+		pr:      sess,
+		session: sessionMgr,
+		mux:     http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	bodyJSON := `{"event": "APPROVE", "body": "looks great"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pr/submit", strings.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("HTTP status = %d, want %d; body = %s", rec.Code, http.StatusBadGateway, rec.Body.String())
+	}
+
+	// Verify error response reports the verdict step
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response JSON: %v", err)
+	}
+	if !strings.Contains(resp.Error, "verdict") {
+		t.Errorf("response error %q does not report verdict step", resp.Error)
+	}
+
+	// Verify all drafts were cleared from p.comments
+	sess.mu.Lock()
+	remComments := sess.comments
+	sess.mu.Unlock()
+	if len(remComments) != 0 {
+		t.Errorf("len(p.comments) = %d, want 0 (cleared)", len(remComments))
+	}
+
+	// Verify all drafts were cleared from s.session.Drafts
+	sessionDrafts := sessionMgr.Get().Drafts
+	if len(sessionDrafts) != 0 {
+		t.Errorf("len(s.session.Drafts) = %d, want 0 (cleared)", len(sessionDrafts))
+	}
+}
+
+func TestPRSubmit_U5_SuccessfulSubmitClearsAllDrafts(t *testing.T) {
+	tempDir := t.TempDir()
+	sessionMgr := newSessionManager("", tempDir)
+
+	mockProv := &mockReviewSubmitProvider{
+		submitFunc: func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+			return nil
+		},
+	}
+
+	initialDrafts := []prComment{
+		{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "note"},
+	}
+
+	sessionMgr.Update(func(ws *WorkspaceSession) {
+		ws.Drafts = append([]prComment(nil), initialDrafts...)
+	})
+
+	sess := &prSession{
+		provider:    mockProv,
+		target:      PRTarget{Provider: "bitbucket", Owner: "myws", Repo: "myrepo", Number: 10},
+		token:       "token-abc",
+		writeAccess: true,
+		meta:        PRMeta{Number: 10, HeadSHA: "headsha"},
+		comments:    append([]prComment(nil), initialDrafts...),
+	}
+
+	srv := &Server{
+		pr:      sess,
+		session: sessionMgr,
+		mux:     http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	bodyJSON := `{"event": "COMMENT", "body": "overall"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pr/submit", strings.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	sess.mu.Lock()
+	remComments := sess.comments
+	sess.mu.Unlock()
+	if len(remComments) != 0 {
+		t.Errorf("len(p.comments) = %d, want 0", len(remComments))
+	}
+	if len(sessionMgr.Get().Drafts) != 0 {
+		t.Errorf("len(s.session.Drafts) = %d, want 0", len(sessionMgr.Get().Drafts))
+	}
+}
+
+// U6 Scenario 1: Bitbucket missing token error mentions BITBUCKET_TOKEN and not GITHUB_TOKEN
+func TestU6_BitbucketMissingTokenErrors(t *testing.T) {
+	sess := &prSession{
+		provider: &BitbucketProvider{},
+		target:   PRTarget{Provider: "bitbucket", Owner: "myws", Repo: "myrepo", Number: 10},
+		token:    "",
+	}
+	srv := &Server{
+		pr:  sess,
+		mux: http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	// 1. Issue comment post
+	reqIssue := httptest.NewRequest(http.MethodPost, "/api/pr/comments/issue", strings.NewReader(`{"body": "test comment"}`))
+	reqIssue.Header.Set("Content-Type", "application/json")
+	reqIssue.Host = "127.0.0.1:7777"
+	reqIssue.Header.Set("Origin", "http://127.0.0.1:7777")
+	recIssue := httptest.NewRecorder()
+	srv.ServeHTTP(recIssue, reqIssue)
+
+	if recIssue.Code != http.StatusForbidden {
+		t.Fatalf("issue comment code = %d, want %d; body = %s", recIssue.Code, http.StatusForbidden, recIssue.Body.String())
+	}
+	var resIssue struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(recIssue.Body.Bytes(), &resIssue); err != nil {
+		t.Fatalf("failed to decode issue comment response: %v", err)
+	}
+	wantBitbucketMsg := "no auth token configured; posting comments requires a Bitbucket token (set BITBUCKET_TOKEN)"
+	if resIssue.Error != wantBitbucketMsg {
+		t.Errorf("issue comment error = %q, want %q", resIssue.Error, wantBitbucketMsg)
+	}
+	if !strings.Contains(resIssue.Error, "BITBUCKET_TOKEN") {
+		t.Errorf("issue comment error does not mention BITBUCKET_TOKEN: %q", resIssue.Error)
+	}
+	if strings.Contains(resIssue.Error, "GITHUB_TOKEN") || strings.Contains(resIssue.Error, "GitHub") {
+		t.Errorf("issue comment error mentions GitHub: %q", resIssue.Error)
+	}
+
+	// 2. Review comment reply
+	reqReply := httptest.NewRequest(http.MethodPost, "/api/pr/comments/review-reply", strings.NewReader(`{"commentId": 42, "body": "test reply"}`))
+	reqReply.Header.Set("Content-Type", "application/json")
+	reqReply.Host = "127.0.0.1:7777"
+	reqReply.Header.Set("Origin", "http://127.0.0.1:7777")
+	recReply := httptest.NewRecorder()
+	srv.ServeHTTP(recReply, reqReply)
+
+	if recReply.Code != http.StatusForbidden {
+		t.Fatalf("review reply code = %d, want %d; body = %s", recReply.Code, http.StatusForbidden, recReply.Body.String())
+	}
+	var resReply struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(recReply.Body.Bytes(), &resReply); err != nil {
+		t.Fatalf("failed to decode review reply response: %v", err)
+	}
+	if resReply.Error != wantBitbucketMsg {
+		t.Errorf("review reply error = %q, want %q", resReply.Error, wantBitbucketMsg)
+	}
+	if !strings.Contains(resReply.Error, "BITBUCKET_TOKEN") {
+		t.Errorf("review reply error does not mention BITBUCKET_TOKEN: %q", resReply.Error)
+	}
+	if strings.Contains(resReply.Error, "GITHUB_TOKEN") || strings.Contains(resReply.Error, "GitHub") {
+		t.Errorf("review reply error mentions GitHub: %q", resReply.Error)
+	}
+}
+
+// U6 Scenario 2: GitHub missing token error is unchanged
+func TestU6_GitHubMissingTokenErrors(t *testing.T) {
+	sess := &prSession{
+		provider: &GitHubProvider{},
+		target:   PRTarget{Provider: "github", Owner: "px0-ai", Repo: "px0", Number: 10},
+		token:    "",
+	}
+	srv := &Server{
+		pr:  sess,
+		mux: http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	wantGitHubMsg := "no auth token configured; posting comments requires a GitHub token"
+
+	// 1. Issue comment post
+	reqIssue := httptest.NewRequest(http.MethodPost, "/api/pr/comments/issue", strings.NewReader(`{"body": "test comment"}`))
+	reqIssue.Header.Set("Content-Type", "application/json")
+	reqIssue.Host = "127.0.0.1:7777"
+	reqIssue.Header.Set("Origin", "http://127.0.0.1:7777")
+	recIssue := httptest.NewRecorder()
+	srv.ServeHTTP(recIssue, reqIssue)
+
+	if recIssue.Code != http.StatusForbidden {
+		t.Fatalf("issue comment code = %d, want %d; body = %s", recIssue.Code, http.StatusForbidden, recIssue.Body.String())
+	}
+	var resIssue struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(recIssue.Body.Bytes(), &resIssue); err != nil {
+		t.Fatalf("failed to decode issue comment response: %v", err)
+	}
+	if resIssue.Error != wantGitHubMsg {
+		t.Errorf("issue comment error = %q, want %q", resIssue.Error, wantGitHubMsg)
+	}
+
+	// 2. Review comment reply
+	reqReply := httptest.NewRequest(http.MethodPost, "/api/pr/comments/review-reply", strings.NewReader(`{"commentId": 42, "body": "test reply"}`))
+	reqReply.Header.Set("Content-Type", "application/json")
+	reqReply.Host = "127.0.0.1:7777"
+	reqReply.Header.Set("Origin", "http://127.0.0.1:7777")
+	recReply := httptest.NewRecorder()
+	srv.ServeHTTP(recReply, reqReply)
+
+	if recReply.Code != http.StatusForbidden {
+		t.Fatalf("review reply code = %d, want %d; body = %s", recReply.Code, http.StatusForbidden, recReply.Body.String())
+	}
+	var resReply struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(recReply.Body.Bytes(), &resReply); err != nil {
+		t.Fatalf("failed to decode review reply response: %v", err)
+	}
+	if resReply.Error != wantGitHubMsg {
+		t.Errorf("review reply error = %q, want %q", resReply.Error, wantGitHubMsg)
+	}
+}
+
+// U6 Scenario 3: handleLaunchPR error mentions both GitHub and Bitbucket
+func TestU6_HandleLaunchPRErrorMentionsBoth(t *testing.T) {
+	srv := &Server{
+		mux: http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pr/launch", strings.NewReader(`{"target": "https://example.com/not-a-pr"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("launch code = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var res struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode launch response: %v", err)
+	}
+	wantMsg := "target must be a valid pull request URL (e.g. https://github.com/owner/repo/pull/123 or https://bitbucket.org/workspace/repo/pull-requests/123)"
+	if res.Error != wantMsg {
+		t.Errorf("launch error = %q, want %q", res.Error, wantMsg)
+	}
+	if !strings.Contains(res.Error, "github.com") || !strings.Contains(res.Error, "bitbucket.org") {
+		t.Errorf("launch error does not mention both github and bitbucket: %q", res.Error)
+	}
+}
+
+// U6 Scenario 4: TokenHint returns expected hint per provider
+func TestU6_ProviderTokenHints(t *testing.T) {
+	gp := &GitHubProvider{}
+	if got := gp.TokenHint(); got != "set GITHUB_TOKEN or gh auth login" {
+		t.Errorf("GitHubProvider.TokenHint() = %q, want %q", got, "set GITHUB_TOKEN or gh auth login")
+	}
+
+	bp := &BitbucketProvider{}
+	if got := bp.TokenHint(); got != "set BITBUCKET_TOKEN" {
+		t.Errorf("BitbucketProvider.TokenHint() = %q, want %q", got, "set BITBUCKET_TOKEN")
+	}
+}
+
+// TestBitbucket_CheckoutAndPullInLocalClone verifies that checkoutPR and Pull
+// for a Bitbucket PR work inside a local clone of the repository (srcRepo != "")
+// by fetching refs/heads/<HeadRef> instead of GitHub's refs/pull/<num>/head.
+func TestBitbucket_CheckoutAndPullInLocalClone(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		base = r
+	}
+
+	// 1. Set up bare upstream "remote" named blgtech/hrms
+	upstream := filepath.Join(base, "upstream.git")
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
+
+	// 2. Initial commit on main and feature branch bugs/leave
+	seedClone := filepath.Join(base, "seed")
+	gitTestRun(t, base, "clone", upstream, "seed")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, seedClone, "config", cfg[0], cfg[1])
+	}
+	if err := os.WriteFile(filepath.Join(seedClone, "main.txt"), []byte("main commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, seedClone, "add", "main.txt")
+	gitTestRun(t, seedClone, "commit", "-qm", "initial main")
+	gitTestRun(t, seedClone, "push", "origin", "main")
+	baseSHA := strings.TrimSpace(gitTestRun(t, seedClone, "rev-parse", "HEAD"))
+
+	gitTestRun(t, seedClone, "checkout", "-qb", "bugs/leave")
+	if err := os.WriteFile(filepath.Join(seedClone, "fix.txt"), []byte("bug fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, seedClone, "add", "fix.txt")
+	gitTestRun(t, seedClone, "commit", "-qm", "fix bug")
+	gitTestRun(t, seedClone, "push", "origin", "bugs/leave")
+	headSHA := strings.TrimSpace(gitTestRun(t, seedClone, "rev-parse", "HEAD"))
+
+	// 3. User's local clone where origin matches blgtech/hrms
+	localClone := filepath.Join(base, "local_hrms")
+	gitTestRun(t, base, "clone", upstream, "local_hrms")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, localClone, "config", cfg[0], cfg[1])
+	}
+
+	upstreamURL := "file://" + upstream
+	mockProv := &mockReviewSubmitProvider{
+		BitbucketProvider: BitbucketProvider{},
+	}
+	// We wrap mockProv to return our desired PRMeta
+	type mockBB struct {
+		*BitbucketProvider
+		meta PRMeta
+	}
+	prov := &struct {
+		GitProvider
+		meta PRMeta
+	}{
+		GitProvider: mockProv,
+		meta: PRMeta{
+			Number:           371,
+			Title:            "Bugs/leave",
+			BaseRef:          "main",
+			HeadRef:          "bugs/leave",
+			HeadSHA:          headSHA,
+			HeadRepoCloneURL: upstreamURL,
+			HeadIsFork:       false,
+		},
+	}
+
+	// Create provider adapter
+	testProv := &localBitbucketMock{
+		BitbucketProvider: &BitbucketProvider{},
+		meta:              prov.meta,
+	}
+
+	target := PRTarget{Provider: "bitbucket", Owner: "upstream", Repo: "git", Number: 371}
+	// Make origin match target.Owner and target.Repo
+	// git remote get-url origin will return upstream path containing "upstream" and "git"
+	sess, err := checkoutPR(context.Background(), testProv, target, localClone, nil)
+	if err != nil {
+		t.Fatalf("checkoutPR failed in local clone: %v", err)
+	}
+	defer sess.Close()
+
+	if sess.srcRepo != localClone {
+		t.Errorf("sess.srcRepo = %q, want %q", sess.srcRepo, localClone)
+	}
+	if sess.diffBase != baseSHA {
+		t.Errorf("sess.diffBase = %q, want %q", sess.diffBase, baseSHA)
+	}
+	if sess.meta.HeadSHA != headSHA {
+		t.Errorf("sess.meta.HeadSHA = %q, want %q", sess.meta.HeadSHA, headSHA)
+	}
+
+	// 4. Test Pull when new commit is pushed to bugs/leave upstream
+	if err := os.WriteFile(filepath.Join(seedClone, "fix2.txt"), []byte("second fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, seedClone, "add", "fix2.txt")
+	gitTestRun(t, seedClone, "commit", "-qm", "second fix")
+	gitTestRun(t, seedClone, "push", "origin", "bugs/leave")
+	newHeadSHA := strings.TrimSpace(gitTestRun(t, seedClone, "rev-parse", "HEAD"))
+
+	info, err := sess.Pull()
+	if err != nil {
+		t.Fatalf("sess.Pull() failed: %v", err)
+	}
+	if !strings.Contains(info, "Updated") && !strings.Contains(info, "Fast-forward") && sess.meta.HeadSHA != newHeadSHA {
+		t.Errorf("sess.Pull() did not update HeadSHA to %q, got %q", newHeadSHA, sess.meta.HeadSHA)
+	}
+}
+
+type localBitbucketMock struct {
+	*BitbucketProvider
+	meta PRMeta
+}
+
+func (l *localBitbucketMock) FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error) {
+	return l.meta, nil
+}
+
+func (l *localBitbucketMock) CheckPushAccess(ctx context.Context, target PRTarget, token string) bool {
+	return true
+}
+
+func TestGitSSHCmdSanitization(t *testing.T) {
+	origSSH := os.Getenv("GIT_SSH_COMMAND")
+	origPrompt := os.Getenv("GIT_TERMINAL_PROMPT")
+	defer func() {
+		os.Setenv("GIT_SSH_COMMAND", origSSH)
+		os.Setenv("GIT_TERMINAL_PROMPT", origPrompt)
+	}()
+
+	os.Setenv("GIT_SSH_COMMAND", "ssh -i /path/to/key -o CustomPrompt=yes")
+	os.Setenv("GIT_TERMINAL_PROMPT", "1")
+
+	cmd := gitSSHCmd("status")
+	var sshCmds []string
+	var promptVals []string
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "GIT_SSH_COMMAND=") {
+			sshCmds = append(sshCmds, env)
+		}
+		if strings.HasPrefix(env, "GIT_TERMINAL_PROMPT=") {
+			promptVals = append(promptVals, env)
+		}
+		if strings.Contains(env, "CustomPrompt=yes") {
+			t.Errorf("cmd.Env contains host GIT_SSH_COMMAND: %s", env)
+		}
+	}
+
+	if len(sshCmds) != 1 || sshCmds[0] != "GIT_SSH_COMMAND=ssh -o BatchMode=yes" {
+		t.Errorf("expected exactly 1 GIT_SSH_COMMAND=ssh -o BatchMode=yes, got: %v", sshCmds)
+	}
+	if len(promptVals) != 1 || promptVals[0] != "GIT_TERMINAL_PROMPT=0" {
+		t.Errorf("expected exactly 1 GIT_TERMINAL_PROMPT=0, got: %v", promptVals)
+	}
+}
+
+// U5: On SSH failure matching "Permission denied (publickey)" or "Host key verification failed",
+// append one fixed sentence telling the user to add an SSH key. Unrelated errors pass through.
+func TestAppendSSHHint(t *testing.T) {
+	cases := []struct {
+		input    string
+		wantHint bool
+	}{
+		{
+			input:    "git@github.com: Permission denied (publickey).",
+			wantHint: true,
+		},
+		{
+			input:    "Host key verification failed.\nfatal: Could not read from remote repository.",
+			wantHint: true,
+		},
+		{
+			input:    "fatal: repository 'https://github.com/foo/bar.git' not found",
+			wantHint: false,
+		},
+		{
+			input:    "fatal: remote error: upload-pack not permitted",
+			wantHint: false,
+		},
+	}
+	for _, tc := range cases {
+		got := appendSSHHint(tc.input)
+		hasHint := strings.Contains(got, "add an SSH key to your git host account")
+		if hasHint != tc.wantHint {
+			t.Errorf("appendSSHHint(%q) hasHint = %v, want %v; got: %q", tc.input, hasHint, tc.wantHint, got)
+		}
+		if !tc.wantHint && got != tc.input {
+			t.Errorf("unrelated error modified: got %q, want %q", got, tc.input)
+		}
+	}
+}
+
+// U5: When no token is set, the SSH attempt runs first and only.
+func TestGitRunStepNoTokenRunsSSHOnly(t *testing.T) {
+	var triedRemotes []string
+	provider := &GitHubProvider{}
+	target := PRTarget{Owner: "owner", Repo: "repo"}
+
+	_, err := gitRunStep(provider, target, "", "https://github.com/owner/repo.git", "git@github.com:owner/repo.git", func(remote string) []string {
+		triedRemotes = append(triedRemotes, remote)
+		return []string{"version"}
+	})
+	if err != nil {
+		t.Fatalf("expected git version to succeed: %v", err)
+	}
+	if len(triedRemotes) != 1 || triedRemotes[0] != "git@github.com:owner/repo.git" {
+		t.Errorf("expected only SSH remote tried, got: %v", triedRemotes)
+	}
+}
+
+// U5: Token set and HTTPS step succeeds: no SSH attempt.
+// Token set and HTTPS step fails: SSH attempt runs with SSH URL, token redacted.
+func TestGitRunStepTokenHTTPSFirstFallbackSSH(t *testing.T) {
+	var triedRemotes []string
+	provider := &GitHubProvider{}
+	target := PRTarget{Owner: "owner", Repo: "repo"}
+	token := "secret-pat-12345"
+
+	// When HTTPS succeeds, SSH should NOT be attempted.
+	triedRemotes = nil
+	_, err := gitRunStep(provider, target, token, "https://github.com/owner/repo.git", "git@github.com:owner/repo.git", func(remote string) []string {
+		triedRemotes = append(triedRemotes, remote)
+		return []string{"version"}
+	})
+	if err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	if len(triedRemotes) != 1 || triedRemotes[0] != "https://github.com/owner/repo.git" {
+		t.Errorf("expected only HTTPS remote tried on success, got: %v", triedRemotes)
+	}
+
+	// When HTTPS fails, it falls back to SSH.
+	triedRemotes = nil
+	_, err = gitRunStep(provider, target, token, "https://github.com/owner/repo.git", "git@github.com:owner/repo.git", func(remote string) []string {
+		triedRemotes = append(triedRemotes, remote)
+		if remote == "https://github.com/owner/repo.git" {
+			// Fail HTTPS attempt with token in error
+			return []string{"nonexistent-subcommand-to-fail-https", token}
+		}
+		// Second attempt (SSH)
+		return []string{"nonexistent-subcommand-to-fail-ssh"}
+	})
+	if err == nil {
+		t.Fatal("expected failure on bad commands")
+	}
+	if len(triedRemotes) != 2 {
+		t.Errorf("expected 2 attempts (HTTPS then SSH), got: %v", triedRemotes)
+	}
+	if len(triedRemotes) >= 2 && (triedRemotes[0] != "https://github.com/owner/repo.git" || triedRemotes[1] != "git@github.com:owner/repo.git") {
+		t.Errorf("unexpected remote order: %v", triedRemotes)
+	}
+	// Verify token is redacted from final error
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("final error contains unredacted token: %v", err)
+	}
+}
+
+// U5: Bitbucket is SSH-only per KTD5 even when token is set.
+func TestGitRunStepBitbucketIsSSHOnly(t *testing.T) {
+	var triedRemotes []string
+	provider := &BitbucketProvider{}
+	target := PRTarget{Provider: "bitbucket", Owner: "owner", Repo: "repo"}
+
+	_, err := gitRunStep(provider, target, "my-bb-token", "https://bitbucket.org/owner/repo.git", "git@bitbucket.org:owner/repo.git", func(remote string) []string {
+		triedRemotes = append(triedRemotes, remote)
+		return []string{"version"}
+	})
+	if err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	if len(triedRemotes) != 1 || triedRemotes[0] != "git@bitbucket.org:owner/repo.git" {
+		t.Errorf("expected only SSH remote for Bitbucket, got: %v", triedRemotes)
+	}
+}
+
+func TestHandlePRSubmitConcurrentDraftsPreserved(t *testing.T) {
+	mockProv := &mockReviewSubmitProvider{
+		submitFunc: func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+			return nil
+		},
+	}
+
+	sessionMgr := newSessionManager("", t.TempDir())
+	sess := &prSession{
+		provider:    mockProv,
+		target:      PRTarget{Owner: "o", Repo: "r", Number: 10},
+		token:       "token",
+		writeAccess: true,
+		meta:        PRMeta{Number: 10, HeadSHA: "headsha"},
+		comments: []prComment{
+			{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "c1"},
+			{ID: 2, Path: "b.go", Line: 20, Side: "RIGHT", Body: "c2"},
+		},
+	}
+
+	srv := &Server{
+		pr:      sess,
+		session: sessionMgr,
+		mux:     http.NewServeMux(),
+	}
+	srv.registerRoutes()
+
+	// Simulate concurrent draft added while SubmitReview is in progress
+	mockProv.submitFunc = func(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error {
+		sess.mu.Lock()
+		sess.comments = append(sess.comments, prComment{ID: 3, Path: "c.go", Line: 30, Side: "RIGHT", Body: "concurrent draft"})
+		sess.mu.Unlock()
+		return nil
+	}
+
+	bodyJSON := `{"event": "COMMENT", "body": "overall comment"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/pr/submit", strings.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "127.0.0.1:7777"
+	req.Header.Set("Origin", "http://127.0.0.1:7777")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	sess.mu.Lock()
+	remaining := append([]prComment(nil), sess.comments...)
+	sess.mu.Unlock()
+
+	if len(remaining) != 1 {
+		t.Fatalf("len(sess.comments) = %d, want 1 (concurrent draft should be preserved)", len(remaining))
+	}
+	if remaining[0].ID != 3 || remaining[0].Body != "concurrent draft" {
+		t.Errorf("remaining[0] = %+v, want concurrent draft with ID 3", remaining[0])
+	}
+}
+
+func TestBitbucket_CheckoutDeletedSourceBranchFallbackToHeadSHA(t *testing.T) {
+	upstream := t.TempDir()
+	gitTestRun(t, upstream, "init", "--bare", "-b", "main")
+
+	seedClone := t.TempDir()
+	gitTestRun(t, seedClone, "clone", upstream, ".")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, seedClone, "config", cfg[0], cfg[1])
+	}
+	gitTestRun(t, seedClone, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(seedClone, "file.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, seedClone, "add", "file.txt")
+	gitTestRun(t, seedClone, "commit", "-qm", "initial commit")
+	gitTestRun(t, seedClone, "push", "origin", "main")
+
+	// Branch with fix
+	gitTestRun(t, seedClone, "checkout", "-b", "feature-branch")
+	if err := os.WriteFile(filepath.Join(seedClone, "file.txt"), []byte("feature edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, seedClone, "add", "file.txt")
+	gitTestRun(t, seedClone, "commit", "-qm", "feature commit")
+	gitTestRun(t, seedClone, "push", "origin", "feature-branch")
+	headSHA := strings.TrimSpace(gitTestRun(t, seedClone, "rev-parse", "HEAD"))
+
+	// Delete branch upstream to simulate deleted branch on merged PR
+	gitTestRun(t, seedClone, "push", "origin", "--delete", "feature-branch")
+
+	localClone := t.TempDir()
+	gitTestRun(t, localClone, "clone", upstream, ".")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, localClone, "config", cfg[0], cfg[1])
+	}
+
+	testProv := &localBitbucketMock{
+		BitbucketProvider: &BitbucketProvider{},
+		meta: PRMeta{
+			Number:           99,
+			Title:            "Merged PR with deleted branch",
+			BaseRef:          "main",
+			HeadRef:          "", // Empty branch name!
+			HeadSHA:          headSHA,
+			HeadRepoCloneURL: upstream,
+			HeadIsFork:       false,
+		},
+	}
+
+	target := PRTarget{Provider: "bitbucket", Owner: "upstream", Repo: "git", Number: 99}
+	sess, err := checkoutPR(context.Background(), testProv, target, localClone, nil)
+	if err != nil {
+		t.Fatalf("checkoutPR should succeed with HeadSHA fallback when HeadRef is empty: %v", err)
+	}
+	defer sess.Close()
+
+	if sess.meta.HeadSHA != headSHA {
+		t.Errorf("sess.meta.HeadSHA = %q, want %q", sess.meta.HeadSHA, headSHA)
+	}
+}
+
+// TestGitRunStepFallsBackToSSHAfterHTTPS tests that gitRunStep with a non-Bitbucket
+// provider first tries HTTPS with the provided token, then falls back to SSH when
+// HTTPS fails. A closure records which remotes were attempted.
+func TestGitRunStepFallsBackToSSHAfterHTTPS(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+
+	base := t.TempDir()
+	missingPath := filepath.Join(base, "nonexistent.git")
+	bareRepo := filepath.Join(base, "bare.git")
+
+	if err := os.MkdirAll(bareRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, bareRepo, "init", "--bare")
+
+	var recorded []string
+	makeArgs := func(remote string) []string {
+		recorded = append(recorded, remote)
+		return []string{"ls-remote", remote}
+	}
+
+	_, err := gitRunStep(&mockSSHProvider{}, PRTarget{}, "tok", missingPath, bareRepo, makeArgs)
+	if err != nil {
+		t.Fatalf("gitRunStep failed: %v", err)
+	}
+
+	if len(recorded) != 2 || recorded[0] != missingPath || recorded[1] != bareRepo {
+		t.Errorf("gitRunStep recorded remotes = %v, want [%s, %s]", recorded, missingPath, bareRepo)
+	}
+}
+
+// TestGitRunStepBitbucketSkipsHTTPS tests that gitRunStep with BitbucketProvider
+// skips the HTTPS attempt entirely and tries SSH directly, even with a token provided.
+// A closure records which remotes were attempted.
+func TestGitRunStepBitbucketSkipsHTTPS(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+
+	base := t.TempDir()
+	bareRepo := filepath.Join(base, "bare.git")
+	missingPath := filepath.Join(base, "nonexistent.git")
+
+	if err := os.MkdirAll(bareRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, bareRepo, "init", "--bare")
+
+	var recorded []string
+	makeArgs := func(remote string) []string {
+		recorded = append(recorded, remote)
+		return []string{"ls-remote", remote}
+	}
+
+	_, err := gitRunStep(&BitbucketProvider{}, PRTarget{}, "tok", bareRepo, missingPath, makeArgs)
+	if err == nil {
+		t.Fatalf("gitRunStep should fail with non-existent SSH remote")
+	}
+
+	if len(recorded) != 1 || recorded[0] != missingPath {
+		t.Errorf("gitRunStep recorded remotes = %v, want [%s]", recorded, missingPath)
 	}
 }

@@ -220,3 +220,11 @@ px0 employs several complementary strategies to maintain an ultra-lean binary fo
 ### Self-Update Integrity
 
 Before `px0 --update` executes or installs a release binary, it verifies the download against the SHA-256 digest in that release's `checksums.txt` asset. Missing, malformed, or mismatched checksum data aborts the update without replacing the current executable.
+
+### PR Review & Non-Interactive SSH Git Transport
+
+When launched with a pull request URL (`px0 https://github.com/...` or `px0 https://bitbucket.org/...`), px0 initializes a dedicated review session backed by the `GitProvider` interface (`GitHubProvider`, `BitbucketProvider`):
+
+- **Non-Interactive Git Transport**: Git subprocess operations configured for SSH use non-interactive transport (`GIT_TERMINAL_PROMPT=0` and `GIT_SSH_COMMAND=ssh -o BatchMode=yes`) to fail fast instead of hanging on terminal prompts.
+- **Fail-Closed Permissions**: Review submission privileges (Approve, Request Changes) verify push permissions against provider APIs and fail closed on transport errors, HTTP 401/403, or invalid responses.
+- **Transport Security & SSRF Protection**: Outbound provider API requests enforce HTTPS and strict hostname allowlisting (`api.bitbucket.org`, `api.github.com`), sanitizing error messages to prevent credential leakage.

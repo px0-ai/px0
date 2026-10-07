@@ -19,7 +19,7 @@ See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://p
 
 ## Features
 
-- GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
+- GitHub and Bitbucket PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, and stage, commit, or push from the browser.
 - Unpushed commit review: Read the commits your branch is ahead of its tracking branch by, one file diff at a time, before you push them.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
@@ -60,8 +60,9 @@ px0
 px0 ~/workspace/project
 px0 main.go:42
 
-# Review a GitHub pull request
+# Review a pull request (GitHub or Bitbucket)
 px0 https://github.com/owner/repo/pull/123
+px0 https://bitbucket.org/workspace/repo/pull-requests/123
 
 # Remote or headless server mode
 px0 -host 0.0.0.0 -port 7777 ~/workspace
@@ -87,6 +88,29 @@ host's interfaces.
 Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel
 with zero remote setup overhead and strict read-only sandboxing
 (path traversal protection & DNS rebinding checks).
+
+### Pull Request Reviews & Authentication
+
+px0 reviews pull requests from GitHub and Bitbucket Cloud by checking out the source tree into a temporary worktree, scoping diffs against the merge-base, and letting you draft review comments or batch apply them with AI agents.
+
+#### Bitbucket Cloud
+- **URL Format**: `https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`
+  ```bash
+  px0 https://bitbucket.org/workspace/repo/pull-requests/123
+  ```
+- **Authentication**:
+  - Configure `bitbucket.token` in px0 Settings (`~/.px0/settings.json` or Settings modal `Cmd/Ctrl+,` > Bitbucket).
+  - Or set the `BITBUCKET_TOKEN` environment variable.
+  - Value is an API token: `email:api_token` for Basic auth, or a bare token for Bearer auth. Repository/workspace access tokens use Bearer auth only.
+- **SSH Prerequisite**:
+  - Git repository clone, fetch, and push operations run via SSH (`git@bitbucket.org:...`). Ensure you have an SSH public key added to your Bitbucket account (**Personal settings** > **SSH keys**) and loaded in your local SSH agent (`ssh-add`).
+
+#### GitHub
+- **URL Format**: `https://github.com/<owner>/<repo>/pull/<id>`
+  ```bash
+  px0 https://github.com/owner/repo/pull/123
+  ```
+- **Authentication**: `github.token` in px0 Settings, `GITHUB_TOKEN` or `GH_TOKEN` environment variables, or `gh auth login`.
 
 ## Development
 
