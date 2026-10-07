@@ -1,6 +1,6 @@
 # Git Awareness, Diff Viewer & Stage/Commit/Push/Pull
 
-px0 includes built-in Git awareness, an interactive visual diff viewer, and a sidebar panel for the rest of the everyday git loop. It highlights working-tree modifications across your file tree and editor gutters, lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`, and stages, commits, pushes, and pulls without leaving the browser.
+px0 includes built-in Git awareness, an interactive visual diff viewer, and a sidebar panel for the rest of the everyday git loop. It highlights working-tree modifications across your file tree and editor gutters, lets you toggle between source code and an interactive side-by-side or unified diff against `HEAD` with `Cmd/Ctrl+D`, and stages, commits, pushes, and pulls without leaving the browser. Pass `-diff <ref>` to review all branch and working-tree changes since that ref diverged from `HEAD`.
 
 ---
 
@@ -19,7 +19,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 - **Real-Time Live Status Synchronization**: px0 establishes a lightweight Server-Sent Events (SSE) connection (`/api/stream`, aliased by `/api/git/stream`) to push working-tree status changes directly to the browser. You do not need to refresh the browser or click manual reindex buttons when files change on disk.
 - **Sub-Millisecond CLI Change Awareness**: When you execute Git operations in your terminal (`git checkout`, `git reset`, `git add`, `git commit`, `git restore`, `git stash`), px0 detects the operation in sub-milliseconds by checking metadata timestamps on Git control files (`.git/index`, `.git/HEAD`, `.git/packed-refs`), instantly updating your view without scanning files on disk.
 - **File Tree Status Badges**: The file explorer decorates changed files with colored badges indicating their Git working-tree status:
-  - `M` (Modified): Working tree file differs from `HEAD`.
+  - `M` (Modified): File differs from the active comparison base.
   - `A` (Added / Staged): Newly added file staged in the index.
   - `D` (Deleted): File removed from the working tree.
   - `U` (Untracked): New file not yet tracked by Git.
@@ -34,7 +34,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
   - Red triangle or marker for deleted lines.
 - **Interactive Diff Viewer (`Cmd/Ctrl+D`)**: Toggle between normal source view and full Git diff with a single keystroke.
 - **Side-by-Side & Unified Diff Modes**:
-  - **Side-by-Side (Split)**: View original `HEAD` code on the left and active working-tree code on the right with synchronized scrolling.
+  - **Side-by-Side (Split)**: View code from the comparison base on the left and the active working tree on the right with synchronized scrolling.
   - **Unified**: View changes inline with consecutive additions and deletions.
 - **Whitespace Diff Filtering**: Toggle whitespace trimming to hide trivial indentation and trailing space differences when reviewing significant logic changes.
 - **Direct Agent Editing from Diffs**: Select any modified or added line in the diff view and trigger an AI agent edit (`Alt+E`) to refine or correct the change on the spot.
@@ -55,7 +55,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 When an AI coding agent (Claude Code, Gemini CLI, Cursor Agent, Antigravity, Aider) edits your code in the background:
 1. Switch to the **Git Changes** view in the sidebar to isolate touched files.
 2. Status badges and gutter markers update in real time as the agent writes to disk.
-3. Open any modified file and press **`Cmd/Ctrl+D`** to review side-by-side changes against `HEAD`.
+3. Open any modified file and press **`Cmd/Ctrl+D`** to review side-by-side changes against the active comparison base.
 4. If an edit needs refinement, select the relevant lines directly inside the diff view and press `Alt+E` to prompt the agent with a targeted correction.
 
 ### Terminal Interaction Without Stale Views
@@ -92,7 +92,7 @@ When a teammate (or CI) has pushed new commits to the branch you're reviewing:
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
-| `Cmd/Ctrl+D` | Editor | Toggle Git Diff View (Split / Unified vs. `HEAD`) |
+| `Cmd/Ctrl+D` | Editor | Toggle Git Diff View (Split / Unified vs. the comparison base) |
 | Toggle Segment (`Files` / `Changes`) | Sidebar Header | Switch between File Explorer and Changed Files Only |
 | Toggle Icon | Diff Header | Switch between Side-by-Side and Unified Diff |
 | Space Icon | Diff Header | Toggle Ignore Leading/Trailing Whitespace |
@@ -120,6 +120,7 @@ Git behavior can be customized in Settings (`Cmd/Ctrl+,`):
 - **Coding Harness & Model**: **Commit with AI** uses the same globally selected harness and model as inline agent edits (`agent.harness`, and its persisted model) — see [Editing with Coding Agents](agent-editing.md).
 - **CLI Flag `-no-git`**: Launch px0 with Git features completely disabled (`px0 -no-git`) for environments where Git is not installed or when viewing plain directory archives.
 - **CLI Flag `-no-agent`**: Disables **Commit with AI** along with every other coding-harness feature; Stage/Commit/Push/Pull remain available since they never invoke a harness.
+- **CLI Flag `-diff <ref>`**: Compare the current branch and working tree with `merge-base(<ref>, HEAD)`. For example, `px0 -diff main` shows the complete reviewable branch diff while preserving untracked-file and conflict badges. An invalid ref emits a warning and falls back to `HEAD`.
 
 ---
 

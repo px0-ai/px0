@@ -867,6 +867,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"builtAt":     at,
 		"ready":       s.ix.Ready(),
 		"git":         gitAvailable(s.ix.Root()),
+		"gitBase":     gitDiffBaseLabel(),
 		"gitChanges":  gitCount,
 		"gitFiles":    gitFiles,
 		"githubToken": githubToken != "",
@@ -1311,7 +1312,7 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, abs)
 }
 
-// handleDiff returns the unified diff of a file against HEAD. available is false
+// handleDiff returns the unified diff of a file against the configured base. available is false
 // (with an empty diff and 200) when git is off/absent or the file is unchanged.
 //
 // In a PR review session, "diff" stays the full merge-base..working-tree diff

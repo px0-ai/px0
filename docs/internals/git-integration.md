@@ -14,6 +14,7 @@ Instead, px0 adheres to a Pure Shell-Out Architecture:
 - Zero disk footprint: holds all status and diff structures in volatile memory on the `Index` (`Node.Status`, `Node.Staged`).
 - Graceful degradation: if `git` is not installed, or if the opened directory is not a git repository, git features degrade silently without warnings or errors.
 - Can be disabled explicitly using the `-no-git` CLI flag.
+- Can compare the branch plus working tree with an immutable merge-base commit selected by `-diff <ref>`.
 
 ## 2. Concurrent Status Generation
 
@@ -42,6 +43,8 @@ git status --porcelain=v2 -z
 
 - `--porcelain=v2`: Machine-readable format immune to user git config customizations.
 - `-z`: NUL-delimited output preventing issues with filenames containing spaces, tabs, quotes, or Unicode characters.
+
+With `-diff <ref>`, startup first resolves `git merge-base <ref> HEAD` to an immutable commit SHA. Status generation overlays `git diff --name-status -z --find-renames <base>` with porcelain status so committed branch changes are visible while untracked files and conflicts retain their working-tree status.
 
 ## 3. In-Memory Status & Dirty Folder Propagation
 
@@ -81,10 +84,10 @@ This enables the file tree in the sidebar to visually highlight collapsed direct
 Both the line gutter and the full diff view are read off the same shell-out, `gitDiff(root, relpath)`:
 
 ```bash
-git diff --no-color HEAD -- <path>
+git diff --no-color <base> -- <path>
 ```
 
-The raw unified diff text is cached at that call site; everything downstream (line-range extraction in Go, and hunk parsing in the browser) is a pure parse of that one string, so a file is never diffed against `HEAD` more than once per request.
+`<base>` is `HEAD` by default or the resolved merge-base commit when `-diff <ref>` is active. The raw unified diff text is cached at that call site; everything downstream (line-range extraction in Go, and hunk parsing in the browser) is a pure parse of that one string, so a file is never diffed more than once per request.
 
 ### Gutter Change Indicators (`/api/gutter?path=...`)
 
@@ -264,7 +267,7 @@ When developers use px0 to inspect AI agent changes or review git branches, they
 
 ## 8. Diffing Against an Arbitrary Base
 
-`gitDiff`/`gitHunks` above are thin `base="HEAD"` wrappers around `gitDiffAgainst`/`gitHunksAgainst`, which take an arbitrary base ref rather than assuming the working tree's `HEAD`. The one other caller is PR review (`px0 <url>`), which diffs a checked-out PR against its merge-base with the target branch instead. See [GitHub PR Review](github-pr-review.md).
+`gitDiff` diffs against the configured base: `HEAD` by default, or the immutable merge-base commit selected by `-diff <ref>`. `gitHunksAgainst` takes an arbitrary base ref. PR review (`px0 <url>`) diffs a checked-out PR against its merge-base with the target branch instead of `-diff`. See [GitHub PR Review](github-pr-review.md).
 
 ## 9. Stage, Commit, Push, Pull
 
