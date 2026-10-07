@@ -112,8 +112,8 @@ Proportional gutter widths and accurate scroll geometry require exact character 
 
 Instead, px0 measures typography once via an offscreen DOM element (`#measure`):
 
-- `LH` (Line Height) and `chW` (Character Width) are measured with sub-pixel fractional precision.
-- Values are cached in state `S.chW` and `S.LH`.
+- `LH` (Line Height) and `chW` (Character Width) are measured with sub-pixel fractional precision. `LH` is synchronized from the computed `--lh` CSS value so the virtual spacer, row transform, scrolling, cursor movement, and navigation use the same geometry as rendered rows.
+- `chW` is cached in `S.chW`; `LH` is kept as the shared live line-height value in `web/src/state.js`.
 - Scrollbar dimensions and virtual positions are computed algebraically without reading DOM layout metrics.
 
 ## 5. Selection Preservation Across Repaints
