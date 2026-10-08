@@ -7,9 +7,21 @@ import { treeEl, refreshTree, setSidebarMode, hasGitView } from './tree.js';
 import { reloadOpenTabs } from './tabs.js';
 import { showToast } from './ui.js';
 import { refreshUnpushed } from './unpushed.js';
+import { syncSidebarButton, toggleSidebarState } from './sidebar-state.js';
+
+function syncSidebar() {
+  syncSidebarButton(document.body, $('#btn-open-side'));
+}
+
+export function toggleSidebar() {
+  toggleSidebarState(document.body, $('#btn-open-side'));
+  layout();
+  render();
+}
 
 export async function showPanel(name) {
   document.body.classList.remove('side-hidden');
+  syncSidebar();
   if (name === 'files') {
     await setSidebarMode('files');
   }
@@ -44,6 +56,9 @@ export async function reindexWorkspace() {
 
 export function initPanels() {
   $('#btn-reindex').addEventListener('click', reindexWorkspace);
+  $('#btn-open-side')?.addEventListener('click', toggleSidebar);
+  $('#btn-close-side')?.addEventListener('click', toggleSidebar);
+  syncSidebar();
 
   /* sidebar resize */
   (() => {

@@ -4,7 +4,7 @@ import { render, toggleWordWrap } from './renderer.js';
 import { openFile, centerLine, closeTab, reopenClosedTab } from './tabs.js';
 import { updateStatus, openLspMenu } from './status.js';
 import { pushHistory } from './history.js';
-import { showPanel, reindexWorkspace } from './panels.js';
+import { showPanel, reindexWorkspace, toggleSidebar } from './panels.js';
 import { openFind } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { revealFile } from './tree.js';
@@ -80,7 +80,7 @@ export const COMMANDS = [
   { name: 'Reveal Active File in Explorer', run: () => { const d = doc_(); if (d) { showPanel('files'); revealFile(d.path); } } },
   { name: withKeys('Toggle Word Wrap ({Alt+Z})'), run: () => toggleWordWrap() },
   { name: withKeys('Toggle Markdown / Table Preview ({Alt+M})'), run: () => togglePreview() },
-  { name: withKeys('Toggle Sidebar ({Mod+B})'), run: () => document.body.classList.toggle('side-hidden') },
+  { name: withKeys('Toggle Sidebar ({Mod+B})'), run: toggleSidebar },
   { name: 'Select Theme…', run: () => openPalette('theme') },
   { name: 'Next Theme', run: cycleTheme },
   { name: 'Re-index Workspace', run: reindexWorkspace },

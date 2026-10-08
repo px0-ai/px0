@@ -19,7 +19,7 @@ px0's file explorer eliminates unnecessary clicks by automatically collapsing si
 - **Gitignore Awareness & Dimming**: Files and folders ignored by `.gitignore` rules (such as `dist/`, `build/`, `vendor/`, `node_modules`) are visually dimmed in the tree and excluded from background search indexes.
 - **Auto-Reveal Active File**: Opening a file via fuzzy search (`Cmd/Ctrl+P`) or Go to Definition (`F12`) automatically scrolls the sidebar tree to reveal and highlight the active file.
 - **Expand All / Collapse All**: The explorer header has buttons to open project folders or close every folder. Expand All shows a progress state while loading nested folders in small batches. Ignored folders stay closed to avoid bulk-loading generated trees; you can still open them individually. Collapse All can stop an expansion while it runs. The resulting folder state is remembered between launches.
-- **Collapsible Sidebar (`Cmd/Ctrl+B`)**: Quickly toggle the entire file explorer sidebar on or off to maximize reading space for wide diffs or code inspection.
+- **Collapsible Sidebar (`Cmd/Ctrl+B`)**: Quickly toggle the file explorer sidebar with the keyboard shortcut or the visible sidebar button. When collapsed, the button remains at the upper-left edge so the sidebar can be restored with a click.
 - **Multi-Tab Document Bar**:
   - Open multiple files in tabs and switch between them.
   - Switch tabs using keyboard shortcuts (`Ctrl+Tab`, `Alt+1` through `Alt+9`).
