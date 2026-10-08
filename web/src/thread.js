@@ -608,7 +608,11 @@ export function newThread(info) {
   thrShow('thread');
   thrRenderState();
   if (info) hideSelectionBar();
+  // A caller can start the draft with a message: a review comment being
+  // discussed arrives quoted, ready for the question to be typed after it.
+  if (info?.message) thrEl.input.value = info.message;
   thrEl.input.focus();
+  thrEl.input.setSelectionRange(thrEl.input.value.length, thrEl.input.value.length);
 }
 
 async function thrSend() {

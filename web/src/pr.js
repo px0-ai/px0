@@ -15,11 +15,23 @@ import { openFile } from './tabs.js';
 import { refreshTree } from './tree.js';
 import { layout, render } from './renderer.js';
 import { openSettings } from './settings.js';
+import { newThread } from './thread.js';
+import { agentCommentCardHtml, reviewPathComments, reviewGeneralComments, reviewSummaryHtml, discussInfo, sevChip, previewText } from './review.js';
 
 let meta = null;      // this session's PR info: {number, title, base, head, writeAccess, readOnly}
 let comments = [];    // draft comments known to the server
 let issueComments = [];   // top-level PR conversation comments, already posted (fetched read-only)
 let reviewComments = [];  // inline diff-line comments, already posted (fetched read-only) -- may include replies
+let rv = null;            // agent-authored review (px0 -review), as served by /api/review; null without one
+let rvPath = [];          // its comments that belong to a file, shaped like reviewComments
+let rvGeneral = [];       // its comments that belong to no file
+let rvKey = '';           // JSON of the last snapshot, so an unchanged poll repaints nothing
+let rvBusy = false;
+let rvTries = 0;
+let rvOpened = false;
+
+// GitHub's inline comments and the agent's, which share markers and threads.
+const allReview = () => (rvPath.length ? reviewComments.concat(rvPath) : reviewComments);
 
 const prBar = () => $('#pr-bar');
 const list = () => $('#pr-comment-list');
@@ -40,6 +52,7 @@ export function initPR() {
   renderBar();
   refreshComments();
   refreshExistingComments();
+  if (S.meta.review) initReview();
 }
 
 // Re-fetches PR metadata and comments after an external change to the
@@ -75,6 +88,7 @@ function fmtTime(iso) {
 // comments -- fetched live (never cached) so another reviewer's activity
 // shows up on the next open of the panel or diff.
 async function refreshExistingComments() {
+  if (meta?.local) return; // no forge to ask; the agent's comments come from refreshReview
   try {
     const j = await api('/api/pr/existing-comments');
     issueComments = j.issueComments || [];
@@ -102,9 +116,13 @@ function renderBar() {
   const b = prBar();
   if (!b || !meta) return;
   b.hidden = false;
-  $('#pr-badge').textContent = '#' + meta.number;
+  $('#pr-badge').textContent = meta.local ? 'Review' : '#' + meta.number;
   const link = $('#pr-link');
-  if (link) link.href = meta.url || '#';
+  if (link) {
+    link.href = meta.url || '#';
+    link.classList.toggle('no-link', !!meta.local);
+    if (meta.local) link.removeAttribute('href');
+  }
   const mb = $('#pr-merged-badge');
   if (mb) mb.hidden = !meta.merged;
   $('#pr-title').textContent = meta.title;
@@ -114,7 +132,7 @@ function renderBar() {
     ? (comments.length + (comments.length === 1 ? ' draft comment' : ' draft comments'))
     : '';
   const ro = $('#pr-readonly-note');
-  if (ro) ro.hidden = !meta.readOnly;
+  if (ro) ro.hidden = !meta.readOnly || !!meta.local;
   const dw = $('#pr-diff-warning');
   if (dw) {
     dw.hidden = !meta.diffBaseWarning;
@@ -127,17 +145,18 @@ function renderBar() {
   }
   const reqBtn = $('#pr-submit-request-changes');
   const appBtn = $('#pr-submit-approve');
-  if (reqBtn) reqBtn.hidden = !meta.writeAccess;
-  if (appBtn) appBtn.hidden = !meta.writeAccess;
+  if (reqBtn) reqBtn.hidden = !meta.writeAccess || !!meta.local;
+  if (appBtn) appBtn.hidden = !meta.writeAccess || !!meta.local;
   const cmtBtn = $('#pr-submit-comment');
   if (cmtBtn) {
+    cmtBtn.hidden = !!meta.local; // nothing to submit a review to
     cmtBtn.disabled = false;
     cmtBtn.title = meta.readOnly
       ? 'No GitHub token configured -- click to connect and submit'
       : 'Submit review with drafts, without approval or change requests';
   }
   const composeEl = $('#pr-issue-compose');
-  if (composeEl) composeEl.hidden = false;
+  if (composeEl) composeEl.hidden = !!meta.local;
 }
 
 export function nudgeGitHubToken() {
@@ -475,8 +494,8 @@ function renderMarkersForActiveDoc() {
   // path/line/side as their thread root, so grouping by key alone already
   // gathers a whole thread together.
   const existingByKey = new Map();
-  for (const c of reviewComments) {
-    if (c.path !== d.path) continue;
+  for (const c of allReview()) {
+    if (c.path !== d.path || !c.line) continue; // a file-level comment has no row to mark
     const key = (c.side || 'RIGHT') + ':' + c.line;
     if (!existingByKey.has(key)) existingByKey.set(key, []);
     existingByKey.get(key).push(c);
@@ -569,6 +588,12 @@ function wireCommentsPanel() {
   }
 
   $('#pr-comments-list')?.addEventListener('click', e => {
+    const discuss = e.target.closest('.rv-discuss');
+    if (discuss) {
+      const c = [...rvPath, ...rvGeneral].find(x => x.rvId === discuss.dataset.rv);
+      if (c) newThread(discussInfo(c));
+      return;
+    }
     const replyBtn = e.target.closest('.pr-issue-comment-reply-btn');
     if (replyBtn) {
       const ta = $('#pr-issue-compose-body');
@@ -683,6 +708,7 @@ function issueCommentCardHtml(c) {
 }
 
 function reviewCommentCardHtml(c) {
+  if (c.agent) return agentCommentCardHtml(c);
   return '<div class="pr-comment-card' + (c.inReplyTo ? ' reply' : '') + '">' +
     '<div class="pr-issue-comment-head">' +
       '<span class="pr-issue-comment-author">' + esc(c.author || 'unknown') + '</span>' +
@@ -705,10 +731,11 @@ function draftCardHtml(c) {
 function threadHtml(path, t, key) {
   const sortedExisting = [...t.existing].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
   const root = sortedExisting.find(c => !c.inReplyTo) || sortedExisting[0];
-  const loc = path + ':' + t.line + (t.side === 'LEFT' ? ' (base)' : '');
+  const lineLabel = t.line ? ':' + t.line + (root?.endLine ? '-' + root.endLine : '') : ' (file)';
+  const loc = path + lineLabel + (t.side === 'LEFT' ? ' (base)' : '');
   const itemsHtml = sortedExisting.map(reviewCommentCardHtml).join('');
   const draftsHtml = t.drafts.map(draftCardHtml).join('');
-  const canReply = !!root;
+  const canReply = !!root && !root.agent; // replying posts to the forge; an agent's comments are discussed instead
   const replyRow = canReply
     ? '<div class="pr-comment-reply-row" data-reply-to="' + root.id + '">' +
       '<textarea class="pr-review-body reply-input" rows="1" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>' +
@@ -719,12 +746,13 @@ function threadHtml(path, t, key) {
   const open = expandedKeys.has(accKey);
   const total = sortedExisting.length + t.drafts.length;
   const countBadge = total > 1 ? '<span class="acc-count">' + total + '</span>' : '';
-  const preview = root ? root.body : (t.drafts[0]?.body || '');
+  const preview = root ? (root.agent ? previewText(root.body) : root.body) : (t.drafts[0]?.body || '');
   return '<div class="pr-comment-thread acc-item' + (open ? ' open' : '') + '" data-thread-key="' + esc(key) + '" data-acc="' + esc(accKey) + '">' +
     '<div class="acc-head">' +
       '<span class="acc-chevron">&#8250;</span>' +
       '<span class="pr-comment-loc" data-path="' + esc(path) + '" data-line="' + t.line + '">' + esc(loc) + '</span>' +
       '<span class="pr-issue-comment-author">' + esc(root ? (root.author || 'unknown') : 'you') + '</span>' +
+      (root?.agent ? sevChip(root) : '') +
       countBadge +
       '<span class="acc-preview">' + esc(preview) + '</span>' +
     '</div>' +
@@ -748,23 +776,26 @@ function renderCommentsPanel() {
     if (!m.has(key)) m.set(key, { existing: [], drafts: [], side, line });
     return m.get(key);
   };
-  for (const c of reviewComments) {
+  for (const c of allReview()) {
     if (!c.path) continue;
-    threadFor(c.path, c.side || 'RIGHT', c.line).existing.push(c);
+    threadFor(c.path, c.side || 'RIGHT', c.line || 0).existing.push(c);
   }
   for (const c of comments) {
     if (!c.path) continue;
     threadFor(c.path, c.side || 'RIGHT', c.line).drafts.push(c);
   }
 
-  const totalReview = reviewComments.length + comments.length;
-  let html = '<div class="pr-comments-section-title">Conversation' +
-    (issueComments.length ? ' (' + issueComments.length + ')' : '') + '</div>';
-  html += issueComments.length
-    ? [...issueComments].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).map(issueCommentCardHtml).join('')
-    : '<div class="pr-comments-empty">No top-level comments yet.</div>';
+  const totalReview = allReview().length + comments.length;
+  let html = rv ? reviewSummaryHtml(rv, rvGeneral) : '';
+  if (!meta?.local) {
+    html += '<div class="pr-comments-section-title">Conversation' +
+      (issueComments.length ? ' (' + issueComments.length + ')' : '') + '</div>';
+    html += issueComments.length
+      ? [...issueComments].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).map(issueCommentCardHtml).join('')
+      : '<div class="pr-comments-empty">No top-level comments yet.</div>';
+  }
 
-  html += '<div class="pr-comments-section-title">Review comments' +
+  html += '<div class="pr-comments-section-title">' + (meta?.local ? 'Comments on files' : 'Review comments') +
     (totalReview ? ' (' + totalReview + ')' : '') + '</div>';
   if (byPath.size === 0) {
     html += '<div class="pr-comments-empty">No inline comments yet.</div>';
@@ -779,8 +810,50 @@ function renderCommentsPanel() {
 
   listEl.innerHTML = html;
   if (countEl) {
-    const n = issueComments.length + totalReview;
+    const n = issueComments.length + totalReview + rvGeneral.length;
     countEl.textContent = n ? String(n) : '';
+  }
+}
+
+/* ---------- agent-authored review (px0 -review) ---------- */
+
+function initReview() {
+  refreshReview();
+  // The agent may rewrite the file while px0 is open: look again when the tab
+  // comes back into view, never on a timer while it is hidden.
+  addEventListener('focus', refreshReview);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshReview(); });
+}
+
+async function refreshReview() {
+  if (rvBusy || document.hidden) return;
+  rvBusy = true;
+  try {
+    const j = await api('/api/review');
+    const key = JSON.stringify(j);
+    if (key !== rvKey) {
+      rvKey = key;
+      rv = j;
+      rvPath = reviewPathComments(j);
+      rvGeneral = reviewGeneralComments(j);
+      renderCommentsPanel();
+      renderMarkersForActiveDoc();
+      // Open the panel the first time there is something in it: a review is
+      // what this session was started to read.
+      if (!rvOpened && (j.comments.length || j.summary)) {
+        rvOpened = true;
+        $('#pr-comments-panel')?.classList.remove('collapsed');
+        layout(); render();
+      }
+    }
+    // Anchors are checked against the code in the background; look again
+    // shortly until that is done.
+    if (!j.resolved && rvTries++ < 40) setTimeout(refreshReview, 300);
+    else if (j.resolved) rvTries = 0;
+  } catch {
+    // Best-effort: the panel keeps whatever it last showed.
+  } finally {
+    rvBusy = false;
   }
 }
 

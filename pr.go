@@ -51,6 +51,13 @@ type prSession struct {
 
 	scopeDir string // temp dir holding the diff files handed to threads; removed in Close
 
+	// local marks a review of two local revisions (px0 -review): there is no
+	// forge, so no provider, token or PR number, and push/pull behave as in a
+	// plain workspace. inPlace means worktree is the user's own repository,
+	// which Close must never remove.
+	local   bool
+	inPlace bool
+
 	comments []prComment
 	nextID   int64
 }
@@ -211,6 +218,9 @@ func (p *prSession) Close() {
 	}
 	if p.scopeDir != "" {
 		os.RemoveAll(p.scopeDir)
+	}
+	if p.inPlace {
+		return // the worktree is the user's repository, not ours to delete
 	}
 	if p.srcRepo != "" {
 		exec.Command("git", "-C", p.srcRepo, "worktree", "remove", "--force", p.worktree).Run()
@@ -468,6 +478,7 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 		"diffBaseWarning": p.diffBaseWarning,
 		"headSHA":         p.meta.HeadSHA,
 		"url":             p.target.URL,
+		"local":           p.local,
 		"files":           s.ix.PRFiles(),
 	})
 }
@@ -480,6 +491,10 @@ func (s *Server) handlePRExistingComments(w http.ResponseWriter, r *http.Request
 		return
 	}
 	p := s.pr
+	if p.provider == nil { // a local review has no forge to ask
+		writeJSON(w, map[string]any{"issueComments": []PRComment{}, "reviewComments": []PRComment{}})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	issue, review, err := p.provider.FetchComments(ctx, p.target, p.token)

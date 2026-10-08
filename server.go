@@ -58,6 +58,7 @@ type Server struct {
 	agent     *agentManager     // nil unless main wires editing for this session
 	threads   *threadManager    // nil unless editing is wired: threads run on the same harness
 	pr        *prSession        // nil unless main launched this process as `px0 pr ...`
+	review    *reviewState      // nil unless px0 -review loaded an agent-authored review
 	diffBase  string            // ref /api/diff and /api/gutter diff against; "HEAD" unless in PR mode
 	prHeadSHA string            // PR mode only: the checked-out PR head commit. Frozen boundary between
 	// the PR's own diff (diffBase..prHeadSHA) and the reviewer's local edits
@@ -173,6 +174,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(s.routePath("/api/threads/delete"), s.handleThreadDelete)
 	s.mux.HandleFunc(s.routePath("/api/threads/stream"), s.handleThreadStream)
 	s.mux.HandleFunc(s.routePath("/api/settings"), s.handleSettings)
+	s.mux.HandleFunc(s.routePath("/api/review"), s.handleReview)
 	s.mux.HandleFunc(s.routePath("/api/pr/meta"), s.handlePRMeta)
 	s.mux.HandleFunc(s.routePath("/api/pr/comments"), s.handlePRComments)
 	s.mux.HandleFunc(s.routePath("/api/pr/comments/delete"), s.handlePRCommentDelete)
@@ -491,6 +493,7 @@ func (s *Server) prThreadContext(scope string) string {
 	p.mu.Lock()
 	num, title, base, head := p.meta.Number, p.meta.Title, p.meta.BaseRef, p.meta.HeadRef
 	mb, headSHA, url := p.diffBase, p.meta.HeadSHA, p.target.URL
+	local := p.local
 	p.mu.Unlock()
 	root := s.ix.Root()
 	short := func(x string) string { return x[:min(12, len(x))] }
@@ -500,15 +503,23 @@ func (s *Server) prThreadContext(scope string) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "This workspace is a checkout of pull request #%d %q (%s ← %s)", num, title, base, head)
-	if url != "" {
-		fmt.Fprintf(&b, ", %s", url)
+	// A local review has no pull request: say what it is, and name the change
+	// the way the user will ("the review", "this change").
+	prName, prHead := "the PR", "the PR head"
+	if local {
+		prName, prHead = "the reviewed change", "the head of the reviewed change"
+		fmt.Fprintf(&b, "This workspace is a local review of %s against %s. ", head, base)
+	} else {
+		fmt.Fprintf(&b, "This workspace is a checkout of pull request #%d %q (%s ← %s)", num, title, base, head)
+		if url != "" {
+			fmt.Fprintf(&b, ", %s", url)
+		}
+		b.WriteString(". ")
 	}
-	b.WriteString(". ")
 
 	prRange := ""
 	if haveRange {
-		prRange = fmt.Sprintf("`git diff %s %s` (merge-base with %s to the PR head %s)", mb, headSHA, base, short(headSHA))
+		prRange = fmt.Sprintf("`git diff %s %s` (merge-base with %s to %s %s)", mb, headSHA, base, prHead, short(headSHA))
 	}
 	switch scope {
 	case "mine":
@@ -538,7 +549,11 @@ func (s *Server) prThreadContext(scope string) string {
 		}
 		b.WriteString(".")
 	default: // "pr"
-		b.WriteString("When the user says \"the PR\" or \"this PR\", they mean the entire pull request, not the latest commit or the file they are looking at.")
+		if local {
+			b.WriteString("When the user says \"the review\", \"the PR\" or \"this change\", they mean the entire change under review, not the latest commit or the file they are looking at.")
+		} else {
+			b.WriteString("When the user says \"the PR\" or \"this PR\", they mean the entire pull request, not the latest commit or the file they are looking at.")
+		}
 		if !haveRange {
 			break
 		}
@@ -559,10 +574,19 @@ func (s *Server) prThreadContext(scope string) string {
 			}
 			fmt.Fprintf(&b, " Files it changes (%d)%s: %s.", len(files), more, strings.Join(names, ", "))
 		}
-		fmt.Fprintf(&b, " Anything after %s (`git diff %s`, or commits above it) is the reviewer's own work on top of the PR, not part of it.", short(headSHA), headSHA)
+		fmt.Fprintf(&b, " Anything after %s (`git diff %s`, or commits above it) is the reviewer's own work on top of %s, not part of it.", short(headSHA), headSHA, prName)
+	}
+	if s.review != nil {
+		b.WriteString("\n\n")
+		b.WriteString(s.review.contextBlock())
 	}
 	return b.String()
 }
+
+// forgePR reports whether this is a review of a pull request on a forge, as
+// opposed to a plain workspace or a local review. Push, pull and the unpushed
+// list are the forge's own only in the first case.
+func (s *Server) forgePR() bool { return s.pr != nil && !s.pr.local }
 
 // SetPR marks this process as a PR review session: diffs are computed
 // against the PR's merge-base instead of HEAD, and the /api/pr/* endpoints
@@ -897,9 +921,13 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 			"diffBaseWarning": p.diffBaseWarning,
 			"headSHA":         p.meta.HeadSHA,
 			"url":             p.target.URL,
+			"local":           p.local,
 			"files":           s.ix.PRFiles(),
 		}
 		p.mu.Unlock()
+	}
+	if s.review != nil {
+		meta["review"] = true
 	}
 	writeJSON(w, meta)
 }
@@ -1627,7 +1655,7 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
 	if !localPost(w, r) {
 		return
 	}
-	if s.pr != nil {
+	if s.forgePR() {
 		if err := s.pr.Push(); err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -1671,7 +1699,7 @@ func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) {
 	if !localPost(w, r) {
 		return
 	}
-	if s.pr != nil {
+	if s.forgePR() {
 		info, err := s.pr.Pull()
 		if err != nil {
 			status := http.StatusBadGateway
@@ -1766,7 +1794,7 @@ func (s *Server) handleUnpushed(w http.ResponseWriter, r *http.Request) {
 	}
 	var upstream string
 	var commits []UnpushedCommit
-	if s.pr != nil {
+	if s.forgePR() {
 		// Detached PR checkout: your commits are everything past the PR head.
 		s.pr.mu.Lock()
 		head, branch := s.pr.remoteHead(), s.pr.meta.HeadRef

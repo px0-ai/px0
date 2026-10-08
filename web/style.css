@@ -2697,6 +2697,54 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .pr-comment-card.draft .pr-issue-comment-author { color: var(--accent-fg); }
 .pr-comment-thread.flash { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* Agent-authored review (px0 -review): severity chips, restricted Markdown
+   bodies, suggestions, and the banners above the comments. Theme tokens only. */
+.pr-link.no-link { pointer-events: none; cursor: default; }
+.rv-review-title { font: 600 13px var(--ui); color: var(--fg); }
+.rv-verdict { font: 11px var(--ui); color: var(--dim); }
+.rv-banner { font: 12px var(--ui); color: var(--dim); background: var(--bg3); border-radius: var(--r); padding: 6px 8px; }
+.rv-banner.warn { border-left: 3px solid var(--no); color: var(--fg); }
+.rv-banner summary { cursor: pointer; }
+.rv-banner ul { margin: 4px 0 0; padding-left: 18px; }
+.rv-sev {
+  flex: none; font: 600 10px var(--ui); text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: var(--r); color: var(--dim);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.rv-sev-blocker { color: var(--err); }
+.rv-sev-major { color: var(--no); }
+.rv-sev-minor { color: var(--accent-fg); }
+.rv-sev-nit { color: var(--faint); }
+.rv-sev-question { color: var(--nt); }
+.rv-sev-praise { color: var(--gi); }
+.rv-cat { font: 11px var(--mono); color: var(--faint); }
+.rv-title { font: 600 12px var(--ui); color: var(--fg); }
+.rv-body { font: 12px/1.5 var(--ui); color: var(--fg); overflow-wrap: anywhere; }
+.rv-body p { margin: 0 0 6px; }
+.rv-body p:last-child { margin-bottom: 0; }
+.rv-body ul, .rv-body ol { margin: 0 0 6px; padding-left: 20px; }
+.rv-body code { font: 11px var(--mono); background: var(--bg4); border-radius: 3px; padding: 0 4px; }
+.rv-body pre { margin: 0 0 6px; padding: 6px 8px; background: var(--bg3); border-radius: var(--r); overflow-x: auto; }
+.rv-body pre code { background: none; padding: 0; white-space: pre; }
+.rv-body a { color: var(--accent-fg); }
+.rv-h { font-weight: 600; margin: 4px 0; }
+.rv-summary { border-left: 2px solid var(--line); padding-left: 8px; }
+.rv-suggest { border: 1px solid var(--gi); border-radius: var(--r); margin: 0 0 6px; overflow: hidden; }
+.rv-suggest-label {
+  font: 600 10px var(--ui); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--gi); background: var(--gi-bg); padding: 2px 8px;
+}
+.rv-body .rv-suggest pre { margin: 0; border-radius: 0; background: var(--gi-bg); }
+.rv-note { font: italic 11px var(--ui); color: var(--faint); }
+.rv-refs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.rv-refs-label { font: 11px var(--ui); color: var(--faint); }
+.rv-ref { font: 11px var(--mono); color: var(--accent-fg); background: var(--bg4); border-radius: var(--r); padding: 1px 6px; }
+.rv-discuss {
+  align-self: flex-start; font: 11px var(--ui); color: var(--accent-fg); background: none;
+  border: none; cursor: pointer; padding: 0;
+}
+.rv-discuss:hover { text-decoration: underline; }
+
 /* Accordion: .acc-head always shows; .acc-body only renders while .open. */
 .acc-head { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
 .acc-chevron {
