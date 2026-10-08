@@ -406,6 +406,43 @@ func TestUpdateGitStatus(t *testing.T) {
 	}
 }
 
+// An edit to a file that is already modified or untracked leaves its status
+// letter alone, so it has to be caught by size and mtime instead (#157).
+func TestUpdateGitStatusSeesEditsWithUnchangedStatus(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := gitRepo(t)
+	ix := NewIndex(root)
+	ix.Build()
+
+	// rewrite keeps the byte size and pushes the mtime forward, so only the
+	// mtime gives the edit away even on filesystems with coarse timestamps.
+	rewrite := func(rel, body, wantStatus string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		later := time.Now().Add(time.Minute)
+		if err := os.Chtimes(p, later, later); err != nil {
+			t.Fatal(err)
+		}
+		_, _, changed, statuses, _, _, _, _ := ix.UpdateGitStatus()
+		if statuses[rel] != wantStatus {
+			t.Fatalf("%s status = %q, want %q", rel, statuses[rel], wantStatus)
+		}
+		if !changed {
+			t.Errorf("editing %s (status %s) reported changed=false", rel, wantStatus)
+		}
+		if _, _, again, _, _, _, _, _ := ix.UpdateGitStatus(); again {
+			t.Errorf("second poll after editing %s reported changed=true", rel)
+		}
+	}
+	rewrite("sub/mod.go", "line six\n", "M")
+	rewrite("untr.go", "untrackeD\n", "U")
+}
+
 func TestGitWatcherStreamAndRefresh(t *testing.T) {
 	if !gitInstalled() {
 		t.Skip("git not installed")

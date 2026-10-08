@@ -1254,7 +1254,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
-		"start": start, "lines": lines, "size": st.Size(),
+		"start": start, "lines": lines, "size": st.Size(), "mtime": strconv.FormatInt(st.ModTime().UnixNano(), 10),
 		"exact": exact, "refine": !exact && coming,
 		"markdown":      isMarkdown(rel),
 		"table":         isTable(rel),

@@ -225,11 +225,11 @@ async function handleGitStatus(data) {
     }
   }
 
-  // Check if any open tabs are affected by modifications
+  // Check if any open tabs are affected by modifications. Untracked tabs count
+  // too: they have no diff, but their content can still change on disk.
   const anyTabModified = S.tabs.some(t => {
     if (t.diffRef) return false; // frozen at a commit; the working tree can't move it
-    const code = statuses[t.path];
-    return code && code !== 'U';
+    return !!statuses[t.path];
   });
 
   if (anyTabModified) {
