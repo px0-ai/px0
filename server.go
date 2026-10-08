@@ -496,7 +496,6 @@ func (s *Server) prThreadContext(scope string) string {
 	local := p.local
 	p.mu.Unlock()
 	root := s.ix.Root()
-	short := func(x string) string { return x[:min(12, len(x))] }
 	haveRange := mb != "" && mb != "HEAD" && headSHA != ""
 	if scope == "" {
 		scope = "pr"
@@ -519,7 +518,7 @@ func (s *Server) prThreadContext(scope string) string {
 
 	prRange := ""
 	if haveRange {
-		prRange = fmt.Sprintf("`git diff %s %s` (merge-base with %s to %s %s)", mb, headSHA, base, prHead, short(headSHA))
+		prRange = fmt.Sprintf("`git diff %s %s` (merge-base with %s to %s %s)", mb, headSHA, base, prHead, shortSHA(headSHA))
 	}
 	switch scope {
 	case "mine":
@@ -574,7 +573,7 @@ func (s *Server) prThreadContext(scope string) string {
 			}
 			fmt.Fprintf(&b, " Files it changes (%d)%s: %s.", len(files), more, strings.Join(names, ", "))
 		}
-		fmt.Fprintf(&b, " Anything after %s (`git diff %s`, or commits above it) is the reviewer's own work on top of %s, not part of it.", short(headSHA), headSHA, prName)
+		fmt.Fprintf(&b, " Anything after %s (`git diff %s`, or commits above it) is the reviewer's own work on top of %s, not part of it.", shortSHA(headSHA), headSHA, prName)
 	}
 	if s.review != nil {
 		b.WriteString("\n\n")

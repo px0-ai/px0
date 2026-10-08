@@ -32,28 +32,30 @@ import (
 var reviewSchema string
 
 const (
-	reviewMaxFile       = 2 << 20
-	reviewMaxComments   = 2000
-	reviewMaxBody       = 16 << 10
-	reviewMaxSummary    = 32 << 10
-	reviewMaxTitle      = 200
-	reviewMaxCTitle     = 120
-	reviewMaxCategory   = 40
-	reviewMaxAnchor     = 2000
-	reviewMaxRefs       = 8
-	reviewMaxPaths      = 500     // distinct files whose content is read to verify anchors
-	reviewMaxContent    = 4 << 20 // larger files are left unverified
-	reviewRelocateRange = 25
-	reviewContextChars  = 1024
+	reviewMaxFile         = 2 << 20
+	reviewMaxComments     = 2000
+	reviewMaxBody         = 16 << 10
+	reviewMaxSummary      = 32 << 10
+	reviewMaxTitle        = 200
+	reviewMaxCommentTitle = 120
+	reviewMaxCategory     = 40
+	reviewMaxAnchor       = 2000
+	reviewMaxRefs         = 8
+	reviewMaxPaths        = 500     // distinct files whose content is read to verify anchors
+	reviewMaxContent      = 4 << 20 // larger files are left unverified
+	reviewRelocateRange   = 25
+	reviewContextChars    = 1024
 )
 
 var (
 	reviewIDRe       = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	reviewSHARe      = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 	reviewSeverities = map[string]bool{"blocker": true, "major": true, "minor": true, "nit": true, "question": true, "praise": true}
 	reviewVerdicts   = map[string]bool{"approve": true, "request_changes": true, "comment": true}
 )
 
+// reviewGenerator says what wrote the review. SessionID is accepted so a later
+// change can hand a thread the writer's session; today it is kept server-side
+// and never sent to the browser or put in a prompt.
 type reviewGenerator struct {
 	Agent     string `json:"agent,omitempty"`
 	Model     string `json:"model,omitempty"`
@@ -74,6 +76,8 @@ type reviewMeta struct {
 	CreatedAt   string           `json:"createdAt,omitempty"`
 }
 
+// reviewRef points at code related to a comment, possibly on another revision.
+// It is validated and shown; its code is not fetched yet.
 type reviewRef struct {
 	Rev     string `json:"rev,omitempty"`
 	Path    string `json:"path"`
@@ -107,11 +111,21 @@ type reviewComment struct {
 	inherits bool // a reply with no location of its own: takes its parent's
 }
 
+// inheritLocation gives a reply that names no location of its own its parent's:
+// where the parent sits, and how that was checked.
+func (c *reviewComment) inheritLocation(p *reviewComment) {
+	c.Path, c.Line, c.EndLine, c.Side = p.Path, p.Line, p.EndLine, p.Side
+	c.Status, c.OrigLine, c.OutsideDiff = p.Status, p.OrigLine, p.OutsideDiff
+}
+
+// reviewRejected is a comment that was not shown, and why.
 type reviewRejected struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
 }
 
+// reviewDoc is a parsed review: the accepted comments, what was rejected while
+// parsing, and notes about fields that were cut down or ignored.
 type reviewDoc struct {
 	reviewMeta
 	Comments []reviewComment
@@ -119,6 +133,7 @@ type reviewDoc struct {
 	Warnings []string
 }
 
+// truncateBytes cuts s to at most n bytes without splitting a UTF-8 character.
 func truncateBytes(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -130,6 +145,9 @@ func truncateBytes(s string, n int) string {
 }
 
 // cleanReviewPath accepts only a clean, repo-relative, slash-separated path.
+// Unlike Server.safePath it never touches the disk and does not tidy what it is
+// given: the path is only ever looked up in a git tree, and "a/../b" from an
+// agent is a mistake to report, not something to quietly resolve.
 func cleanReviewPath(p string) (string, bool) {
 	if p == "" || strings.ContainsAny(p, "\x00\r\n\\") {
 		return "", false
@@ -192,8 +210,8 @@ func parseReview(data []byte) (*reviewDoc, error) {
 		doc.Warnings = append(doc.Warnings, "summary was truncated to 32 KiB")
 	}
 	for name, sha := range map[string]*string{"baseSHA": &doc.BaseSHA, "headSHA": &doc.HeadSHA} {
-		if *sha != "" && !reviewSHARe.MatchString(*sha) {
-			doc.Warnings = append(doc.Warnings, fmt.Sprintf("ignored %s %q: expected 7 to 64 hex digits", name, truncateBytes(*sha, 40)))
+		if *sha != "" && !(validSHA(*sha) && len(*sha) >= 7) {
+			doc.Warnings = append(doc.Warnings, fmt.Sprintf("ignored %s %q: expected 7 to 40 hex digits", name, truncateBytes(*sha, 40)))
 			*sha = ""
 		}
 	}
@@ -247,7 +265,7 @@ func validateReviewComment(c *reviewComment, seen map[string]bool) string {
 	if len(c.Body) > reviewMaxBody {
 		return "body is larger than 16 KiB"
 	}
-	if len(c.Title) > reviewMaxCTitle || len(c.Category) > reviewMaxCategory || len(c.Anchor) > reviewMaxAnchor {
+	if len(c.Title) > reviewMaxCommentTitle || len(c.Category) > reviewMaxCategory || len(c.Anchor) > reviewMaxAnchor {
 		return "title, category or anchor is over its length limit"
 	}
 	c.Side = strings.ToUpper(c.Side)
@@ -305,7 +323,7 @@ func validateReviewComment(c *reviewComment, seen map[string]bool) string {
 		if r.Line < 0 || r.EndLine < 0 || (r.EndLine > 0 && r.EndLine < r.Line) || (r.EndLine > 0 && r.Line == 0) {
 			return "ref has an invalid line range"
 		}
-		if len(r.Label) > reviewMaxCTitle || strings.HasPrefix(r.Rev, "-") || strings.ContainsAny(r.Rev, "\x00\r\n") {
+		if len(r.Label) > reviewMaxCommentTitle || strings.HasPrefix(r.Rev, "-") || strings.ContainsAny(r.Rev, "\x00\r\n") {
 			return "ref has an invalid rev or label"
 		}
 	}
@@ -345,6 +363,8 @@ func normalizeAnchor(a string) []string {
 	return lines
 }
 
+// windowEquals reports whether the normalised lines starting at the 1-based
+// line start are exactly want.
 func windowEquals(norm []string, start int, want []string) bool {
 	if start < 1 || start-1+len(want) > len(norm) {
 		return false
@@ -441,6 +461,8 @@ func loadReview(src string) (*reviewState, error) {
 	return rs, nil
 }
 
+// fileSig identifies a version of the review file by mtime and size, which is
+// what changes when an agent rewrites it.
 func fileSig(src string) string {
 	fi, err := os.Stat(src)
 	if err != nil {
@@ -449,6 +471,8 @@ func fileSig(src string) string {
 	return fmt.Sprintf("%d-%d", fi.ModTime().UnixNano(), fi.Size())
 }
 
+// initialReviewComments is the parsed comments as written, with replies placed
+// where their parents say. The checks in resolve refine it.
 func initialReviewComments(doc *reviewDoc) []reviewComment {
 	out := append([]reviewComment(nil), doc.Comments...)
 	byID := map[string]*reviewComment{}
@@ -456,7 +480,7 @@ func initialReviewComments(doc *reviewDoc) []reviewComment {
 		c := &out[i]
 		if c.inherits {
 			if p := byID[c.InReplyTo]; p != nil {
-				c.Path, c.Line, c.EndLine, c.Side = p.Path, p.Line, p.EndLine, p.Side
+				c.inheritLocation(p)
 			}
 		}
 		c.Kind = reviewKind(c)
@@ -524,57 +548,6 @@ func (rs *reviewState) refresh() {
 	}
 }
 
-func gitCatSize(root, rev, p string) int64 {
-	out, err := exec.Command("git", "-C", root, "cat-file", "-s", rev+":"+p).Output()
-	if err != nil {
-		return -1
-	}
-	var n int64
-	if _, err := fmt.Sscan(strings.TrimSpace(string(out)), &n); err != nil {
-		return -1
-	}
-	return n
-}
-
-// gitTreeFiles returns the set of files in a commit, or nil if it cannot be listed.
-func gitTreeFiles(root, rev string) map[string]bool {
-	out, err := exec.Command("git", "-C", root, "ls-tree", "-r", "--name-only", "-z", rev).Output()
-	if err != nil {
-		return nil
-	}
-	set := map[string]bool{}
-	for _, p := range strings.Split(string(out), "\x00") {
-		if p != "" {
-			set[p] = true
-		}
-	}
-	return set
-}
-
-// gitFileLines returns a file's lines at a commit, or nil if it cannot or
-// should not be read (missing, too big, binary).
-func gitFileLines(root, rev, p string) []string {
-	if n := gitCatSize(root, rev, p); n < 0 || n > reviewMaxContent {
-		return nil
-	}
-	out, err := exec.Command("git", "-C", root, "show", rev+":"+p).Output()
-	if err != nil {
-		return nil
-	}
-	probe := out
-	if len(probe) > 8000 {
-		probe = probe[:8000]
-	}
-	if strings.IndexByte(string(probe), 0) >= 0 {
-		return nil
-	}
-	lines := strings.Split(string(out), "\n")
-	if n := len(lines); n > 0 && lines[n-1] == "" {
-		lines = lines[:n-1]
-	}
-	return lines
-}
-
 type reviewFileKey struct{ rev, path string }
 
 // resolve runs once per load, off the request path. It rejects comments whose
@@ -640,7 +613,7 @@ func (rs *reviewState) resolve(gen int, doc *reviewDoc, env reviewEnv) {
 		go func(k reviewFileKey) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			lines := gitFileLines(env.root, k.rev, k.path)
+			lines := gitFileLines(env.root, k.rev, k.path, reviewMaxContent)
 			if lines == nil {
 				return
 			}
@@ -662,19 +635,15 @@ func (rs *reviewState) resolve(gen int, doc *reviewDoc, env reviewEnv) {
 
 	kept := make([]reviewComment, 0, len(comments))
 	index := map[string]int{} // id -> position in kept
-	dropped := map[string]bool{}
 	for i := range comments {
 		c := comments[i]
 		if c.inherits {
 			pi, ok := index[c.InReplyTo]
 			if !ok {
-				dropped[c.ID] = true
 				rejected = append(rejected, reviewRejected{ID: c.ID, Reason: "the comment it replies to was rejected"})
 				continue
 			}
-			p := kept[pi]
-			c.Path, c.Line, c.EndLine, c.Side = p.Path, p.Line, p.EndLine, p.Side
-			c.Status, c.OrigLine, c.OutsideDiff = p.Status, p.OrigLine, p.OutsideDiff
+			c.inheritLocation(&kept[pi])
 			c.Kind = reviewKind(&c)
 			index[c.ID] = len(kept)
 			kept = append(kept, c)
@@ -686,7 +655,6 @@ func (rs *reviewState) resolve(gen int, doc *reviewDoc, env reviewEnv) {
 				files, label = baseFiles, "the merge-base"
 			}
 			if files != nil && !files[c.Path] {
-				dropped[c.ID] = true
 				rejected = append(rejected, reviewRejected{ID: c.ID, Reason: "path not in " + label})
 				continue
 			}
@@ -766,8 +734,6 @@ func shaPrefixMatch(a, b string) bool {
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
-func shortSHA(s string) string { return s[:min(12, len(s))] }
-
 // ---------------------------------------------------------------- output
 
 type reviewSnapshot struct {
@@ -809,7 +775,7 @@ func (rs *reviewState) snapshot() reviewSnapshot {
 		Warnings:  rs.doc.Warnings,
 		Comments:  append([]reviewComment{}, rs.comments...),
 		Rejected:  append([]reviewRejected{}, rs.rejected...),
-		etag:      fmt.Sprintf(`W/"%s-%d-%t-%d"`, rs.sig, rs.gen, rs.resolved, len(rs.loadErr)),
+		etag:      fmt.Sprintf(`W/"%s-%d-%t-%t"`, rs.sig, rs.gen, rs.resolved, rs.loadErr != ""),
 	}
 	if g := rs.doc.GeneratedBy; g != nil {
 		s.GeneratedBy = &reviewGenerator{Agent: g.Agent, Model: g.Model} // the session id stays server-side
@@ -900,17 +866,6 @@ func (s *Server) SetReview(rs *reviewState) {
 
 // ---------------------------------------------------------------- local sessions
 
-func revParseCommit(root, rev string) (string, error) {
-	if rev == "" || strings.HasPrefix(rev, "-") || strings.ContainsAny(rev, "\x00\r\n") {
-		return "", fmt.Errorf("invalid revision %q", rev)
-	}
-	out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", rev+"^{commit}").Output()
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve revision %q", rev)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // defaultReviewBase picks a base when neither the flags nor the file name one.
 func defaultReviewBase(root string) string {
 	for _, c := range []string{"origin/HEAD", "origin/main", "origin/master", "main", "master"} {
@@ -977,12 +932,9 @@ func prepareLocalReview(doc *reviewDoc, baseFlag, headFlag, dir string) (*prSess
 		p.worktree, p.inPlace = top, true
 		return p, nil
 	}
-	tmp, err := os.MkdirTemp("", "px0-review-*")
+	tmp, err := tempDirResolved("px0-review-*")
 	if err != nil {
 		return nil, err
-	}
-	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
-		tmp = resolved
 	}
 	if out, err := exec.Command("git", "-C", top, "worktree", "add", "--detach", tmp, headSHA).CombinedOutput(); err != nil {
 		os.RemoveAll(tmp)

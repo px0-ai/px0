@@ -25,11 +25,11 @@
     },
     "baseSHA": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{7,64}$"
+      "pattern": "^[0-9a-fA-F]{7,40}$"
     },
     "headSHA": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{7,64}$"
+      "pattern": "^[0-9a-fA-F]{7,40}$"
     },
     "verdict": {
       "enum": [

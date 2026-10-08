@@ -53,6 +53,15 @@ function thrDur(ms) {
    with syntax badge and copy button, blockquotes with GitHub alerts, ordered and
    unordered lists with task checkboxes and nesting, tables, links (with local file
    navigation), autolinks, images, horizontal rules, and inline styling. */
+// Set while rendering text nobody at this keyboard wrote (an agent's review):
+// an image must not be fetched just because the comment was drawn, so it
+// becomes a link. thrMd is synchronous, so a flag around the call is enough.
+let thrNoImages = false;
+export function thrMdNoImages(src) {
+  thrNoImages = true;
+  try { return thrMd(src); } finally { thrNoImages = false; }
+}
+
 function thrSafeUrl(u) {
   u = u.trim();
   if (/^(?:https?|mailto):/i.test(u)) return esc(u);
@@ -91,6 +100,9 @@ function thrInline(src) {
   // Images: ![alt](url)
   s = s.replace(/!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)/g, (_, alt, url) => {
     const u = thrSafeUrl(url);
+    if (thrNoImages) {
+      return /^https?:/i.test(url.trim()) ? pushLink(`<a href="${u}" target="_blank" rel="noopener noreferrer">image: ${esc(alt || url.trim())}</a>`) : esc(alt);
+    }
     return u ? pushLink(`<img src="${u}" alt="${esc(alt)}" class="thr-img" />`) : esc(alt);
   });
 
@@ -597,6 +609,25 @@ function thrBack() {
 
 /* Starts a draft: anchored to info's range, or to the workspace when info is
    omitted. Nothing is created on the server until the first message is sent. */
+// Clicks on what thrMd renders: a code block's copy button and a link to a file
+// in the workspace. Returns true when it handled the click, so the review panel
+// in pr.js, which draws the same markup, shares it instead of copying it.
+export function thrMdClick(e) {
+  const cp = /** @type {HTMLElement|null} */ (e.target)?.closest('.thr-copy');
+  if (cp) {
+    const code = cp.closest('.thr-pre')?.querySelector('code')?.textContent || '';
+    if (code) copyToClipboard(code, 'Copied code', cp);
+    return true;
+  }
+  const link = /** @type {HTMLElement|null} */ (e.target)?.closest('a.thr-link');
+  if (link && link.dataset.path) {
+    e.preventDefault();
+    openFile(link.dataset.path, { line: +link.dataset.line || 1 });
+    return true;
+  }
+  return false;
+}
+
 export function newThread(info) {
   if (!thr.avail) { showToast('!', 'Threads need a coding harness: run px0 without -no-agent'); return; }
   thr.opening = null;
@@ -700,18 +731,7 @@ export function initThreads() {
     if (p) openFile(p, { line: +thrEl.anchor.dataset.line || 1 });
   });
   thrEl.msgs.addEventListener('click', e => {
-    const cp = /** @type {HTMLElement|null} */ (e.target)?.closest('.thr-copy');
-    if (cp) {
-      const code = cp.closest('.thr-pre')?.querySelector('code')?.textContent || '';
-      if (code) copyToClipboard(code, 'Copied code', cp);
-      return;
-    }
-    const link = /** @type {HTMLElement|null} */ (e.target)?.closest('a.thr-link');
-    if (link && link.dataset.path) {
-      e.preventDefault();
-      openFile(link.dataset.path, { line: +link.dataset.line || 1 });
-      return;
-    }
+    if (thrMdClick(e)) return;
     const f = /** @type {HTMLElement|null} */ (e.target)?.closest('.thr-file');
     if (f) openFile(f.dataset.path);
   });

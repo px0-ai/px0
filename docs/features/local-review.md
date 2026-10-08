@@ -37,7 +37,7 @@ px0 never writes the review file, and the agent should keep it outside the repos
 - **A Review section at the top of the comments panel**: the title, the agent's suggested verdict, the summary, and comments that belong to no file. The panel opens on its own the first time there is something in it.
 - **Comment markers on the diff** at the commented lines, like GitHub's. Click one to jump to its thread in the panel. Comments on a whole file (no line) appear only in the panel.
 - **Severity chips** on every comment: Blocker, Major, Minor, Nit, Question, Praise.
-- **Suggestions** (a fenced `suggestion` block) are shown as a labelled before/after snippet. px0 does not apply them; to act on one, use **Discuss** and ask your coding harness.
+- **Suggestions** (a fenced `suggestion` block) are shown as a code block labelled *suggestion*. px0 does not apply them; to act on one, use **Discuss** and ask your coding harness.
 - **Notes where px0 had to adjust a comment**: *moved* (the agent's line number was off, but the quoted code was found nearby), *this code could not be found any more* (shown at file level), *past the end of the file*, and *this file is not part of the diff*.
 - **Banners** when the review was written against a different head than the one you are looking at (the comments are placed by matching their code, so check them), when a rewritten file no longer parses (the last good review stays up), and when comments were skipped, with the reasons.
 

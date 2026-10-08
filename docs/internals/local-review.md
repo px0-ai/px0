@@ -66,11 +66,11 @@ The coupling is debt: a later change should split the provider-backed parts out 
 
 ### 3.6 Frontend
 
-`review.js` renders; `pr.js` owns the state and the panel.
+`review.js` builds the comment markup; `pr.js` owns the state and the panel. The git shell-outs the check needs (`revParseCommit`, `gitTreeFiles`, `gitFileLines`) live in `git.go` with the others.
 
 - Agent comments are mapped into the shape GitHub's inline comments have, so the existing gutter markers (`renderMarkersForActiveDoc`) and thread grouping apply to them. A file-level comment (no line) has no row to mark and appears only in the panel.
 - The panel gets a Review section first: title, verdict, banners (checking, stale, load error, warnings, rejected comments), the summary, and comments with no file. The panel opens by itself the first time there is something in it.
-- Comment text goes through an escape-first renderer (`reviewMd`): fenced code, a labelled `suggestion` fence, headings, lists, `code`, bold and `http(s)` links. Images are rendered as links and never loaded, because the CSP allows `https:` images and an injected image URL could otherwise carry repository data out when the comment rendered.
+- Comment text goes through the renderer the thread pane already uses (`thrMd`, [Threads](threads.md)), via `thrMdNoImages`: headings, lists, tables, quotes, code blocks (a `suggestion` fence is labelled as such), links, and `path:line` links that open the file. Images are rendered as links and never loaded, because the CSP allows `https:` images and an injected image URL could otherwise carry repository data out when the comment rendered. A code block's copy button and file links share `thrMdClick` with the thread pane rather than being wired twice.
 - **Discuss** calls `newThread()` with a prefilled, quoted message. A head-side line comment is anchored to its lines; a general, file-level or `LEFT` comment starts an unanchored thread that says where the comment was.
 - For a local review the bar shows a "Review" badge, and the controls that submit to a forge (Submit Review, the conversation composer) are hidden.
 

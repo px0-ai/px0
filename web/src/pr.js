@@ -15,7 +15,7 @@ import { openFile } from './tabs.js';
 import { refreshTree } from './tree.js';
 import { layout, render } from './renderer.js';
 import { openSettings } from './settings.js';
-import { newThread } from './thread.js';
+import { newThread, thrMdClick } from './thread.js';
 import { agentCommentCardHtml, reviewPathComments, reviewGeneralComments, reviewSummaryHtml, discussInfo, sevChip, previewText } from './review.js';
 
 let meta = null;      // this session's PR info: {number, title, base, head, writeAccess, readOnly}
@@ -119,9 +119,9 @@ function renderBar() {
   $('#pr-badge').textContent = meta.local ? 'Review' : '#' + meta.number;
   const link = $('#pr-link');
   if (link) {
-    link.href = meta.url || '#';
-    link.classList.toggle('no-link', !!meta.local);
+    link.classList.toggle('no-link', !!meta.local); // nothing to open on a forge
     if (meta.local) link.removeAttribute('href');
+    else link.href = meta.url || '#';
   }
   const mb = $('#pr-merged-badge');
   if (mb) mb.hidden = !meta.merged;
@@ -588,6 +588,7 @@ function wireCommentsPanel() {
   }
 
   $('#pr-comments-list')?.addEventListener('click', e => {
+    if (thrMdClick(e)) return; // a code block's copy button, a link to a file
     const discuss = e.target.closest('.rv-discuss');
     if (discuss) {
       const c = [...rvPath, ...rvGeneral].find(x => x.rvId === discuss.dataset.rv);

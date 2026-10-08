@@ -121,6 +121,22 @@ func computeDiffBase(worktree, srcRepo, token string, target PRTarget, baseRef s
 	return diffBase, diffBaseWarning
 }
 
+// tempDirResolved is os.MkdirTemp with symlinks resolved. macOS TempDir lives
+// under /var -> /private/var; git rev-parse --show-toplevel reports the
+// resolved path, so leaving a checkout's dir unresolved makes
+// gitStatusAgainst's toplevel-relative prefix check fail for every file,
+// silently emptying the diff/status view.
+func tempDirResolved(pattern string) (string, error) {
+	dir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return dir, nil
+}
+
 // checkoutPR fetches a PR's head ref and checks it out into a system temp
 // directory: a git worktree of cwd's origin when cwd is already a clone of
 // the same repo (the common case -- opened inside the repo), or a shallow
@@ -138,16 +154,9 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		return nil, err
 	}
 
-	tmp, err := os.MkdirTemp("", "px0-pr-*")
+	tmp, err := tempDirResolved("px0-pr-*")
 	if err != nil {
 		return nil, err
-	}
-	// macOS TempDir lives under /var -> /private/var; git rev-parse
-	// --show-toplevel reports the resolved path, so leaving tmp unresolved
-	// makes gitStatusAgainst's toplevel-relative prefix check fail for every
-	// file, silently emptying the PR's diff/status view.
-	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
-		tmp = resolved
 	}
 	cleanup := func() { os.RemoveAll(tmp) }
 

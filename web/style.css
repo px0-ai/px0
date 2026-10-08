@@ -2719,31 +2719,12 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .rv-sev-praise { color: var(--gi); }
 .rv-cat { font: 11px var(--mono); color: var(--faint); }
 .rv-title { font: 600 12px var(--ui); color: var(--fg); }
-.rv-body { font: 12px/1.5 var(--ui); color: var(--fg); overflow-wrap: anywhere; }
-.rv-body p { margin: 0 0 6px; }
-.rv-body p:last-child { margin-bottom: 0; }
-.rv-body ul, .rv-body ol { margin: 0 0 6px; padding-left: 20px; }
-.rv-body code { font: 11px var(--mono); background: var(--bg4); border-radius: 3px; padding: 0 4px; }
-.rv-body pre { margin: 0 0 6px; padding: 6px 8px; background: var(--bg3); border-radius: var(--r); overflow-x: auto; }
-.rv-body pre code { background: none; padding: 0; white-space: pre; }
-.rv-body a { color: var(--accent-fg); }
-.rv-h { font-weight: 600; margin: 4px 0; }
 .rv-summary { border-left: 2px solid var(--line); padding-left: 8px; }
-.rv-suggest { border: 1px solid var(--gi); border-radius: var(--r); margin: 0 0 6px; overflow: hidden; }
-.rv-suggest-label {
-  font: 600 10px var(--ui); text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--gi); background: var(--gi-bg); padding: 2px 8px;
-}
-.rv-body .rv-suggest pre { margin: 0; border-radius: 0; background: var(--gi-bg); }
+.rv-body .thr-pre[data-lang="suggestion"] pre { border-color: var(--gi); background: var(--gi-bg); }
 .rv-note { font: italic 11px var(--ui); color: var(--faint); }
 .rv-refs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .rv-refs-label { font: 11px var(--ui); color: var(--faint); }
 .rv-ref { font: 11px var(--mono); color: var(--accent-fg); background: var(--bg4); border-radius: var(--r); padding: 1px 6px; }
-.rv-discuss {
-  align-self: flex-start; font: 11px var(--ui); color: var(--accent-fg); background: none;
-  border: none; cursor: pointer; padding: 0;
-}
-.rv-discuss:hover { text-decoration: underline; }
 
 /* Accordion: .acc-head always shows; .acc-body only renders while .open. */
 .acc-head { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
@@ -2772,11 +2753,13 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 }
 .pr-comment-card-actions { display: flex; gap: 10px; }
 .pr-issue-comment-reply-btn,
+.rv-discuss,
 .pr-comment-delete-btn {
   align-self: flex-start; font: 11px var(--ui); color: var(--faint); background: none;
   border: none; cursor: pointer; padding: 0;
 }
-.pr-issue-comment-reply-btn:hover { color: var(--accent); text-decoration: underline; }
+.pr-issue-comment-reply-btn:hover,
+.rv-discuss:hover { color: var(--accent); text-decoration: underline; }
 .pr-comment-delete-btn:hover { color: var(--err); text-decoration: underline; }
 .pr-comment-reply-row { display: flex; gap: 6px; align-items: flex-start; margin-top: 2px; }
 .pr-comment-reply-row .pr-review-body { height: 32px; resize: vertical; }

@@ -73,7 +73,7 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
 - Put a suggested replacement in a fenced block tagged `suggestion`. px0 previews it and never applies it; applying is done by the user's harness.
 - `inReplyTo` (an earlier comment's `id`) makes a follow-up in the same thread. A reply with no `path` takes its parent's location.
 - `refs` (`{rev, path, line, endLine, label}`) point at related code on other branches. px0 lists them under the comment; it does not fetch the snippet yet.
-- Markdown is limited: fenced code, headings, lists, `code`, **bold**, and `http(s)` links. Images are never loaded and raw HTML is shown as text. Do not rely on either.
+- Markdown renders as in px0's threads: headings, lists, tables, quotes, code blocks, links, and a link such as `[token.go](auth/token.go:42)` opens that file in px0. Images are never loaded (they show as links) and raw HTML is shown as text.
 
 ## Limits
 

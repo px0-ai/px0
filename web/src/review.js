@@ -4,94 +4,14 @@
 // panel GitHub's comments use.
 //
 // Everything in a review is untrusted: a pull request can steer the agent into
-// writing anything. So text is escaped first and only a small set of tags is
-// built from it, images are never loaded (the CSP allows https images, which
-// would let an injected URL carry repository data out the moment a comment
-// rendered), and links are limited to http(s). See
+// writing anything. Text goes through thread.js's escape-first renderer in its
+// no-images mode: the CSP allows https images, so an injected image URL would
+// carry repository data out the moment a comment rendered. See
 // docs/internals/review-file-spec.md section 7.
 import { esc } from './state.js';
+import { thrMdNoImages } from './thread.js';
 
 const SEV_LABEL = { blocker: 'Blocker', major: 'Major', minor: 'Minor', nit: 'Nit', question: 'Question', praise: 'Praise' };
-
-const safeUrl = u => /^https?:\/\/[^\s"'<>]+$/i.test(u);
-
-// Inline: `code`, **bold**, [text](http-url) and ![alt](http-url). An image
-// becomes a plain link; nothing here ever produces an <img>.
-function inline(src) {
-  const re = /`([^`\n]+)`|(!?)\[([^\]\n]*)\]\(([^)\s]*)\)|\*\*([^*\n]+)\*\*/g;
-  let out = '';
-  let last = 0;
-  let m;
-  while ((m = re.exec(src))) {
-    out += esc(src.slice(last, m.index));
-    last = re.lastIndex;
-    if (m[1] !== undefined) {
-      out += '<code>' + esc(m[1]) + '</code>';
-    } else if (m[5] !== undefined) {
-      out += '<strong>' + esc(m[5]) + '</strong>';
-    } else {
-      const label = m[3] || m[4];
-      if (!safeUrl(m[4])) {
-        out += esc(label); // relative and other schemes are shown as text only
-      } else {
-        const text = m[2] ? 'image: ' + label : label;
-        out += '<a href="' + esc(m[4]) + '" target="_blank" rel="noopener noreferrer">' + esc(text) + '</a>';
-      }
-    }
-  }
-  return out + esc(src.slice(last));
-}
-
-// A small block renderer: fenced code (a "suggestion" fence is labelled),
-// headings, bullet and numbered lists, paragraphs.
-export function reviewMd(src) {
-  if (!src) return '';
-  const lines = src.replace(/\r\n?/g, '\n').split('\n');
-  let html = '';
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-
-    const fence = /^ {0,3}(`{3,}|~{3,})\s*([\w+#.-]*)[^\n]*$/.exec(line);
-    if (fence) {
-      const marker = fence[1][0];
-      const closer = new RegExp('^ {0,3}' + (marker === '`' ? '`' : '~') + '{' + fence[1].length + ',}\\s*$');
-      const code = [];
-      i++;
-      while (i < lines.length && !closer.test(lines[i])) code.push(lines[i++]);
-      i++;
-      const lang = fence[2];
-      if (lang === 'suggestion') {
-        html += '<div class="rv-suggest"><div class="rv-suggest-label">Suggested change</div><pre><code>' + esc(code.join('\n')) + '</code></pre></div>';
-      } else {
-        html += '<pre class="rv-pre"' + (lang ? ' data-lang="' + esc(lang) + '"' : '') + '><code>' + esc(code.join('\n')) + '</code></pre>';
-      }
-      continue;
-    }
-
-    const h = /^#{1,6}\s+(.*)$/.exec(line);
-    if (h) { html += '<div class="rv-h">' + inline(h[1]) + '</div>'; i++; continue; }
-
-    if (/^\s*([-*]|\d+[.)])\s+/.test(line)) {
-      const ordered = /^\s*\d+[.)]\s+/.test(line);
-      const items = [];
-      while (i < lines.length && /^\s*([-*]|\d+[.)])\s+/.test(lines[i])) {
-        items.push('<li>' + inline(lines[i].replace(/^\s*([-*]|\d+[.)])\s+/, '')) + '</li>');
-        i++;
-      }
-      html += (ordered ? '<ol>' : '<ul>') + items.join('') + (ordered ? '</ol>' : '</ul>');
-      continue;
-    }
-
-    const para = [];
-    while (i < lines.length && lines[i].trim() && !/^ {0,3}(`{3,}|~{3,})/.test(lines[i]) && !/^#{1,6}\s/.test(lines[i]) && !/^\s*([-*]|\d+[.)])\s+/.test(lines[i])) {
-      para.push(lines[i++]);
-    }
-    html += '<p>' + para.map(inline).join('<br>') + '</p>';
-  }
-  return html;
-}
 
 function sevChip(c) {
   const sev = c.severity || 'minor';
@@ -127,7 +47,7 @@ export function agentCommentCardHtml(c) {
       (c.category ? '<span class="rv-cat">' + esc(c.category) + '</span>' : '') +
     '</div>' +
     (c.title ? '<div class="rv-title">' + esc(c.title) + '</div>' : '') +
-    '<div class="rv-body">' + reviewMd(c.body) + '</div>' +
+    '<div class="thr-body rv-body">' + thrMdNoImages(c.body) + '</div>' +
     statusNote(c) +
     refsHtml(c) +
     '<div class="pr-comment-card-actions">' +
@@ -141,7 +61,12 @@ export { sevChip };
 // One line of plain text for a collapsed thread: the Markdown source with
 // fences and markers taken out, so a suggestion does not read as backticks.
 export function previewText(md) {
-  return (md || '').replace(/^ {0,3}(`{3,}|~{3,}).*$/gm, '').replace(/[`*#>]/g, '').replace(/\s+/g, ' ').trim();
+  return (md || '')
+    .replace(/^ {0,3}(`{3,}|~{3,}).*$/gm, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*#>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Path comments become entries shaped like GitHub's inline comments, so the
@@ -190,7 +115,7 @@ export function reviewSummaryHtml(snap, general) {
     html += '<details class="rv-banner warn"><summary>' + snap.rejected.length + ' comment' + (snap.rejected.length === 1 ? ' was' : 's were') + ' not shown</summary><ul>' +
       snap.rejected.map(r => '<li><code>' + esc(r.id) + '</code> ' + esc(r.reason) + '</li>').join('') + '</ul></details>';
   }
-  if (snap.summary) html += '<div class="rv-body rv-summary">' + reviewMd(snap.summary) + '</div>';
+  if (snap.summary) html += '<div class="thr-body rv-body rv-summary">' + thrMdNoImages(snap.summary) + '</div>';
   if (general.length) html += general.map(agentCommentCardHtml).join('');
   if (!snap.summary && !general.length && !snap.comments?.length) html += '<div class="pr-comments-empty">The review has no comments.</div>';
   return html;

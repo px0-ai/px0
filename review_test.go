@@ -463,6 +463,36 @@ func TestLocalReviewWorktreeIsRemovedOnClose(t *testing.T) {
 	}
 }
 
+func TestGitFileLines(t *testing.T) {
+	repo := reviewRepo(t)
+	gitTestRun(t, repo, "checkout", "-q", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "bin.dat"), []byte("a\x00b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, repo, "add", "bin.dat")
+	gitTestRun(t, repo, "commit", "-qm", "binary")
+
+	lines := gitFileLines(repo, "HEAD", "a.go", 1<<20)
+	if len(lines) != 10 || lines[0] != "package a" || lines[len(lines)-1] != "func Z() {}" {
+		t.Errorf("the trailing newline must not add an empty last line: %q", lines)
+	}
+	if gitFileLines(repo, "HEAD", "a.go", 10) != nil {
+		t.Errorf("a file over the size cap must be skipped")
+	}
+	if gitFileLines(repo, "HEAD", "bin.dat", 1<<20) != nil {
+		t.Errorf("a binary file must be skipped")
+	}
+	if gitFileLines(repo, "HEAD", "nope.go", 1<<20) != nil {
+		t.Errorf("a missing file must be skipped")
+	}
+	if files := gitTreeFiles(repo, "HEAD"); !files["a.go"] || !files["c.go"] || files["b.go"] {
+		t.Errorf("unexpected tree listing: %v", files)
+	}
+	if gitTreeFiles(repo, "no-such-rev") != nil {
+		t.Errorf("an unknown revision lists nothing")
+	}
+}
+
 func TestPrepareLocalReviewErrors(t *testing.T) {
 	repo := reviewRepo(t)
 	for name, tc := range map[string]struct{ base, head string }{
