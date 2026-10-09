@@ -1,0 +1,45 @@
+version: 2
+
+# Dependabot delivers dep updates as PRs that the security workflow
+# (.github/workflows/security.yml) gates via dependency-review.
+# Without this, advisories against a Go module reach us only when a
+# human notices — Dependabot turns them into auditable PRs within hours.
+#
+# Each ecosystem gets its own schedule so the noise stays bounded.
+
+updates:
+  # ────────────────────────────────────────────────────────
+  # Go modules — go.mod at repo root
+  # ────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:30"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
+    # Group patch + minor bumps so we don't drown in single-dep PRs;
+    # majors stay separate because they may carry breaking changes.
+    groups:
+      go-minor-patch:
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "go"]
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # ────────────────────────────────────────────────────────
+  # GitHub Actions — uses: statements in .github/workflows/
+  # ────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday" #I guess tuesday is good ;)
+      time: "09:30"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "github-actions"]
+    commit-message:
+      prefix: "chore(ci)"
