@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -264,12 +265,12 @@ func main() {
 
 	// Language servers are children that can hold gigabytes. Shut them down on
 	// the way out rather than leaving them for the OS to reap.
-	interrupted := false
+	var interrupted atomic.Bool
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
-		interrupted = true
+		interrupted.Store(true)
 		fmt.Print("\r")
 		uiStatus("info", "px0 stopped", "", 0, os.Stderr)
 		go func() {
@@ -287,12 +288,11 @@ func main() {
 	pxSrv.CloseThreads()
 	pr.Close()
 
-	if interrupted {
+	if interrupted.Load() {
 		tel.Close("interrupted")
 		os.Exit(130)
 	}
 
-	tel.Close("normal")
 	if err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
