@@ -68,7 +68,21 @@ px0 -host 0.0.0.0 -port 7777 ~/workspace
 
 # Behind a reverse proxy under a subpath
 px0 -base-path /rev-123/ -host 0.0.0.0 -port 7777 ~/workspace
+
+# Assign and persist a dedicated port for this workspace (the default)
+px0 ~/workspace
+
+# Explicit stable-port alias and existing-instance reuse
+px0 -stable-port -reuse ~/workspace
 ```
+
+By default, px0 stores the canonical workspace-to-port assignment in
+`~/.px0/ports.json` (or `$XDG_CONFIG_HOME/px0/ports.json`) and reuses it after
+restart. `-stable-port` is an explicit alias for this behavior. New assignments
+use ports `7800` through `7899`. If an assigned port is occupied, px0 reports
+the conflict instead of silently changing the workspace URL. Use `-port N` for
+the existing explicit-port behavior, or `-port 0` to request an OS-assigned
+port.
 
 When px0 binds to `0.0.0.0`, it prints a `network` URL for every unique
 non-loopback IPv4 address on the machine, using the port selected by the

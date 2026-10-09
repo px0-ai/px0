@@ -65,9 +65,18 @@ type Server struct {
 	gitWatcher *GitWatcher
 	mux        *http.ServeMux
 	basePath   string
+	port       string
 	session    *sessionManager
 
 	lastReq atomic.Int64 // unix nanos of the most recent request
+}
+
+// SetPort records the listener address exposed in the server identity metadata.
+func (s *Server) SetPort(addr string) {
+	_, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		s.port = port
+	}
 }
 
 // BasePath returns the URL path prefix configured for this server (e.g. "/" or "/rev-123/").
@@ -874,6 +883,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"metrics":     getProcessMetrics(s.lsp),
 		"version":     version,
 		"basePath":    s.BasePath(),
+		"port":        s.port,
 		"agent":       s.agent.Name(),
 		"agentModel":  s.agent.Model(),
 		"agentPinned": s.agent.Pinned(),

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -31,6 +32,8 @@ func main() {
 	var (
 		port         = flag.Int("port", 7777, "port to listen on (0 picks a free one)")
 		host         = flag.String("host", "127.0.0.1", "address to bind")
+		stablePort   = flag.Bool("stable-port", false, "assign and persist a dedicated port for each workspace (default)")
+		reuse        = flag.Bool("reuse", false, "open an existing px0 instance for the workspace")
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
@@ -53,6 +56,12 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	portFlagSet := false
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		if f.Name == "port" {
+			portFlagSet = true
+		}
+	})
 
 	if *noColor {
 		f := false
@@ -135,8 +144,25 @@ func main() {
 	}
 
 	tListen := time.Now()
-	ln, addr, err := listen(*host, *port)
+	var ln net.Listener
+	var addr string
+	var err error
+	// Workspace ports are persistent by default. Explicit -port values retain
+	// the legacy listener behavior, while -port 0 remains the random-port escape hatch.
+	useStablePort := *stablePort || !portFlagSet
+	if useStablePort {
+		ln, addr, err = listenStableWorkspace(root, *host, *port, portFlagSet, *reuse)
+	} else {
+		ln, addr, err = listen(*host, *port)
+	}
 	if err != nil {
+		var existing *existingWorkspaceError
+		if errors.As(err, &existing) && !*noOpen {
+			url := viewerURL(existing.addr, initialFile, initialLine)
+			go openBrowser(url)
+			uiKV("url", uiAccent(url, os.Stdout), 11, os.Stdout)
+			return
+		}
 		fatal(err)
 	}
 	listenDur := time.Since(tListen)
@@ -155,6 +181,7 @@ func main() {
 	}
 
 	pxSrv := NewServer(ix, lsp, configuredBasePath)
+	pxSrv.SetPort(addr)
 	pxSrv.tel = tel
 	if pr != nil {
 		pxSrv.SetPR(pr)
