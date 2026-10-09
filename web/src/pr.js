@@ -1,5 +1,5 @@
 // web/src/pr.js
-// GitHub PR review: shown only when this process was launched as `px0 pr ...`
+// GitHub/Gitea PR review: shown only when this process was launched as `px0 pr ...`
 // (S.meta.pr, set by main.go/pr.go). A persistent bar above the tabs shows
 // the PR and hosts Approve/Request Changes/Comment; selecting a diff line and
 // pressing Alt+R (or the footer/context-menu action) drafts an inline review
@@ -104,7 +104,10 @@ function renderBar() {
   b.hidden = false;
   $('#pr-badge').textContent = '#' + meta.number;
   const link = $('#pr-link');
-  if (link) link.href = meta.url || '#';
+  if (link) {
+    link.href = meta.url || '#';
+    link.title = 'Open on ' + forgeLabel();
+  }
   const mb = $('#pr-merged-badge');
   if (mb) mb.hidden = !meta.merged;
   $('#pr-title').textContent = meta.title;
@@ -114,7 +117,11 @@ function renderBar() {
     ? (comments.length + (comments.length === 1 ? ' draft comment' : ' draft comments'))
     : '';
   const ro = $('#pr-readonly-note');
-  if (ro) ro.hidden = !meta.readOnly;
+  if (ro) {
+    ro.hidden = !meta.readOnly;
+    ro.textContent = 'No ' + forgeLabel() + ' token \u2014 click to connect';
+    ro.title = tokenHint() + ' -- or click to connect';
+  }
   const dw = $('#pr-diff-warning');
   if (dw) {
     dw.hidden = !meta.diffBaseWarning;
@@ -133,16 +140,23 @@ function renderBar() {
   if (cmtBtn) {
     cmtBtn.disabled = false;
     cmtBtn.title = meta.readOnly
-      ? 'No GitHub token configured -- click to connect and submit'
+      ? 'No ' + forgeLabel() + ' token configured -- click to connect and submit'
       : 'Submit review with drafts, without approval or change requests';
   }
   const composeEl = $('#pr-issue-compose');
   if (composeEl) composeEl.hidden = false;
 }
 
-export function nudgeGitHubToken() {
-  showToast('!', 'No GitHub token configured: set GITHUB_TOKEN, set GH_TOKEN, or run `gh auth login` -- or connect in Settings.', 5000);
-  openSettings('ui', 'GitHub', 'github.token');
+// The session's forge as pr.go's forgeMeta describes it; GitHub when absent.
+const forgeLabel = () => meta?.providerLabel || 'GitHub';
+const tokenHint = () => {
+  const h = meta?.tokenHint || "set GITHUB_TOKEN or run 'gh auth login'";
+  return h[0].toUpperCase() + h.slice(1);
+};
+
+export function nudgeToken() {
+  showToast('!', 'No ' + forgeLabel() + ' token configured: ' + tokenHint() + ' -- or connect in Settings.', 5000);
+  openSettings('ui', forgeLabel(), (meta?.provider || 'github') + '.token');
 }
 
 function wireBarButtons() {
@@ -151,12 +165,12 @@ function wireBarButtons() {
   $('#pr-submit-request-changes')?.addEventListener('click', () => submitReview('REQUEST_CHANGES'));
   $('#pr-submit-approve')?.addEventListener('click', () => submitReview('APPROVE'));
   $('#pr-issue-compose-send')?.addEventListener('click', sendNewIssueComment);
-  $('#pr-readonly-note')?.addEventListener('click', nudgeGitHubToken);
+  $('#pr-readonly-note')?.addEventListener('click', nudgeToken);
 }
 
 async function sendNewIssueComment() {
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const ta = $('#pr-issue-compose-body');
@@ -252,7 +266,7 @@ async function pollPRBatch(id, count) {
 
 async function submitReview(event) {
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const bodyEl = $('#pr-review-body');
@@ -612,7 +626,7 @@ function wireCommentsPanel() {
 async function sendThreadReply(row) {
   if (!row) return;
   if (meta?.readOnly) {
-    nudgeGitHubToken();
+    nudgeToken();
     return;
   }
   const ta = row.querySelector('.reply-input');

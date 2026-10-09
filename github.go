@@ -31,6 +31,10 @@ type GitHubProvider struct{}
 
 func (g *GitHubProvider) Name() string { return "github" }
 
+func (g *GitHubProvider) Label() string { return "GitHub" }
+
+func (g *GitHubProvider) TokenHint() string { return "set GITHUB_TOKEN or run 'gh auth login'" }
+
 func (g *GitHubProvider) MatchURL(rawURL string) bool {
 	return githubPRURLRe.MatchString(strings.TrimSpace(rawURL))
 }
@@ -43,6 +47,7 @@ func (g *GitHubProvider) ParseURL(rawURL string) (PRTarget, error) {
 	n, _ := strconv.Atoi(m[3])
 	return PRTarget{
 		Provider: "github",
+		BaseURL:  "https://github.com",
 		Owner:    m[1],
 		Repo:     strings.TrimSuffix(m[2], ".git"),
 		Number:   n,
@@ -50,7 +55,7 @@ func (g *GitHubProvider) ParseURL(rawURL string) (PRTarget, error) {
 	}, nil
 }
 
-func (g *GitHubProvider) ResolveToken(cfg settings) (token, source string) {
+func (g *GitHubProvider) ResolveToken(cfg settings, _ PRTarget) (token, source string) {
 	return resolveGitHubToken(cfg)
 }
 
@@ -148,12 +153,18 @@ func checkPushAccess(ctx context.Context, owner, repo, token string) bool {
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
+	return decodePushPermission(resp.Body)
+}
+
+// decodePushPermission reads permissions.push from a repository object, which
+// GitHub and Gitea shape alike. Any decode failure is false.
+func decodePushPermission(r io.Reader) bool {
 	var out struct {
 		Permissions struct {
 			Push bool `json:"push"`
 		} `json:"permissions"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(r).Decode(&out); err != nil {
 		return false
 	}
 	return out.Permissions.Push
@@ -173,6 +184,13 @@ func fetchPRMeta(ctx context.Context, owner, repo string, num int, token string)
 		}
 		return PRMeta{}, fmt.Errorf("github: fetch PR #%d: %s: %s", num, resp.Status, bodyMsg)
 	}
+	return decodePRMeta(resp.Body, owner, repo)
+}
+
+// decodePRMeta reads a pull request object, which GitHub and Gitea shape
+// alike, into PRMeta. owner/repo name the base repository, to tell a fork's
+// head apart.
+func decodePRMeta(r io.Reader, owner, repo string) (PRMeta, error) {
 	var out struct {
 		Number   int    `json:"number"`
 		Title    string `json:"title"`
@@ -195,7 +213,7 @@ func fetchPRMeta(ctx context.Context, owner, repo string, num int, token string)
 			} `json:"repo"`
 		} `json:"head"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(r).Decode(&out); err != nil {
 		return PRMeta{}, err
 	}
 	m := PRMeta{
@@ -257,29 +275,30 @@ func submitReview(ctx context.Context, owner, repo string, num int, token, commi
 	return nil
 }
 
-var githubLinkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+var linkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
 
-// githubGetAllPages follows a GitHub list endpoint's Link header until
-// exhausted, decoding each page as a raw JSON array so callers can unmarshal
-// elements into their own shape.
-func githubGetAllPages(ctx context.Context, path, token string) ([]json.RawMessage, error) {
+// getAllPages follows a list endpoint's Link header (GitHub and Gitea both
+// send one) until exhausted, decoding each page as a raw JSON array so
+// callers can unmarshal elements into their own shape. get issues one GET
+// for a path or absolute URL; forge prefixes error messages.
+func getAllPages(forge, path string, get func(path string) (*http.Response, error)) ([]json.RawMessage, error) {
 	var all []json.RawMessage
 	next := path
 	for next != "" {
-		resp, err := githubRequest(ctx, http.MethodGet, next, token, nil)
+		resp, err := get(next)
 		if err != nil {
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			return nil, fmt.Errorf("github: get %s: %s: %s", path, resp.Status, strings.TrimSpace(string(b)))
+			return nil, fmt.Errorf("%s: get %s: %s: %s", forge, path, resp.Status, strings.TrimSpace(string(b)))
 		}
 		var page []json.RawMessage
 		err = json.NewDecoder(resp.Body).Decode(&page)
 		next = ""
 		if link := resp.Header.Get("Link"); link != "" {
-			if m := githubLinkNextRe.FindStringSubmatch(link); m != nil {
+			if m := linkNextRe.FindStringSubmatch(link); m != nil {
 				next = m[1]
 			}
 		}
@@ -292,11 +311,19 @@ func githubGetAllPages(ctx context.Context, path, token string) ([]json.RawMessa
 	return all, nil
 }
 
+func githubGetAllPages(ctx context.Context, path, token string) ([]json.RawMessage, error) {
+	return getAllPages("github", path, func(p string) (*http.Response, error) {
+		return githubRequest(ctx, http.MethodGet, p, token, nil)
+	})
+}
+
 type ghUser struct {
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 }
 
+// ghIssueComment is a top-level PR conversation comment; Gitea's issue
+// comments carry the same fields.
 type ghIssueComment struct {
 	ID        int64  `json:"id"`
 	Body      string `json:"body"`

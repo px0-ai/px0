@@ -56,6 +56,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `agent.harness` | Coding Agent | `""` | `claude`, `gemini`, `agy`, etc. | Preferred CLI coding harness |
 | `agent.timeoutSeconds` | Coding Agent | `120` | `10` – `600` (seconds) | Max runtime for agent edits |
 | `github.token` | GitHub | `""` | any string | Personal access token for `px0 pr` review; takes precedence over `GITHUB_TOKEN` and `gh auth token`. Masked in the Settings UI. |
+| `gitea.token` | Gitea | `""` | any string | Access token for Gitea PR review; takes precedence over `GITEA_TOKEN` and the `tea` CLI's login for the PR's host. Masked in the Settings UI. |
 | `server.basePath` | Server | `"/"` | any path prefix (e.g. `"/rev-123/"`) | Base URL path prefix to serve endpoints and assets from. Overridden by the `-base-path` CLI flag. |
 
 ---

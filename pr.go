@@ -85,9 +85,9 @@ func computeDiffBase(worktree, srcRepo, token string, target PRTarget, baseRef s
 	baseRefspec := fmt.Sprintf("refs/heads/%s:refs/px0/base/%d", baseRef, num)
 	baseRemote := "origin"
 	if srcRepo == "" {
-		baseRemote = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+		baseRemote = target.RepoCloneURL()
 	}
-	if out, err := gitAuthCmd(token, "-C", worktree, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err != nil {
+	if out, err := gitAuthCmd(target, token, "-C", worktree, "fetch", "--no-tags", baseRemote, baseRefspec).CombinedOutput(); err != nil {
 		fetchErr = strings.TrimSpace(string(out))
 		if fetchErr == "" {
 			fetchErr = err.Error()
@@ -121,7 +121,7 @@ func computeDiffBase(worktree, srcRepo, token string, target PRTarget, baseRef s
 // unrelated directory).
 func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd string, onProgress func(string)) (*prSession, error) {
 	cfg := readSettings()
-	token, _ := provider.ResolveToken(cfg)
+	token, _ := provider.ResolveToken(cfg, target)
 
 	if onProgress != nil {
 		onProgress(fmt.Sprintf("Fetching PR #%d metadata from %s...", target.Number, provider.Name()))
@@ -176,9 +176,9 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		}
 		cloneURL := meta.HeadRepoCloneURL
 		if cloneURL == "" {
-			cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+			cloneURL = target.RepoCloneURL()
 		}
-		if out, err := gitAuthCmd(token, "clone", "--filter=blob:none", "--branch", meta.HeadRef, "--single-branch", cloneURL, tmp).CombinedOutput(); err != nil {
+		if out, err := gitAuthCmd(target, token, "clone", "--filter=blob:none", "--branch", meta.HeadRef, "--single-branch", cloneURL, tmp).CombinedOutput(); err != nil {
 			cleanup()
 			return nil, fmt.Errorf("git clone PR head: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -246,20 +246,21 @@ func httpsRemoteURL(raw string) string {
 	return raw
 }
 
-// gitAuthCmd builds a git command that authenticates to github.com over https
-// with the forge token -- what a PAT-based URL does, minus the token in the URL
-// (and so in argv, in git's remote config, and in error text). The header
-// travels in the environment, is scoped to github.com, and terminal prompts are
-// off so a bad or missing token fails fast instead of hanging on a password
-// prompt. With no token it is plain git.
-func gitAuthCmd(token string, args ...string) *exec.Cmd {
+// gitAuthCmd builds a git command that authenticates to target's forge over
+// https with the forge token -- what a PAT-based URL does, minus the token in
+// the URL (and so in argv, in git's remote config, and in error text). The
+// header travels in the environment, is scoped to the forge's web root (e.g.
+// https://github.com/), and terminal prompts are off so a bad or missing token
+// fails fast instead of hanging on a password prompt. GitHub and Gitea both
+// take the token as the Basic password. With no token it is plain git.
+func gitAuthCmd(target PRTarget, token string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if token != "" {
 		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 		env = append(env,
 			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+			"GIT_CONFIG_KEY_0=http."+target.WebBase()+"/.extraheader",
 			"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
 		)
 	}
@@ -333,9 +334,9 @@ func (p *prSession) Pull() (info string, err error) {
 	} else {
 		cloneURL := headRepoCloneURL
 		if cloneURL == "" {
-			cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+			cloneURL = target.RepoCloneURL()
 		}
-		if out, err := gitAuthCmd(token, "-C", worktree, "fetch", "--no-tags", cloneURL, "+refs/heads/"+headRef).CombinedOutput(); err != nil {
+		if out, err := gitAuthCmd(target, token, "-C", worktree, "fetch", "--no-tags", cloneURL, "+refs/heads/"+headRef).CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git fetch PR head: %w: %s", err, redactToken(strings.TrimSpace(string(out)), token))
 		}
 	}
@@ -378,7 +379,7 @@ func (p *prSession) Pull() (info string, err error) {
 		p.mu.Unlock()
 	}
 
-	// Title, state, merged, base branch: refresh what GitHub says about the PR
+	// Title, state, merged, base branch: refresh what the forge says about the PR
 	// itself, so the bar doesn't keep showing the state from session start.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -412,7 +413,7 @@ func (p *prSession) Push() error {
 	p.mu.Unlock()
 
 	if cloneURL == "" {
-		cloneURL = fmt.Sprintf("https://github.com/%s/%s.git", target.Owner, target.Repo)
+		cloneURL = target.RepoCloneURL()
 	}
 	// However this checkout was cloned (https or ssh), the push goes over https
 	// with the forge token, so it never stops to ask for a password.
@@ -421,7 +422,7 @@ func (p *prSession) Push() error {
 		pushURL = httpsRemoteURL(cloneURL)
 	}
 	refspec := fmt.Sprintf("HEAD:refs/heads/%s", headRef)
-	out, err := gitAuthCmd(token, "-C", worktree, "push", pushURL, refspec).CombinedOutput()
+	out, err := gitAuthCmd(target, token, "-C", worktree, "push", pushURL, refspec).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git push: %w: %s", err, redactToken(strings.TrimSpace(string(out)), token))
 	}
@@ -438,6 +439,28 @@ func (p *prSession) Push() error {
 
 // ---------------------------------------------------------------- HTTP
 
+// forgeMeta describes the session's forge to the UI: which provider (whose
+// token setting is "<provider>.token"), its display name, how to supply a
+// token, and the PR's web page.
+func (p *prSession) forgeMeta() map[string]any {
+	m := map[string]any{"provider": "github", "providerLabel": "GitHub", "tokenHint": "", "webUrl": ""}
+	if p.provider != nil {
+		m["provider"], m["providerLabel"], m["tokenHint"] = p.provider.Name(), p.provider.Label(), p.provider.TokenHint()
+	}
+	if p.target.Owner != "" {
+		m["webUrl"] = p.target.WebURL()
+	}
+	return m
+}
+
+// tokenRequired is the error text for a write attempted without a token.
+func (p *prSession) tokenRequired(what string) string {
+	if p.provider == nil {
+		return "no auth token configured; " + what + " requires a forge token"
+	}
+	return fmt.Sprintf("no auth token configured; %s requires a %s token (%s)", what, p.provider.Label(), p.provider.TokenHint())
+}
+
 func (s *Server) prOrFail(w http.ResponseWriter) bool {
 	if s.pr == nil {
 		fail(w, http.StatusNotFound, "not a PR review session")
@@ -453,7 +476,7 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 	p := s.pr
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	writeJSON(w, map[string]any{
+	m := map[string]any{
 		"number":          p.meta.Number,
 		"title":           p.meta.Title,
 		"author":          p.meta.Author,
@@ -469,7 +492,11 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 		"headSHA":         p.meta.HeadSHA,
 		"url":             p.target.URL,
 		"files":           s.ix.PRFiles(),
-	})
+	}
+	for k, v := range p.forgeMeta() {
+		m[k] = v
+	}
+	writeJSON(w, m)
 }
 
 // handlePRExistingComments fetches every comment already posted on the PR
@@ -497,9 +524,9 @@ func (s *Server) handlePRExistingComments(w http.ResponseWriter, r *http.Request
 }
 
 // handlePRIssueCommentPost posts a new top-level PR comment immediately (not
-// part of the draft-then-submit review flow below, since GitHub's issue
+// part of the draft-then-submit review flow below, since a forge's issue
 // comments aren't tied to a review). Used both for starting a new top-level
-// comment and for "replying" to one, since GitHub doesn't thread these.
+// comment and for "replying" to one, since forges don't thread these.
 func (s *Server) handlePRIssueCommentPost(w http.ResponseWriter, r *http.Request) {
 	if !s.prOrFail(w) {
 		return
@@ -509,7 +536,7 @@ func (s *Server) handlePRIssueCommentPost(w http.ResponseWriter, r *http.Request
 	}
 	p := s.pr
 	if p.token == "" {
-		fail(w, http.StatusForbidden, "no auth token configured; posting comments requires a GitHub token")
+		fail(w, http.StatusForbidden, p.tokenRequired("posting comments"))
 		return
 	}
 	var body struct {
@@ -532,7 +559,7 @@ func (s *Server) handlePRIssueCommentPost(w http.ResponseWriter, r *http.Request
 // handlePRReviewCommentReply posts an immediate, threaded reply to an
 // existing inline review comment (not a new draft: this bypasses the
 // draft-then-submit review flow, matching GitHub's own dedicated reply
-// endpoint, which posts right away).
+// endpoint, which posts right away; Gitea has none, see giteaReplyToReviewComment).
 func (s *Server) handlePRReviewCommentReply(w http.ResponseWriter, r *http.Request) {
 	if !s.prOrFail(w) {
 		return
@@ -542,7 +569,7 @@ func (s *Server) handlePRReviewCommentReply(w http.ResponseWriter, r *http.Reque
 	}
 	p := s.pr
 	if p.token == "" {
-		fail(w, http.StatusForbidden, "no auth token configured; posting comments requires a GitHub token")
+		fail(w, http.StatusForbidden, p.tokenRequired("posting comments"))
 		return
 	}
 	var body struct {
@@ -642,7 +669,7 @@ func (s *Server) handlePRSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	p := s.pr
 	if p.token == "" {
-		fail(w, http.StatusForbidden, "no auth token configured; review submission is read-only")
+		fail(w, http.StatusForbidden, p.tokenRequired("submitting a review"))
 		return
 	}
 	var body struct {
@@ -697,7 +724,7 @@ func (s *Server) handleLaunchPR(w http.ResponseWriter, r *http.Request) {
 	}
 	targetURL := strings.TrimSpace(body.Target)
 	if _, _, ok := DetectPRURL(targetURL); !ok {
-		fail(w, http.StatusBadRequest, "target must be a valid pull request URL (e.g. https://github.com/owner/repo/pull/123)")
+		fail(w, http.StatusBadRequest, "target must be a valid pull request URL (e.g. https://github.com/owner/repo/pull/123 or https://gitea.example.com/owner/repo/pulls/123)")
 		return
 	}
 	exe, err := os.Executable()
