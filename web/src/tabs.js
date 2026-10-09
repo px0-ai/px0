@@ -6,7 +6,7 @@ import { render, layout, refineChunk } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
 import { pushHistory } from './history.js';
 import { warmLSP } from './lsp.js';
-import { loadOutline } from './outline.js';
+import { loadOutline, symbolsShown } from './outline.js';
 import { showPanel } from './panels.js';
 import { revealDir, treeEl } from './tree.js';
 import { clearLink } from './hover.js';
@@ -190,7 +190,7 @@ export async function openFile(path, opts = {}) {
   }
   render();
   updateStatus();
-  if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+  if (symbolsShown()) loadOutline();
   if (push) pushHistory(path, line || d.cur);
   saveWorkspaceState();
   emit('tab:activated', { doc: d, prevDoc: prev });
@@ -351,7 +351,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
     layout();
     vp.scrollTop = d.scrollTop;
     render();
-    if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+    if (symbolsShown()) loadOutline();
   }
 
   drawTabs();
@@ -501,7 +501,7 @@ export function switchTab(i) {
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = S.tabs[i].scrollTop;
   render(); updateStatus();
-  if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+  if (symbolsShown()) loadOutline();
   pushHistory(S.tabs[i].path, S.tabs[i].cur);
   saveWorkspaceState();
   emit('tab:activated', { doc: S.tabs[i], prevDoc: prev });

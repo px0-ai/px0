@@ -200,7 +200,7 @@ if (d) {
   layout();
   vp.scrollTop = d.scrollTop;
   render();
-  if ($('#panel-outline')?.classList.contains('active')) loadOutline();
+  if (symbolsShown()) loadOutline();
 }
 
 drawTabs();
@@ -210,7 +210,7 @@ updateStatus();
 
 - **Single Layout & Paint Budget**: Rather than re-rendering for each tab, a single `layout()` recalculates the sizer dimensions and a single `render()` mounts the ~60 visible rows into the DOM.
 - **Viewport Scroll Restoration**: `vp.scrollTop = d.scrollTop` restores the user's exact scroll position on the freshly-sized canvas.
-- **Outline Panel Resync**: If the symbol outline sidebar is active, `loadOutline()` re-extracts declarations against the updated file.
+- **Outline Panel Resync**: If the Symbols tab of the right inspector is on screen (`symbolsShown()`), `loadOutline()` re-extracts declarations against the updated file.
 
 ---
 
