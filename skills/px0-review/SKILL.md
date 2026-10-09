@@ -32,7 +32,7 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
    px0 -review "$TMPDIR/review.json" <pr-url>        # the same, naming the pull request on the command line
    ```
 
-   Run it in the background; it prints the URL and opens the browser. On a remote machine add `-no-open` and tell the user the URL. The file format and its JSON Schema are documented at https://github.com/px0-ai/px0/blob/master/docs/internals/review.schema.json (schema) and https://github.com/px0-ai/px0/blob/master/docs/internals/review-file-spec.md (spec).
+   Run it in the background; it prints the URL and opens the browser. On a remote machine add `-no-open` and tell the user the URL. `review.schema.json`, next to this file, is a JSON Schema for the file.
 
 5. **Tell the user** it is open and that **Discuss** on any comment starts a thread with their coding harness, which is given the review's context.
 

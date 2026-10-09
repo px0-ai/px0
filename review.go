@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 )
 
-// review.go loads an agent-authored review (docs/internals/review-file-spec.md)
+// review.go loads an agent-authored review (skills/px0-review/SKILL.md)
 // and serves it to the browser next to the PR-style diff UI.
 //
 // The review file is read-only input: px0 never writes, renames or deletes it.

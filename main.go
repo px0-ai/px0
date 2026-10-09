@@ -52,7 +52,7 @@ func main() {
 		headFlag     = flag.String("head", "", "with -review: revision under review (overrides the file; default: the file's head, else HEAD)")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n  px0 -review review.json [-base REV] [-head REV]\n\nreview file format: https://github.com/px0-ai/px0/blob/master/docs/internals/review-file-spec.md\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n  px0 -review review.json [-base REV] [-head REV]\n\nreview file format: https://github.com/px0-ai/px0/blob/master/skills/px0-review/SKILL.md\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()

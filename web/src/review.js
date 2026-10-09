@@ -7,7 +7,7 @@
 // writing anything. Text goes through thread.js's escape-first renderer in its
 // no-images mode: the CSP allows https images, so an injected image URL would
 // carry repository data out the moment a comment rendered. See
-// docs/internals/review-file-spec.md section 7.
+// docs/internals/local-review.md section 9.
 import { esc } from './state.js';
 import { thrMdNoImages } from './thread.js';
 
