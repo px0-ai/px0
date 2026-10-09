@@ -41,7 +41,7 @@ func TestIgnorePatterns(t *testing.T) {
 		{"src/vendor.go", false, false},
 	}
 	for _, c := range cases {
-		if got := ig.match(c.path, c.dir); got != c.want {
+		if got := ig.Match(c.path, c.dir); got != c.want {
 			t.Errorf("match(%q, dir=%v) = %v, want %v", c.path, c.dir, got, c.want)
 		}
 	}
@@ -468,18 +468,18 @@ func TestIgnoreFastPathMatchesRegex(t *testing.T) {
 			if !ok {
 				t.Fatalf("%q: regex form failed to compile", full)
 			}
-			if r.kind != rkRegex {
-				if slow.re == nil || slow.sub == nil {
+			if r.Kind != rkRegex {
+				if slow.Re == nil || slow.Sub == nil {
 					t.Fatalf("%q: reference rule has no regexps", full)
 				}
 			}
 			for _, p := range paths {
 				for _, isDir := range []bool{false, true} {
-					got := r.hit(p, isDir)
-					want := slow.hit(p, isDir)
+					got := r.Hit(p, isDir)
+					want := slow.Hit(p, isDir)
 					if got != want {
 						t.Errorf("pattern %q path %q dir=%v: fast=%v regex=%v (kind=%d lit=%q)",
-							full, p, isDir, got, want, r.kind, r.lit)
+							full, p, isDir, got, want, r.Kind, r.Lit)
 					}
 				}
 			}
@@ -493,7 +493,7 @@ func compileRegexOnly(p string) (rule, bool) {
 	if !ok {
 		return r, false
 	}
-	if r.kind == rkRegex {
+	if r.Kind == rkRegex {
 		return r, true
 	}
 	// Re-derive the regexp form by compiling a pattern that cannot be

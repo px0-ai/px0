@@ -706,7 +706,10 @@ function renderSettingsList() {
           ${presetPills}
         </div>`;
     } else if (type === 'textarea') {
-      controlHtml = `<textarea class="settings-input settings-textarea" data-key="${esc(key)}" rows="3" spellcheck="false">${esc(String(val || ''))}</textarea>`;
+      const placeholder = key === 'git.commitMessageInstruction'
+        ? 'Enter custom instructions for AI commit messages (e.g. Follow Conventional Commits, reference issue key from branch)...'
+        : 'Enter instructions...';
+      controlHtml = `<textarea class="settings-input settings-textarea" data-key="${esc(key)}" rows="6" spellcheck="false" placeholder="${esc(placeholder)}">${esc(String(val || ''))}</textarea>`;
     } else {
       const isSecret = item.secret || item.Secret;
       controlHtml = `<input type="${isSecret ? 'password' : 'text'}" class="settings-input" data-key="${esc(key)}" value="${esc(String(val || ''))}"${isSecret ? ' autocomplete="off"' : ''}>`;
@@ -739,8 +742,10 @@ function renderSettingsList() {
         </button>
       </div>` : '';
 
+    const cardClass = `settings-card${modClass}${type === 'textarea' ? ' settings-card-textarea' : ''}`;
+
     return `
-      <div class="settings-card${modClass}" data-setting="${esc(key)}">
+      <div class="${cardClass}" data-setting="${esc(key)}">
         <div class="settings-card-left">
           <div class="settings-card-header">
             <span class="settings-card-title">${esc(title)}</span>

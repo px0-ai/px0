@@ -250,6 +250,7 @@ When developers use px0 to inspect AI agent changes or review git branches, they
    ```javascript
    for (let i = S.tabs.length - 1; i >= 0; i--) {
      const t = S.tabs[i];
+     if (t.diffRef) continue; // pinned to a commit; see §10
      const code = statuses[t.path];
      const isDiff = !!code && code !== 'U';
      const wasDiff = !!(t.diffMode || t.openedInDiffView);
@@ -325,7 +326,7 @@ Three reads share one set of `git diff-tree` flags (`commitDiffArgs`): `--no-com
 
 | Function | Shell-out | Returns |
 | --- | --- | --- |
-| `gitCommitFiles(root, sha)` | `git diff-tree --name-status -z …` | Paths the commit touched, with git's status letter (`M`/`A`/`D`/`R`/`C`/`T`), mapped through `repoRelKey` so a repo served from a subdirectory lists only what it can open. |
+| `gitCommitFiles(root, sha)` | `git diff-tree --name-status -z …` + `gitCommitNumstat` (`git show --numstat -z -m --first-parent`) | Paths the commit touched, with git's status letter (`M`/`A`/`D`/`R`/`C`/`T`) and each path's `add`/`del` line counts (`binary` when numstat reports `-`), mapped through `repoRelKey` so a repo served from a subdirectory lists only what it can open. |
 | `gitCommitDetail(root, sha)` | `git show -s --format=…` + `git diff-tree --numstat …` | Author, email, relative and ISO dates, the full message, and the files/insertions/deletions diffstat. |
 | `gitDiffCommit(root, relpath, sha)` | `git diff-tree -p --no-color …` | The unified diff that commit alone made to one file. |
 
@@ -347,7 +348,7 @@ Rather than add two more endpoints, the existing diff and gutter endpoints take 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
 | `/api/unpushed` | GET | `{available, upstream, commits[]}` — commits in `@{u}..HEAD`, newest first. `available: false` with no upstream or nothing ahead. |
-| `/api/commitfiles?sha=` | GET | `{sha, files[]}` — the paths one commit touched, with status letters. Empty list for an unknown SHA. |
+| `/api/commitfiles?sha=` | GET | `{sha, files[]}` — the paths one commit touched, with status letters and line counts. Empty list for an unknown SHA. |
 | `/api/commitdetail?sha=` | GET | Author, message and diffstat for the hover card. `404` for an unknown SHA. |
 | `/api/diff?path=&ref=` | GET | With `ref`, that commit's diff for the file instead of the working tree's. |
 | `/api/gutter?path=&ref=` | GET | Same, for the change gutter. |
@@ -363,7 +364,15 @@ Clicking a commit expands it into its file list, badged with the same `git-M`/`g
 
 A commit-pinned tab is deliberately invisible to the working-tree reconciliation in `gitstream.js`: it is skipped by the auto-close pass, by the `diffAvailable` sync, and by the reload trigger. The working tree going clean is precisely when you still want to be reading one. The ref is persisted in the workspace session (`SessionTab.Ref`), so a reload comes back pinned.
 
-The list is refreshed from the `ahead` count and head SHA that already ride on every git-status SSE tick, so it re-reads `git log` only when one of them actually moved, and explicitly after a commit, push, pull or reindex. A commit that disappears (amend, rebase, push) drops its cached file list and detail with it. A commit's file rows are capped at `MAX_COMMIT_FILES` (200) with a "+N more" note — a squash or a vendor bump can touch thousands of paths, and the list is for reading a commit, not enumerating one.
+The list is refreshed from the `ahead` count and head SHA that already ride on every git-status SSE tick, so it re-reads `git log` only when one of them actually moved, and explicitly after a commit, push, pull or reindex. A commit that disappears (amend, rebase, push) drops its cached file list and detail with it. A commit's file rows are built `COMMIT_FILES_PAGE` (100) at a time behind a **Show 100 more** row (`web/src/commitfiles.js`), and only while that commit is open. A squash or a vendor bump can touch thousands of paths: building them all at once for a 20,000-file commit cost 224k DOM nodes and a 550 MB tab, where one page costs about 1,000 nodes.
+
+### Recent Commits (`web/src/gitpanel.js`)
+
+The git panel's Recent Commits list uses the same reads and the same pinned tabs. `/api/git/log` now also returns each commit's full SHA (`full`), so a file opened from either list pins its tab to the same `diffRef`. Clicking a commit expands it into its files from `/api/commitfiles`, drawn with the same `commitfiles.js` rows and paging; collapsing deletes the rows rather than hiding them. The git-status stream re-sends the recent commits on every tick, so the list is rebuilt only when the commits themselves change, and open commits are re-expanded from cache. The short-hash chip copies the SHA; arrow keys, Enter and Space move through commits and files.
+
+### Stepping Through a Commit (`web/src/diff.js`)
+
+A pinned tab's diff view opens with a strip showing the file's status, path, line counts and place in the commit (`3 / 17`), with ‹ › to step to the neighbouring file. The file list comes from `/api/commitfiles` once per SHA through `loadCommitFiles` (`commitfiles.js`), cached and shared with the sidebar rows, since a commit's files never change. `stepCommitFile` (`tabs.js`) opens the next file pinned to the same commit and closes the tab stepped away from, so stepping swaps a tab in place rather than leaving one open per file. Binary files are passed over (`commitStepTarget`): they have no text diff, and `/api/file` refuses to open them.
 
 ### Hover Cards That Stay Open (`web/src/cardkeep.js`)
 

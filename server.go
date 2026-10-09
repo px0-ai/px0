@@ -1498,12 +1498,10 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case <-heartbeatTicker.C:
-			if s.gitWatcher == nil {
-				if _, err := w.Write([]byte(": ping\n\n")); err != nil {
-					return
-				}
-				flusher.Flush()
+			if _, err := fmt.Fprintf(w, "event: ping\ndata: {}\n\n"); err != nil {
+				return
 			}
+			flusher.Flush()
 		}
 	}
 }

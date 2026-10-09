@@ -8,6 +8,7 @@ import (
 )
 
 func TestMarkdownPreview(t *testing.T) {
+	t.Parallel()
 	s, root := newTestServer(t)
 	src := "# Hello World\n\nSee [deep](sub/deep.py#L2).\n\n## API_reference\n\n```go\nfunc main() {}\n```\n\n- [x] done\n"
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(src), 0o644); err != nil {
@@ -43,6 +44,7 @@ func TestMarkdownPreview(t *testing.T) {
 }
 
 func TestHeadingIDsFollowGitHub(t *testing.T) {
+	t.Parallel()
 	ids := &headingIDs{seen: map[string]bool{}}
 	for _, c := range []struct{ in, want string }{
 		{"Getting Started!", "getting-started"},

@@ -217,19 +217,22 @@ func agentPresetNames() []string {
 
 // Detect reports every harness known and whether it is installed right
 // now, so a tool installed since startup shows up without a restart.
+// Models are only discovered for the currently selected harness to avoid
+// executing external commands (such as `agy models`) on startup for unused tools.
 func (m *agentManager) Detect() []agentHarness {
 	m.mu.Lock()
 	savedModels := make(map[string]string, len(m.models))
 	for k, v := range m.models {
 		savedModels[k] = v
 	}
+	selected := m.selected
 	m.mu.Unlock()
 
 	detected := harness.Detect(savedModels)
 	out := make([]agentHarness, 0, len(detected))
 	for _, h := range detected {
 		var models []string
-		if h.Installed {
+		if h.Installed && h.Name == selected {
 			if list, err := harness.DiscoverModels(context.Background(), h.Name); err == nil {
 				models = list
 			}

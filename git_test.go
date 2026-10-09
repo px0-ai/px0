@@ -27,6 +27,9 @@ func gitInstalled() bool {
 // rename) so every status code is exercised. Returns the served root.
 func gitRepo(tb testing.TB) string {
 	tb.Helper()
+	if testing.Short() {
+		tb.Skip("skipping git integration test in short mode")
+	}
 	root := tb.TempDir()
 	// macOS TempDir lives under /var -> /private/var; git reports the real path.
 	if r, err := filepath.EvalSymlinks(root); err == nil {
@@ -173,6 +176,9 @@ func TestGitDiff(t *testing.T) {
 }
 
 func TestGitCleanRepo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
@@ -247,6 +253,9 @@ func TestGitDisabled(t *testing.T) {
 }
 
 func TestGitGutter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
@@ -909,6 +918,9 @@ func TestGitStageUnstageCommit(t *testing.T) {
 // more than one working tree.
 func gitTestRun(tb testing.TB, dir string, args ...string) string {
 	tb.Helper()
+	if testing.Short() {
+		tb.Skip("skipping git integration test in short mode")
+	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
@@ -1613,6 +1625,67 @@ func TestGitCommitFilesAndDetail(t *testing.T) {
 	}
 	if files := gitCommitFiles(root, "HEAD~1"); files != nil {
 		t.Fatalf("expected only hex SHAs to be accepted, got %+v", files)
+	}
+}
+
+func TestGitCommitFilesLineCounts(t *testing.T) {
+	if !gitInstalled() {
+		t.Skip("git not installed")
+	}
+	root := unpushedRepo(t)
+	_, commits := gitUnpushedCommits(root, 0)
+	counts := map[string][2]int{}
+	for _, f := range gitCommitFiles(root, commits[1].Hash) {
+		counts[f.Path] = [2]int{f.Add, f.Del}
+	}
+	want := map[string][2]int{"a.txt": {1, 1}, "added.txt": {1, 0}, "gone.txt": {0, 1}}
+	for path, c := range want {
+		if counts[path] != c {
+			t.Errorf("%s: got +%d/-%d, want +%d/-%d", path, counts[path][0], counts[path][1], c[0], c[1])
+		}
+	}
+
+	// A binary file is flagged and carries no line counts.
+	dir := t.TempDir()
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r // macOS TempDir is under /var -> /private/var; git reports the real path
+	}
+	gitTestRun(t, dir, "init", "-q", "-b", "main")
+	for _, cfg := range [][2]string{{"user.email", "t@example.com"}, {"user.name", "T"}, {"commit.gpgsign", "false"}} {
+		gitTestRun(t, dir, "config", cfg[0], cfg[1])
+	}
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\ntwo\n"), 0o644)
+	gitTestRun(t, dir, "add", "-A")
+	gitTestRun(t, dir, "commit", "-qm", "base")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\nTWO\nthree\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "img.bin"), []byte("\x00\x01\x02binary\x00"), 0o644)
+	gitTestRun(t, dir, "add", "-A")
+	gitTestRun(t, dir, "commit", "-qm", "modify and binary")
+	head := strings.TrimSpace(gitTestRun(t, dir, "rev-parse", "HEAD"))
+	byPath := map[string]CommitFile{}
+	for _, f := range gitCommitFiles(dir, head) {
+		byPath[f.Path] = f
+	}
+	if f := byPath["a.txt"]; f.Status != "M" || f.Add != 2 || f.Del != 1 || f.Binary {
+		t.Errorf("modify: got %+v, want M with +2/-1", f)
+	}
+	if f := byPath["img.bin"]; !f.Binary || f.Add != 0 || f.Del != 0 {
+		t.Errorf("binary: got %+v, want binary with no line counts", f)
+	}
+
+	// A merge counts only what it brought in against its first parent.
+	gitTestRun(t, dir, "checkout", "-q", "-b", "side")
+	os.WriteFile(filepath.Join(dir, "side.txt"), []byte("a\nb\n"), 0o644)
+	gitTestRun(t, dir, "add", "-A")
+	gitTestRun(t, dir, "commit", "-qm", "side work")
+	gitTestRun(t, dir, "checkout", "-q", "main")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed on main\n"), 0o644)
+	gitTestRun(t, dir, "commit", "-qam", "main work")
+	gitTestRun(t, dir, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+	merge := strings.TrimSpace(gitTestRun(t, dir, "rev-parse", "HEAD"))
+	stats := gitCommitNumstat(dir, merge)
+	if len(stats) != 1 || stats["side.txt"] != (numstat{add: 2}) {
+		t.Errorf("merge numstat: got %+v, want only side.txt +2", stats)
 	}
 }
 

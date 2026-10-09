@@ -19,34 +19,24 @@ import { openFile } from './tabs.js';
 import { copyToClipboard } from './ui.js';
 import { treeEl, updateSidebarToggleState, inGitMode } from './tree.js';
 import { makeCardKeeper, pointerPos } from './cardkeep.js';
+import { commitFileRows, COMMIT_FILES_PAGE } from './commitfiles.js';
 
 const upPanel = () => $('#unpushed');
 const upBody = () => $('#unpushed-body');
 const upCard = () => $('#commitcard');
 
 const UP_CARD_DELAY = 300; // rest time on a commit row before its card opens
-/* A squash or a vendor bump can touch thousands of paths. The list is for
-   reading a commit, not for enumerating one, so cap the rows and say how many
-   were left out rather than building a DOM nobody scrolls to the end of. */
-const MAX_COMMIT_FILES = 200;
 
 let upList = [];                  // UnpushedCommit[], newest first
 let upUpstream = '';              // "origin/master", the ref the list is measured against
 let upOpenSha = '';               // the one expanded commit, '' for none
+let upShown = COMMIT_FILES_PAGE;  // file rows built for the open commit
 let upActiveFile = '';            // "<sha>\0<path>" of the file row showing in the editor
 const upFiles = new Map();        // sha -> CommitFile[] (a commit's file list never changes)
 const upDetails = new Map();      // sha -> CommitDetail
 let upSig = '';                   // last (ahead, head SHA) seen, to skip pointless refetches
 let upCardTimer = 0, upCardSeq = 0, upCardSha = '';
 let upKeeper = null;
-
-/* git's name-status letter -> the badge classes the file tree already uses, so
-   a commit's file list reads the same as the working-tree one. */
-const COMMIT_STATUS = {
-  M: ['git-M', 'modified'], A: ['git-A', 'added'], D: ['git-D', 'deleted'],
-  R: ['git-R', 'renamed'], C: ['git-A', 'copied'], T: ['git-M', 'type changed'],
-  U: ['git-untracked', 'unmerged'],
-};
 
 
 /* Visible only in "changed files only" mode, and only with something to list. */
@@ -115,35 +105,22 @@ function drawUnpushed() {
         '<span class="up-subject">' + esc(c.subject || '(no message)') + '</span>' +
         '<span class="up-sha">' + esc(c.short || '') + '</span>' +
       '</div>' +
-      '<div class="up-files">' + (open ? commitFileRows(c.hash) : '') + '</div>' +
+      '<div class="up-files">' + (open ? openCommitRows(c.hash) : '') + '</div>' +
     '</div>';
   }).join('');
 }
 
-function commitFileRows(sha) {
+function openCommitRows(sha) {
   const all = upFiles.get(sha);
   if (!all) return '<div class="up-note">Loading files…</div>';
   if (!all.length) return '<div class="up-note">No files in this commit.</div>';
-  const files = all.slice(0, MAX_COMMIT_FILES);
-  const extra = all.length - files.length;
-  return files.map(f => {
-    const g = COMMIT_STATUS[f.status] || ['git-M', f.status];
-    const name = f.path.split('/').pop();
-    const dir = f.path.slice(0, f.path.length - name.length).replace(/\/$/, '');
-    const from = f.from ? ' (was ' + f.from + ')' : '';
-    const sel = upActiveFile === sha + '\0' + f.path ? ' sel' : '';
-    return '<div class="up-file' + sel + '" data-path="' + esc(f.path) + '" ' +
-      'title="' + esc(f.path + from) + ' — ' + esc(g[1]) + ' in this commit">' +
-      '<span class="up-file-name">' + esc(name) + '</span>' +
-      (dir ? '<span class="up-file-dir">' + esc(dir) + '</span>' : '') +
-      '<span class="gs ' + g[0] + '" title="' + esc(g[1]) + '">' + esc(f.status) + '</span>' +
-    '</div>';
-  }).join('') +
-  (extra ? '<div class="up-note">+' + extra + ' more file' + (extra === 1 ? '' : 's') + ' in this commit</div>' : '');
+  const active = upActiveFile.startsWith(sha + '\0') ? upActiveFile.slice(sha.length + 1) : '';
+  return commitFileRows(all, 0, upShown, active);
 }
 
 async function toggleUnpushedCommit(sha) {
   upOpenSha = upOpenSha === sha ? '' : sha;
+  upShown = COMMIT_FILES_PAGE;
   drawUnpushed();
   if (!upOpenSha || upFiles.has(sha)) return;
   try {
@@ -278,6 +255,7 @@ export function initUnpushed() {
   }
 
   el.addEventListener('click', e => {
+    if (e.target.closest('.up-more')) { upShown += COMMIT_FILES_PAGE; drawUnpushed(); return; }
     const file = e.target.closest('.up-file');
     if (file) {
       const sha = file.closest('.up-commit')?.dataset.sha;
@@ -297,6 +275,16 @@ export function initUnpushed() {
 
   el.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target.closest('.up-more')) {
+      e.preventDefault();
+      const first = upShown;
+      upShown += COMMIT_FILES_PAGE;
+      drawUnpushed();
+      el.querySelectorAll('.up-commit.open .up-file')[first]?.focus();
+      return;
+    }
+    const file = e.target.closest('.up-file');
+    if (file) { e.preventDefault(); file.click(); return; }
     const row = e.target.closest('.up-row');
     if (!row) return;
     e.preventDefault();

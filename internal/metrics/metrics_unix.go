@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package metrics
 
 import (
 	"runtime"
@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// getProcessRusage reads user+system CPU time and peak resident set size
+// GetProcessRusage reads user+system CPU time and peak resident set size
 // using the POSIX getrusage syscall available on Darwin, Linux, and BSDs.
-func getProcessRusage() (cpuTime time.Duration, peakRSS uint64, ok bool) {
+func GetProcessRusage() (cpuTime time.Duration, peakRSS uint64, ok bool) {
 	var ru syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
 		return 0, 0, false

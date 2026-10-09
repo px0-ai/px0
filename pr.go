@@ -273,16 +273,16 @@ func httpsRemoteURL(raw string) string {
 // prompt. With no token it is plain git.
 func gitAuthCmd(token string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
-	if token == "" {
-		return cmd
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+		env = append(env,
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+			"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+		)
 	}
-	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
-	)
+	cmd.Env = env
 	return cmd
 }
 

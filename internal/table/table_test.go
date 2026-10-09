@@ -1,18 +1,16 @@
-package main
+package table
 
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-func mustTable(t *testing.T, src string, delim rune) tableResult {
+func mustTable(t *testing.T, src string, delim rune) Result {
 	t.Helper()
-	res, err := renderTable(strings.NewReader(src), int64(len(src)), delim)
+	res, err := Render(strings.NewReader(src), int64(len(src)), delim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +83,14 @@ func TestTableStopsAtRowCap(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder
 	b.WriteString("n,sq\n")
-	for i := 1; i <= maxTableRows+1000; i++ {
+	for i := 1; i <= MaxRows+1000; i++ {
 		fmt.Fprintf(&b, "%d,%d\n", i, i*i)
 	}
 	res := mustTable(t, b.String(), ',')
-	if len(res.Rows) != maxTableRows || !res.Truncated {
-		t.Errorf("rows %d truncated %v; want %d true", len(res.Rows), res.Truncated, maxTableRows)
+	if len(res.Rows) != MaxRows || !res.Truncated {
+		t.Errorf("rows %d truncated %v; want %d true", len(res.Rows), res.Truncated, MaxRows)
 	}
-	if last := res.Rows[len(res.Rows)-1]; last.Line != maxTableRows+1 {
+	if last := res.Rows[len(res.Rows)-1]; last.Line != MaxRows+1 {
 		t.Errorf("last row line %d", last.Line)
 	}
 }
@@ -101,7 +99,7 @@ func TestTableExactlyAtRowCapIsNotTruncated(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder
 	b.WriteString("n\n")
-	for i := 1; i <= maxTableRows; i++ {
+	for i := 1; i <= MaxRows; i++ {
 		fmt.Fprintf(&b, "%d\n", i)
 	}
 	if res := mustTable(t, b.String(), ','); res.Truncated {
@@ -109,38 +107,6 @@ func TestTableExactlyAtRowCapIsNotTruncated(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, root, rel, body string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestTableEndpointServesRowsAndFileFlagsTables(t *testing.T) {
-	t.Parallel()
-	s, root := newTestServer(t)
-	writeFile(t, root, "bench.csv", "repo,files\nlinux,81902\n")
-	writeFile(t, root, "bench.tsv", "repo\tfiles\nlinux\t81902\n")
-
-	code, m := get(t, s, "/api/table?path=bench.csv")
-	if code != 200 {
-		t.Fatalf("status %d: %v", code, m)
-	}
-	rows, _ := m["rows"].([]any)
-	if len(rows) != 1 || m["cols"] != float64(2) {
-		t.Errorf("response = %v", m)
-	}
-	for path, want := range map[string]bool{"bench.csv": true, "bench.tsv": true, "main.go": false} {
-		if _, m := get(t, s, "/api/file?path="+path); m["table"] != want {
-			t.Errorf("%s: table = %v, want %v", path, m["table"], want)
-		}
-	}
-	if code, _ := get(t, s, "/api/table?path=main.go"); code != 415 {
-		t.Errorf("non-table file: status %d, want 415", code)
-	}
-}
-
-// rowSource is an endless CSV body that counts the bytes read from it.
 type rowSource struct {
 	row  string
 	off  int
@@ -161,12 +127,12 @@ func (s *rowSource) Read(p []byte) (int, error) {
 func TestTableReadsNoMoreThanTheByteCap(t *testing.T) {
 	t.Parallel()
 	src := &rowSource{row: strings.Repeat("y", 10000) + ",end\n"}
-	res, err := renderTable(io.MultiReader(strings.NewReader("a,b\n"), src), 50<<20, ',')
+	res, err := Render(io.MultiReader(strings.NewReader("a,b\n"), src), 50<<20, ',')
 	if err != nil {
 		t.Fatal(err)
 	}
-	if src.read > maxTableBytes {
-		t.Errorf("read %d bytes of a 50 MB file, cap is %d", src.read, maxTableBytes)
+	if src.read > MaxBytes {
+		t.Errorf("read %d bytes of a 50 MB file, cap is %d", src.read, MaxBytes)
 	}
 	if !res.Truncated || len(res.Rows) == 0 {
 		t.Fatalf("truncated %v with %d rows", res.Truncated, len(res.Rows))
@@ -181,7 +147,7 @@ func TestTableReadsNoMoreThanTheByteCap(t *testing.T) {
 func TestTableFileAtTheByteCapIsNotTruncated(t *testing.T) {
 	t.Parallel()
 	src := "a,b\n1,2\n"
-	res, err := renderTable(strings.NewReader(src), maxTableBytes, ',')
+	res, err := Render(strings.NewReader(src), MaxBytes, ',')
 	if err != nil || res.Truncated {
 		t.Errorf("truncated %v, err %v", res.Truncated, err)
 	}
@@ -202,7 +168,7 @@ func TestTableDelimiterComesFromTheFileNotTheExtension(t *testing.T) {
 		"blank first line":              {"\n\na\tb\n1\t2\n", ',', []string{"1", "2"}},
 		"single column keeps extension": {"name\nx\n", ',', []string{"x"}},
 	} {
-		res, err := renderTable(strings.NewReader(tc.src), int64(len(tc.src)), tc.fallback)
+		res, err := Render(strings.NewReader(tc.src), int64(len(tc.src)), tc.fallback)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -214,10 +180,10 @@ func TestTableDelimiterComesFromTheFileNotTheExtension(t *testing.T) {
 
 func TestTableTieBetweenSeparatorsKeepsTheExtension(t *testing.T) {
 	t.Parallel()
-	if got := sniffDelim([]byte("a,b\tc\n"), '\t'); got != '\t' {
+	if got := SniffDelim([]byte("a,b\tc\n"), '\t'); got != '\t' {
 		t.Errorf("tie picked %q, want the .tsv tab", got)
 	}
-	if got := sniffDelim([]byte("a,b\tc\n"), ','); got != ',' {
+	if got := SniffDelim([]byte("a,b\tc\n"), ','); got != ',' {
 		t.Errorf("tie picked %q, want the .csv comma", got)
 	}
 }

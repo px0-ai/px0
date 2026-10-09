@@ -356,6 +356,18 @@ body.side-hidden #side, body.side-hidden #resizer { display: none; }
 .up-file .gs.git-M, .up-file .gs.git-R { color: var(--accent-fg); }
 .up-file .gs.git-A, .up-file .gs.git-untracked { color: var(--gi); }
 .up-file .gs.git-D { color: var(--gd); }
+.up-file:focus-visible, .up-more:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.up-file-stat { flex: none; display: inline-flex; gap: 4px; margin-left: auto; font: 10.5px var(--mono); }
+.up-file-stat + .gs { margin-left: 0; }
+.up-file-add { color: var(--gi); }
+.up-file-del { color: var(--gd); }
+.up-file-bin { color: var(--faint); }
+.up-more {
+  padding: 3px 10px 3px 26px; font: 11px/1.4 var(--ui); color: var(--dim);
+  cursor: pointer; user-select: none;
+}
+.git-commit-files .up-more { padding-left: 6px; border-radius: var(--r); }
+.up-more:hover { background: var(--bg3); color: var(--accent); }
 
 /* A tab pinned to a commit rather than the working tree. */
 .tab-ref {
@@ -549,6 +561,29 @@ a.cc-who:hover { color: var(--accent-fg); }
   flex: 1; min-width: 0; font: 11.5px var(--ui); color: var(--fg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4;
 }
+.git-commit-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.git-commit-caret {
+  flex: none; color: var(--faint); transition: transform .12s;
+}
+.git-commit.expanded .git-commit-caret { transform: rotate(90deg); color: var(--fg); }
+.git-commit-sha {
+  flex: none; padding: 0 4px; border: 1px solid transparent; border-radius: var(--r);
+  background: none; color: var(--faint); font: 10.5px/1.5 var(--mono); cursor: copy;
+}
+.git-commit-row:hover .git-commit-sha { color: var(--dim); border-color: var(--line); }
+.git-commit-sha:hover { color: var(--accent) !important; border-color: var(--accent) !important; }
+.git-commit-files {
+  display: flex; flex-direction: column; gap: 1px;
+  margin: 1px 0 4px 13px; padding-left: 8px; border-left: 1px solid var(--line);
+}
+.git-commit-files[hidden] { display: none; }
+.git-commit-meta, .git-commit-note {
+  font: 10.5px/1.5 var(--ui); color: var(--faint); padding: 1px 6px 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* File rows are the shared .up-file ones (commitfiles.js); these only fit
+   them under the commit's indent. */
+.git-commit-files .up-file { padding-left: 6px; border-radius: var(--r); }
 .git-see-all-wrap {
   padding: 3px 6px 2px;
 }
@@ -1048,6 +1083,27 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 #diffview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
 #diffcontent { font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
 .diff-empty { padding: 24px 16px; color: var(--faint); font: 12px/1.4 var(--ui); }
+/* A pinned tab's place in its commit, with ‹ › to step through the files. */
+.diff-commit-strip {
+  display: flex; align-items: center; gap: 8px; min-height: 32px;
+  padding: 5px 12px; background: var(--bg2); border-bottom: 1px solid var(--line);
+  font: 11.5px/1.4 var(--mono);
+}
+.diff-commit-strip:empty { display: none; }
+.diff-commit-strip .gs { flex: none; font: 600 10px/1 var(--mono); }
+.diff-commit-strip .gs.git-M, .diff-commit-strip .gs.git-R { color: var(--accent-fg); }
+.diff-commit-strip .gs.git-A { color: var(--gi); }
+.diff-commit-strip .gs.git-D { color: var(--gd); }
+.dcs-path { min-width: 0; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diff-commit-strip .grow { flex: 1; }
+.dcs-pos { flex: none; color: var(--faint); font: 11px var(--ui); font-variant-numeric: tabular-nums; }
+.dcs-step {
+  flex: none; width: 22px; height: 20px; padding: 0;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--bg); color: var(--fg); font: 14px/1 var(--ui); cursor: pointer;
+}
+.dcs-step:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.dcs-step:disabled { opacity: .4; cursor: default; }
 .diff-hunk-head {
   position: sticky; top: 0; z-index: 1; padding: 4px 12px;
   color: var(--accent-fg); background: var(--bg3);
@@ -2357,6 +2413,22 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   background: var(--sel);
 }
 
+.settings-card.settings-card-textarea,
+.settings-card:has(.settings-textarea) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.settings-card.settings-card-textarea .settings-card-left,
+.settings-card:has(.settings-textarea) .settings-card-left {
+  width: 100%;
+}
+.settings-card.settings-card-textarea .settings-card-right,
+.settings-card:has(.settings-textarea) .settings-card-right {
+  width: 100%;
+  justify-content: stretch;
+}
+
 .settings-card-right {
   flex: none;
   display: flex;
@@ -2382,10 +2454,11 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   width: 90px;
 }
 .settings-textarea {
-  width: 320px;
-  min-height: 64px;
+  width: 100%;
+  min-height: 140px;
+  padding: 8px 10px;
   resize: vertical;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .settings-select {
   background: var(--bg2);

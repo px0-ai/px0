@@ -155,6 +155,9 @@ func TestLSPServersEndpoint(t *testing.T) {
 }
 
 func TestLSPStopAndStart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real LSP stop/start in short mode")
+	}
 	s, root := newTestServer(t)
 	s.lsp = newLSPManager(root, true)
 	_ = os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644)

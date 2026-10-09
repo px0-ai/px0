@@ -8,7 +8,15 @@ unalias find 2>/dev/null || true
 unset -f find 2>/dev/null || true
 
 BIN=${BIN:-./px0}
-CORPUS=${CORPUS:-./bench-repos}
+if [ -z "${CORPUS:-}" ]; then
+  if [ -d "./bench-repos" ]; then
+    CORPUS="./bench-repos"
+  elif [ -d "../bench-repos" ]; then
+    CORPUS="../bench-repos"
+  else
+    CORPUS="../bench-repos"
+  fi
+fi
 PORT=${PORT:-7900}
 RUNS=${RUNS:-5}
 BENCH_TMP="${TMPDIR:-/tmp}"

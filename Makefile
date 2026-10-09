@@ -28,6 +28,8 @@ help:
 	@echo "  make build             - build px0 binary for current platform (optional: POSTHOG_KEY=phc_...)"
 	@echo "  make web               - bundle web assets (JS/CSS/themes)"
 	@echo "  make test              - run go test suite"
+	@echo "  make test-short        - run fast unit tests (short mode)"
+	@echo "  make check             - bundle web assets and run fast test suite"
 	@echo "  make dist              - compile cross-platform binaries into dist/"
 	@echo "  make publish <version> - bump VERSION, commit, tag, and build dist binaries"
 	@echo "  make clean             - remove build artifacts"
@@ -43,6 +45,14 @@ build: web
 
 test: web
 	go test -v .
+
+web-check:
+	@node ./scripts/check-web.js
+
+test-short:
+	go test -short .
+
+check: web-check web test-short
 
 bench:
 	go test -bench=. -benchmem -run=^$$ .

@@ -217,6 +217,10 @@ func (m *lspManager) runInstall(def *lspServerDef, j *lspJob, tool string, args 
 		err = fmt.Errorf("gave up after %s", lspInstallTimeout)
 	case err == nil:
 		m.Rescan()
+		// Rescan→discover already invalidates the binary cache, but make it
+		// explicit here: the install→fresh-status guarantee shouldn't depend
+		// on that chain surviving future refactors.
+		invalidateBinaryCache()
 		if _, found := lookPathIn(def.Cmd[0], lspBinDirs()); !found {
 			err = fmt.Errorf("installed, but %s is not on PATH or in the usual install folders", def.Cmd[0])
 		}
@@ -283,6 +287,10 @@ func localPost(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) handleLSPSetup(w http.ResponseWriter, r *http.Request) {
+	if s.lsp == nil {
+		fail(w, 503, "language servers are disabled")
+		return
+	}
 	_, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
 	if !ok {
 		fail(w, 400, "bad path")
@@ -292,6 +300,10 @@ func (s *Server) handleLSPSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLSPInstall(w http.ResponseWriter, r *http.Request) {
+	if s.lsp == nil {
+		fail(w, 503, "language servers are disabled")
+		return
+	}
 	if !localPost(w, r) {
 		return
 	}
@@ -339,31 +351,32 @@ func (s *Server) relevantLSPServers() []map[string]any {
 		}
 	}
 
-	// 2. Also include any server that is currently running or starting
-	s.lsp.mu.Lock()
+	// 2. Also include any server that is currently running or starting.
+	// Snapshot the names under RLock first: ServerStatus takes m.mu.RLock
+	// itself, and Go's RWMutex is not reentrant, so holding the lock across
+	// the call would deadlock.
+	s.lsp.mu.RLock()
+	var extra []string
 	for name := range s.lsp.clients {
 		if !seen[name] {
-			for i := range lspRegistry {
-				if lspRegistry[i].Name == name {
-					seen[name] = true
-					result = append(result, s.lsp.ServerStatus(&lspRegistry[i]))
-					break
-				}
-			}
+			extra = append(extra, name)
 		}
 	}
 	for name := range s.lsp.starting {
 		if !seen[name] {
-			for i := range lspRegistry {
-				if lspRegistry[i].Name == name {
-					seen[name] = true
-					result = append(result, s.lsp.ServerStatus(&lspRegistry[i]))
-					break
-				}
+			extra = append(extra, name)
+		}
+	}
+	s.lsp.mu.RUnlock()
+	for _, name := range extra {
+		for i := range lspRegistry {
+			if lspRegistry[i].Name == name {
+				seen[name] = true
+				result = append(result, s.lsp.ServerStatus(&lspRegistry[i]))
+				break
 			}
 		}
 	}
-	s.lsp.mu.Unlock()
 
 	return result
 }
@@ -399,6 +412,10 @@ func (s *Server) handleLSPServers(w http.ResponseWriter, r *http.Request) {
 
 // handleLSPStop stops a running language server or all servers.
 func (s *Server) handleLSPStop(w http.ResponseWriter, r *http.Request) {
+	if s.lsp == nil {
+		fail(w, 503, "language servers are disabled")
+		return
+	}
 	if !localPost(w, r) {
 		return
 	}
@@ -418,6 +435,10 @@ func (s *Server) handleLSPStop(w http.ResponseWriter, r *http.Request) {
 // handleLSPStart finds servers installed since startup, clears earlier start
 // failures and starts the server for path or server name, reporting status.
 func (s *Server) handleLSPStart(w http.ResponseWriter, r *http.Request) {
+	if s.lsp == nil {
+		fail(w, 503, "language servers are disabled")
+		return
+	}
 	if !localPost(w, r) {
 		return
 	}

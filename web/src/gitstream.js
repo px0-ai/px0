@@ -13,10 +13,22 @@ let reconnectTimer = null;
 let lastSig = '';
 let refreshing = null;
 let lastRefreshAt = 0;
+let lastTrafficAt = Date.now();
 
-// Focus, visibilitychange and the SSE reconnect snapshot all fire together when
-// the user comes back to the tab; one refresh covers them.
-const REFRESH_COOLDOWN_MS = 1500;
+function markTraffic() {
+  lastTrafficAt = Date.now();
+}
+
+function reconnect() {
+  disconnect();
+  connect();
+}
+
+async function handleWake() {
+  lastSig = ''; // Clear signature to ensure git-status, badges and unpushed state apply freshly
+  reconnect();
+  await triggerRefresh();
+}
 
 export function initGitStream() {
   connect();
@@ -24,10 +36,13 @@ export function initGitStream() {
   // Instant refresh when user focuses the browser window
   window.addEventListener('focus', () => {
     if (document.visibilityState === 'visible') {
-      if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
-        connect();
+      const now = Date.now();
+      // If the connection is closed, or if no SSE traffic has arrived for >5s, reconnect
+      if (!eventSource || eventSource.readyState !== EventSource.OPEN || (now - lastTrafficAt > 5000)) {
+        handleWake();
+      } else {
+        triggerRefresh();
       }
-      triggerRefresh();
     }
   });
 
@@ -36,19 +51,40 @@ export function initGitStream() {
     if (document.visibilityState === 'hidden') {
       disconnect();
     } else {
-      connect();
-      triggerRefresh();
+      handleWake();
     }
   });
+
+  // Sleep/wake detection & connection watchdog:
+  // When laptop lid closes, timers suspend. When reopened, the timer delta jumps significantly.
+  let lastTick = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const gap = now - lastTick;
+    lastTick = now;
+
+    // 1. Laptop lid closed/reopened or OS sleep: delta > 3000ms (expected ~1000ms)
+    if (gap > 3000) {
+      handleWake();
+      return;
+    }
+
+    // 2. Stream watchdog: if tab is visible and no SSE events arrived for >12s, reconnect
+    if (document.visibilityState === 'visible' && (now - lastTrafficAt > 12000)) {
+      handleWake();
+    }
+  }, 1000);
 }
 
 export function triggerRefresh() {
-  if (!S.meta?.git) return Promise.resolve();
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const data = await apiPost('/api/git/refresh');
-      await handleGitStatus(data);
+      if (S.meta?.git) {
+        const data = await apiPost('/api/git/refresh');
+        await handleGitStatus(data);
+      }
+      await reloadOpenTabs({ onlyIfChanged: true });
     } catch (e) {
       // Quiet fail on network hiccups
     } finally {
@@ -69,8 +105,14 @@ function connect() {
   try {
     const streamUrl = new URL('api/stream', document.baseURI || location.href).href;
     eventSource = new EventSource(streamUrl);
+    markTraffic();
+
+    eventSource.onopen = () => {
+      markTraffic();
+    };
 
     eventSource.addEventListener('git-status', async e => {
+      markTraffic();
       try {
         const data = JSON.parse(e.data);
         await handleGitStatus(data);
@@ -80,6 +122,7 @@ function connect() {
     });
 
     eventSource.addEventListener('metrics', e => {
+      markTraffic();
       try {
         const data = JSON.parse(e.data);
         updateMetricsDisplay(data);
@@ -88,10 +131,14 @@ function connect() {
       }
     });
 
+    eventSource.addEventListener('ping', () => {
+      markTraffic();
+    });
+
     eventSource.onerror = () => {
       disconnect();
       if (document.visibilityState === 'visible') {
-        reconnectTimer = setTimeout(connect, 3000);
+        reconnectTimer = setTimeout(connect, 1500);
       }
     };
   } catch (err) {
@@ -119,10 +166,7 @@ async function handleGitStatus(data) {
   // but they only repaint if something actually differs.
   const sig = JSON.stringify(data);
   if (sig === lastSig) {
-    const statuses = data.statuses || {};
-    if (S.tabs.some(t => statuses[t.path] && statuses[t.path] !== 'U')) {
-      await reloadOpenTabs({ onlyIfChanged: true });
-    }
+    await reloadOpenTabs({ onlyIfChanged: true });
     return;
   }
   lastSig = sig;

@@ -334,7 +334,7 @@ func SearchContext(ctx context.Context, ix *Index, o SearchOpts) ([]FileMatches,
 				if f.Size == 0 || f.Size > searchFileCap {
 					continue
 				}
-				if s.glob != nil && !s.glob.hit(f.Path, false) {
+				if s.glob != nil && !s.glob.Hit(f.Path, false) {
 					continue
 				}
 				if int(atomic.LoadInt32(&hit)) >= o.MaxFiles {

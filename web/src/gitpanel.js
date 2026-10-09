@@ -11,6 +11,9 @@ import { reloadOpenTabs } from './tabs.js';
 import { openSettings } from './settings.js';
 import { layout, render } from './renderer.js';
 import { refreshUnpushed } from './unpushed.js';
+import { openFile } from './tabs.js';
+import { on } from './bus.js';
+import { commitFileRows, COMMIT_FILES_PAGE, loadCommitFiles, cachedCommitFiles } from './commitfiles.js';
 import { triggerRefresh } from './gitstream.js';
 
 const panel = () => $('#git-panel');
@@ -70,6 +73,7 @@ export function initGitPanel() {
     openSettings('ui', 'Git & Diff', 'git.commitMessageInstruction');
   });
   $('#git-see-all-commits')?.addEventListener('click', handleSeeAllCommits);
+  initCommitList();
 
   updateGitPanelVisibility();
   if (S.meta?.git) {
@@ -527,27 +531,201 @@ async function handleSeeAllCommits(e) {
   }
 }
 
+/* ---------- recent commits: expandable rows ----------
+   The git status stream re-sends the commits on every tick, so the list is
+   rebuilt only when they change, and expanded rows are restored from cache.
+   A file opens as a tab pinned to the commit (openFile's ref), the same as
+   the Unpushed section; the rows themselves come from commitfiles.js. */
+
+const listedCommits = new Map(); // full SHA -> GitCommit, for the expanded meta line
+const expandedCommits = new Set();
+let renderedCommitsKey = '';
+
 function renderRecentCommits(commits, max = 5) {
   const list = $('#git-commits-list');
   if (!list) return;
   if (!commits || commits.length === 0) {
+    renderedCommitsKey = '';
     list.innerHTML = '<div class="git-commits-empty">No commits yet</div>';
     return;
   }
   const slice = max ? commits.slice(0, max) : commits;
+  const key = slice.map(c => c.full + '\x1f' + c.subject + '\x1f' + c.date).join('\x1e');
+  if (key === renderedCommitsKey) return;
+  renderedCommitsKey = key;
+  listedCommits.clear();
+  for (const c of slice) listedCommits.set(c.full, c);
+  const focused = list.contains(document.activeElement) ? document.activeElement.closest('.git-commit')?.dataset.sha : null;
   list.innerHTML = slice.map(c => `
-    <div class="git-commit-row" data-hash="${esc(c.hash)}" title="${esc(c.hash)}: ${esc(c.subject || '')} (${esc(c.author || '')}, ${esc(c.date || '')}) - Click to copy SHA">
-      <svg class="git-commit-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.8"/><line x1="8" y1="1" x2="8" y2="5.2"/><line x1="8" y1="10.8" x2="8" y2="15"/></svg>
-      <span class="git-commit-msg-text">${esc(c.subject || '(no message)')}</span>
+    <div class="git-commit" data-sha="${esc(c.full)}">
+      <div class="git-commit-row" tabindex="0" role="button" aria-expanded="false" title="${esc(c.subject || '')} (${esc(c.author || '')}, ${esc(c.date || '')})&#10;Click to show changed files">
+        <svg class="git-commit-caret" viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2L6.5 5L3.5 8"/></svg>
+        <svg class="git-commit-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.8"/><line x1="8" y1="1" x2="8" y2="5.2"/><line x1="8" y1="10.8" x2="8" y2="15"/></svg>
+        <span class="git-commit-msg-text">${esc(c.subject || '(no message)')}</span>
+        <button type="button" class="git-commit-sha" tabindex="-1" title="Copy SHA">${esc(c.hash)}</button>
+      </div>
+      <div class="git-commit-files" hidden></div>
     </div>
   `).join('');
+  for (const sha of [...expandedCommits]) {
+    const el = commitEl(sha);
+    if (el) setCommitExpanded(el, true);
+    else expandedCommits.delete(sha);
+  }
+  if (focused) commitEl(focused)?.querySelector('.git-commit-row')?.focus();
+}
 
-  list.querySelectorAll('.git-commit-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const h = row.dataset.hash;
-      if (h) {
-        copyToClipboard(h, 'Copied ' + h, row);
-      }
-    });
+function commitEl(sha) {
+  return $('#git-commits-list')?.querySelector(`.git-commit[data-sha="${CSS.escape(sha)}"]`);
+}
+
+async function setCommitExpanded(el, open) {
+  const sha = el.dataset.sha;
+  const row = el.querySelector('.git-commit-row');
+  const body = el.querySelector('.git-commit-files');
+  el.classList.toggle('expanded', open);
+  row.setAttribute('aria-expanded', String(open));
+  body.hidden = !open;
+  if (!open) {
+    expandedCommits.delete(sha);
+    body.replaceChildren(); // hiding would keep every row in memory
+    return;
+  }
+  expandedCommits.add(sha);
+  const cached = cachedCommitFiles(sha);
+  if (cached) { drawCommitFiles(body, sha, cached); return; }
+  body.innerHTML = '<div class="git-commit-note">Loading…</div>';
+  try {
+    const files = await loadCommitFiles(sha);
+    if (el.isConnected && expandedCommits.has(sha)) drawCommitFiles(body, sha, files);
+  } catch (e) {
+    if (el.isConnected) body.innerHTML = `<div class="git-commit-note">${esc(e.message || 'Could not load commit')}</div>`;
+  }
+}
+
+function drawCommitFiles(body, sha, files) {
+  const c = listedCommits.get(sha);
+  const meta = c ? `<div class="git-commit-meta">${esc(c.author)} · ${esc(c.date)}</div>` : '';
+  if (!files.length) {
+    body.innerHTML = meta + '<div class="git-commit-note">No file changes</div>';
+    return;
+  }
+  body.innerHTML = meta;
+  appendCommitFiles(body, sha, files);
+}
+
+// Builds the next page of rows; returns the index of the first one added.
+function appendCommitFiles(body, sha, files) {
+  const from = body.querySelectorAll('.up-file').length;
+  body.querySelector('.up-more')?.remove();
+  body.insertAdjacentHTML('beforeend', commitFileRows(files, from, from + COMMIT_FILES_PAGE, activeCommitPath(sha)));
+  return from;
+}
+
+function showMoreCommitFiles(el) {
+  const files = cachedCommitFiles(el.dataset.sha);
+  if (!files) return -1;
+  return appendCommitFiles(el.querySelector('.git-commit-files'), el.dataset.sha, files);
+}
+
+function openCommitPath(el, path) {
+  // px0 has no diff for a binary file, so say so rather than doing nothing.
+  if (cachedCommitFiles(el.dataset.sha)?.find(f => f.path === path)?.binary) {
+    showToast('!', 'Binary file, no diff to show');
+    return;
+  }
+  openFile(path, { ref: el.dataset.sha, view: 'diff' });
+}
+
+// Double-click or Enter on a commit: expand it and open its first file.
+async function openFirstCommitFile(el) {
+  if (!el.classList.contains('expanded')) setCommitExpanded(el, true);
+  try {
+    const files = await loadCommitFiles(el.dataset.sha);
+    if (files.length) openCommitPath(el, files[0].path);
+    else showToast('!', 'This commit changes no files');
+  } catch (e) {
+    showToast('!', e.message || 'Could not load commit');
+  }
+}
+
+// The path the active tab shows if it is pinned to sha, else ''.
+function activeCommitPath(sha) {
+  const d = S.tabs[S.active];
+  return d && d.diffRef === sha ? d.path : '';
+}
+
+function markActiveCommitFile() {
+  const list = $('#git-commits-list');
+  if (!list) return;
+  for (const x of list.querySelectorAll('.up-file.sel')) x.classList.remove('sel');
+  for (const el of list.querySelectorAll('.git-commit.expanded')) {
+    const path = activeCommitPath(el.dataset.sha);
+    if (path) el.querySelector(`.up-file[data-path="${CSS.escape(path)}"]`)?.classList.add('sel');
+  }
+}
+
+function initCommitList() {
+  const list = $('#git-commits-list');
+  if (!list) return;
+  list.addEventListener('click', e => {
+    const sha = e.target.closest('.git-commit-sha');
+    if (sha) {
+      e.stopPropagation();
+      copyToClipboard(sha.textContent, 'Copied ' + sha.textContent, sha);
+      return;
+    }
+    const more = e.target.closest('.up-more');
+    if (more) { showMoreCommitFiles(more.closest('.git-commit')); return; }
+    const file = e.target.closest('.up-file');
+    if (file) { openCommitPath(file.closest('.git-commit'), file.dataset.path); return; }
+    const row = e.target.closest('.git-commit-row');
+    // The second click of a double-click opens instead (dblclick below).
+    if (row && e.detail < 2) {
+      const el = row.closest('.git-commit');
+      setCommitExpanded(el, !el.classList.contains('expanded'));
+    }
   });
+  list.addEventListener('dblclick', e => {
+    const row = e.target.closest('.git-commit-row');
+    if (!row || e.target.closest('.git-commit-sha')) return;
+    openFirstCommitFile(row.closest('.git-commit'));
+  });
+  list.addEventListener('keydown', e => {
+    const item = e.target.closest('.git-commit-row, .up-file, .up-more');
+    if (!item) return;
+    const el = item.closest('.git-commit');
+    const isRow = item.classList.contains('git-commit-row');
+    if (item.classList.contains('up-more') && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      const first = showMoreCommitFiles(el);
+      el.querySelectorAll('.up-file')[first]?.focus();
+      return;
+    }
+    const items = [...list.querySelectorAll('.git-commit-row, .git-commit.expanded .up-file, .git-commit.expanded .up-more')];
+    const at = items.indexOf(item);
+    switch (e.key) {
+      case 'ArrowDown': items[at + 1]?.focus(); break;
+      case 'ArrowUp': items[at - 1]?.focus(); break;
+      case 'ArrowRight':
+        if (isRow && !el.classList.contains('expanded')) setCommitExpanded(el, true);
+        else if (isRow) items[at + 1]?.focus();
+        break;
+      case 'ArrowLeft':
+        if (isRow) setCommitExpanded(el, false);
+        else el.querySelector('.git-commit-row').focus();
+        break;
+      case 'Enter':
+        if (isRow) openFirstCommitFile(el);
+        else openCommitPath(el, item.dataset.path);
+        break;
+      case ' ':
+        if (isRow) setCommitExpanded(el, !el.classList.contains('expanded'));
+        else openCommitPath(el, item.dataset.path);
+        break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+  on('tab:activated', markActiveCommitFile);
 }

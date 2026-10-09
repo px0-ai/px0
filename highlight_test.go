@@ -36,8 +36,12 @@ func fixtures(t *testing.T) []string {
 		}
 		return nil
 	})
-	if len(files) > 400 {
-		files = files[:400]
+	maxFiles := 400
+	if testing.Short() {
+		maxFiles = 10
+	}
+	if len(files) > maxFiles {
+		files = files[:maxFiles]
 	}
 	if len(files) == 0 {
 		t.Skip("no fixtures")
@@ -147,7 +151,11 @@ func TestConcurrentChunkAccess(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < 40; i++ {
+			loops := 40
+			if testing.Short() {
+				loops = 4
+			}
+			for i := 0; i < loops; i++ {
 				start := ((w*13 + i*7) % 5) * hlChunk
 				lines, _ := d.Lines(start, start+hlChunk)
 				if len(lines) == 0 {

@@ -547,14 +547,28 @@ export function initMetrics() {
 
 /* The status bar stays on one line. When its contents outgrow the width, it
    sheds detail in steps (see the fit-N rules in style.css), least useful first,
-   stopping at the first step that fits. */
-const FIT_STEPS = 6;
+   stopping at the first step that fits. A step comes back only with FIT_SLACK px
+   to spare, so a 1px wobble of a resizer cannot flip it on every move. */
+const FIT_STEPS = 6, FIT_SLACK = 16;
 const statusEl = $('#status');
+const growEl = $('.grow', statusEl);
+let fitLevel = 0;
+
+/* Apply fit level n and return the room left: the .grow spacer's width, or the
+   overflow as a negative number. */
+function applyFit(n) {
+  for (let i = 1; i <= FIT_STEPS; i++) statusEl.classList.toggle('fit-' + i, i <= n);
+  return growEl.offsetWidth - (statusEl.scrollWidth - statusEl.clientWidth);
+}
 
 export function fitStatus() {
-  for (let i = 1; i <= FIT_STEPS; i++) statusEl.classList.remove('fit-' + i);
-  for (let i = 1; i <= FIT_STEPS && statusEl.scrollWidth > statusEl.clientWidth; i++) {
-    statusEl.classList.add('fit-' + i);
+  let room = applyFit(fitLevel);
+  while (fitLevel < FIT_STEPS && room < 0) room = applyFit(++fitLevel);
+  // Showing more only ever shrinks the room, so stop as soon as it is short.
+  while (fitLevel > 0 && room >= FIT_SLACK) {
+    room = applyFit(fitLevel - 1);
+    if (room < FIT_SLACK) { applyFit(fitLevel); return; }
+    fitLevel--;
   }
 }
 

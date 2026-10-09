@@ -162,6 +162,20 @@ func TestAgentDetectListsKnownHarnesses(t *testing.T) {
 	}
 }
 
+func TestAgentDetectLazyModels(t *testing.T) {
+	isolateSettings(t)
+	m, err := newAgentManager(t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.Detect()
+	for _, h := range got {
+		if len(h.Models) > 0 {
+			t.Fatalf("harness %q had models eagerly discovered when unselected", h.Name)
+		}
+	}
+}
+
 func TestAgentSelectPersistsOutsideWorkspace(t *testing.T) {
 	cfg := isolateSettings(t)
 	root := t.TempDir()
@@ -478,7 +492,7 @@ func TestAgentAllowsNonOverlappingEditsInParallel(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	root := gitRepo(t)
-	s := agentServer(t, root, writeHarness(t, "sleep 1\n"))
+	s := agentServer(t, root, writeHarness(t, "sleep 0.15\n"))
 
 	code, first := agentPost(t, s, "/api/agent/edit?path=keep.go&l1=1&l2=1&instruction=one")
 	if code != 200 {

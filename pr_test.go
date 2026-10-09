@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -160,6 +161,9 @@ func TestSubmitReviewPayload(t *testing.T) {
 }
 
 func TestPRSessionCloseRefCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
 	if !gitInstalled() {
 		t.Skip("git not installed")
 	}
@@ -435,8 +439,17 @@ func TestCheckoutPRMergedAlwaysProceeds(t *testing.T) {
 	orig := githubHTTPClient.Transport
 	defer func() { githubHTTPClient.Transport = orig }()
 
+	localRepo := t.TempDir()
+	gitTestRun(t, localRepo, "init")
+	gitTestRun(t, localRepo, "config", "user.name", "Tester")
+	gitTestRun(t, localRepo, "config", "user.email", "test@example.com")
+	gitTestRun(t, localRepo, "checkout", "-b", "feature-x")
+	os.WriteFile(filepath.Join(localRepo, "f.txt"), []byte("hi"), 0644)
+	gitTestRun(t, localRepo, "add", "f.txt")
+	gitTestRun(t, localRepo, "commit", "-m", "init")
+
 	githubHTTPClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		body := `{
+		body := fmt.Sprintf(`{
 			"number": 77,
 			"title": "Already merged PR",
 			"state": "closed",
@@ -447,9 +460,9 @@ func TestCheckoutPRMergedAlwaysProceeds(t *testing.T) {
 			"head": {
 				"ref": "feature-x",
 				"sha": "1234567890ab",
-				"repo": {"clone_url": "https://github.com/px0-ai/px0.git", "full_name": "px0-ai/px0"}
+				"repo": {"clone_url": %q, "full_name": "px0-ai/px0"}
 			}
-		}`
+		}`, localRepo)
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(body)),

@@ -1,0 +1,12 @@
+{
+  "name": "px0",
+  "version": "0.1.16",
+  "type": "module",
+  "private": true,
+  "description": "High-performance code reader and review engine",
+  "scripts": {
+    "build": "node ./scripts/build-web.js",
+    "check": "node ./scripts/check-web.js",
+    "test": "bun test web/src/"
+  }
+}
