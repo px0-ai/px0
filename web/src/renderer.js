@@ -2,6 +2,13 @@
 import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 
+/* One-way registration, like diff.js's: the renderer never imports pr.js. The
+   provider maps a file's path to Map<line, {count, agent}> for the lines that
+   carry review comments, or null. Those lines get a marker in the gutter. */
+let commentMarks = null;
+export function setCommentMarkProvider(fn) { commentMarks = fn; }
+const CMT_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
 export function measure() {
   const m = $('#measure');
   m.textContent = 'x'.repeat(100);
@@ -73,6 +80,7 @@ export function paint() {
   let html = '';
   const gut = d.gutter || null;
   const agentRanges = (S.agentTargets || []).filter(t => t.path === d.path);
+  const cmts = commentMarks ? commentMarks(d.path) : null;
   for (let i = first; i < last; i++) {
     const n = i + 1;
     const body = d.lines[i];
@@ -85,8 +93,11 @@ export function paint() {
       if (m) gc += m === 'add' ? ' gut-add' : ' gut-mod';
       if (gut.dels.has(n)) rc += ' gut-del';
     }
+    const cm = cmts && cmts.get(n);
+    if (cm) gc += cm.agent ? ' has-cmt has-cmt-agent' : ' has-cmt';
     html += '<div class="' + rc + '" data-l="' + n + '">' +
-      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions">Edit</span>' + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
+      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions">Edit</span>' +
+      (cm ? '<span class="cmt-mark" role="button" data-l="' + n + '" title="' + cm.count + ' review comment' + (cm.count === 1 ? '' : 's') + '">' + CMT_ICON + '</span>' : '') + n + '</div><div class="c">' + (body === undefined ? '' : body) + '</div></div>';
   }
   const sel = saveSelection();
   rowsEl.style.transform = 'translateY(' + (first * LH) + 'px)';

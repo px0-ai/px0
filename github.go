@@ -334,7 +334,8 @@ func (c ghReviewComment) toPRComment() PRComment {
 	}
 	return PRComment{
 		ID: c.ID, Kind: "review", Path: c.Path, Line: line, Side: c.Side, InReplyTo: c.InReplyToID,
-		Author: c.User.Login, AvatarURL: c.User.AvatarURL, Body: c.Body, CreatedAt: c.CreatedAt, URL: c.HTMLURL,
+		Outdated: c.Line == 0 && c.OriginalLine > 0,
+		Author:   c.User.Login, AvatarURL: c.User.AvatarURL, Body: c.Body, CreatedAt: c.CreatedAt, URL: c.HTMLURL,
 	}
 }
 

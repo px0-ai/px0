@@ -592,6 +592,65 @@ func gitMergeBase(root, a, b string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// revParseCommit resolves rev to the full SHA of a commit. A rev that could be
+// read as an option is refused before git sees it, so a name taken from a file
+// or a flag can never become one.
+func revParseCommit(root, rev string) (string, error) {
+	if rev == "" || strings.HasPrefix(rev, "-") || strings.ContainsAny(rev, "\x00\r\n") {
+		return "", fmt.Errorf("invalid revision %q", rev)
+	}
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", rev+"^{commit}").Output()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve revision %q", rev)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// shortSHA abbreviates a commit SHA for display.
+func shortSHA(s string) string { return s[:min(12, len(s))] }
+
+// gitTreeFiles returns the set of files in a commit, or nil if it cannot be
+// listed. One ls-tree answers "is this path in that commit" for any number of
+// paths.
+func gitTreeFiles(root, rev string) map[string]bool {
+	out, err := exec.Command("git", "-C", root, "ls-tree", "-r", "--name-only", "-z", rev).Output()
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			set[p] = true
+		}
+	}
+	return set
+}
+
+// gitFileLines returns a file's lines as of a commit, or nil if it cannot or
+// should not be read: missing, larger than max bytes, or binary. It asks for the
+// size first so a huge blob is never pulled into memory.
+func gitFileLines(root, rev, p string, max int64) []string {
+	sizeOut, err := exec.Command("git", "-C", root, "cat-file", "-s", rev+":"+p).Output()
+	if err != nil {
+		return nil
+	}
+	if n, err := strconv.ParseInt(strings.TrimSpace(string(sizeOut)), 10, 64); err != nil || n > max {
+		return nil
+	}
+	out, err := exec.Command("git", "-C", root, "show", rev+":"+p).Output()
+	if err != nil {
+		return nil
+	}
+	if bytes.IndexByte(out[:min(len(out), 8000)], 0) >= 0 {
+		return nil
+	}
+	lines := strings.Split(string(out), "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	return lines
+}
+
 // gitHunksAgainst parses the unified diff of relpath against base into
 // 1-based NEW-FILE line numbers for a change gutter: added lines, modified
 // (replaced) lines, and one marker per pure-deletion run (the new-file line

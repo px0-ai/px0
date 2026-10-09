@@ -47,9 +47,12 @@ func main() {
 		_            = flag.Bool("y", false, "answer yes to prompts (deprecated; PRs are always opened without prompt)")
 		_            = flag.Bool("yes", false, "answer yes to prompts (alias for -y)")
 		basePathFlag = flag.String("base-path", "", "base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)")
+		reviewFlag   = flag.String("review", "", "show an agent-authored review file (JSON, or - for stdin) on the diff between two local revisions, or on the pull request given as the argument or by the file's pr field")
+		baseFlag     = flag.String("base", "", "with -review: revision to review against (overrides the file; default: the file's base, else origin/HEAD, main or master)")
+		headFlag     = flag.String("head", "", "with -review: revision under review (overrides the file; default: the file's head, else HEAD)")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n  px0 -review review.json [-base REV] [-head REV]\n\nreview file format: https://github.com/px0-ai/px0/blob/master/skills/px0-review/SKILL.md\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -102,6 +105,54 @@ func main() {
 		fatal(fmt.Errorf("px0: git is required for PR review; remove -no-git"))
 	}
 
+	// -review: an agent-authored review file shown on the diff. With a PR URL
+	// it adds the comments to that PR's session; without one it reviews two
+	// local revisions.
+	var rv *reviewState
+	if *reviewFlag != "" {
+		if gitDisabled {
+			fatal(fmt.Errorf("git is required for -review; remove -no-git"))
+		}
+		if !isPR && flag.NArg() > 0 {
+			fatal(fmt.Errorf("-review reviews a diff and cannot be combined with the path %q", flag.Arg(0)))
+		}
+		var err error
+		if rv, err = loadReview(*reviewFlag); err != nil {
+			fatal(fmt.Errorf("-review: %w", err))
+		}
+		// The file's "pr" opens that pull request as if its URL had been given;
+		// a URL on the command line wins.
+		if ref := rv.doc.PR; ref != nil {
+			if isPR {
+				if (ref.URL != "" && ref.URL != prTarget.URL) || (ref.URL == "" && ref.Number != prTarget.Number) {
+					uiStatus("warn", "review: the file's pr is ignored; using the pull request given on the command line", "", 0, os.Stderr)
+				}
+			} else {
+				cwd, _ := os.Getwd()
+				top, err := reviewRepoTop(cwd)
+				if err == nil {
+					prProvider, prTarget, err = reviewPRTarget(ref, top)
+				}
+				if err != nil {
+					fatal(fmt.Errorf("-review: %w", err))
+				}
+				isPR = true
+			}
+		}
+		if isPR && (*baseFlag != "" || *headFlag != "") {
+			fatal(fmt.Errorf("-base and -head do not apply to a pull request"))
+		}
+		rv.announce = true
+		for _, w := range rv.doc.Warnings {
+			uiStatus("warn", "review: "+w, "", 0, os.Stderr)
+		}
+		for _, r := range rv.doc.Rejected {
+			uiStatus("warn", fmt.Sprintf("review: ignored comment %s: %s", r.ID, r.Reason), "", 0, os.Stderr)
+		}
+	} else if *baseFlag != "" || *headFlag != "" {
+		fatal(fmt.Errorf("-base and -head need -review"))
+	}
+
 	var pr *prSession
 	var root, initialFile string
 	var initialLine int
@@ -122,6 +173,17 @@ func main() {
 		} else {
 			sp.Success(fmt.Sprintf("PR #%d checked out (%s)", prTarget.Number, p.meta.Title))
 		}
+		pr = p
+		root = p.Root()
+	} else if rv != nil {
+		sp := newSpinner("Preparing review...", os.Stdout)
+		cwd, _ := os.Getwd()
+		p, err := prepareLocalReview(rv.doc, *baseFlag, *headFlag, cwd)
+		if err != nil {
+			sp.Fail(fmt.Sprintf("Failed to prepare review: %v", err))
+			fatal(err)
+		}
+		sp.Success(fmt.Sprintf("Reviewing %s against %s", p.meta.HeadRef, p.meta.BaseRef))
 		pr = p
 		root = p.Root()
 	} else {
@@ -159,6 +221,9 @@ func main() {
 	if pr != nil {
 		pxSrv.SetPR(pr)
 	}
+	if rv != nil {
+		pxSrv.SetReview(rv)
+	}
 	var agent *agentManager
 	if !*noAgent {
 		agent, err = newAgentManager(root, *agentCmd, lsp)
@@ -173,7 +238,12 @@ func main() {
 
 	url := viewerURL(addr, initialFile, initialLine, configuredBasePath)
 	uiHeading("px0 "+version, nil, os.Stdout)
-	if pr != nil {
+	if pr != nil && pr.local {
+		uiKV("review", fmt.Sprintf("%s (%s ← %s)", pr.meta.Title, pr.meta.BaseRef, pr.meta.HeadRef), 11, os.Stdout)
+		if pr.inPlace {
+			uiKV("checkout", uiDim("this repository (head is checked out)", os.Stdout), 11, os.Stdout)
+		}
+	} else if pr != nil {
 		prTitle := fmt.Sprintf("#%d %s", pr.meta.Number, pr.meta.Title)
 		if pr.meta.Merged {
 			prTitle += " " + paint("[MERGED]", colorWarn, true, os.Stdout)

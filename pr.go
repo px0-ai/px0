@@ -51,6 +51,13 @@ type prSession struct {
 
 	scopeDir string // temp dir holding the diff files handed to threads; removed in Close
 
+	// local marks a review of two local revisions (px0 -review): there is no
+	// forge, so no provider, token or PR number, and push/pull behave as in a
+	// plain workspace. inPlace means worktree is the user's own repository,
+	// which Close must never remove.
+	local   bool
+	inPlace bool
+
 	comments []prComment
 	nextID   int64
 }
@@ -114,6 +121,22 @@ func computeDiffBase(worktree, srcRepo, token string, target PRTarget, baseRef s
 	return diffBase, diffBaseWarning
 }
 
+// tempDirResolved is os.MkdirTemp with symlinks resolved. macOS TempDir lives
+// under /var -> /private/var; git rev-parse --show-toplevel reports the
+// resolved path, so leaving a checkout's dir unresolved makes
+// gitStatusAgainst's toplevel-relative prefix check fail for every file,
+// silently emptying the diff/status view.
+func tempDirResolved(pattern string) (string, error) {
+	dir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return dir, nil
+}
+
 // checkoutPR fetches a PR's head ref and checks it out into a system temp
 // directory: a git worktree of cwd's origin when cwd is already a clone of
 // the same repo (the common case -- opened inside the repo), or a shallow
@@ -131,16 +154,9 @@ func checkoutPR(ctx context.Context, provider GitProvider, target PRTarget, cwd 
 		return nil, err
 	}
 
-	tmp, err := os.MkdirTemp("", "px0-pr-*")
+	tmp, err := tempDirResolved("px0-pr-*")
 	if err != nil {
 		return nil, err
-	}
-	// macOS TempDir lives under /var -> /private/var; git rev-parse
-	// --show-toplevel reports the resolved path, so leaving tmp unresolved
-	// makes gitStatusAgainst's toplevel-relative prefix check fail for every
-	// file, silently emptying the PR's diff/status view.
-	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
-		tmp = resolved
 	}
 	cleanup := func() { os.RemoveAll(tmp) }
 
@@ -211,6 +227,9 @@ func (p *prSession) Close() {
 	}
 	if p.scopeDir != "" {
 		os.RemoveAll(p.scopeDir)
+	}
+	if p.inPlace {
+		return // the worktree is the user's repository, not ours to delete
 	}
 	if p.srcRepo != "" {
 		exec.Command("git", "-C", p.srcRepo, "worktree", "remove", "--force", p.worktree).Run()
@@ -468,6 +487,7 @@ func (s *Server) handlePRMeta(w http.ResponseWriter, r *http.Request) {
 		"diffBaseWarning": p.diffBaseWarning,
 		"headSHA":         p.meta.HeadSHA,
 		"url":             p.target.URL,
+		"local":           p.local,
 		"files":           s.ix.PRFiles(),
 	})
 }
@@ -480,6 +500,10 @@ func (s *Server) handlePRExistingComments(w http.ResponseWriter, r *http.Request
 		return
 	}
 	p := s.pr
+	if p.provider == nil { // a local review has no forge to ask
+		writeJSON(w, map[string]any{"issueComments": []PRComment{}, "reviewComments": []PRComment{}})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	issue, review, err := p.provider.FetchComments(ctx, p.target, p.token)

@@ -384,3 +384,12 @@ Both this card and the existing LSP hover card used to close before you could re
 2. "Is the pointer still near the card" was measured from an anchor captured when the card was *requested*, not when it opened. A hover response can take seconds, so the card could appear anchored to where the pointer used to be, and the very next move read as "left the card".
 
 `makeCardKeeper(el, { hide })` replaces both with one document-level pointer track — so the pointer is never unobserved, wherever it goes — one timer per card, and every decision made against where the pointer is *now*: inside the card (plus slack), or anywhere in the rectangle spanned by the anchor and the card, which is the path a pointer travelling towards it takes. `reanchor()` moves that rectangle's origin when an awaited card finally renders, so a slow response can't strand it.
+
+## 11. Revision Helpers for Local Review
+
+`px0 -review` ([Local Review](local-review.md)) checks an agent's comments against a commit that is not necessarily checked out, so `git.go` has read-only helpers that take a revision:
+
+- `revParseCommit(root, rev)` resolves a revision to a full commit SHA with `git rev-parse --verify --quiet <rev>^{commit}`. A revision that starts with `-` or contains a NUL or newline is refused before git runs, so a name from a file or flag can never become an option.
+- `gitTreeFiles(root, rev)` lists every path in a commit with one `git ls-tree -r --name-only -z`, so "is this path in that commit" is a map lookup for any number of comments. It returns nil when the commit cannot be listed.
+- `gitFileLines(root, rev, path, max)` returns a file's lines as of a commit. It asks `git cat-file -s` for the size first so a blob over `max` bytes is never read, and returns nil for a missing or binary file (a NUL in the first 8000 bytes).
+- `shortSHA(sha)` abbreviates a SHA to 12 characters for display.

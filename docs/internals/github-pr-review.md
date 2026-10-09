@@ -174,6 +174,10 @@ Unlike a formal review submission, Push is not gated on `p.writeAccess` — that
 
 ---
 
+## 7b. Local Reviews Reuse the Session
+
+`px0 -review` ([Local Review](local-review.md)) builds a `prSession` with `local: true` and no provider, token or PR number, so the diff view, the PR scope split, the comments panel and PR threads work for two local revisions. `Server.forgePR()` keeps push, pull and the unpushed list on their plain-workspace behaviour for such a session, `handlePRExistingComments` returns empty lists when there is no provider, and `prSession.Close` never removes the worktree of an `inPlace` session, because that worktree is the user's own repository.
+
 ## 8. Frontend Integration
 
 - **Hover Line Thread Icon (`web/src/linecomment.js`)**:

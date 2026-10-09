@@ -2710,6 +2710,28 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .pr-comment-mark svg { display: block; }
 .pr-comment-mark:hover { transform: scale(1.15); }
 
+/* The source view: a marker on a commented line, in the line-number gutter. */
+.g .cmt-mark {
+  position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; color: var(--accent-fg); cursor: pointer; line-height: 0;
+}
+.g .cmt-mark:hover { transform: translateY(-50%) scale(1.15); }
+.g.has-cmt { color: var(--accent-fg); }
+.pr-peek { width: 460px !important; overflow: auto; }
+.pr-peek[hidden] { display: none; }
+.pr-peek-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 8px 8px; font: 12px var(--ui); }
+.pr-peek .pr-inline-thread { margin: 0; max-width: none; }
+
+/* A comment that is only in the local review, not posted to GitHub. Shown only
+   when there is a GitHub pull request to tell it apart from. */
+.rv-local { display: none; }
+body.pr-forge .rv-local {
+  display: inline-block; flex: none; font: 10.5px var(--ui); color: var(--faint);
+  border: 1px dashed var(--line); border-radius: var(--r); padding: 0 5px; line-height: 15px; white-space: nowrap;
+}
+body.pr-forge .pr-comment-thread.rv-thread { border-style: dashed; }
+
+
 /* ---------- PR comments bottom panel ---------- */
 .pr-comments-panel {
   flex: none; display: flex; flex-direction: column;
@@ -2770,6 +2792,46 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .pr-comment-card.draft .pr-issue-comment-author { color: var(--accent-fg); }
 .pr-comment-thread.flash { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* A thread shown inline in the diff, between code rows. It reuses the panel's
+   thread markup; here it only needs to stop inheriting the code rows' monospace,
+   nowrap look and to sit inside the diff's gutter-to-edge width. */
+.pr-inline-thread {
+  margin: 4px 12px 8px 12px; font: 12px var(--ui); white-space: normal; text-align: left;
+  position: relative; max-width: 900px;
+}
+.pr-inline-thread .acc-head { padding: 0; }
+.pr-inline-loc { flex: none; font: 11px var(--mono); color: var(--faint); }
+.pr-inline-filestrip { padding: 6px 0 2px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+
+/* Agent-authored review (px0 -review): severity chips, restricted Markdown
+   bodies, suggestions, and the banners above the comments. Theme tokens only. */
+.pr-link.no-link { pointer-events: none; cursor: default; }
+.rv-review-title { font: 600 13px var(--ui); color: var(--fg); }
+.rv-verdict { font: 11px var(--ui); color: var(--dim); }
+.rv-banner { font: 12px var(--ui); color: var(--dim); background: var(--bg3); border-radius: var(--r); padding: 6px 8px; }
+.rv-banner.warn { border-left: 3px solid var(--no); color: var(--fg); }
+.rv-banner summary { cursor: pointer; }
+.rv-banner ul { margin: 4px 0 0; padding-left: 18px; }
+.rv-sev {
+  flex: none; font: 600 10px var(--ui); text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: var(--r); color: var(--dim);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.rv-sev-blocker { color: var(--err); }
+.rv-sev-major { color: var(--no); }
+.rv-sev-minor { color: var(--accent-fg); }
+.rv-sev-nit { color: var(--faint); }
+.rv-sev-question { color: var(--nt); }
+.rv-sev-praise { color: var(--gi); }
+.rv-cat { font: 11px var(--mono); color: var(--faint); }
+.rv-title { font: 600 12px var(--ui); color: var(--fg); }
+.rv-summary { border-left: 2px solid var(--line); padding-left: 8px; }
+.rv-body .thr-pre[data-lang="suggestion"] pre { border-color: var(--gi); background: var(--gi-bg); }
+.rv-note { font: italic 11px var(--ui); color: var(--faint); }
+.rv-refs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.rv-refs-label { font: 11px var(--ui); color: var(--faint); }
+.rv-ref { font: 11px var(--mono); color: var(--accent-fg); background: var(--bg4); border-radius: var(--r); padding: 1px 6px; }
+
 /* Accordion: .acc-head always shows; .acc-body only renders while .open. */
 .acc-head { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
 .acc-chevron {
@@ -2797,11 +2859,13 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 }
 .pr-comment-card-actions { display: flex; gap: 10px; }
 .pr-issue-comment-reply-btn,
+.rv-discuss,
 .pr-comment-delete-btn {
   align-self: flex-start; font: 11px var(--ui); color: var(--faint); background: none;
   border: none; cursor: pointer; padding: 0;
 }
-.pr-issue-comment-reply-btn:hover { color: var(--accent); text-decoration: underline; }
+.pr-issue-comment-reply-btn:hover,
+.rv-discuss:hover { color: var(--accent); text-decoration: underline; }
 .pr-comment-delete-btn:hover { color: var(--err); text-decoration: underline; }
 .pr-comment-reply-row { display: flex; gap: 6px; align-items: flex-start; margin-top: 2px; }
 .pr-comment-reply-row .pr-review-body { height: 32px; resize: vertical; }

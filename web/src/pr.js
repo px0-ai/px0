@@ -7,19 +7,32 @@
 // beyond what's needed to repaint -- a page refresh re-fetches the server's
 // in-memory draft list (pr.go's prSession), which is the only source of truth.
 import { $, S, doc_, esc, api, apiPostJson, keyLabel, withKeys } from './state.js';
-import { showToast } from './ui.js';
+import { showToast, vp, rowsEl } from './ui.js';
 import { setReviewHandler, SEL_MENU_ITEMS } from './selbar.js';
 import { diffview, setPRSyncHandler } from './diff.js';
 import { reloadWorkspace } from './agent.js';
 import { openFile } from './tabs.js';
 import { refreshTree } from './tree.js';
-import { layout, render } from './renderer.js';
+import { layout, render, rowFor, setCommentMarkProvider } from './renderer.js';
 import { openSettings } from './settings.js';
+import { newThread, thrMdClick } from './thread.js';
+import { ctThreadKey, ctGroupThreads } from './commentthreads.js';
+import { LOCAL_CHIP, agentCommentCardHtml, reviewPathComments, reviewGeneralComments, reviewSummaryHtml, discussInfo, sevChip, previewText } from './review.js';
 
 let meta = null;      // this session's PR info: {number, title, base, head, writeAccess, readOnly}
 let comments = [];    // draft comments known to the server
 let issueComments = [];   // top-level PR conversation comments, already posted (fetched read-only)
 let reviewComments = [];  // inline diff-line comments, already posted (fetched read-only) -- may include replies
+let rv = null;            // agent-authored review (px0 -review), as served by /api/review; null without one
+let rvPath = [];          // its comments that belong to a file, shaped like reviewComments
+let rvGeneral = [];       // its comments that belong to no file
+let rvKey = '';           // JSON of the last snapshot, so an unchanged poll repaints nothing
+let rvBusy = false;
+let rvTries = 0;
+let rvOpened = false;
+
+// GitHub's inline comments and the agent's, which share markers and threads.
+const allReview = () => (rvPath.length ? reviewComments.concat(rvPath) : reviewComments);
 
 const prBar = () => $('#pr-bar');
 const list = () => $('#pr-comment-list');
@@ -34,12 +47,14 @@ export function initPR() {
   }
   setReviewHandler(openCommentComposer);
   setPRSyncHandler(renderMarkersForActiveDoc);
+  setCommentMarkProvider(sourceCommentMarks);
   injectFooterButton();
   wireBarButtons();
   wireCommentsPanel();
   renderBar();
   refreshComments();
   refreshExistingComments();
+  if (S.meta.review) initReview();
 }
 
 // Re-fetches PR metadata and comments after an external change to the
@@ -75,6 +90,7 @@ function fmtTime(iso) {
 // comments -- fetched live (never cached) so another reviewer's activity
 // shows up on the next open of the panel or diff.
 async function refreshExistingComments() {
+  if (meta?.local) return; // no forge to ask; the agent's comments come from refreshReview
   try {
     const j = await api('/api/pr/existing-comments');
     issueComments = j.issueComments || [];
@@ -102,9 +118,14 @@ function renderBar() {
   const b = prBar();
   if (!b || !meta) return;
   b.hidden = false;
-  $('#pr-badge').textContent = '#' + meta.number;
+  document.body.classList.toggle('pr-forge', !meta.local); // there is a forge: its comments and ours differ
+  $('#pr-badge').textContent = meta.local ? 'Review' : '#' + meta.number;
   const link = $('#pr-link');
-  if (link) link.href = meta.url || '#';
+  if (link) {
+    link.classList.toggle('no-link', !!meta.local); // nothing to open on a forge
+    if (meta.local) link.removeAttribute('href');
+    else link.href = meta.url || '#';
+  }
   const mb = $('#pr-merged-badge');
   if (mb) mb.hidden = !meta.merged;
   $('#pr-title').textContent = meta.title;
@@ -114,7 +135,7 @@ function renderBar() {
     ? (comments.length + (comments.length === 1 ? ' draft comment' : ' draft comments'))
     : '';
   const ro = $('#pr-readonly-note');
-  if (ro) ro.hidden = !meta.readOnly;
+  if (ro) ro.hidden = !meta.readOnly || !!meta.local;
   const dw = $('#pr-diff-warning');
   if (dw) {
     dw.hidden = !meta.diffBaseWarning;
@@ -127,17 +148,18 @@ function renderBar() {
   }
   const reqBtn = $('#pr-submit-request-changes');
   const appBtn = $('#pr-submit-approve');
-  if (reqBtn) reqBtn.hidden = !meta.writeAccess;
-  if (appBtn) appBtn.hidden = !meta.writeAccess;
+  if (reqBtn) reqBtn.hidden = !meta.writeAccess || !!meta.local;
+  if (appBtn) appBtn.hidden = !meta.writeAccess || !!meta.local;
   const cmtBtn = $('#pr-submit-comment');
   if (cmtBtn) {
+    cmtBtn.hidden = !!meta.local; // nothing to submit a review to
     cmtBtn.disabled = false;
     cmtBtn.title = meta.readOnly
       ? 'No GitHub token configured -- click to connect and submit'
       : 'Submit review with drafts, without approval or change requests';
   }
   const composeEl = $('#pr-issue-compose');
-  if (composeEl) composeEl.hidden = false;
+  if (composeEl) composeEl.hidden = !!meta.local;
 }
 
 export function nudgeGitHubToken() {
@@ -327,12 +349,42 @@ function ensureTracking() {
     requestAnimationFrame(() => { scheduled = false; repositionAll(); });
   };
   diffview?.addEventListener('scroll', schedule);
+  // The source view repaints its rows on scroll; look again after that frame.
+  let sourceScheduled = false;
+  vp?.addEventListener('scroll', () => {
+    if (sourceScheduled) return;
+    sourceScheduled = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => { sourceScheduled = false; repositionAll(); }));
+  });
   addEventListener('resize', schedule);
 }
 
 function positionBox(entry) {
   const { box, path, side, line } = entry;
   const host = $('#editor');
+  if (entry.source) { // a peek on a source line: out of sight with its row, not docked
+    const d = doc_();
+    const row = d && d.path === path && (!diffview || diffview.hidden) ? rowFor(line) : null;
+    box.hidden = !row;
+    if (!row || !host) return;
+    box.classList.remove('docked');
+    const hostRect = host.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    // Below the row if the card fits there, else above it, whichever side has
+    // more room; never over the line it is about. The card scrolls if it must.
+    const below = hostRect.bottom - rowRect.bottom - 12;
+    const above = rowRect.top - hostRect.top - 12;
+    box.style.maxHeight = '';
+    const wantsBelow = box.offsetHeight <= below || below >= above;
+    box.style.maxHeight = Math.max(120, wantsBelow ? below : above) + 'px';
+    const left = Math.min(hostRect.width - box.offsetWidth - 16, Math.max(16, rowRect.left - hostRect.left + 60));
+    const top = wantsBelow
+      ? rowRect.bottom - hostRect.top + 4
+      : Math.max(4, rowRect.top - hostRect.top - box.offsetHeight - 4);
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+    return;
+  }
   const target = findDiffRowEl(path, side, line);
   if (!host) return;
   if (!target) {
@@ -426,6 +478,7 @@ export function openCommentComposer(info) {
       const c = await apiPostJson('/api/pr/comments', { path: info.path, line, side, body });
       comments.push(c);
       expandedKeys.add('thread:' + threadKey(info.path, side, line));
+      inlineCollapsed.delete('inline:' + threadKey(info.path, side, line));
       close();
       renderBar();
       renderCommentsPanel();
@@ -442,6 +495,94 @@ export function openCommentComposer(info) {
     if (e.key === 'Escape') { e.preventDefault(); close(); }
     else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
   });
+}
+
+/* ---------- comments on a source line ----------
+   The source view has fixed-height rows, so a thread cannot sit between them as
+   it does in the diff. A commented line carries a gutter marker instead; its
+   click opens the line's threads in a card pinned under the row (the overlay the
+   composer uses), and the marker again, or the card's close button, puts it away. */
+
+const srcMarks = new Map(); // path -> Map<line, {count, agent}> | null; cleared when comments change
+
+function sourceCommentMarks(path) {
+  if (!meta) return null;
+  if (srcMarks.has(path)) return srcMarks.get(path);
+  const m = new Map();
+  for (const t of ctGroupThreads(allReview(), comments).values()) {
+    if (t.path !== path || !t.line || t.side === 'LEFT') continue; // LEFT lines are not in the file on disk
+    const cur = m.get(t.line) || { count: 0, agent: false };
+    cur.count += t.existing.length + t.drafts.length;
+    if (t.source === 'rv') cur.agent = true;
+    m.set(t.line, cur);
+  }
+  const out = m.size ? m : null;
+  srcMarks.set(path, out);
+  return out;
+}
+
+function peekThreads(path, line) {
+  return [...ctGroupThreads(allReview(), comments).values()]
+    .filter(t => t.path === path && t.line === line && t.side !== 'LEFT')
+    .sort((a, b) => a.source.localeCompare(b.source)); // GitHub's, then the agent's
+}
+
+function closePeek(id) {
+  const e = openBoxes.get(id);
+  if (!e) return;
+  openBoxes.delete(id);
+  e.box.remove();
+  if (!list().children.length) list().hidden = true;
+}
+
+function fillPeek(entry) {
+  const { box, path, line, id } = entry;
+  const threads = peekThreads(path, line);
+  if (!threads.length) { closePeek(id); return; }
+  box.innerHTML =
+    '<div class="agent-head"><span class="sel-chip">Comments</span>' +
+    '<span class="agent-ref">' + esc(path + ':' + line) + '</span>' +
+    '<span class="grow"></span><button class="agent-close" title="Close">✕</button></div>' +
+    '<div class="pr-peek-body">' + threads.map(t => threadHtml(path, t, t.key, true)).join('') + '</div>';
+  for (const node of box.querySelectorAll('.pr-comment-thread')) {
+    const ta = node.querySelector('.reply-input');
+    const saved = inlineReplyText.get(node.dataset.threadKey);
+    if (ta && saved) ta.value = saved;
+  }
+}
+
+function toggleSourcePeek(path, line) {
+  const id = 'peek:' + path + ':' + line;
+  if (openBoxes.has(id)) { closePeek(id); return; }
+  const box = document.createElement('div');
+  box.className = 'agent-box pr-peek entering';
+  box.dataset.id = id;
+  const entry = { box, path, side: 'RIGHT', line, source: true, id };
+  openBoxes.set(id, entry);
+  ensureTracking();
+  fillPeek(entry);
+  if (!openBoxes.has(id)) return; // nothing to show
+  box.addEventListener('click', e => {
+    if (e.target.closest('.agent-close')) { closePeek(id); return; }
+    onCommentClick(e);
+  });
+  box.addEventListener('keydown', onCommentKeydown);
+  box.addEventListener('input', e => {
+    const ta = e.target.closest?.('.reply-input');
+    if (ta) inlineReplyText.set(ta.closest('.pr-comment-thread').dataset.threadKey, ta.value);
+  });
+  list().hidden = false;
+  list().append(box);
+  positionBox(entry);
+}
+
+// After a comment is added, replied to or deleted: bring open peeks up to date.
+function refreshPeeks() {
+  for (const e of [...openBoxes.values()]) {
+    if (!e.source) continue;
+    fillPeek(e);
+    if (openBoxes.has(e.id)) positionBox(e);
+  }
 }
 
 function closeAllComposers() {
@@ -461,57 +602,123 @@ function renderMarkersForActiveDoc() {
   // Runs whether or not a diff is on screen right now, so a composer whose
   // file just scrolled out of (or into) view re-docks or re-pins itself.
   repositionAll();
-  if (!diffview || diffview.hidden) return;
+  srcMarks.clear();
+  if (!diffview || diffview.hidden) { // the source view: gutter markers, and any open peeks
+    render();
+    refreshPeeks();
+    return;
+  }
   const d = doc_();
   if (!d) return;
-  const draftsByKey = new Map();
-  for (const c of comments) {
-    if (c.path !== d.path) continue;
-    const key = (c.side || 'RIGHT') + ':' + c.line;
-    if (!draftsByKey.has(key)) draftsByKey.set(key, []);
-    draftsByKey.get(key).push(c);
-  }
-  // Existing (already-posted) review comments: replies carry the same
-  // path/line/side as their thread root, so grouping by key alone already
-  // gathers a whole thread together.
-  const existingByKey = new Map();
-  for (const c of reviewComments) {
-    if (c.path !== d.path) continue;
-    const key = (c.side || 'RIGHT') + ':' + c.line;
-    if (!existingByKey.has(key)) existingByKey.set(key, []);
-    existingByKey.get(key).push(c);
-  }
-  for (const el of diffview.querySelectorAll('.pr-comment-mark')) el.remove();
+
+  // Which element each side:line sits in. A split row holds the same context
+  // line twice, so the first one found wins and a thread is placed once; the
+  // thread goes after the whole pair so it spans both columns.
+  const diffRows = new Map();
   for (const el of diffview.querySelectorAll('[data-l]:not([data-reviewable="0"]), [data-old-l]:not([data-reviewable="0"])')) {
-    const isOldOnly = el.dataset.oldL !== undefined && el.dataset.l === undefined;
-    const side = isOldOnly ? 'LEFT' : 'RIGHT';
-    const line = isOldOnly ? +el.dataset.oldL : +el.dataset.l;
-    const key = side + ':' + line;
-    const drafts = draftsByKey.get(key);
-    const existing = existingByKey.get(key);
-    el.classList.toggle('pr-has-comment', !!drafts || !!existing);
-    if (!drafts && !existing) continue;
+    const host = el.closest('.diff-row-pair') || el;
+    if (el.dataset.l !== undefined && !diffRows.has('RIGHT:' + el.dataset.l)) diffRows.set('RIGHT:' + el.dataset.l, { el, host });
+    if (el.dataset.oldL !== undefined && !diffRows.has('LEFT:' + el.dataset.oldL)) diffRows.set('LEFT:' + el.dataset.oldL, { el, host });
+  }
+
+  const threads = [...ctGroupThreads(allReview(), comments).values()]
+    .filter(t => t.path === d.path)
+    .sort((a, b) => a.line - b.line || a.source.localeCompare(b.source));
+
+  // Gutter markers: one per line that has a thread, on the first element showing it.
+  for (const el of diffview.querySelectorAll('.pr-comment-mark')) el.remove();
+  for (const el of diffview.querySelectorAll('.pr-has-comment')) el.classList.remove('pr-has-comment');
+  const marked = new Map(); // side:line -> threads there
+  for (const t of threads) {
+    if (!t.line) continue; // a file-level comment has no row to mark
+    const k = t.side + ':' + t.line;
+    if (!marked.has(k)) marked.set(k, []);
+    marked.get(k).push(t);
+  }
+  for (const [k, ts] of marked) {
+    const row = diffRows.get(k);
+    if (!row) continue;
+    row.el.classList.add('pr-has-comment');
+    const count = ts.reduce((n, t) => n + t.existing.length + t.drafts.length, 0);
     const badge = document.createElement('span');
     badge.className = 'pr-comment-mark';
-    const count = (existing?.length || 0) + (drafts?.length || 0);
     badge.title = 'View ' + count + ' comment' + (count === 1 ? '' : 's');
     badge.innerHTML = COMMENT_ICON;
     badge.addEventListener('click', e => {
       e.stopPropagation();
-      revealThreadInPanel(threadKey(d.path, side, line));
+      revealInlineThread(ts[0]);
     });
-    el.querySelector('.diff-code')?.before(badge);
+    row.el.querySelector('.diff-code')?.before(badge);
   }
+
+  // Inline threads. Remember what the reviewer was typing and where, since
+  // this rebuilds every thread.
+  const active = document.activeElement;
+  const focused = active?.classList?.contains('reply-input') ? active.closest('.pr-inline-thread') : null;
+  const focusKey = focused?.dataset.threadKey;
+  const focusPos = focusKey ? active.selectionStart : 0;
+  for (const el of diffview.querySelectorAll('.pr-inline-thread, .pr-inline-filestrip')) el.remove();
+
+  const last = new Map(); // host -> the node most recently placed after it
+  const strip = [];
+  for (const t of threads) {
+    const row = t.line ? (diffRows.get(t.side + ':' + (t.endLine || t.line)) || diffRows.get(t.side + ':' + t.line)) : null;
+    if (!row) { strip.push(t); continue; } // file-level, outdated, or past the visible hunks
+    const node = buildInlineThread(d.path, t);
+    (last.get(row.host) || row.host).after(node);
+    last.set(row.host, node);
+  }
+  if (strip.length) {
+    const box = document.createElement('div');
+    box.className = 'pr-inline-filestrip';
+    for (const t of strip) box.append(buildInlineThread(d.path, t));
+    const home = diffview.querySelector('.diff-section-pr > .diff-section-body') || diffview.querySelector('#diffcontent');
+    home?.prepend(box);
+  }
+  if (focusKey) {
+    for (const node of diffview.querySelectorAll('.pr-inline-thread')) {
+      if (node.dataset.threadKey !== focusKey) continue;
+      const ta = node.querySelector('.reply-input');
+      if (ta) { ta.focus(); ta.setSelectionRange(focusPos, focusPos); }
+    }
+  }
+}
+
+function buildInlineThread(path, t) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = threadHtml(path, t, t.key, true);
+  const node = tpl.content.firstElementChild;
+  node.classList.add('pr-inline-thread');
+  const saved = inlineReplyText.get(t.key);
+  const ta = node.querySelector('.reply-input');
+  if (ta && saved) ta.value = saved;
+  return node;
+}
+
+// A gutter marker's click: bring the thread's inline block into view, open if folded.
+function revealInlineThread(t) {
+  const el = [...(diffview?.querySelectorAll('.pr-inline-thread') || [])].find(n => n.dataset.threadKey === t.key);
+  if (!el) { revealThreadInPanel(t.key); return; }
+  if (!el.classList.contains('open')) toggleAccordion(el);
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1200);
 }
 
 /* ---------- bottom panel: existing comments + drafts, always open ---------- */
 
-function threadKey(path, side, line) { return path + '|' + (side || 'RIGHT') + ':' + line; }
+// Drafts and GitHub comments share a thread ('gh'); the agent's review has its own ('rv').
+function threadKey(path, side, line, source = 'gh') { return ctThreadKey(path, side, line, source); }
 
 // Which accordion items ("issue:<id>" / "thread:<threadKey>") are expanded.
 // Persists across re-renders within the session so replying, adding a draft,
 // or a background refresh never silently collapses something you opened.
 const expandedKeys = new Set();
+
+// Inline threads in the diff start open; this holds the ones the reviewer folded.
+const inlineCollapsed = new Set();
+// A half-typed reply in an inline thread, kept across the diff repaints that rebuild it.
+const inlineReplyText = new Map();
 
 function toggleAccordion(item) {
   if (!item) return;
@@ -519,7 +726,9 @@ function toggleAccordion(item) {
   const open = !item.classList.contains('open');
   item.classList.toggle('open', open);
   if (!key) return;
-  if (open) expandedKeys.add(key); else expandedKeys.delete(key);
+  if (key.startsWith('inline:')) {
+    if (open) inlineCollapsed.delete(key); else inlineCollapsed.add(key);
+  } else if (open) expandedKeys.add(key); else expandedKeys.delete(key);
 }
 
 function wireCommentsPanel() {
@@ -568,45 +777,70 @@ function wireCommentsPanel() {
     });
   }
 
-  $('#pr-comments-list')?.addEventListener('click', e => {
-    const replyBtn = e.target.closest('.pr-issue-comment-reply-btn');
-    if (replyBtn) {
-      const ta = $('#pr-issue-compose-body');
-      if (ta) {
-        const prefix = replyBtn.dataset.author ? '@' + replyBtn.dataset.author + ' ' : '';
-        if (!ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-      return;
-    }
-    const loc = e.target.closest('.pr-comment-loc');
-    if (loc) {
-      openFile(loc.dataset.path, { line: +loc.dataset.line });
-      return;
-    }
-    const delBtn = e.target.closest('.pr-comment-delete-btn');
-    if (delBtn) {
-      deleteDraft(+delBtn.dataset.draftId);
-      return;
-    }
-    const sendBtn = e.target.closest('.reply-send');
-    if (sendBtn) {
-      const row = sendBtn.closest('.pr-comment-reply-row');
-      sendThreadReply(row);
-      return;
-    }
-    const head = e.target.closest('.acc-head');
-    if (head) toggleAccordion(head.closest('.acc-item'));
+  // The panel and the threads inline in the diff are the same markup and act
+  // the same, so they share one set of handlers.
+  $('#pr-comments-list')?.addEventListener('click', onCommentClick);
+  $('#pr-comments-list')?.addEventListener('keydown', onCommentKeydown);
+  diffview?.addEventListener('click', e => { if (e.target.closest('.pr-inline-thread')) onCommentClick(e); });
+  rowsEl?.addEventListener('click', e => {
+    const mark = e.target.closest?.('.cmt-mark');
+    const d = doc_();
+    if (!mark || !d) return;
+    e.stopPropagation();
+    toggleSourcePeek(d.path, +mark.dataset.l);
   });
+  diffview?.addEventListener('keydown', e => { if (e.target.closest('.pr-inline-thread')) onCommentKeydown(e); });
+  diffview?.addEventListener('input', e => {
+    const ta = e.target.closest?.('.pr-inline-thread .reply-input');
+    if (ta) inlineReplyText.set(ta.closest('.pr-inline-thread').dataset.threadKey, ta.value);
+  });
+}
 
-  $('#pr-comments-list')?.addEventListener('keydown', e => {
-    if (!e.target.closest('.reply-input')) return;
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      sendThreadReply(e.target.closest('.pr-comment-reply-row'));
+function onCommentClick(e) {
+  if (thrMdClick(e)) return; // a code block's copy button, a link to a file
+  const discuss = e.target.closest('.rv-discuss');
+  if (discuss) {
+    const c = [...rvPath, ...rvGeneral].find(x => x.rvId === discuss.dataset.rv);
+    if (c) newThread(discussInfo(c));
+    return;
+  }
+  const replyBtn = e.target.closest('.pr-issue-comment-reply-btn');
+  if (replyBtn) {
+    const ta = $('#pr-issue-compose-body');
+    if (ta) {
+      const prefix = replyBtn.dataset.author ? '@' + replyBtn.dataset.author + ' ' : '';
+      if (!ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
     }
-  });
+    return;
+  }
+  const loc = e.target.closest('.pr-comment-loc');
+  if (loc) {
+    openFile(loc.dataset.path, { line: +loc.dataset.line });
+    return;
+  }
+  const delBtn = e.target.closest('.pr-comment-delete-btn');
+  if (delBtn) {
+    deleteDraft(+delBtn.dataset.draftId);
+    return;
+  }
+  const sendBtn = e.target.closest('.reply-send');
+  if (sendBtn) {
+    const row = sendBtn.closest('.pr-comment-reply-row');
+    sendThreadReply(row);
+    return;
+  }
+  const head = e.target.closest('.acc-head');
+  if (head) toggleAccordion(head.closest('.acc-item'));
+}
+
+function onCommentKeydown(e) {
+  if (!e.target.closest('.reply-input')) return;
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    sendThreadReply(e.target.closest('.pr-comment-reply-row'));
+  }
 }
 
 async function sendThreadReply(row) {
@@ -619,11 +853,13 @@ async function sendThreadReply(row) {
   const body = ta?.value.trim();
   if (!body) return;
   const commentId = +row.dataset.replyTo;
+  const threadKeyOf = row.closest('[data-thread-key]')?.dataset.threadKey;
   const btn = row.querySelector('.reply-send');
   if (btn) btn.disabled = true;
   try {
     const c = await apiPostJson('/api/pr/comments/review-reply', { commentId, body });
     reviewComments.push(c);
+    if (threadKeyOf) inlineReplyText.delete(threadKeyOf);
     renderCommentsPanel();
     renderMarkersForActiveDoc();
     showToast('✓', 'Reply posted');
@@ -683,6 +919,7 @@ function issueCommentCardHtml(c) {
 }
 
 function reviewCommentCardHtml(c) {
+  if (c.agent) return agentCommentCardHtml(c);
   return '<div class="pr-comment-card' + (c.inReplyTo ? ' reply' : '') + '">' +
     '<div class="pr-issue-comment-head">' +
       '<span class="pr-issue-comment-author">' + esc(c.author || 'unknown') + '</span>' +
@@ -694,7 +931,7 @@ function reviewCommentCardHtml(c) {
 
 function draftCardHtml(c) {
   return '<div class="pr-comment-card draft">' +
-    '<div class="pr-issue-comment-head"><span class="pr-issue-comment-author">You (draft, not yet submitted)</span></div>' +
+    '<div class="pr-issue-comment-head"><span class="pr-issue-comment-author">You (draft, not yet submitted)</span>' + LOCAL_CHIP + '</div>' +
     '<div class="pr-issue-comment-body">' + esc(c.body) + '</div>' +
     '<div class="pr-comment-card-actions">' +
       '<button class="pr-comment-delete-btn" data-draft-id="' + c.id + '">Delete draft</button>' +
@@ -702,29 +939,42 @@ function draftCardHtml(c) {
   '</div>';
 }
 
-function threadHtml(path, t, key) {
+function replyRowHtml(root) {
+  return '<div class="pr-comment-reply-row" data-reply-to="' + root.id + '">' +
+    '<textarea class="pr-review-body reply-input" rows="1" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>' +
+    '<button class="footer-btn reply-send">Reply</button>' +
+    '</div>';
+}
+
+// One thread as an accordion item. In the panel it starts folded and names its
+// file; inline in the diff (inline = true) it starts open, sits under its line,
+// and only says which line it is about.
+function threadHtml(path, t, key, inline = false) {
   const sortedExisting = [...t.existing].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
   const root = sortedExisting.find(c => !c.inReplyTo) || sortedExisting[0];
-  const loc = path + ':' + t.line + (t.side === 'LEFT' ? ' (base)' : '');
+  const was = root?.line || 0; // an outdated comment keeps the line it was written on
+  let where = t.line ? ':' + t.line + (t.endLine ? '-' + t.endLine : '') : ' (file)';
+  if (t.outdated) where = ':' + was + ' (outdated)';
+  const suffix = t.side === 'LEFT' ? ' (base)' : '';
+  const loc = inline && t.line ? 'line ' + t.line + (t.endLine ? '-' + t.endLine : '') + suffix : path + where + suffix;
   const itemsHtml = sortedExisting.map(reviewCommentCardHtml).join('');
   const draftsHtml = t.drafts.map(draftCardHtml).join('');
-  const canReply = !!root;
-  const replyRow = canReply
-    ? '<div class="pr-comment-reply-row" data-reply-to="' + root.id + '">' +
-      '<textarea class="pr-review-body reply-input" rows="1" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>' +
-      '<button class="footer-btn reply-send">Reply</button>' +
-      '</div>'
-    : '';
-  const accKey = 'thread:' + key;
-  const open = expandedKeys.has(accKey);
+  const canReply = !!root && !root.agent; // replying posts to the forge; an agent's comments are discussed instead
+  const replyRow = canReply ? replyRowHtml(root) : '';
+  const accKey = (inline ? 'inline:' : 'thread:') + key;
+  const open = inline ? !inlineCollapsed.has(accKey) : expandedKeys.has(accKey);
   const total = sortedExisting.length + t.drafts.length;
   const countBadge = total > 1 ? '<span class="acc-count">' + total + '</span>' : '';
-  const preview = root ? root.body : (t.drafts[0]?.body || '');
-  return '<div class="pr-comment-thread acc-item' + (open ? ' open' : '') + '" data-thread-key="' + esc(key) + '" data-acc="' + esc(accKey) + '">' +
+  const preview = root ? (root.agent ? previewText(root.body) : root.body) : (t.drafts[0]?.body || '');
+  const locHtml = inline
+    ? '<span class="pr-inline-loc">' + esc(loc) + '</span>'
+    : '<span class="pr-comment-loc" data-path="' + esc(path) + '" data-line="' + (t.line || was) + '">' + esc(loc) + '</span>';
+  return '<div class="pr-comment-thread acc-item' + (root?.agent ? ' rv-thread' : '') + (open ? ' open' : '') + '" data-thread-key="' + esc(key) + '" data-acc="' + esc(accKey) + '">' +
     '<div class="acc-head">' +
       '<span class="acc-chevron">&#8250;</span>' +
-      '<span class="pr-comment-loc" data-path="' + esc(path) + '" data-line="' + t.line + '">' + esc(loc) + '</span>' +
+      locHtml +
       '<span class="pr-issue-comment-author">' + esc(root ? (root.author || 'unknown') : 'you') + '</span>' +
+      (root?.agent ? LOCAL_CHIP + sevChip(root) : '') +
       countBadge +
       '<span class="acc-preview">' + esc(preview) + '</span>' +
     '</div>' +
@@ -733,38 +983,30 @@ function threadHtml(path, t, key) {
 }
 
 function renderCommentsPanel() {
+  srcMarks.clear();
   const listEl = $('#pr-comments-list');
   const countEl = $('#pr-comments-count');
   if (!listEl) return;
 
-  // Group existing review comments and local drafts by path, then by
-  // side:line -- a reply carries the same path/line/side as its thread
-  // root, so grouping by that key alone already gathers a whole thread.
+  // Group existing review comments and local drafts into threads (the agent's
+  // and GitHub's are kept apart; see commentthreads.js), then by file.
   const byPath = new Map();
-  const threadFor = (path, side, line) => {
-    if (!byPath.has(path)) byPath.set(path, new Map());
-    const m = byPath.get(path);
-    const key = threadKey(path, side, line);
-    if (!m.has(key)) m.set(key, { existing: [], drafts: [], side, line });
-    return m.get(key);
-  };
-  for (const c of reviewComments) {
-    if (!c.path) continue;
-    threadFor(c.path, c.side || 'RIGHT', c.line).existing.push(c);
-  }
-  for (const c of comments) {
-    if (!c.path) continue;
-    threadFor(c.path, c.side || 'RIGHT', c.line).drafts.push(c);
+  for (const t of ctGroupThreads(allReview(), comments).values()) {
+    if (!byPath.has(t.path)) byPath.set(t.path, new Map());
+    byPath.get(t.path).set(t.key, t);
   }
 
-  const totalReview = reviewComments.length + comments.length;
-  let html = '<div class="pr-comments-section-title">Conversation' +
-    (issueComments.length ? ' (' + issueComments.length + ')' : '') + '</div>';
-  html += issueComments.length
-    ? [...issueComments].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).map(issueCommentCardHtml).join('')
-    : '<div class="pr-comments-empty">No top-level comments yet.</div>';
+  const totalReview = allReview().length + comments.length;
+  let html = rv ? reviewSummaryHtml(rv, rvGeneral) : '';
+  if (!meta?.local) {
+    html += '<div class="pr-comments-section-title">Conversation' +
+      (issueComments.length ? ' (' + issueComments.length + ')' : '') + '</div>';
+    html += issueComments.length
+      ? [...issueComments].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).map(issueCommentCardHtml).join('')
+      : '<div class="pr-comments-empty">No top-level comments yet.</div>';
+  }
 
-  html += '<div class="pr-comments-section-title">Review comments' +
+  html += '<div class="pr-comments-section-title">' + (meta?.local ? 'Comments on files' : 'Review comments') +
     (totalReview ? ' (' + totalReview + ')' : '') + '</div>';
   if (byPath.size === 0) {
     html += '<div class="pr-comments-empty">No inline comments yet.</div>';
@@ -773,14 +1015,59 @@ function renderCommentsPanel() {
     for (const [path, threads] of byPath) {
       for (const [key, t] of threads) entries.push([path, key, t]);
     }
-    entries.sort((a, b) => a[0].localeCompare(b[0]) || a[2].line - b[2].line);
+    entries.sort((a, b) => a[0].localeCompare(b[0]) || a[2].line - b[2].line || a[2].source.localeCompare(b[2].source));
     html += entries.map(([path, key, t]) => threadHtml(path, t, key)).join('');
   }
 
   listEl.innerHTML = html;
   if (countEl) {
-    const n = issueComments.length + totalReview;
+    const n = issueComments.length + totalReview + rvGeneral.length;
     countEl.textContent = n ? String(n) : '';
+  }
+}
+
+/* ---------- agent-authored review (px0 -review) ---------- */
+
+function initReview() {
+  refreshReview();
+  // The agent may rewrite the file while px0 is open: look again when the tab
+  // comes back into view, never on a timer while it is hidden.
+  addEventListener('focus', refreshReview);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshReview(); });
+}
+
+async function refreshReview() {
+  // A hidden tab skips refreshes, but never the first load: px0 often opens in
+  // a background tab, and the review must be there when it is brought forward.
+  if (rvBusy || (document.hidden && rv?.resolved)) return;
+  rvBusy = true;
+  try {
+    const j = await api('/api/review');
+    const key = JSON.stringify(j);
+    if (key !== rvKey) {
+      rvKey = key;
+      rv = j;
+      rvPath = reviewPathComments(j);
+      rvGeneral = reviewGeneralComments(j);
+      renderCommentsPanel();
+      renderMarkersForActiveDoc();
+      // Open the panel the first time there is something in it: a review is
+      // what this session was started to read.
+      if (!rvOpened && (j.comments.length || j.summary)) {
+        rvOpened = true;
+        $('#pr-comments-panel')?.classList.remove('collapsed');
+        layout(); render();
+      }
+    }
+    // Anchors are checked against the code in the background; look again
+    // shortly until that is done.
+    if (!j.resolved && rvTries++ < 40) setTimeout(refreshReview, 300);
+    else if (j.resolved) rvTries = 0;
+  } catch (e) {
+    // Best-effort: the panel keeps whatever it last showed.
+    console.error('px0 review:', e);
+  } finally {
+    rvBusy = false;
   }
 }
 

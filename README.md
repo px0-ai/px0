@@ -20,6 +20,7 @@ See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://p
 ## Features
 
 - GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, expand recent commits to browse what each one changed, and stage, commit, or push from the browser.
+- Agent review inline: Have Claude or another agent review a branch or PR, write its comments to a file, and open them on the diff with `px0 -review review.json`. Comments carry severity and suggestions, and each has a **Discuss** button that starts a thread about it.
 - Unpushed commit review: Read the commits your branch is ahead of its tracking branch by, one file diff at a time, before you push them.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
@@ -62,6 +63,9 @@ px0 main.go:42
 
 # Review a GitHub pull request
 px0 https://github.com/owner/repo/pull/123
+
+# Show a review an agent wrote (JSON file) on the diff between two local revisions
+px0 -review review.json [-base main] [-head feature]
 
 # Remote or headless server mode
 px0 -host 0.0.0.0 -port 7777 ~/workspace

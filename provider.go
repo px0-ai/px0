@@ -43,6 +43,7 @@ type PRComment struct {
 	Line      int    `json:"line,omitempty"`
 	Side      string `json:"side,omitempty"`
 	InReplyTo int64  `json:"inReplyTo,omitempty"`
+	Outdated  bool   `json:"outdated,omitempty"` // its line has since changed; Line is where it was, not where the code is now
 	Author    string `json:"author"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
 	Body      string `json:"body"`

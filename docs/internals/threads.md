@@ -121,7 +121,7 @@ The list stream is opened once at startup and drives the running indicators and 
 
 ## 8b. PR Scope
 
-A thread in a PR session carries `scope` (`pr`, `mine`, `selection`) and `scopeSent`. `Server.prThreadContext(scope)` builds the text: the PR's number and title, then the exact range for the scope (`git diff <merge-base> <head>` for `pr`, `git diff <head>` plus the untracked files for `mine`) and the same diff written to a temp file (`prSession.writeScopeFile`, removed in `Close`). It goes in with the first prompt, with a replay, and once more whenever `scope != scopeSent`. `POST /api/threads/scope` changes it. Outside a PR session the context is empty.
+A thread in a PR session carries `scope` (`pr`, `mine`, `selection`) and `scopeSent`. `Server.prThreadContext(scope)` builds the text: the PR's number and title, then the exact range for the scope (`git diff <merge-base> <head>` for `pr`, `git diff <head>` plus the untracked files for `mine`) and the same diff written to a temp file (`prSession.writeScopeFile`, removed in `Close`). It goes in with the first prompt, with a replay, and once more whenever `scope != scopeSent`. `POST /api/threads/scope` changes it. Outside a PR session the context is empty. In a local review (`px0 -review`, [Local Review](local-review.md)) the intro says so instead of naming a pull request, and when a review is loaded `reviewState.contextBlock` adds a paragraph with its title, comment counts, summary and file path, labelled as claims to verify. The comment being discussed is in the user's message, not in the context.
 
 ## 9. Limits
 

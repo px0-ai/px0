@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "px0 review file v1",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 32768
+    },
+    "base": {
+      "type": "string"
+    },
+    "head": {
+      "type": "string"
+    },
+    "baseSHA": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$"
+    },
+    "headSHA": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$"
+    },
+    "verdict": {
+      "enum": [
+        "approve",
+        "request_changes",
+        "comment"
+      ]
+    },
+    "pr": {
+      "description": "Pull request this review belongs to: its number on the origin remote, or its URL. px0 then opens that pull request with the review's comments added.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "format": "uri"
+        }
+      ]
+    },
+    "generatedBy": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "comments": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/$defs/comment"
+      }
+    }
+  },
+  "$defs": {
+    "comment": {
+      "type": "object",
+      "required": [
+        "id",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "side": {
+          "enum": [
+            "RIGHT",
+            "LEFT"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "blocker",
+            "major",
+            "minor",
+            "nit",
+            "question",
+            "praise"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "anchor": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "inReplyTo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
+        "refs": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
+      },
+      "dependentRequired": {
+        "line": [
+          "path"
+        ],
+        "endLine": [
+          "line"
+        ]
+      }
+    },
+    "ref": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "rev": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "dependentRequired": {
+        "endLine": [
+          "line"
+        ]
+      }
+    }
+  }
+}
