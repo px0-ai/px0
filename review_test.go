@@ -576,16 +576,6 @@ func TestReviewMetaFlags(t *testing.T) {
 	}
 }
 
-func TestReviewSchemaEmbedded(t *testing.T) {
-	var v map[string]any
-	if err := json.Unmarshal([]byte(reviewSchema), &v); err != nil {
-		t.Fatalf("embedded schema is not JSON: %v", err)
-	}
-	if v["title"] != "px0 review file v1" {
-		t.Errorf("unexpected schema title %v", v["title"])
-	}
-}
-
 func TestParseReviewPR(t *testing.T) {
 	ok := func(src string) *reviewDoc {
 		t.Helper()

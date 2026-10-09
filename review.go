@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +26,6 @@ import (
 // comment to the code (path exists at head, line in range, anchor text still
 // matches) happens once in the background after the listener is up, so a big
 // review never delays startup or a request.
-
-//go:embed review.schema.json
-var reviewSchema string
 
 const (
 	reviewMaxFile         = 2 << 20

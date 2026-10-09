@@ -1,6 +1,6 @@
 # Review File Specification (`px0.review` v1)
 
-> **Status: implemented, except the items listed under [Implementation notes](#implementation-notes).** This is the contract between a coding agent that reviews code and px0, which displays that review. It accompanies [Local Review](local-review.md). The loader and validator are in [`review.go`](../../review.go), the embedded schema in [`review.schema.json`](../../review.schema.json) (printed by `px0 -review-schema`), and the rendering in [`web/src/review.js`](../../web/src/review.js).
+> **Status: implemented, except the items listed under [Implementation notes](#implementation-notes).** This is the contract between a coding agent that reviews code and px0, which displays that review. It accompanies [Local Review](local-review.md). The loader and validator are in [`review.go`](../../review.go), the JSON Schema in [`review.schema.json`](review.schema.json), and the rendering in [`web/src/review.js`](../../web/src/review.js).
 
 A review file is a UTF-8 JSON document that an agent writes after reviewing a branch or pull request. `px0 -review <file>` reads it and shows each comment inline on the diff, with a panel, a summary, and a "Discuss" action that opens a px0 [thread](threads.md) about the comment.
 
@@ -193,7 +193,7 @@ What the first implementation does differently from, or not yet, this specificat
 
 ## Appendix A: JSON Schema
 
-Draft 2020-12. The cross-field rules in §4 (`endLine ≥ line`, duplicate ids, `inReplyTo` ordering, path and range checks against git) are enforced by the Go validator, not the schema. The schema would be embedded with `go:embed` and printed by `px0 -review-schema`.
+Draft 2020-12. The cross-field rules in §4 (`endLine ≥ line`, duplicate ids, `inReplyTo` ordering, path and range checks against git) are enforced by the Go validator, not the schema. The schema is a documentation file, [`review.schema.json`](review.schema.json); px0 does not embed or load it.
 
 ```json
 {

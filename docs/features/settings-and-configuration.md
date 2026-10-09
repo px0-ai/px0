@@ -79,7 +79,6 @@ These flags belong to `px0 -review` (see [Local Review](local-review.md)); they 
 | `-review <file>` | Show an agent-authored review (JSON file, or `-` for stdin) on the diff between two local revisions, or on the pull request named by the argument or the file's `pr` field. Needs git; cannot be combined with `-no-git` or a path. |
 | `-base <rev>` | With `-review`: the revision to review against. Overrides the file. Default: the file's `base`, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. |
 | `-head <rev>` | With `-review`: the revision under review. Overrides the file. Default: the file's `head`, else `HEAD`. |
-| `-review-schema` | Print the review file's JSON Schema and exit. |
 
 ---
 

@@ -63,7 +63,7 @@ The agent can rewrite the review file. px0 notices when the browser tab regains 
 
 ## For agents
 
-A ready-made skill is in [`skills/px0-review/SKILL.md`](../../skills/px0-review/SKILL.md). `px0 -review-schema` prints the JSON Schema, and the full format is in the [Review File Specification](../internals/review-file-spec.md).
+A ready-made skill is in [`skills/px0-review/SKILL.md`](../../skills/px0-review/SKILL.md). The full format is in the [Review File Specification](../internals/review-file-spec.md), and its [JSON Schema](../internals/review.schema.json) can validate a file.
 
 ## Limits and not yet supported
 

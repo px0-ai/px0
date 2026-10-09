@@ -50,10 +50,9 @@ func main() {
 		reviewFlag   = flag.String("review", "", "show an agent-authored review file (JSON, or - for stdin) on the diff between two local revisions, or on the pull request given as the argument or by the file's pr field")
 		baseFlag     = flag.String("base", "", "with -review: revision to review against (overrides the file; default: the file's base, else origin/HEAD, main or master)")
 		headFlag     = flag.String("head", "", "with -review: revision under review (overrides the file; default: the file's head, else HEAD)")
-		schemaFlag   = flag.Bool("review-schema", false, "print the JSON Schema of the review file and exit")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n  px0 -review review.json [-base REV] [-head REV]\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags] [file or directory]\n  px0 [flags] <pr-url>\n  px0 -review review.json [-base REV] [-head REV]\n\nreview file format: https://github.com/px0-ai/px0/blob/master/docs/internals/review-file-spec.md\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -81,11 +80,6 @@ func main() {
 		if err := runSelfUpdate(version); err != nil {
 			fatal(err)
 		}
-		return
-	}
-
-	if *schemaFlag {
-		fmt.Print(reviewSchema)
 		return
 	}
 

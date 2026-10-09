@@ -14,7 +14,7 @@ px0 already had the review UI: a merge-base diff view, gutter comment markers, a
 |---|---|
 | Edits go through a harness, never px0 | The review file is read-only data. No endpoint accepts file content or comments. A `suggestion` block is only previewed. |
 | Nothing written into a working tree | The review file lives outside the repo. A checkout that is needed goes in the OS temp directory. |
-| Single static binary, no runtime deps | `encoding/json` only. The JSON Schema is embedded with `go:embed`. |
+| Single static binary, no runtime deps | `encoding/json` only. The JSON Schema is a documentation file, not loaded by the binary. |
 | Performance budgets | The listener is up before the review is checked against the code. Checking runs in the background, bounded to `NumCPU` workers and 500 files. Nothing runs on the scroll path. |
 
 ## 3. How it works
@@ -26,7 +26,6 @@ px0 -review review.json                        # base and head come from the fil
 px0 -review review.json -base main -head feature
 px0 -review review.json <pr-url>               # a real PR plus the agent's comments
 px0 -review -                                  # read the review from stdin
-px0 -review-schema                             # print the embedded JSON Schema
 ```
 
 It is a flag and not a subcommand because `px0 pr` was removed on purpose. Flags go first: Go's `flag` package stops at the first non-flag argument.
@@ -79,7 +78,7 @@ The coupling is debt: a later change should split the provider-backed parts out 
 
 ### 3.7 Skill
 
-[`skills/px0-review/SKILL.md`](../../skills/px0-review/SKILL.md) tells an agent how to write the file (with an `anchor` on every line comment), where to put it (outside the repo), and how to launch px0. `px0 -review-schema` lets it check the format against the installed binary.
+[`skills/px0-review/SKILL.md`](../../skills/px0-review/SKILL.md) tells an agent how to write the file (with an `anchor` on every line comment), where to put it (outside the repo), and how to launch px0. The format and its JSON Schema are in [`review-file-spec.md`](review-file-spec.md) and [`review.schema.json`](review.schema.json), and `px0 -help` links to the spec.
 
 ## 4. Security
 
@@ -99,7 +98,7 @@ The coupling is debt: a later change should split the provider-backed parts out 
 
 ## 6. Tests
 
-[`review_test.go`](../../review_test.go) covers whole-file errors, the size and comment limits, per-comment rejection (including a file trying to set its own status), path cleaning, anchor matching, the checks against a real repository (anchored, moved, out of range, unanchored, missing path, `LEFT` side, replies, files outside the diff), staleness, the ETag and live reload (including a file that stops parsing), in-place sessions never removing the repository, worktree cleanup on close, refused revisions, the thread context, and the embedded schema.
+[`review_test.go`](../../review_test.go) covers whole-file errors, the size and comment limits, per-comment rejection (including a file trying to set its own status), path cleaning, anchor matching, the checks against a real repository (anchored, moved, out of range, unanchored, missing path, `LEFT` side, replies, files outside the diff), staleness, the ETag and live reload (including a file that stops parsing), in-place sessions never removing the repository, worktree cleanup on close, refused revisions, the thread context.
 
 ## 7. Open decisions
 
