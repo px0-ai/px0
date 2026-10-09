@@ -607,8 +607,6 @@ function thrBack() {
   thrDrawList();
 }
 
-/* Starts a draft: anchored to info's range, or to the workspace when info is
-   omitted. Nothing is created on the server until the first message is sent. */
 // Clicks on what thrMd renders: a code block's copy button and a link to a file
 // in the workspace. Returns true when it handled the click, so the review panel
 // in pr.js, which draws the same markup, shares it instead of copying it.
@@ -628,6 +626,8 @@ export function thrMdClick(e) {
   return false;
 }
 
+/* Starts a draft: anchored to info's range, or to the workspace when info is
+   omitted. Nothing is created on the server until the first message is sent. */
 export function newThread(info) {
   if (!thr.avail) { showToast('!', 'Threads need a coding harness: run px0 without -no-agent'); return; }
   thr.opening = null;

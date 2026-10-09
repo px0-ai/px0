@@ -13,7 +13,7 @@ import { thrMdNoImages } from './thread.js';
 
 const SEV_LABEL = { blocker: 'Blocker', major: 'Major', minor: 'Minor', nit: 'Nit', question: 'Question', praise: 'Praise' };
 
-function sevChip(c) {
+export function sevChip(c) {
   const sev = c.severity || 'minor';
   return '<span class="rv-sev rv-sev-' + esc(sev) + '">' + esc(SEV_LABEL[sev] || sev) + '</span>';
 }
@@ -61,8 +61,6 @@ export function agentCommentCardHtml(c) {
   '</div>';
 }
 
-export { sevChip };
-
 // One line of plain text for a collapsed thread: the Markdown source with
 // fences and markers taken out, so a suggestion does not read as backticks.
 export function previewText(md) {
@@ -74,11 +72,11 @@ export function previewText(md) {
     .trim();
 }
 
-// Path comments become entries shaped like GitHub's inline comments, so the
+// Review comments become entries shaped like GitHub's inline comments, so the
 // existing markers and thread grouping apply to them unchanged.
-export function reviewPathComments(snap) {
+function asPRComments(snap, keep) {
   const author = snap.generatedBy?.agent || 'review';
-  return (snap.comments || []).filter(c => c.path).map(c => ({
+  return (snap.comments || []).filter(keep).map(c => ({
     ...c,
     id: 'rv:' + c.id,
     rvId: c.id,
@@ -89,18 +87,8 @@ export function reviewPathComments(snap) {
   }));
 }
 
-export function reviewGeneralComments(snap) {
-  const author = snap.generatedBy?.agent || 'review';
-  return (snap.comments || []).filter(c => !c.path).map(c => ({
-    ...c,
-    id: 'rv:' + c.id,
-    rvId: c.id,
-    agent: true,
-    author,
-    inReplyTo: c.inReplyTo ? 'rv:' + c.inReplyTo : 0,
-    createdAt: '',
-  }));
-}
+export const reviewPathComments = snap => asPRComments(snap, c => c.path);
+export const reviewGeneralComments = snap => asPRComments(snap, c => !c.path);
 
 const VERDICT = { approve: 'The review suggests approving', request_changes: 'The review suggests requesting changes', comment: 'The review is comments only' };
 

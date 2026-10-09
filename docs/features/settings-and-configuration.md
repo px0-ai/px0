@@ -70,6 +70,19 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 
 ---
 
+## Command-Line Flags for Reviews
+
+These flags belong to `px0 -review` (see [Local Review](local-review.md)); they are not saved in `settings.json`. Put flags before any pull request URL.
+
+| Flag | Description |
+| :--- | :--- |
+| `-review <file>` | Show an agent-authored review (JSON file, or `-` for stdin) on the diff between two local revisions, or on the pull request named by the argument or the file's `pr` field. Needs git; cannot be combined with `-no-git` or a path. |
+| `-base <rev>` | With `-review`: the revision to review against. Overrides the file. Default: the file's `base`, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. |
+| `-head <rev>` | With `-review`: the revision under review. Overrides the file. Default: the file's `head`, else `HEAD`. |
+| `-review-schema` | Print the review file's JSON Schema and exit. |
+
+---
+
 ## Direct JSON File Configuration
 
 For automated machine setup, dotfile repositories, or scripting, you can directly edit the JSON configuration file:
