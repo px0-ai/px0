@@ -18,6 +18,7 @@ The words MUST, SHOULD and MAY are used as in RFC 2119. The file is written by t
 | `base`, `head` | string | SHOULD | Any rev git resolves. `head` defaults to `HEAD`. The `-base` / `-head` flags override the file. |
 | `baseSHA`, `headSHA` | hex string, 7–40 chars | SHOULD | The revisions the agent actually reviewed. Used for staleness (§6). |
 | `verdict` | `approve` \| `request_changes` \| `comment` | MAY | Advisory label. px0 never submits anything automatically. |
+| `pr` | integer ≥ 1 \| string (pull request URL) | MAY | The pull request this review belongs to: a number on the repository's `origin` remote, or a full URL. px0 then opens that pull request, as `px0 -review file <pr-url>` does, with the comments already on it. A URL on the command line wins; `-base` / `-head` cannot be combined with it. A value that is not a positive number or a URL px0 recognises is ignored with a warning; any other type is a whole-file error. Changing it in a file px0 has open needs a restart. |
 | `generatedBy` | `{ agent, model?, sessionId? }` | MAY | `sessionId` enables the optional session handoff ([§9](#9-in-chat-discussion)). |
 | `createdAt` | RFC 3339 string | MAY | |
 | `comments` | array, ≤ 2000 | MAY | See §2. |
@@ -209,6 +210,7 @@ Draft 2020-12. The cross-field rules in §4 (`endLine ≥ line`, duplicate ids, 
     "baseSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
     "headSHA": { "type": "string", "pattern": "^[0-9a-fA-F]{7,40}$" },
     "verdict": { "enum": ["approve", "request_changes", "comment"] },
+    "pr": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "format": "uri" }] },
     "generatedBy": {
       "type": "object",
       "properties": {

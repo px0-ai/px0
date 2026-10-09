@@ -2637,6 +2637,28 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .pr-comment-mark svg { display: block; }
 .pr-comment-mark:hover { transform: scale(1.15); }
 
+/* The source view: a marker on a commented line, in the line-number gutter. */
+.g .cmt-mark {
+  position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; color: var(--accent-fg); cursor: pointer; line-height: 0;
+}
+.g .cmt-mark:hover { transform: translateY(-50%) scale(1.15); }
+.g.has-cmt { color: var(--accent-fg); }
+.pr-peek { width: 460px !important; overflow: auto; }
+.pr-peek[hidden] { display: none; }
+.pr-peek-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 8px 8px; font: 12px var(--ui); }
+.pr-peek .pr-inline-thread { margin: 0; max-width: none; }
+
+/* A comment that is only in the local review, not posted to GitHub. Shown only
+   when there is a GitHub pull request to tell it apart from. */
+.rv-local { display: none; }
+body.pr-forge .rv-local {
+  display: inline-block; flex: none; font: 10.5px var(--ui); color: var(--faint);
+  border: 1px dashed var(--line); border-radius: var(--r); padding: 0 5px; line-height: 15px; white-space: nowrap;
+}
+body.pr-forge .pr-comment-thread.rv-thread { border-style: dashed; }
+
+
 /* ---------- PR comments bottom panel ---------- */
 .pr-comments-panel {
   flex: none; display: flex; flex-direction: column;
@@ -2696,6 +2718,17 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .pr-comment-card.draft { border-style: dashed; }
 .pr-comment-card.draft .pr-issue-comment-author { color: var(--accent-fg); }
 .pr-comment-thread.flash { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A thread shown inline in the diff, between code rows. It reuses the panel's
+   thread markup; here it only needs to stop inheriting the code rows' monospace,
+   nowrap look and to sit inside the diff's gutter-to-edge width. */
+.pr-inline-thread {
+  margin: 4px 12px 8px 12px; font: 12px var(--ui); white-space: normal; text-align: left;
+  position: relative; max-width: 900px;
+}
+.pr-inline-thread .acc-head { padding: 0; }
+.pr-inline-loc { flex: none; font: 11px var(--mono); color: var(--faint); }
+.pr-inline-filestrip { padding: 6px 0 2px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 
 /* Agent-authored review (px0 -review): severity chips, restricted Markdown
    bodies, suggestions, and the banners above the comments. Theme tokens only. */

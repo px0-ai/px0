@@ -38,6 +38,19 @@
         "comment"
       ]
     },
+    "pr": {
+      "description": "Pull request this review belongs to: its number on the origin remote, or its URL. px0 then opens that pull request with the review's comments added.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "format": "uri"
+        }
+      ]
+    },
     "generatedBy": {
       "type": "object",
       "properties": {

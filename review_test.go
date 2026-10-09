@@ -585,3 +585,62 @@ func TestReviewSchemaEmbedded(t *testing.T) {
 		t.Errorf("unexpected schema title %v", v["title"])
 	}
 }
+
+func TestParseReviewPR(t *testing.T) {
+	ok := func(src string) *reviewDoc {
+		t.Helper()
+		doc, err := parseReview([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	if d := ok(`{"version":1,"pr":7}`); d.PR == nil || d.PR.Number != 7 || len(d.Warnings) != 0 {
+		t.Errorf("a pr number must load: %+v %v", d.PR, d.Warnings)
+	}
+	if d := ok(`{"version":1,"pr":"https://github.com/acme/widgets/pull/3"}`); d.PR == nil || d.PR.URL == "" || len(d.Warnings) != 0 {
+		t.Errorf("a pr URL must load: %+v %v", d.PR, d.Warnings)
+	}
+	for _, src := range []string{`{"version":1,"pr":0}`, `{"version":1,"pr":-2}`, `{"version":1,"pr":"https://example.com/x"}`} {
+		if d := ok(src); d.PR != nil || len(d.Warnings) != 1 {
+			t.Errorf("%s: a bad pr must be dropped with one warning: %+v %v", src, d.PR, d.Warnings)
+		}
+	}
+	for _, src := range []string{`{"version":1,"pr":true}`, `{"version":1,"pr":{"n":1}}`, `{"version":1,"pr":1.5}`} {
+		if _, err := parseReview([]byte(src)); err == nil {
+			t.Errorf("%s: a pr of the wrong type is a whole-file error", src)
+		}
+	}
+}
+
+func TestReviewPRTarget(t *testing.T) {
+	repo := reviewRepo(t)
+	if _, _, err := reviewPRTarget(&reviewPRRef{Number: 12}, repo); err == nil {
+		t.Error("a pr number with no origin remote must be an error")
+	}
+	gitTestRun(t, repo, "remote", "add", "origin", "git@github.com:acme/widgets.git")
+	_, target, err := reviewPRTarget(&reviewPRRef{Number: 12}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Owner != "acme" || target.Repo != "widgets" || target.Number != 12 {
+		t.Errorf("target = %+v", target)
+	}
+	_, target, err = reviewPRTarget(&reviewPRRef{URL: "https://github.com/o/r/pull/5"}, repo)
+	if err != nil || target.Owner != "o" || target.Number != 5 {
+		t.Errorf("a URL must not need the remote: %+v %v", target, err)
+	}
+	if _, _, err := reviewPRTarget(&reviewPRRef{URL: "https://example.com/x"}, repo); err == nil {
+		t.Error("an unrecognised URL must be an error")
+	}
+}
+
+func TestReviewPRChanged(t *testing.T) {
+	a, b := &reviewPRRef{Number: 1}, &reviewPRRef{Number: 1}
+	if reviewPRChanged(nil, nil) || reviewPRChanged(a, b) {
+		t.Error("equal refs are not a change")
+	}
+	if !reviewPRChanged(nil, a) || !reviewPRChanged(a, &reviewPRRef{Number: 2}) {
+		t.Error("different refs are a change")
+	}
+}

@@ -9,11 +9,15 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
 
 ## Steps
 
-1. **Pin what you review.** Work out the base and head and record their SHAs:
+1. **Pin what you review.** Work out the base and head and record their SHAs (one `rev-parse` per revision):
 
    ```bash
-   git rev-parse --verify main^{commit} feature^{commit}
+   git rev-parse --verify main^{commit}
+   git rev-parse --verify feature^{commit}
+   gh pr view feature --json number -q .number   # the pull request for this branch, if there is one
    ```
+
+   If the last command prints a number, put it in the file as `"pr"` (step 3) so px0 opens the real pull request, with its existing comments, and your comments added.
 
    Review the change as `git diff $(git merge-base main feature) feature`, not whatever happens to be checked out.
 
@@ -24,8 +28,8 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
 4. **Launch px0** from inside the repository, flags first:
 
    ```bash
-   px0 -review "$TMPDIR/review.json"                 # local branches; base/head come from the file
-   px0 -review "$TMPDIR/review.json" <pr-url>        # the same, on a GitHub pull request
+   px0 -review "$TMPDIR/review.json"                 # local branches, or the pull request the file's "pr" names
+   px0 -review "$TMPDIR/review.json" <pr-url>        # the same, naming the pull request on the command line
    ```
 
    Run it in the background; it prints the URL and opens the browser. On a remote machine add `-no-open` and tell the user the URL. `px0 -review-schema` prints the JSON Schema if you want to check the file.
@@ -36,7 +40,7 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
 
 ## The file
 
-`headSHA` is the real full SHA of `head` from step 1 (the one below is an example). px0 uses it to tell the user when the code has moved since you reviewed it.
+`headSHA` is the real full SHA of `head` from step 1 (the one below is an example). px0 uses it to tell the user when the code has moved since you reviewed it. Leave out `"pr"` when there is no pull request; with one, it is the number on `origin` (or the pull request's URL), and `-base` / `-head` no longer apply.
 
 ```json
 {
@@ -46,6 +50,7 @@ px0 can show a review you wrote as inline comments on the diff, with a panel for
   "base": "main",
   "head": "feature/refresh",
   "headSHA": "7dd0efd66ac439907b80645f104efc0f1d82fd99",
+  "pr": 123,
   "verdict": "request_changes",
   "generatedBy": { "agent": "claude" },
   "comments": [

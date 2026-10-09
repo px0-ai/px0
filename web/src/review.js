@@ -38,11 +38,16 @@ function refsHtml(c) {
   return '<div class="rv-refs"><span class="rv-refs-label">See also</span>' + items.join('') + '</div>';
 }
 
+// Marks a comment that exists only in the local review, not on the forge. CSS
+// shows it only in a pull request session, where the other comments are GitHub's.
+export const LOCAL_CHIP = '<span class="rv-local" title="From the local review; not posted to GitHub">not posted</span>';
+
 // One agent comment as it appears in a thread or in the general list.
 export function agentCommentCardHtml(c) {
   return '<div class="pr-comment-card rv-card' + (c.inReplyTo ? ' reply' : '') + '" data-rv="' + esc(c.rvId) + '">' +
     '<div class="pr-issue-comment-head">' +
       '<span class="pr-issue-comment-author">' + esc(c.author || 'review') + '</span>' +
+      LOCAL_CHIP +
       sevChip(c) +
       (c.category ? '<span class="rv-cat">' + esc(c.category) + '</span>' : '') +
     '</div>' +

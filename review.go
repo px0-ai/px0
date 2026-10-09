@@ -62,6 +62,34 @@ type reviewGenerator struct {
 	SessionID string `json:"sessionId,omitempty"`
 }
 
+// reviewPRRef names the pull request a review belongs to: its number on the
+// repository's origin remote, or its full URL.
+type reviewPRRef struct {
+	Number int
+	URL    string
+}
+
+func (r *reviewPRRef) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*r = reviewPRRef{Number: n}
+		return nil
+	}
+	var u string
+	if err := json.Unmarshal(b, &u); err == nil {
+		*r = reviewPRRef{URL: u}
+		return nil
+	}
+	return errors.New("pr must be a number or a pull request URL")
+}
+
+func (r reviewPRRef) MarshalJSON() ([]byte, error) {
+	if r.URL != "" {
+		return json.Marshal(r.URL)
+	}
+	return json.Marshal(r.Number)
+}
+
 // reviewMeta is every top-level field except the comments.
 type reviewMeta struct {
 	Version     int              `json:"version"`
@@ -72,8 +100,48 @@ type reviewMeta struct {
 	BaseSHA     string           `json:"baseSHA,omitempty"`
 	HeadSHA     string           `json:"headSHA,omitempty"`
 	Verdict     string           `json:"verdict,omitempty"`
+	PR          *reviewPRRef     `json:"pr,omitempty"`
 	GeneratedBy *reviewGenerator `json:"generatedBy,omitempty"`
 	CreatedAt   string           `json:"createdAt,omitempty"`
+}
+
+// reviewPRChanged reports whether two reviews name different pull requests.
+func reviewPRChanged(a, b *reviewPRRef) bool {
+	if a == nil || b == nil {
+		return a != b
+	}
+	return *a != *b
+}
+
+// reviewPRTarget turns the file's pr into a provider and target. A bare number
+// is looked up on root's origin remote and rewritten to its pull request URL.
+func reviewPRTarget(ref *reviewPRRef, root string) (GitProvider, PRTarget, error) {
+	rawURL := ref.URL
+	if rawURL == "" {
+		host, p, ok := remoteHostPath(gitRemoteURL(root, ""))
+		if !ok || p == "" {
+			return nil, PRTarget{}, fmt.Errorf("pr %d needs an origin remote on GitHub; give the pull request URL instead", ref.Number)
+		}
+		rawURL = fmt.Sprintf("https://%s/%s/pull/%d", host, p, ref.Number)
+	}
+	provider, target, ok := DetectPRURL(rawURL)
+	if !ok {
+		return nil, PRTarget{}, fmt.Errorf("pr %q is not a pull request URL px0 recognises", truncateBytes(rawURL, 200))
+	}
+	return provider, target, nil
+}
+
+// reviewRepoTop is the top of the git repository containing dir, symlinks resolved.
+func reviewRepoTop(dir string) (string, error) {
+	info := gitProbe(dir)
+	if !info.ok || info.toplevel == "" {
+		return "", errors.New("-review needs to run inside a git repository")
+	}
+	top := info.toplevel
+	if resolved, err := filepath.EvalSymlinks(top); err == nil {
+		top = resolved
+	}
+	return top, nil
 }
 
 // reviewRef points at code related to a comment, possibly on another revision.
@@ -218,6 +286,18 @@ func parseReview(data []byte) (*reviewDoc, error) {
 	if doc.Verdict != "" && !reviewVerdicts[doc.Verdict] {
 		doc.Warnings = append(doc.Warnings, fmt.Sprintf("ignored unknown verdict %q", truncateBytes(doc.Verdict, 40)))
 		doc.Verdict = ""
+	}
+	if pr := doc.PR; pr != nil {
+		switch {
+		case pr.URL == "" && pr.Number < 1:
+			doc.Warnings = append(doc.Warnings, fmt.Sprintf("ignored pr %d: expected a positive number", pr.Number))
+			doc.PR = nil
+		case pr.URL != "":
+			if _, _, ok := DetectPRURL(pr.URL); !ok {
+				doc.Warnings = append(doc.Warnings, fmt.Sprintf("ignored pr %q: not a pull request URL px0 recognises", truncateBytes(pr.URL, 200)))
+				doc.PR = nil
+			}
+		}
 	}
 
 	seen := map[string]bool{}
@@ -534,6 +614,9 @@ func (rs *reviewState) refresh() {
 		return
 	}
 	rs.loadErr = ""
+	if reviewPRChanged(rs.doc.PR, doc.PR) {
+		doc.Warnings = append(doc.Warnings, "pr changed in the file; restart px0 to open the other pull request")
+	}
 	rs.doc = doc
 	env := rs.env
 	if env.root == "" {
@@ -881,13 +964,9 @@ func defaultReviewBase(root string) string {
 // otherwise head is checked out into a throwaway worktree under the OS temp
 // directory, removed by prSession.Close.
 func prepareLocalReview(doc *reviewDoc, baseFlag, headFlag, dir string) (*prSession, error) {
-	info := gitProbe(dir)
-	if !info.ok || info.toplevel == "" {
-		return nil, errors.New("-review needs to run inside a git repository")
-	}
-	top := info.toplevel
-	if resolved, err := filepath.EvalSymlinks(top); err == nil {
-		top = resolved
+	top, err := reviewRepoTop(dir)
+	if err != nil {
+		return nil, err
 	}
 	first := func(vals ...string) string {
 		for _, v := range vals {

@@ -47,7 +47,7 @@ func main() {
 		_            = flag.Bool("y", false, "answer yes to prompts (deprecated; PRs are always opened without prompt)")
 		_            = flag.Bool("yes", false, "answer yes to prompts (alias for -y)")
 		basePathFlag = flag.String("base-path", "", "base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)")
-		reviewFlag   = flag.String("review", "", "show an agent-authored review file (JSON, or - for stdin) on the diff between two local revisions, or on the pull request given as the argument")
+		reviewFlag   = flag.String("review", "", "show an agent-authored review file (JSON, or - for stdin) on the diff between two local revisions, or on the pull request given as the argument or by the file's pr field")
 		baseFlag     = flag.String("base", "", "with -review: revision to review against (overrides the file; default: the file's base, else origin/HEAD, main or master)")
 		headFlag     = flag.String("head", "", "with -review: revision under review (overrides the file; default: the file's head, else HEAD)")
 		schemaFlag   = flag.Bool("review-schema", false, "print the JSON Schema of the review file and exit")
@@ -119,15 +119,34 @@ func main() {
 		if gitDisabled {
 			fatal(fmt.Errorf("git is required for -review; remove -no-git"))
 		}
-		if isPR && (*baseFlag != "" || *headFlag != "") {
-			fatal(fmt.Errorf("-base and -head do not apply to a pull request"))
-		}
 		if !isPR && flag.NArg() > 0 {
 			fatal(fmt.Errorf("-review reviews a diff and cannot be combined with the path %q", flag.Arg(0)))
 		}
 		var err error
 		if rv, err = loadReview(*reviewFlag); err != nil {
 			fatal(fmt.Errorf("-review: %w", err))
+		}
+		// The file's "pr" opens that pull request as if its URL had been given;
+		// a URL on the command line wins.
+		if ref := rv.doc.PR; ref != nil {
+			if isPR {
+				if (ref.URL != "" && ref.URL != prTarget.URL) || (ref.URL == "" && ref.Number != prTarget.Number) {
+					uiStatus("warn", "review: the file's pr is ignored; using the pull request given on the command line", "", 0, os.Stderr)
+				}
+			} else {
+				cwd, _ := os.Getwd()
+				top, err := reviewRepoTop(cwd)
+				if err == nil {
+					prProvider, prTarget, err = reviewPRTarget(ref, top)
+				}
+				if err != nil {
+					fatal(fmt.Errorf("-review: %w", err))
+				}
+				isPR = true
+			}
+		}
+		if isPR && (*baseFlag != "" || *headFlag != "") {
+			fatal(fmt.Errorf("-base and -head do not apply to a pull request"))
 		}
 		rv.announce = true
 		for _, w := range rv.doc.Warnings {
