@@ -34,6 +34,7 @@ func main() {
 		noOpen       = flag.Bool("no-open", false, "do not launch a browser")
 		noLSP        = flag.Bool("no-lsp", false, "do not use language servers, even if installed")
 		noGit        = flag.Bool("no-git", false, "disable git awareness")
+		diffRef      = flag.String("diff", "", "compare git changes with the merge base of this ref and HEAD")
 		showVer      = flag.Bool("version", false, "print version and exit")
 		showVerShort = flag.Bool("v", false, "print version and exit (shorthand)")
 		doUpdate     = flag.Bool("update", false, "check for and install latest version of px0")
@@ -101,6 +102,9 @@ func main() {
 	if isPR && gitDisabled {
 		fatal(fmt.Errorf("px0: git is required for PR review; remove -no-git"))
 	}
+	if *diffRef != "" && isPR {
+		uiStatus("warn", "-diff is ignored for pull-request review; the PR merge-base is used", "", 0, os.Stderr)
+	}
 
 	var pr *prSession
 	var root, initialFile string
@@ -132,6 +136,9 @@ func main() {
 		}
 		targetDur = time.Since(tStart)
 		root, initialFile, initialLine = r, f, l
+		if err := configureGitDiffBase(root, *diffRef); err != nil {
+			uiStatus("warn", fmt.Sprintf("invalid diff ref %q; using HEAD", *diffRef), err.Error(), 0, os.Stderr)
+		}
 	}
 
 	tListen := time.Now()
@@ -158,6 +165,9 @@ func main() {
 	pxSrv.tel = tel
 	if pr != nil {
 		pxSrv.SetPR(pr)
+	} else if base := gitDiffBase(); base != "" && base != "HEAD" {
+		ix.SetDiffBase(base)
+		pxSrv.diffBase = base
 	}
 	var agent *agentManager
 	if !*noAgent {
