@@ -70,6 +70,11 @@ px0 -host 0.0.0.0 -port 7777 ~/workspace
 px0 -base-path /rev-123/ -host 0.0.0.0 -port 7777 ~/workspace
 ```
 
+For DNS-rebinding protection, px0 accepts only `localhost` or an IP literal in
+the request `Host` header. A reverse proxy may use any public hostname for its
+client-facing URL, but must send its upstream request to px0 with `Host` set to
+`localhost:<port>` or the upstream IP and port.
+
 When px0 binds to `0.0.0.0`, it prints a `network` URL for every unique
 non-loopback IPv4 address on the machine, using the port selected by the
 listener:

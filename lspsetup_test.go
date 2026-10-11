@@ -118,7 +118,7 @@ func TestLSPServersEndpoint(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "app.py"), []byte("print('hello')\n"), 0o644)
 	s.ix.Build()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lsp/servers", nil)
+	req := newLocalRequest(http.MethodGet, "/api/lsp/servers", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 

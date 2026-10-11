@@ -119,10 +119,16 @@ func newTestServer(t *testing.T) (*Server, string) {
 	return NewServer(ix, nil), root
 }
 
+func newLocalRequest(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	req.Host = "127.0.0.1:7777"
+	return req
+}
+
 func get(t *testing.T, s *Server, url string) (int, map[string]any) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	s.ServeHTTP(rec, newLocalRequest(http.MethodGet, url, nil))
 	var m map[string]any
 	json.Unmarshal(rec.Body.Bytes(), &m)
 	return rec.Code, m
@@ -131,7 +137,7 @@ func get(t *testing.T, s *Server, url string) (int, map[string]any) {
 func TestThemesStylesheetJoinsEveryThemeFile(t *testing.T) {
 	s, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/themes.css", nil))
+	s.ServeHTTP(rec, newLocalRequest(http.MethodGet, "/static/themes.css", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -172,7 +178,7 @@ func TestStaticAssetServing(t *testing.T) {
 
 	// 1. Serving uncompressed assets (e.g. style.css)
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/style.css", nil))
+	s.ServeHTTP(rec, newLocalRequest(http.MethodGet, "/static/style.css", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("style.css status %d", rec.Code)
 	}
@@ -182,7 +188,7 @@ func TestStaticAssetServing(t *testing.T) {
 
 	// 2. Serving compressed vendor assets with Accept-Encoding: gzip
 	rec = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/static/vendor/mermaid-12.0.0.min.js", nil)
+	req := newLocalRequest(http.MethodGet, "/static/vendor/mermaid-12.0.0.min.js", nil)
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -215,7 +221,7 @@ func TestStaticAssetServing(t *testing.T) {
 
 	// 3. Serving compressed vendor assets without Accept-Encoding: gzip (transparent decompression)
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/static/vendor/mermaid-12.0.0.min.js", nil)
+	req = newLocalRequest(http.MethodGet, "/static/vendor/mermaid-12.0.0.min.js", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("mermaid uncompressed status %d", rec.Code)
@@ -232,14 +238,14 @@ func TestStaticAssetServing(t *testing.T) {
 
 	// 4. Missing static file returns 404
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/nonexistent.js", nil))
+	s.ServeHTTP(rec, newLocalRequest(http.MethodGet, "/static/nonexistent.js", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("missing asset status = %d, want 404", rec.Code)
 	}
 
 	// 5. Path traversal attempts are rejected (never 200 OK)
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/../server.go", nil))
+	s.ServeHTTP(rec, newLocalRequest(http.MethodGet, "/static/../server.go", nil))
 	if rec.Code == http.StatusOK {
 		t.Errorf("traversal returned 200 OK")
 	}
@@ -828,7 +834,7 @@ func TestServerBasePathRouting(t *testing.T) {
 	}
 
 	// 1. GET /rev-123/ should return 200 and have injected <base href="/rev-123/">
-	req := httptest.NewRequest(http.MethodGet, "/rev-123/", nil)
+	req := newLocalRequest(http.MethodGet, "/rev-123/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -839,7 +845,7 @@ func TestServerBasePathRouting(t *testing.T) {
 	}
 
 	// 2. GET /rev-123 without trailing slash should redirect to /rev-123/
-	reqNoSlash := httptest.NewRequest(http.MethodGet, "/rev-123", nil)
+	reqNoSlash := newLocalRequest(http.MethodGet, "/rev-123", nil)
 	recNoSlash := httptest.NewRecorder()
 	s.ServeHTTP(recNoSlash, reqNoSlash)
 	if recNoSlash.Code != http.StatusMovedPermanently && recNoSlash.Code != http.StatusFound {
@@ -850,7 +856,7 @@ func TestServerBasePathRouting(t *testing.T) {
 	}
 
 	// 3. GET / should redirect to /rev-123/
-	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqRoot := newLocalRequest(http.MethodGet, "/", nil)
 	recRoot := httptest.NewRecorder()
 	s.ServeHTTP(recRoot, reqRoot)
 	if recRoot.Code != http.StatusFound {
@@ -861,7 +867,7 @@ func TestServerBasePathRouting(t *testing.T) {
 	}
 
 	// 4. GET /rev-123/api/meta returns 200 and basePath
-	reqMeta := httptest.NewRequest(http.MethodGet, "/rev-123/api/meta", nil)
+	reqMeta := newLocalRequest(http.MethodGet, "/rev-123/api/meta", nil)
 	recMeta := httptest.NewRecorder()
 	s.ServeHTTP(recMeta, reqMeta)
 	if recMeta.Code != http.StatusOK {
@@ -876,7 +882,7 @@ func TestServerBasePathRouting(t *testing.T) {
 	}
 
 	// 5. GET /api/meta without prefix should 404
-	reqRootMeta := httptest.NewRequest(http.MethodGet, "/api/meta", nil)
+	reqRootMeta := newLocalRequest(http.MethodGet, "/api/meta", nil)
 	recRootMeta := httptest.NewRecorder()
 	s.ServeHTTP(recRootMeta, reqRootMeta)
 	if recRootMeta.Code != http.StatusNotFound {
@@ -950,7 +956,7 @@ func TestVerboseRequestLogging(t *testing.T) {
 	uiQuiet = false
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/tree", nil)
+	req := newLocalRequest(http.MethodGet, "/api/tree", nil)
 	s.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -958,7 +964,7 @@ func TestVerboseRequestLogging(t *testing.T) {
 	}
 
 	rec404 := httptest.NewRecorder()
-	req404 := httptest.NewRequest(http.MethodGet, "/api/nonexistent", nil)
+	req404 := newLocalRequest(http.MethodGet, "/api/nonexistent", nil)
 	s.ServeHTTP(rec404, req404)
 
 	w.Close()
@@ -1143,7 +1149,7 @@ func TestGzipWriterBodilessResponsesAndContentLength(t *testing.T) {
 func TestServerServeHTTPGzip(t *testing.T) {
 	s, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := newLocalRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	s.ServeHTTP(rec, req)
 
@@ -1308,7 +1314,7 @@ func TestRawEndpointHeaders(t *testing.T) {
 
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/raw?path="+url.QueryEscape(tc.rel), nil)
+		req := newLocalRequest(http.MethodGet, "/api/raw?path="+url.QueryEscape(tc.rel), nil)
 		s.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
@@ -1332,7 +1338,7 @@ func TestContentSecurityPolicyHeader(t *testing.T) {
 	endpoints := []string{"/", "/api/meta", "/api/raw?path=main.go"}
 	for _, ep := range endpoints {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		req := newLocalRequest(http.MethodGet, ep, nil)
 		s.ServeHTTP(rec, req)
 
 		csp := rec.Header().Get("Content-Security-Policy")
@@ -1363,6 +1369,38 @@ func TestContentSecurityPolicyHeader(t *testing.T) {
 	}
 }
 
+func TestServerRejectsNonLocalHost(t *testing.T) {
+	s, _ := newTestServer(t)
 
+	// A DNS-rebinding page controls Host, so every route must reject a DNS name
+	// before a handler can return workspace or settings data.
+	for _, endpoint := range []string{
+		"/",
+		"/static/style.css",
+		"/api/meta",
+		"/api/raw?path=main.go",
+		"/api/settings",
+		"/api/threads",
+	} {
+		rec := httptest.NewRecorder()
+		req := newLocalRequest(http.MethodGet, endpoint, nil)
+		req.Host = "evil.example.com:7777"
+		s.ServeHTTP(rec, req)
 
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s with attacker Host returned %d, want 403", endpoint, rec.Code)
+		}
+	}
 
+	// px0 is intentionally reachable over loopback, LAN/VPN IPs, and IPv6.
+	for _, host := range []string{"localhost:7777", "127.0.0.1:7777", "192.0.2.10:7777", "[::1]:7777"} {
+		rec := httptest.NewRecorder()
+		req := newLocalRequest(http.MethodGet, "/api/meta", nil)
+		req.Host = host
+		s.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET /api/meta with Host %q returned %d, want 200", host, rec.Code)
+		}
+	}
+}

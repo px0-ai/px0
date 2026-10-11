@@ -709,7 +709,7 @@ func TestGitStatusAgainstAndPRDiff(t *testing.T) {
 	srv := NewServer(ix, newLSPManager(root, false))
 	srv.diffBase = baseSHA
 
-	req := httptest.NewRequest("GET", "/api/file?path=foo.go", nil)
+	req := newLocalRequest("GET", "/api/file?path=foo.go", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -724,7 +724,7 @@ func TestGitStatusAgainstAndPRDiff(t *testing.T) {
 	}
 
 	// /api/diff should return the diff against baseSHA
-	diffReq := httptest.NewRequest("GET", "/api/diff?path=foo.go", nil)
+	diffReq := newLocalRequest("GET", "/api/diff?path=foo.go", nil)
 	dw := httptest.NewRecorder()
 	srv.ServeHTTP(dw, diffReq)
 	if dw.Code != 200 {
@@ -745,7 +745,7 @@ func TestGitStatusAgainstAndPRDiff(t *testing.T) {
 	}
 
 	// Server /api/diff against baseSHA must reflect the external edit in real time
-	diffReq2 := httptest.NewRequest("GET", "/api/diff?path=foo.go", nil)
+	diffReq2 := newLocalRequest("GET", "/api/diff?path=foo.go", nil)
 	dw2 := httptest.NewRecorder()
 	srv.ServeHTTP(dw2, diffReq2)
 	if dw2.Code != 200 {
@@ -814,7 +814,7 @@ func TestHandleDiffPRSplitsPRAndYourChanges(t *testing.T) {
 	})
 
 	getDiff := func() map[string]any {
-		req := httptest.NewRequest("GET", "/api/diff?path=foo.go", nil)
+		req := newLocalRequest("GET", "/api/diff?path=foo.go", nil)
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
 		if w.Code != 200 {

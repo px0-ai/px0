@@ -20,7 +20,7 @@ func TestSessionAPIEndpoints(t *testing.T) {
 	s := NewServer(ix, nil, "/rev-999/")
 
 	// 1. GET /rev-999/api/session initially
-	req := httptest.NewRequest(http.MethodGet, "/rev-999/api/session", nil)
+	req := newLocalRequest(http.MethodGet, "/rev-999/api/session", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

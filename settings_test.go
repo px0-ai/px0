@@ -162,7 +162,7 @@ func TestSettingsAPIEndpoints(t *testing.T) {
 	srv := agentServer(t, root, "echo")
 
 	// 1. GET /api/settings
-	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req := newLocalRequest(http.MethodGet, "/api/settings", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

@@ -229,9 +229,37 @@ func (s *Server) scavenge() {
 
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: http:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none';"
 
+// allowedRequestHost accepts only names whose address cannot be changed by DNS.
+// A page on an attacker-controlled hostname can otherwise rebind that name to
+// 127.0.0.1 and read px0's GET endpoints with a same-origin browser request.
+// IP literals keep remote/LAN/VPN access working; localhost keeps the normal
+// local URL convenient.
+func allowedRequestHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil
+}
+
+func requireAllowedHost(w http.ResponseWriter, r *http.Request) bool {
+	if allowedRequestHost(r.Host) {
+		return true
+	}
+	fail(w, http.StatusForbidden, "open px0 by IP address or localhost")
+	return false
+}
+
 // ServeHTTP delegates incoming HTTP requests to the configured ServeMux,
 // recording request timing and updating access timestamps.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	if !requireAllowedHost(w, r) {
+		return
+	}
+
 	streamPath := s.routePath("/api/stream")
 	gitStreamPath := s.routePath("/api/git/stream")
 	metricsPath := s.routePath("/api/metrics")
@@ -270,8 +298,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var out http.ResponseWriter = rec
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && !isSSE {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Add("Vary", "Accept-Encoding")
