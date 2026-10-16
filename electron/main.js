@@ -26,6 +26,7 @@ function findBinary() {
 
 // Repo name for the title: PR URL wins, otherwise the workspace directory name.
 function repoName(workspace) {
+  if (process.env.PX0_REPO_NAME) return process.env.PX0_REPO_NAME; // set by launch.js
   for (const a of userArgs) {
     const m = /^https?:\/\/[^/]+\/[^/]+\/([^/]+)\/(?:pull|pulls|merge_requests)\/\d+/.exec(a)
       || /^https?:\/\/[^/]+\/[^/]+\/([^/]+)\/-?\/?pull-requests\/\d+/.exec(a);

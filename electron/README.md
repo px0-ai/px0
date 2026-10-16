@@ -24,3 +24,9 @@ cd ~/code/myrepo && px0-ide    # opens a window on the current directory
 `px0-ide` always starts the Electron app; the regular `px0` command is left alone. It runs
 detached from the terminal (log: `$TMPDIR/px0-ide.log`) and passes `--version`/`--update`/`--help`
 to the plain px0 binary. App files live in `~/.local/share/px0-ide`.
+
+### macOS Cmd+Tab name
+
+Cmd+Tab and the Dock read the app *bundle* name, not the window title. `launch.js` therefore keeps a
+per-repo clone of `Electron.app` (renamed "px0 - <repo>", px0 icon, own bundle id, re-signed ad hoc) under
+`~/.local/share/px0-ide/bundles/`. Clones are cheap on APFS; delete the folder to reset them.
