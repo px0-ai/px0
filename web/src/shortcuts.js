@@ -46,6 +46,7 @@ export const SHORTCUTS = [
   [['Alt+C', 'Alt+A'], 'Copy selection ref / with context'], [['Alt+U'], 'Find usages of selection'],
   [['Alt+E'], 'Edit selection inline'],
   [['Alt+T'], 'Start a thread on the selection'],
+  [['Alt+Q'], 'Queue a command for the agent thread'],
   [['Right click'], 'Selection actions at the pointer'],
   [['Mod+Home|Mod+Up', 'Mod+End|Mod+Down'], 'Top / bottom of file'],
   [['Home|Mod+Left', 'End|Mod+Right'], 'Start / end of line'],

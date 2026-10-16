@@ -25,6 +25,7 @@ export const SEL_KEYS = {
   KeyE: 'agent-edit',
   KeyR: 'review-comment',
   KeyT: 'thread',
+  KeyQ: 'queue-thread',
   KeyM: 'copy-markdown',
   KeyS: 'copy-source',
 };
@@ -38,6 +39,10 @@ export function setAgentHandler(fn) { agentHandler = fn; }
 /* Threads (thread.js) hook in the same way. */
 let threadHandler = null;
 export function setThreadHandler(fn) { threadHandler = fn; }
+
+/* Queueing a command for a thread (thread.js) is registered the same way. */
+let queueHandler = null;
+export function setQueueHandler(fn) { queueHandler = fn; }
 
 /* Same one-way registration for PR review comments (pr.js), active only in a
    `px0 pr ...` session. */
@@ -324,6 +329,14 @@ export function runSelectionAction(act, triggerBtn = null, override = null) {
         return true;
       }
     }
+    if (act === 'queue-thread') {
+      const d = doc_();
+      if (d && queueHandler) {
+        const line = d.cur || 1;
+        queueHandler({ text: (d.lines && d.lines[line - 1]) || '', l1: line, l2: line, path: d.path });
+        return true;
+      }
+    }
     if (act === 'agent-edit') {
       const d = doc_();
       if (d && agentHandler) {
@@ -375,6 +388,9 @@ export function runSelectionAction(act, triggerBtn = null, override = null) {
   } else if (act === 'thread') {
     if (!threadHandler) return false;
     threadHandler(target);
+  } else if (act === 'queue-thread') {
+    if (!queueHandler) return false;
+    queueHandler(target);
   } else if (act === 'review-comment') {
     if (!reviewHandler) return false;
     reviewHandler(target);
@@ -408,6 +424,7 @@ export function openLineMenu(info, x, y) {
 // without selbar needing to know PR review exists.
 export const SEL_MENU_ITEMS = [
   { sel: 'thread', label: 'Start Agent Thread', keys: 'Alt+T' },
+  { sel: 'queue-thread', label: 'Queue Agent Thread', keys: 'Alt+Q' },
   { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
   { sel: 'copy-source', label: 'Copy Source', keys: 'Mod+C', forCode: true },
   { sel: 'copy-preview-text', label: 'Copy Formatted Text', keys: 'Mod+C', forPreview: true },

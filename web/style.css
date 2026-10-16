@@ -2984,3 +2984,29 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
 .thr-scope button.active { color: var(--accent-fg); border-color: var(--accent); background: var(--bg2); }
 .thr-scope button:disabled { opacity: .4; cursor: default; }
 .thr-compose { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+/* Queue Agent Thread: the entry box, and the queued commands just above Send. */
+.thr-qform { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg2); }
+.thr-qrow { display: flex; gap: 6px; }
+.thr-q-field {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r);
+  font: 11px/1.2 var(--mono); padding: 4px 6px; outline: none; min-width: 0;
+}
+.thr-q-field:focus { border-color: var(--accent); }
+.thr-q-path { flex: 1; }
+.thr-q-lines { width: 112px; flex: none; }
+.thr-queue { display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto; }
+/* Greyed out: queued, not yet sent. */
+.thr-q-item {
+  display: flex; align-items: baseline; gap: 6px; padding: 3px 6px;
+  border: 1px dashed var(--line); border-radius: var(--r);
+  color: var(--faint); opacity: .75; font: 11px/1.35 var(--ui);
+}
+.thr-q-n { flex: none; font: 600 10px/1 var(--mono); color: var(--faint); }
+.thr-q-ref {
+  flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: 10.5px/1.35 var(--mono);
+}
+.thr-q-ref:hover { color: var(--accent); text-decoration: underline; }
+.thr-q-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thr-q-x { flex: none; background: none; border: 0; padding: 0 2px; cursor: pointer; color: inherit; font-size: 13px; line-height: 1; }
+.thr-q-x:hover { color: var(--accent); }

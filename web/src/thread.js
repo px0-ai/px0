@@ -3,7 +3,7 @@ import { $, $$, S, esc, doc_, api, apiPost, apiPostJson, applyKeyLabels } from '
 import { on } from './bus.js';
 import { showToast, copyToClipboard } from './ui.js';
 import { openFile } from './tabs.js';
-import { setThreadHandler, hideSelectionBar } from './selbar.js';
+import { setThreadHandler, setQueueHandler, hideSelectionBar } from './selbar.js';
 import { showRightInspector } from './inspector.js';
 import { registerAgentPicker, reloadWorkspace } from './agent.js';
 
@@ -31,6 +31,7 @@ const thr = {
   opening: null,      // id of the thread being fetched, so a late reply for another one is dropped
   threadEs: null,
   sending: false,
+  queue: [],          // queued commands, oldest first: {path, l1, l2, comment}
 };
 
 const thrUrl = p => new URL(p, document.baseURI || location.href).href;
@@ -350,6 +351,101 @@ function thrMd(src) {
   return html;
 }
 
+
+/* ---------- queued commands ----------
+   A queued command is a comment about a file and line range, held in the order
+   it was added. Send ships every one of them to the agent together with the
+   file, lines and code, then clears the queue. */
+
+const thrLinesText = (l1, l2) => (l1 === l2 ? String(l1) : l1 + '-' + l2);
+
+function thrParseLines(text) {
+  const m = /^\s*(\d+)\s*(?:[-:]\s*(\d+))?\s*$/.exec(text);
+  if (!m) return null;
+  const l1 = +m[1], l2 = m[2] ? +m[2] : l1;
+  return l1 >= 1 && l2 >= l1 ? { l1, l2 } : null;
+}
+
+function thrRenderQueue() {
+  const el = thrEl.queue;
+  if (!el) return;
+  el.hidden = !thr.queue.length;
+  el.replaceChildren();
+  thr.queue.forEach((q, i) => {
+    const row = document.createElement('div');
+    row.className = 'thr-q-item';
+    row.setAttribute('role', 'listitem');
+    row.title = 'Queued command ' + (i + 1) + (i === 0 ? ' (sent first)' : '');
+    const n = document.createElement('span');
+    n.className = 'thr-q-n';
+    n.textContent = String(i + 1);
+    const ref = document.createElement('button');
+    ref.type = 'button';
+    ref.className = 'thr-q-ref';
+    ref.textContent = q.path + ':' + thrLinesText(q.l1, q.l2);
+    ref.title = 'Jump to this code';
+    ref.addEventListener('click', () => openFile(q.path, { line: q.l1 }));
+    const text = document.createElement('span');
+    text.className = 'thr-q-text';
+    text.textContent = q.comment;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'thr-q-x';
+    x.textContent = '\u00d7';
+    x.title = 'Remove from the queue';
+    x.setAttribute('aria-label', 'Remove queued command ' + (i + 1));
+    x.addEventListener('click', () => { thr.queue.splice(i, 1); thrRenderState(); });
+    row.append(n, ref, text, x);
+    el.append(row);
+  });
+}
+
+function thrCloseQueueForm() {
+  thrEl.qform.hidden = true;
+  thrEl.qhint.textContent = 'Enter to queue, Esc to cancel';
+}
+
+/* Opens the inline queue box for info's file and lines, in the open thread or a
+   new workspace thread. Nothing is sent until Send. */
+export function queueThread(info) {
+  if (!thr.avail) { showToast('!', 'Threads need a coding harness: run px0 without -no-agent'); return; }
+  if (!thr.cur && !thr.draft) {
+    thr.opening = null;
+    thrCloseStream();
+    thr.draft = {};
+    if (S.meta?.pr) thr.draft.scope = thrDefaultScope(info);
+  }
+  showRightInspector('threads');
+  thrShow('thread');
+  thrRenderState();
+  const d = doc_();
+  const path = (info && info.path) || (d && d.path) || '';
+  const l1 = info && info.l1 ? info.l1 : (d && d.cur) || 1;
+  const l2 = info && info.l2 ? info.l2 : l1;
+  thrEl.qpath.value = path;
+  thrEl.qlines.value = thrLinesText(l1, l2);
+  thrEl.qcomment.value = '';
+  thrEl.qform.hidden = false;
+  if (info) hideSelectionBar();
+  thrEl.qcomment.focus();
+}
+
+function thrQueueAdd() {
+  const path = thrEl.qpath.value.trim();
+  const range = thrParseLines(thrEl.qlines.value);
+  const comment = thrEl.qcomment.value.trim();
+  const fail = msg => { thrEl.qhint.textContent = msg; };
+  if (!path) return fail('Enter a file');
+  if (!range) return fail('Lines look like 12 or 12-20');
+  if (!comment) return fail('Write what the agent should do');
+  thr.queue.push({ path, l1: range.l1, l2: range.l2, comment });
+  thrEl.qcomment.value = '';
+  thrCloseQueueForm();
+  thrRenderState();
+  showToast('✓', 'Queued ' + thr.queue.length + (thr.queue.length === 1 ? ' command' : ' commands') + '. Send to run them');
+  thrEl.input.focus();
+}
+
 /* ---------- list view ---------- */
 
 const thrEl = {};
@@ -513,7 +609,11 @@ function thrRenderState() {
   thrEl.del.hidden = !thr.cur;
   thrEl.stop.hidden = !running;
   thrEl.send.disabled = running || thr.sending;
-  thrEl.hint.textContent = running ? 'Working. You can send the next message once it replies.' : 'Enter to send, Shift+Enter for a new line';
+  const q = thr.queue.length;
+  thrEl.hint.textContent = running ? 'Working. You can send the next message once it replies.'
+    : q ? 'Send ships ' + q + ' queued ' + (q === 1 ? 'command' : 'commands') + (thrEl.input.value.trim() ? ' and your message' : '')
+    : 'Enter to send, Shift+Enter for a new line';
+  thrRenderQueue();
   thrRenderAnchor();
   thrRenderScope();
   thrRenderMsgs();
@@ -613,22 +713,25 @@ export function newThread(info) {
 
 async function thrSend() {
   const message = thrEl.input.value.trim();
-  if (!message || thr.sending || thrRunning()) return;
+  const queue = thr.queue.slice(); // first queued is first sent
+  if ((!message && !queue.length) || thr.sending || thrRunning()) return;
   thr.sending = true;
   thrEl.send.disabled = true;
   try {
     if (thr.draft) {
-      const t = await apiPostJson('/api/threads/create', { ...thr.draft, message });
+      const t = await apiPostJson('/api/threads/create', { ...thr.draft, message, queue });
       thr.draft = null;
       thr.cur = t;
       thrOpenStream(t.id);
     } else if (thr.cur) {
-      await apiPostJson('/api/threads/send', { id: thr.cur.id, message });
+      await apiPostJson('/api/threads/send', { id: thr.cur.id, message, queue });
       if (!thr.threadEs) thrOpenStream(thr.cur.id);
     } else {
       return;
     }
     thrEl.input.value = '';
+    thr.queue = [];
+    thrCloseQueueForm();
   } catch (e) {
     showToast('!', e.message);
   } finally {
@@ -667,6 +770,12 @@ export function initThreads() {
   thrEl.send = $('#thr-send');
   thrEl.stop = $('#thr-stop');
   thrEl.hint = $('#thr-hint');
+  thrEl.queue = $('#thr-queue');
+  thrEl.qform = $('#thr-qform');
+  thrEl.qpath = $('#thr-q-path');
+  thrEl.qlines = $('#thr-q-lines');
+  thrEl.qcomment = $('#thr-q-comment');
+  thrEl.qhint = $('#thr-q-hint');
   $('#thr-scope')?.addEventListener('click', e => {
     const b = e.target.closest('button[data-scope]');
     if (b && !b.disabled) thrPickScope(b.dataset.scope);
@@ -674,11 +783,21 @@ export function initThreads() {
   if (!thrEl.listView) return;
 
   setThreadHandler(newThread);
+  setQueueHandler(queueThread);
   registerAgentPicker({ el: $('.thr-compose'), harnessSelect: $('#thr-harness'), modelSelect: $('#thr-model') });
 
   $('#thr-new').addEventListener('click', () => newThread(null));
   $('#thr-back').addEventListener('click', thrBack);
   thrEl.send.addEventListener('click', thrSend);
+  thrEl.qform.addEventListener('submit', e => { e.preventDefault(); thrQueueAdd(); });
+  $('#thr-q-cancel').addEventListener('click', () => { thrCloseQueueForm(); thrEl.input.focus(); });
+  thrEl.qform.addEventListener('keydown', e => {
+    // Typing here must not trigger editor shortcuts, or Esc closing the sidebar.
+    e.stopPropagation();
+    if (e.key === 'Escape') { thrCloseQueueForm(); thrEl.input.focus(); }
+    else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target === thrEl.qcomment) { e.preventDefault(); thrQueueAdd(); }
+  });
+  thrEl.input.addEventListener('input', () => { if (thr.queue.length) thrRenderState(); });
   thrEl.stop.addEventListener('click', () => {
     if (thr.cur) apiPost('/api/threads/cancel', { id: thr.cur.id }).catch(e => showToast('!', e.message));
   });
@@ -761,5 +880,6 @@ export function initThreads() {
     thrConnectList();
   }).catch(() => {
     $('[data-sel="thread"]')?.setAttribute('hidden', '');
+    $('[data-sel="queue-thread"]')?.setAttribute('hidden', '');
   });
 }
