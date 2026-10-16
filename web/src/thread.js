@@ -5,7 +5,7 @@ import { showToast, copyToClipboard } from './ui.js';
 import { openFile } from './tabs.js';
 import { setThreadHandler, setQueueHandler, hideSelectionBar } from './selbar.js';
 import { showRightInspector } from './inspector.js';
-import { registerAgentPicker, reloadWorkspace } from './agent.js';
+import { registerAgentPicker, reloadWorkspace, syncAgentSelection } from './agent.js';
 
 /* A thread is a long-running conversation with the coding harness, kept on the
    server. It starts from a spot in the code but is not limited to it: the
@@ -718,6 +718,8 @@ async function thrSend() {
   thr.sending = true;
   thrEl.send.disabled = true;
   try {
+    // Every queued command runs on the harness and model the dropdowns show.
+    if (!await syncAgentSelection($('#thr-harness')?.value, $('#thr-model')?.value)) return;
     if (thr.draft) {
       const t = await apiPostJson('/api/threads/create', { ...thr.draft, message, queue });
       thr.draft = null;

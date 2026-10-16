@@ -677,6 +677,20 @@ async function pick(session, name) {
   if (await select(name, msg => showErr(session, msg))) showCompose(session);
 }
 
+/* Makes the server use the harness and model a picker is showing. A dropdown
+   shows its first harness even when none was ever chosen, so what the UI shows
+   and what the server will run can differ; call this before dispatching.
+   Returns whether a harness is selected afterwards. */
+export async function syncAgentSelection(name, model) {
+  name = name || chosen();
+  if (!name) {
+    showToast('!', 'No coding harness available: install one and reload');
+    return false;
+  }
+  if (chosen() === name && (!model || chosenModel() === model)) return true;
+  return select(name, model || '', msg => showToast('!', msg));
+}
+
 // Makes name the harness for every later edit. Returns whether it took.
 async function select(name, model, onError) {
   if (typeof model === 'function') {
