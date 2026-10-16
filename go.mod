@@ -9,3 +9,7 @@ require (
 )
 
 require github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+
+// px0 carries its own copy of the harness module so it can ship the fx preset
+// before it is released upstream. Drop this line once px0-ai/harness has fx.
+replace github.com/px0-ai/harness => ./internal/harness
