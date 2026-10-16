@@ -12,7 +12,11 @@ const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
 app.setName('px0');
 
 // Args after the app path are forwarded to px0 (target dir/file, PR URL, flags).
-const userArgs = process.argv.slice(app.isPackaged ? 1 : 2);
+// Electron reports isPackaged=true for a renamed executable (the per-repo
+// bundles), so locate our own app directory in argv instead of guessing.
+const argv = process.argv;
+const selfIdx = argv.findIndex((a, i) => i > 0 && !a.startsWith('-') && path.resolve(a) === __dirname);
+const userArgs = argv.slice(selfIdx >= 0 ? selfIdx + 1 : app.isPackaged ? 1 : 2);
 
 function findBinary() {
   const exe = process.platform === 'win32' ? 'px0.exe' : 'px0';
