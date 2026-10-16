@@ -1,0 +1,15 @@
+{
+  "name": "px0-app",
+  "productName": "px0",
+  "version": "0.1.16",
+  "private": true,
+  "description": "Desktop window for px0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "node scripts/brand-dev-electron.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

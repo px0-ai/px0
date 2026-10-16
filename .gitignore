@@ -26,3 +26,6 @@ web/vendor/*.min.js.gz
 # Logs
 *.log
 px0
+
+# Electron app mode
+electron/node_modules/
