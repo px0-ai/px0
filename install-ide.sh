@@ -33,6 +33,7 @@ fi
 # 2. App files
 step "Installing app to $APP_DIR..."
 mkdir -p "$APP_DIR" "$INSTALL_DIR"
+rm -f "$APP_DIR/px0" # new inode: macOS kills a binary overwritten in place (exit 137)
 cp "$ROOT/px0" "$APP_DIR/px0"
 cp -R "$HERE/main.js" "$HERE/launch.js" "$HERE/package.json" "$HERE/package-lock.json" "$HERE/assets" "$HERE/scripts" "$APP_DIR/"
 (cd "$APP_DIR" && npm install --no-audit --no-fund --loglevel=error)
