@@ -17,10 +17,10 @@ npx electron . [px0 args]  # e.g. npx electron . ~/code/myrepo, or a PR URL
 ## Install
 
 ```bash
-./electron/install.sh      # installs a `px0` launcher into ~/.local/bin
-cd ~/code/myrepo && px0    # opens a window on the current directory
+./install-ide.sh           # installs a `px0-ide` launcher into ~/.local/bin
+cd ~/code/myrepo && px0-ide    # opens a window on the current directory
 ```
 
-The launcher runs the app detached from the terminal (log: `$TMPDIR/px0-app.log`) and passes
-`--version`/`--update`/`--help` to the plain px0 binary. App files live in `~/.local/share/px0-app`.
-An existing `~/.local/bin/px0` that isn't ours is moved to `px0.bak`.
+`px0-ide` always starts the Electron app; the regular `px0` command is left alone. It runs
+detached from the terminal (log: `$TMPDIR/px0-ide.log`) and passes `--version`/`--update`/`--help`
+to the plain px0 binary. App files live in `~/.local/share/px0-ide`.
