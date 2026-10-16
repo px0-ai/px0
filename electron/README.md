@@ -13,3 +13,14 @@ npx electron . [px0 args]  # e.g. npx electron . ~/code/myrepo, or a PR URL
 - Arguments are passed straight to px0. `--no-open --no-color --port 0` are added.
 - Closing the window stops the server.
 - Repo name comes from the PR URL if one is given, otherwise the workspace directory name.
+
+## Install
+
+```bash
+./electron/install.sh      # installs a `px0` launcher into ~/.local/bin
+cd ~/code/myrepo && px0    # opens a window on the current directory
+```
+
+The launcher runs the app detached from the terminal (log: `$TMPDIR/px0-app.log`) and passes
+`--version`/`--update`/`--help` to the plain px0 binary. App files live in `~/.local/share/px0-app`.
+An existing `~/.local/bin/px0` that isn't ours is moved to `px0.bak`.
