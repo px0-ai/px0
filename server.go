@@ -126,6 +126,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(s.routePath("/api/file"), s.handleFile)
 	s.mux.HandleFunc(s.routePath("/api/close"), s.handleClose)
 	s.mux.HandleFunc(s.routePath("/api/raw"), s.handleRaw)
+	s.mux.HandleFunc(s.routePath("/api/file/save"), s.handleFileSave)
+	s.mux.HandleFunc(s.routePath("/api/fs/new"), s.handleFSNew)
 	s.mux.HandleFunc(s.routePath("/api/markdown"), s.handleMarkdown)
 	s.mux.HandleFunc(s.routePath("/api/table"), s.handleTable)
 	s.mux.HandleFunc(s.routePath("/api/diff"), s.handleDiff)
@@ -1309,6 +1311,116 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	setRawHeaders(w, rel)
 	http.ServeFile(w, r, abs)
+}
+
+type fileSaveRequest struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		fail(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req fileSaveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	abs, rel, ok := s.safePath(req.Path)
+	if !ok || rel == "" {
+		fail(w, http.StatusBadRequest, "bad path")
+		return
+	}
+
+	dir := filepath.Dir(abs)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fail(w, http.StatusInternalServerError, "failed to create directory: "+err.Error())
+		return
+	}
+
+	if st, err := os.Stat(abs); err == nil && st.IsDir() {
+		fail(w, http.StatusBadRequest, "target is a directory")
+		return
+	}
+
+	if err := os.WriteFile(abs, []byte(req.Content), 0o644); err != nil {
+		fail(w, http.StatusInternalServerError, "failed to write file: "+err.Error())
+		return
+	}
+
+	Evict(abs)
+	if s.lsp != nil {
+		s.lsp.CloseDoc(abs, rel)
+		s.lsp.RefreshOpenDocs()
+	}
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	go s.ix.Build()
+
+	writeJSON(w, map[string]any{
+		"ok":   true,
+		"path": rel,
+		"size": len(req.Content),
+	})
+}
+
+type fsNewRequest struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+func (s *Server) handleFSNew(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		fail(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req fsNewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	abs, rel, ok := s.safePath(req.Path)
+	if !ok || rel == "" {
+		fail(w, http.StatusBadRequest, "bad path")
+		return
+	}
+
+	if _, err := os.Stat(abs); err == nil {
+		fail(w, http.StatusConflict, "already exists: "+rel)
+		return
+	}
+
+	if req.Type == "dir" {
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			fail(w, http.StatusInternalServerError, "failed to create directory: "+err.Error())
+			return
+		}
+	} else {
+		dir := filepath.Dir(abs)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fail(w, http.StatusInternalServerError, "failed to create parent directory: "+err.Error())
+			return
+		}
+		if err := os.WriteFile(abs, []byte(""), 0o644); err != nil {
+			fail(w, http.StatusInternalServerError, "failed to create file: "+err.Error())
+			return
+		}
+		Evict(abs)
+	}
+
+	if s.gitWatcher != nil {
+		s.gitWatcher.Trigger()
+	}
+	s.ix.Build()
+
+	writeJSON(w, map[string]any{
+		"ok":   true,
+		"path": rel,
+		"type": req.Type,
+	})
 }
 
 // handleDiff returns the unified diff of a file against HEAD. available is false

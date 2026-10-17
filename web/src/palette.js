@@ -20,6 +20,8 @@ import { newThread, deleteCurrentThread } from './thread.js';
 import { copyToClipboard, copyRichToClipboard } from './ui.js';
 import { getDocRaw } from './markdown.js';
 import { getSelectedRangeInfo } from './selbar.js';
+import { enterEditMode, exitEditMode, saveActiveFile } from './editview.js';
+import { promptNewItem } from './newitem.js';
 
 export const overlay = $('#overlay');
 export const palInput = $('#pal');
@@ -60,6 +62,16 @@ export const COMMANDS = [
     const d = doc_();
     if (d) copyToClipboard(d.path, `Copied ${d.path}`);
   } },
+  { name: withKeys('File: Edit Current File ({Mod+E})'), run: () => {
+    const d = doc_();
+    if (d && !d.isImage && !d.deleted && !d.diffRef) {
+      if (d.isEditing) exitEditMode();
+      else enterEditMode();
+    }
+  } },
+  { name: withKeys('File: Save File ({Mod+S})'), run: () => saveActiveFile() },
+  { name: 'File: New File…', run: () => promptNewItem('file') },
+  { name: 'File: New Folder…', run: () => promptNewItem('dir') },
   { name: withKeys('Preferences: Open Settings (UI) ({Mod+,})'), run: () => openSettings('ui') },
   { name: 'Preferences: Open Settings (JSON)', run: () => openSettings('json') },
   { name: 'Go to File…', run: () => openPalette('file') },

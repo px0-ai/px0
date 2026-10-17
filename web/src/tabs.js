@@ -15,6 +15,7 @@ import { clearSelectAll } from './selbar.js';
 import { syncPreview, previewing, previewLine } from './markdown.js';
 import { syncDiffView, layoutPref, diffScrollTop, setDiffMode, setSourceJumpHandler, setCommitStepHandler, scrollDiffToLine } from './diff.js';
 import { syncImageView } from './imageview.js';
+import { syncEditUI, editTextarea, updateGutter } from './editview.js';
 
 // Recently closed files, newest last, for Alt+Shift+T.
 const closedTabs = [];
@@ -188,6 +189,7 @@ export async function openFile(path, opts = {}) {
   } else if (!d.diffMode) {
     vp.scrollTop = d.scrollTop;
   }
+  syncEditUI();
   render();
   updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
@@ -323,6 +325,9 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
       prCollapsed: keep.prCollapsed,
       youCollapsed: keep.youCollapsed,
       diffRef: tgt.ref,
+      isEditing: !!keep.isEditing,
+      dirty: !!keep.dirty,
+      editContent: keep.editContent,
     };
 
     for (let k = 0; k < j.lines.length; k++) {
@@ -389,6 +394,13 @@ export function closeTab(i) {
 
 function closeTabs(indices) {
   if (!indices.length) return;
+  const dirtyTabs = indices.map(i => S.tabs[i]).filter(t => t?.dirty);
+  if (dirtyTabs.length > 0) {
+    const names = dirtyTabs.map(t => t.name).join(', ');
+    if (!confirm(`You have unsaved changes in ${names}. Close anyway and discard changes?`)) {
+      return;
+    }
+  }
   // Descending indices stay valid as tabs are removed.
   indices.sort((a, b) => b - a);
   closeTabMenu();
@@ -426,6 +438,7 @@ function closeTabs(indices) {
     syncImageView();
     syncPreview();
     syncDiffView();
+    syncEditUI();
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
     $('#empty').hidden = false; drawCrumbs();
     drawTabs(); updateStatus();
@@ -438,6 +451,11 @@ function closeTabs(indices) {
   syncImageView();
   syncPreview();
   syncDiffView();
+  syncEditUI();
+  if (d && d.isEditing && editTextarea) {
+    editTextarea.value = d.editContent || '';
+    updateGutter();
+  }
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = d.scrollTop; render(); updateStatus();
   saveWorkspaceState();
@@ -470,12 +488,13 @@ async function stepCommitFile(from, file) {
 
 export function drawTabs() {
   $('#tabs').innerHTML = S.tabs.map((t, i) =>
-    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.deleted ? ' tab-deleted' : '') + '" data-i="' + i +
+    '<div class="tab' + (i === S.active ? ' active' : '') + (t.isImage ? ' tab-image' : '') + (t.deleted ? ' tab-deleted' : '') + (t.dirty ? ' tab-dirty' : '') + '" data-i="' + i +
     '" title="' + esc(t.path) + (t.diffRef ? ' — in commit ' + esc(t.diffRef.slice(0, 7)) : '') + '">' +
     (t.isImage ? '<svg class="tab-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1.5"/><path d="M14 10l-3.5-3.5L3 14"/></svg>' : '') +
     '<span class="tn">' + esc(t.name) + '</span>' +
     // Pinned to a commit: the tab is not the working tree, and it should say so.
     (t.diffRef ? '<span class="tab-ref">@' + esc(t.diffRef.slice(0, 7)) + '</span>' : '') +
+    (t.dirty ? '<span class="tab-dirty-dot" title="Unsaved changes">●</span>' : '') +
     '<span class="x" data-close="' + i + '" title="' + withKeys('Close tab ({Alt+W})') + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></span></div>').join('');
   const act = $('#tabs .tab.active');
   if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -485,12 +504,22 @@ export function switchTab(i) {
   if (i === S.active || !S.tabs[i]) return;
   clearLink();
   const prev = doc_();
-  if (prev) prev.scrollTop = vp.scrollTop;
+  if (prev) {
+    prev.scrollTop = vp.scrollTop;
+    if (prev.isEditing && editTextarea) {
+      prev.editContent = editTextarea.value;
+    }
+  }
   S.active = i;
   const curDoc = S.tabs[i];
   syncImageView();
   syncPreview();
   syncDiffView();
+  syncEditUI();
+  if (curDoc.isEditing && editTextarea) {
+    editTextarea.value = curDoc.editContent || '';
+    updateGutter();
+  }
   clearFind();
   clearSelectAll();
   S.at = null;
@@ -594,4 +623,10 @@ export function initTabs() {
       if (c) { showPanel('files'); revealDir(c.dataset.dir); }
     });
   }
+  window.addEventListener('beforeunload', e => {
+    if (S.tabs.some(t => t.dirty)) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 }

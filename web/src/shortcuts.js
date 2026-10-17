@@ -23,6 +23,7 @@ import { handleVimKeyDown, isVimEnabled, getVimMode, showVimHelp, closeVimHelp }
 import { handleImageKey } from './imageview.js';
 import { submitBatch } from './agent.js';
 import { reindexWorkspace } from './panels.js';
+import { enterEditMode, exitEditMode, saveActiveFile } from './editview.js';
 
 /* Each entry lists alternative combos, written as for keyLabel in state.js so
    they show as ⌘/⌥/⇧ on a Mac and Ctrl/Alt/Shift elsewhere. Browsers keep
@@ -32,6 +33,7 @@ export const SHORTCUTS = [
   [['Mod+K'], 'Quick search / palette'], [['Mod+P'], 'Go to file'],
   [['Mod+Shift+P'], 'Command palette'], [['Mod+Shift+O'], 'Go to symbol'],
   [['Mod+Shift+F'], 'Search in files'], [['Mod+Shift+R'], 'Refresh workspace'], [['Mod+F'], 'Find in file'],
+  [['Mod+E'], 'Toggle edit mode'], [['Mod+S'], 'Save file (in edit mode)'],
   [['Mod+G'], 'Go to line'], [['Mod+D'], 'Toggle diff view (git)'], [['Alt+Z'], 'Toggle word wrap'],
   [['Alt+M'], 'Toggle Markdown / table preview'],
   [['Enter', 'Shift+Enter'], 'Next / previous match'],
@@ -146,6 +148,20 @@ export function initShortcuts() {
     if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); openPalette('file'); return; }
     if (mod && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); openPalette('line'); return; }
     if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(S.lastWord); return; }
+    if (mod && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveActiveFile();
+      return;
+    }
+    if (mod && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      const d = doc_();
+      if (d && !d.isImage && !d.deleted && !d.diffRef) {
+        e.preventDefault();
+        if (d.isEditing) exitEditMode();
+        else enterEditMode();
+        return;
+      }
+    }
     if (mod && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); document.body.classList.toggle('side-hidden'); layout(); render(); return; }
     // Diff view of the open file (git only; fails quiet when git is off).
     if (mod && !e.shiftKey && (e.key === 'd' || e.key === 'D')) { if (S.meta?.git) { e.preventDefault(); toggleDiff(); } return; }

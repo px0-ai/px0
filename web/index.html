@@ -19,7 +19,7 @@
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
-    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-collapse-tree" class="mini" title="Collapse all folders" aria-label="Collapse all folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 11 12 6 17 11"/><polyline points="7 18 12 13 17 18"/></svg></button><button id="btn-expand-tree" class="mini" title="Expand all project folders (ignored folders stay closed)" aria-label="Expand all project folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 6 12 11 17 6"/><polyline points="7 13 12 18 17 13"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
+    <header class="panel-head"><span id="root-name">-</span><span class="panel-actions"><div class="sidebar-toggle" role="group" aria-label="Explorer view mode"><button id="btn-files" class="toggle-btn active" title="File Explorer (show all files)" aria-label="File Explorer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><button id="btn-changed" class="toggle-btn" title="Git changes (show changed files only)" aria-label="Git changes"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 3.5-6 3.5"/></svg></button></div><button id="btn-new-file" class="mini" title="New File" aria-label="New File"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></button><button id="btn-new-folder" class="mini" title="New Folder" aria-label="New Folder"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></button><button id="btn-collapse-tree" class="mini" title="Collapse all folders" aria-label="Collapse all folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 11 12 6 17 11"/><polyline points="7 18 12 13 17 18"/></svg></button><button id="btn-expand-tree" class="mini" title="Expand all project folders (ignored folders stay closed)" aria-label="Expand all project folders"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 6 12 11 17 6"/><polyline points="7 13 12 18 17 13"/></svg></button><button id="btn-reindex" class="mini" title="Re-index"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></header>
     <!-- PR review only (web/src/prscope.js): whole PR vs just your own changes -->
     <div id="scope-bar" class="scope-bar" role="group" aria-label="Changes to show" hidden>
       <button type="button" data-scope="all" class="active" aria-pressed="true" title="Every file this PR changes, plus your edits">PR changes <span id="scope-all-n" class="scope-n">0</span></button>
@@ -184,6 +184,20 @@
         </div>
         </div>
       </div>
+      <!-- Direct file edit controls -->
+      <div id="edit-switch" class="view-switch" role="group" aria-label="Edit controls" hidden>
+        <button id="btn-edit-mode" title="Edit this file ({Mod+E})">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <span>Edit</span>
+        </button>
+        <button id="btn-save-file" class="edit-btn-save" title="Save changes ({Mod+S})" hidden>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;vertical-align:-1px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span>Save</span>
+        </button>
+        <button id="btn-cancel-edit" class="edit-btn-done" title="Exit edit mode" hidden>
+          <span>Done</span>
+        </button>
+      </div>
       <!-- Opens the right sidebar; shown only while it is closed -->
       <button id="btn-open-right" class="open-right" title="Open sidebar ({Mod+J})" aria-label="Open right sidebar"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     </div>
@@ -193,6 +207,13 @@
       <!-- #viewport handles scrolling; #sizer sets full document scroll height; #rows renders only visible DOM rows -->
       <div id="viewport">
         <div id="sizer"><div id="rows"></div><div id="caret" hidden></div></div>
+      </div>
+      <!-- Direct editing overlay -->
+      <div id="editview" hidden>
+        <div id="editview-gutter" class="editview-gutter"></div>
+        <div class="editview-wrap">
+          <textarea id="editview-textarea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+        </div>
       </div>
       <!-- Preview: covers the code view for a Markdown tab, or a CSV/TSV tab as a table (Alt+M toggles) -->
       <div id="mdview" hidden><article id="md" class="md"></article></div>
@@ -611,6 +632,24 @@
       <div class="lightbox-canvas bg-checker" id="lb-canvas">
         <img id="lb-img" src="" alt="">
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Prompt Dialog for New File / New Folder -->
+<div id="input-modal" class="modal-overlay" hidden>
+  <div class="fs-modal-card">
+    <div class="fs-modal-header">
+      <h3 id="modal-title" class="fs-modal-title">New File</h3>
+      <button type="button" class="mini" id="modal-btn-close" onclick="document.getElementById('input-modal').hidden=true" title="Close (Esc)">&#10005;</button>
+    </div>
+    <div class="fs-modal-body">
+      <div id="modal-desc" class="fs-modal-desc">Enter relative path from project root:</div>
+      <input id="modal-input" class="fs-modal-input" type="text" spellcheck="false" autocomplete="off" />
+    </div>
+    <div class="fs-modal-footer">
+      <button id="modal-btn-cancel" class="footer-btn" type="button">Cancel</button>
+      <button id="modal-btn-ok" class="footer-btn primary" type="button">Create</button>
     </div>
   </div>
 </div>

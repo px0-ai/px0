@@ -29,10 +29,14 @@ import { initPR } from './pr.js';
 import { initLineComment } from './linecomment.js';
 import { initUnpushed, refreshUnpushed } from './unpushed.js';
 import { initPRScope } from './prscope.js';
+import { initEditView } from './editview.js';
+import { initNewItem } from './newitem.js';
 
 // Initialize all subsystems
 initRenderer();
 initTabs();
+initEditView();
+initNewItem();
 initCursor();
 initHover();
 initSelectionBar();

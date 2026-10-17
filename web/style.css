@@ -804,6 +804,7 @@ body.right-hidden.md-tab.diff-tab #tabs { padding-right: 435px; }
 body.md-tab #tabs { padding-right: 245px; }
 body.diff-tab #tabs { padding-right: 150px; }
 body.md-tab.diff-tab #tabs { padding-right: 395px; }
+body.editing-file #tabs { padding-right: 180px; }
 
 #tabs { display: flex; height: 28px; background: var(--bg2); box-shadow: inset 0 -1px 0 var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 #tabs::-webkit-scrollbar { display: none; }
@@ -823,6 +824,15 @@ body.md-tab.diff-tab #tabs { padding-right: 395px; }
 }
 .tab .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab.tab-deleted .tn { text-decoration: line-through; color: var(--gd); }
+.tab .tab-dirty-dot {
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 1px;
+}
 /* The close cross is drawn, not typed: a glyph's ink sits wherever the font puts
    it, which is below centre for x in most UI fonts. */
 .tab .x { width: 15px; height: 15px; border-radius: var(--r); display: grid; place-items: center; color: var(--faint); flex: none; }
@@ -1310,6 +1320,47 @@ body.mermaid-fs-active { overflow: hidden; }
 .md-alert-caution { --alert: var(--err); }
 .md blockquote.md-alert { padding: 8px 16px; color: var(--fg); border-left-color: var(--alert); }
 .md .md-alert-title { margin: 0 0 4px; font-weight: 600; color: var(--alert); }
+
+/* ---------- direct file edit view ---------- */
+#editview {
+  position: absolute; inset: 0;
+  display: flex; background: var(--bg);
+  overflow: hidden; z-index: 6;
+}
+.editview-gutter {
+  flex: none; width: 45px;
+  background: var(--bg); border-right: 1px solid var(--line);
+  color: var(--faint); font: var(--fs)/var(--lh) var(--mono);
+  text-align: right; padding: 0 8px 40vh 0;
+  user-select: none; overflow: hidden; box-sizing: border-box;
+  white-space: pre;
+}
+.editview-wrap {
+  flex: 1; position: relative; height: 100%; overflow: hidden;
+}
+#editview-textarea {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  padding: 0 8px 40vh 8px; margin: 0;
+  border: none; outline: none; resize: none;
+  background: transparent; color: var(--fg);
+  font: var(--fs)/var(--lh) var(--mono);
+  tab-size: var(--tab-size, 4);
+  -moz-tab-size: var(--tab-size, 4);
+  white-space: pre; overflow: auto;
+  box-sizing: border-box; caret-color: var(--accent);
+}
+.edit-btn-save {
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+  font-weight: 600 !important;
+}
+.edit-btn-save:hover {
+  filter: brightness(1.1);
+}
+.edit-btn-done:hover {
+  color: var(--fg);
+}
 
 /* ---------- dedicated image viewer ---------- */
 #imgview { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); z-index: 5; }
@@ -2067,6 +2118,46 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   position: fixed; inset: 0; background: var(--scrim);
   backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   z-index: 120; display: grid; place-items: center;
+}
+
+/* ---------- new file / folder modal ---------- */
+.fs-modal-card {
+  width: min(440px, 92vw);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.fs-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: var(--bg3);
+  border-bottom: 1px solid var(--line);
+}
+.fs-modal-title {
+  margin: 0; font-size: 13.5px; font-weight: 600; color: var(--fg);
+}
+.fs-modal-body {
+  padding: 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.fs-modal-desc {
+  font-size: 12px; color: var(--dim);
+}
+.fs-modal-input {
+  width: 100%; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r); color: var(--fg);
+  font: var(--fs, 13px)/1.4 var(--mono);
+  outline: none; box-sizing: border-box;
+}
+.fs-modal-input:focus {
+  border-color: var(--accent);
+}
+.fs-modal-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 10px 16px; background: var(--bg3);
+  border-top: 1px solid var(--line);
 }
 
 /* ---------- settings modal ---------- */

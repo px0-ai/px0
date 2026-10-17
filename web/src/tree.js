@@ -6,6 +6,7 @@ import { showToast, copyToClipboard } from './ui.js';
 import { closeSelMenu } from './selbar.js';
 import { emit, on } from './bus.js';
 import { isAutoRevealEnabled } from './settings.js';
+import { promptNewItem } from './newitem.js';
 
 export const treeEl = $('#tree');
 const treeMenu = $('#tree-menu');
@@ -529,11 +530,18 @@ export function openTreeMenu(row, x, y) {
   if (!treeMenu) return;
   treeMenu.replaceChildren();
 
-  const items = [
+  const items = [];
+  if (isDir) {
+    items.push(
+      { action: 'new-file', label: 'New File...' },
+      { action: 'new-folder', label: 'New Folder...' },
+    );
+  }
+  items.push(
     { action: 'copy-relative', label: 'Copy Relative Path' },
     { action: 'copy-name', label: isDir ? 'Copy Folder Name' : 'Copy File Name' },
     { action: 'copy-absolute', label: 'Copy Absolute Path' },
-  ];
+  );
 
   for (const item of items) {
     const btn = document.createElement('button');
@@ -564,7 +572,11 @@ export function initTree() {
       const act = btn.dataset.action;
       closeTreeMenu();
 
-      if (act === 'copy-relative') {
+      if (act === 'new-file') {
+        promptNewItem('file', path);
+      } else if (act === 'new-folder') {
+        promptNewItem('dir', path);
+      } else if (act === 'copy-relative') {
         copyToClipboard(path, 'Copied ' + path);
       } else if (act === 'copy-name') {
         copyToClipboard(name, 'Copied ' + name);
