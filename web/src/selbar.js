@@ -241,11 +241,7 @@ function showSelectionBar(info) {
     } else {
       if (btnSource) btnSource.hidden = false;
       if (btnPreviewText) btnPreviewText.hidden = true;
-      if (btnMarkdown) {
-        btnMarkdown.hidden = !(d && d.markdown);
-        const l = btnMarkdown.querySelector('.footer-btn-label');
-        if (l) l.textContent = 'Copy Markdown';
-      }
+      if (btnMarkdown) btnMarkdown.hidden = true;
     }
   }
 
@@ -411,7 +407,7 @@ export const SEL_MENU_ITEMS = [
   { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
   { sel: 'copy-source', label: 'Copy Source', keys: 'Mod+C', forCode: true },
   { sel: 'copy-preview-text', label: 'Copy Formatted Text', keys: 'Mod+C', forPreview: true },
-  { sel: 'copy-markdown', label: 'Copy Raw Markdown', keys: 'Alt+M', forMarkdown: true },
+  { sel: 'copy-markdown', label: 'Copy Raw Markdown', keys: 'Alt+M', forPreview: true },
   { sel: 'copy-ref', label: 'Copy Ref', keys: 'Alt+C' },
   { sel: 'copy-agent', label: 'Copy with Context', keys: 'Alt+A' },
   { sel: 'usages', label: 'Find Usages', keys: 'Alt+U', forCode: true },

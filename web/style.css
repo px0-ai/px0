@@ -711,9 +711,9 @@ body.right-hidden #right-side, body.right-hidden #right-resizer { display: none;
 .open-right:hover { color: var(--accent-fg); border-color: var(--accent); }
 body:not(.right-hidden) .open-right { display: none; }
 body.right-hidden #tabs { padding-right: 38px; }
-body.right-hidden.md-tab #tabs { padding-right: 285px; }
+body.right-hidden.md-tab #tabs { padding-right: 178px; }
 body.right-hidden.diff-tab #tabs { padding-right: 188px; }
-body.right-hidden.md-tab.diff-tab #tabs { padding-right: 435px; }
+body.right-hidden.md-tab.diff-tab #tabs { padding-right: 328px; }
 #view-switches { position: absolute; top: 3px; right: 8px; z-index: 7; display: flex; gap: 6px; }
 .view-switch {
   height: 22px; display: flex; gap: 1px;
@@ -722,20 +722,6 @@ body.right-hidden.md-tab.diff-tab #tabs { padding-right: 435px; }
 .view-switch button { padding: 0 9px; border-radius: var(--r); font-size: 11px; line-height: 18px; color: var(--dim); }
 .view-switch button:hover { color: var(--fg); }
 .view-switch button.on { background: var(--bg); color: var(--accent-fg); font-weight: 600; }
-.view-switch button.view-switch-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  border-left: 1px solid var(--line);
-  border-radius: 0 var(--r) var(--r) 0;
-  margin-left: 2px;
-  padding-left: 7px;
-  color: var(--dim);
-}
-.view-switch button.view-switch-copy:hover {
-  color: var(--fg);
-  background: var(--bg4);
-}
 .view-switch button:disabled,
 .view-switch button.disabled {
   opacity: .35;
@@ -801,9 +787,9 @@ body.right-hidden.md-tab.diff-tab #tabs { padding-right: 435px; }
 }
 .diff-menu-item.active .diff-item-badge { background: var(--accent); color: var(--on-accent); }
 
-body.md-tab #tabs { padding-right: 245px; }
+body.md-tab #tabs { padding-right: 140px; }
 body.diff-tab #tabs { padding-right: 150px; }
-body.md-tab.diff-tab #tabs { padding-right: 395px; }
+body.md-tab.diff-tab #tabs { padding-right: 290px; }
 body.editing-file #tabs { padding-right: 180px; }
 
 #tabs { display: flex; height: 28px; background: var(--bg2); box-shadow: inset 0 -1px 0 var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }

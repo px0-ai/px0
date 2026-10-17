@@ -63,7 +63,7 @@ px0 automatically normalizes diff selections:
 | :--- | :--- | :--- | :--- | :--- |
 | **Copy Source** | `Mod+C` | Right-Click | `[Copy Source]` | Copies clean code as is without line numbers |
 | **Copy Text (Preview)** | `Mod+C` | Right-Click | `[Copy Text]` | Copies clean plain text + formatted rich HTML |
-| **Copy Raw Markdown** | `Alt+M` | Right-Click | `[Copy Markdown]` | Copies raw Markdown syntax of selection |
+| **Copy Raw Markdown** | `Alt+M` | Right-Click | `[Copy Raw Markdown]` | Copies raw Markdown syntax of selection |
 | **Copy Reference** | `Alt+C` | Right-Click | `[Copy Ref]` | Copies `path#L10-L25` pointer |
 | **Copy for Agent** | `Alt+A` | Right-Click | `[Copy Context]` | Copies formatted markdown with lines & context |
 | **Find Usages** | `Alt+U` | Right-Click | `[Find Usages]` | Finds references across workspace |

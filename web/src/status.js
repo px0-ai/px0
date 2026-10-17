@@ -33,11 +33,8 @@ export function updateStatus() {
     if (pb && isMd) pb.textContent = label;
     document.body.classList.toggle('md-tab', isMd);
     for (const b of sw.children) {
-
       if (b.dataset.md) b.classList.toggle('on', isMd && (b.dataset.md === 'preview') === shown);
     }
-    const copyMdBtn = $('#btn-copy-md');
-    if (copyMdBtn) copyMdBtn.hidden = !isMd || kind !== 'markdown';
   }
 
 

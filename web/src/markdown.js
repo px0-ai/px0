@@ -530,11 +530,6 @@ export function initMarkdown() {
       }
     });
   }
-  const copyMdBtn = $('#btn-copy-md');
-  if (copyMdBtn) {
-    copyMdBtn.addEventListener('click', () => copyFullMarkdown(copyMdBtn));
-  }
-
   on('tab:activated', () => syncPreview());
   on('tabs:cleared', () => syncPreview());
   on('theme:changed', scheduleMermaidThemeRender);
@@ -551,19 +546,6 @@ export function getDocRaw(d) {
       .catch(e => { d.rawTextPromise = null; throw e; });
   }
   return d.rawTextPromise;
-}
-
-export async function copyFullMarkdown(btn = null) {
-  const d = doc_();
-  if (!d) return;
-  const trigger = btn || $('#btn-copy-md');
-  try {
-    const raw = await getDocRaw(d);
-    const lineCount = raw.split('\n').length;
-    copyToClipboard(raw, `Copied ${d.name} (${lineCount.toLocaleString()} lines)`, trigger);
-  } catch (err) {
-    showToast('!', 'Failed to read markdown: ' + err.message);
-  }
 }
 
 export function getFragmentPlainText(frag) {
