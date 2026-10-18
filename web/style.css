@@ -1354,6 +1354,11 @@ body.word-wrap .editview-gutter { white-space: normal; }
 .edit-btn-save:hover {
   filter: brightness(1.1);
 }
+.edit-btn-save.action-success {
+  background: var(--gi) !important;
+  border-color: var(--gi) !important;
+  color: #fff !important;
+}
 .edit-btn-done:hover {
   color: var(--fg);
 }
