@@ -4,6 +4,7 @@ import { vp, showToast, flashActionSuccess } from './ui.js';
 import { drawTabs, loadGutter, reloadOpenTabs } from './tabs.js';
 import { syncPreview } from './markdown.js';
 import { syncDiffView } from './diff.js';
+import { triggerRefresh } from './gitstream.js';
 
 export const editViewEl = $('#editview');
 export const editGutterEl = $('#editview-gutter');
@@ -205,6 +206,7 @@ export async function saveActiveFile() {
     if (btnSaveFile) flashActionSuccess(btnSaveFile, 'Saved');
     showToast('✓', 'Saved ' + d.name);
     loadGutter(d);
+    triggerRefresh();
   } catch (err) {
     showToast('!', 'Failed to save: ' + (err.message || 'unknown error'));
   } finally {

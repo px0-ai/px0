@@ -3,6 +3,7 @@ import { $, apiPostJson } from './state.js';
 import { showToast } from './ui.js';
 import { openFile } from './tabs.js';
 import { enterEditMode } from './editview.js';
+import { triggerRefresh } from './gitstream.js';
 import { drawTree, revealDir, treeEl } from './tree.js';
 
 export function promptNewItem(type, targetDir = '') {
@@ -58,6 +59,8 @@ async function submitNewItem() {
     if (parentDir) {
       await revealDir(parentDir);
     }
+
+    triggerRefresh();
 
     if (currentType === 'file') {
       await openFile(res.path);
