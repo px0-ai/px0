@@ -16,6 +16,7 @@ This directory provides comprehensive documentation for all px0 user-facing feat
 | **In-File Find & Caret** | `Cmd/Ctrl+F`, `Cmd/Ctrl+G` | Active document search, minimap match markers, and line jumps | [In-File Search](in-file-search.md) |
 | **Git Awareness, Diffs & Stage/Commit/Push/Pull** | `Cmd/Ctrl+D` | Real-time status stream, stat cache fast-path, split / unified diffs, a sidebar panel to stage/commit/push/fast-forward-pull, and AI-written commit messages | [Git Integration](git-integration.md) |
 | **GitHub PR Review** | `px0 <pr-url>`, `Alt+R` | Full-tree checkout of a pull request, merge-base diffing, draft comments with Approve / Request Changes / Comment, and committing/pushing/pulling straight from the checkout | [GitHub PR Review](github-pr-review.md) |
+| **Direct File Editing** | `Cmd/Ctrl+E`, `Cmd/Ctrl+S` | Edit and save a file in the browser, create new files and folders, word wrap and unsaved-change protection | [File Editing](file-editing.md) |
 | **Coding Agent Editing** | `Alt+E`, Right-click | Delegating edits to Claude Code, Gemini CLI, Cursor Agent, and more | [Agent Editing](agent-editing.md) |
 | **Threads** | `Alt+T` | Long-running, multi-turn conversations with your coding harness that can read and change any file, with per-turn changed files | [Threads](threads.md) |
 | **Semantic Code Intelligence** | `F12`, `Shift+F12`, `Alt+Shift+H` | Go to Definition, Find References, Call Trails, and Hover docs | [LSP & Intelligence](lsp-code-intelligence.md) |

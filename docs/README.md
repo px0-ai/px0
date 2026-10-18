@@ -10,12 +10,13 @@ This directory houses the comprehensive documentation for px0, split into user-f
 
 ### 1. [Feature Guides](features/README.md)
 Detailed walkthroughs of all px0 features, capabilities, developer workflows, and configuration options without low-level implementation noise.
-- **[Features Overview & Catalog](features/README.md)**: Master index of all 17 feature areas.
+- **[Features Overview & Catalog](features/README.md)**: Master index of all 18 feature areas.
 - **[Fuzzy File Search & Quick Open](features/fuzzy-file-search.md)**: Rapid multi-file discovery with recency weighting (`Cmd/Ctrl+P`, `Cmd/Ctrl+K`).
 - **[Workspace Text & Regex Search](features/workspace-search.md)**: Full-repository pattern matching and symbol exploration (`Cmd/Ctrl+Shift+F`).
 - **[Symbol Outline & Navigation](features/symbol-outline.md)**: In-file structural symbol trees with LSP and regex fallbacks (`Cmd/Ctrl+Shift+O`).
 - **[In-File Find & Caret Navigation](features/in-file-search.md)**: Active document search (`Cmd/Ctrl+F`), line jumps (`Cmd/Ctrl+G`), and caret motion.
 - **[Git Awareness & Visual Diff Viewer](features/git-integration.md)**: Status badges, dirty ancestor trees, gutter markers, and side-by-side / unified diffs (`Cmd/Ctrl+D`).
+- **[Direct File Editing & Creation](features/file-editing.md)**: In-browser edit and save (`Cmd/Ctrl+E`, `Cmd/Ctrl+S`), new files and folders.
 - **[Editing with Coding Agents](features/agent-editing.md)**: Delegating code changes to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, and Goose.
 - **[LSP & Semantic Code Intelligence](features/lsp-code-intelligence.md)**: Go to Definition (`F12`), References (`Shift+F12`), Call Trails (`Alt+Shift+H`), and Hover cards.
 - **[Rendered Markdown Preview](features/markdown-preview.md)**: GFM rendering, syntax-highlighted code fences with copy buttons, and synchronized scrolling (`Alt+M`).
@@ -39,6 +40,7 @@ In-depth technical write-ups covering px0's Go server runtime, concurrency pipel
 - **[Windowed Syntax Highlighting](internals/syntax-highlighting.md)**
 - **[Language Server Protocol Architecture](internals/lsp-and-intelligence.md)**
 - **[Git Awareness & Porcelain Diffing](internals/git-integration.md)**
+- **[Direct File Editing & Creation](internals/file-editing.md)**
 - **[Harness Editing & Agent Dispatch](internals/agent-editing.md)**
 - **[Editor Virtualization & Caret Engine](internals/editor-virtualization.md)**
 - **[Image Viewer Architecture](internals/image-viewer.md)**

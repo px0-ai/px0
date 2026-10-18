@@ -1,6 +1,6 @@
 # Editing with Coding Agents
 
-px0 is intentionally designed as a read-optimized viewer rather than a traditional text editor. When code needs to be modified, px0 allows you to select lines in either the source viewer or the visual diff view and delegate the edit directly to your local CLI coding agent.
+px0 is intentionally designed as a read-optimized viewer rather than a traditional text editor. Small direct edits are possible too (see [File Editing](file-editing.md)). When code needs to be modified, px0 allows you to select lines in either the source viewer or the visual diff view and delegate the edit directly to your local CLI coding agent.
 
 ---
 

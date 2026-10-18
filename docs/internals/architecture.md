@@ -6,7 +6,7 @@ This document describes the high-level architecture, startup pipeline, HTTP serv
 
 px0 is engineered as an ultra-fast, zero-overhead code exploration console. Its architecture is guided by five foundational tenets:
 
-1. Edits Are Delegated: px0 navigates, searches, and inspects code, and does not author changes itself. There are no save buttons and no endpoint accepts file content. Changes are made by a coding harness px0 dispatches on request, one per non-overlapping line range so several can run at once (see [Harness Editing & Agent Dispatch](agent-editing.md)).
+1. Edits Are Mostly Delegated: px0 navigates, searches, and inspects code. Large or multi-file changes are made by a coding harness px0 dispatches on request, one per non-overlapping line range so several can run at once (see [Harness Editing & Agent Dispatch](agent-editing.md)). Small direct edits and new files are the one exception: `/api/file/save` and `/api/fs/new` write content typed in the browser (see [File Editing](file-editing.md)).
 1. Single Static Binary Footprint: All frontend assets (HTML, CSS, JavaScript, icons, themes) are embedded directly into the Go binary at compile time via `go:embed`. px0 requires no Node.js, Python, or Ruby runtime, no external database, and no CGO dependencies.
 1. Sub-Millisecond Responsiveness: The HTTP listener binds, serves the web UI, and opens the default browser in under 1 millisecond. Heavy operations (full directory indexing, git status checks, language server binary discovery) run asynchronously off the critical path.
 1. Stateless in the Workspace: px0 never writes configuration directories, temporary caches, or metadata files (e.g., `.px0/` or `.cache/`) into a workspace. Indexes and caches live in volatile memory. Outside the workspace it keeps only the remembered harness choice and update/telemetry state under `~/.px0/` (or `$XDG_CONFIG_HOME/px0/`).
@@ -81,6 +81,8 @@ When hosted behind reverse proxies or multi-tenant review platforms, px0 support
 | `/api/metrics`        | `GET`  | Point-in-time process memory, CPU, and goroutine stats (polled via `/api/stream` SSE) | JSON (`{rssBytes, cpuUsage, goroutines}`)|
 | `/api/tree`           | `GET`  | Directory contents for the sidebar file explorer (`?dir=path`)          | JSON array of `Node` objects               |
 | `/api/file`           | `GET`  | Windowed, highlighted source file lines (`?path=...&start=0&count=500`) | JSON (`{lines, total, refine, markdown}`)  |
+| `/api/file/save`      | `POST` | Write edited file content, creating parent folders | JSON (`{ok, path, size}`) |
+| `/api/fs/new`         | `POST` | Create an empty file or a folder (`409` if it exists) | JSON (`{ok, path, type}`) |
 | `/api/raw`            | `GET`  | Raw file content for copies and preview assets (attachment; nosniff)    | `application/octet-stream` or `image/*`    |
 | `/api/markdown`       | `GET`  | Converted HTML preview of `.md` / `.markdown` files via goldmark        | JSON (`{path, html}`)                      |
 | `/api/table`          | `GET`  | First 1,000 rows (or 1 MB) of a `.csv` / `.tsv` file, parsed with `encoding/csv` | JSON (`{header, headerLine, rows, cols, truncated}`) |

@@ -74,6 +74,7 @@ The internal documentation is modularized into the following focused guides:
 
 ### Frontend & UI Subsystems
 
+- [Direct File Editing & Creation](file-editing.md): `/api/file/save` and `/api/fs/new`, the textarea edit view, per-tab edit state, wrap-aware gutter, and post-save git refresh.
 - [Editor Virtualization & Caret Engine](editor-virtualization.md): Custom ~60-row DOM virtualization, offscreen sub-pixel font measurement, selection preservation across repaints, decoupled overlay caret, and non-destructive inline decorations.
 - [Image Viewer & Asset Inspection](image-viewer.md): First-class image tabs, interactive viewport transforms (zoom, drag-to-pan, fit-to-window), background contrast cycling, adaptive smooth vs. pixelated rendering, and Markdown click-to-expand lightbox.
 - [File Updates & In-Place Tab Reloading](file-reload-and-updates.md): End-to-end flow for workspace reindex and tab refreshing, in-place document reconciliation, concurrent chunk fetches, live viewport/markdown scroll snapshotting, and file shrinkage handling.

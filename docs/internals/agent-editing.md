@@ -13,7 +13,7 @@ Harnesses are discovered automatically, the same way language servers are. Editi
 
 ## 1. The Dispatcher Model
 
-px0 does not author changes. No endpoint accepts file content; it composes a prompt and reloads whatever the harness wrote.
+px0 does not author agent changes. The harness flow sends no file content; it composes a prompt and reloads whatever the harness wrote. (Direct typing in the browser is a separate path, see [File Editing](file-editing.md).)
 
 Editing works by delegation:
 

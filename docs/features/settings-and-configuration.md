@@ -30,7 +30,7 @@ px0 stores all configuration in a single per-user global file (`~/.px0/settings.
 | `editor.fontFamily` | Text Editor | JetBrains Mono stack | CSS font stack string | Font family stack for viewer |
 | `editor.lineHeight` | Text Editor | `21.0` | `14.0` – `48.0` (px) | Line height for viewer rows |
 | `editor.tabSize` | Text Editor | `4` | `2`, `4`, `8` | Number of spaces per tab |
-| `editor.wordWrap` | Text Editor | `"on"` | `"on"`, `"off"` | Soft line wrapping at editor boundary |
+| `editor.wordWrap` | Text Editor | `"on"` | `"on"`, `"off"` | Soft line wrapping at editor boundary (also applies to the edit view) |
 | `editor.lineNumbers` | Text Editor | `"on"` | `"on"`, `"off"` | Line numbers display in gutter |
 | `editor.cursorStyle` | Text Editor | `"line"` | `"line"`, `"block"`, `"underline"` | Cursor rendering style |
 | `editor.cursorBlinking` | Text Editor | `"smooth"` | `"blink"`, `"smooth"`, `"solid"` | Cursor blinking animation style |

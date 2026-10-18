@@ -14,7 +14,7 @@ General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are 
 - Their initialization latency takes hundreds of milliseconds.
 - Complex DOM representations degrade frame rates when scrolling large files.
 
-Because px0 is a code inspection and navigation tool that never edits text in place (changes go through a coding harness), it bypasses heavy third-party editor runtimes entirely. Instead, it implements a custom, high-performance virtualized surface with a fixed DOM footprint (~60 active nodes) and sub-millisecond paint budgets. This architectural choice keeps the frontend browser tab's RAM strictly bounded (~80–150 MB), ensuring that the combined client-server footprint (~100–180 MB) remains an order of magnitude leaner than Electron IDEs without suffering memory creep on large files.
+Because px0 is a code inspection and navigation tool that does not edit text in the virtualized surface (direct edits use a separate textarea view, see [File Editing](file-editing.md); larger changes go through a coding harness), it bypasses heavy third-party editor runtimes entirely. Instead, it implements a custom, high-performance virtualized surface with a fixed DOM footprint (~60 active nodes) and sub-millisecond paint budgets. This architectural choice keeps the frontend browser tab's RAM strictly bounded (~80–150 MB), ensuring that the combined client-server footprint (~100–180 MB) remains an order of magnitude leaner than Electron IDEs without suffering memory creep on large files.
 
 ## 2. DOM Surface Hierarchy
 
