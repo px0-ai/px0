@@ -1522,3 +1522,93 @@ func TestFSNew(t *testing.T) {
 		t.Fatalf("expected 400 for path traversal, got %d", rec.Code)
 	}
 }
+
+
+
+	// 2. Reject path traversal
+	body, _ = json.Marshal(map[string]string{
+		"path":    "../../escape.txt",
+		"content": "bad",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/file/save", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path traversal, got %d", rec.Code)
+	}
+
+	// 3. Reject directory target
+	body, _ = json.Marshal(map[string]string{
+		"path":    "sub",
+		"content": "bad",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/file/save", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for directory target, got %d", rec.Code)
+	}
+}
+
+func TestFSNew(t *testing.T) {
+	s, root := newTestServer(t)
+
+	// 1. Create new file with nested directory
+	body, _ := json.Marshal(map[string]string{
+		"path": "pkg/nested/new_file.go",
+		"type": "file",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	targetPath := filepath.Join(root, "pkg", "nested", "new_file.go")
+	st, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("expected file to exist at %s: %v", targetPath, err)
+	}
+	if st.IsDir() {
+		t.Fatalf("expected regular file, got directory")
+	}
+
+	// 2. Creating already existing file should fail with 409 Conflict
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict, got %d", rec.Code)
+	}
+
+	// 3. Create new directory
+	body, _ = json.Marshal(map[string]string{
+		"path": "src/components",
+		"type": "dir",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	dirPath := filepath.Join(root, "src", "components")
+	st, err = os.Stat(dirPath)
+	if err != nil || !st.IsDir() {
+		t.Fatalf("expected directory to exist at %s", dirPath)
+	}
+
+	// 4. Reject traversal
+	body, _ = json.Marshal(map[string]string{
+		"path": "../evil",
+		"type": "file",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path traversal, got %d", rec.Code)
+	}
+}
