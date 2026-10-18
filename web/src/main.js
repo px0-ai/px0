@@ -1,11 +1,11 @@
 // web/src/main.js
 import { $, S, api, applyKeyLabels } from './state.js';
 import { measure, layout, render, initRenderer, updateEditorOptionControls } from './renderer.js';
-import { initTabs, openFile, restoreWorkspaceTabs, switchTab } from './tabs.js';
+import { initTabs, openFile, switchTab } from './tabs.js';
 import { initCursor } from './cursor.js';
 import { initHover } from './hover.js';
 import { initSelectionBar } from './selbar.js';
-import { drawTree, treeEl, initTree, revealFile, refreshTree, restoreOpenDirs, setSidebarMode, updateSidebarToggleState, hasGitView } from './tree.js';
+import { drawTree, treeEl, initTree, revealFile, refreshTree, setSidebarMode, updateSidebarToggleState, hasGitView } from './tree.js';
 import { initSearch } from './search.js';
 import { initOutline } from './outline.js';
 import { initPanels } from './panels.js';
@@ -110,12 +110,6 @@ initPRScope();
     }
   }
   updateStatus();
-  try {
-    const session = await api('/api/session');
-    if (session && Array.isArray(session.openDirs) && session.openDirs.length > 0) {
-      restoreOpenDirs(session.openDirs);
-    }
-  } catch {}
   await refreshTree();
   initGitStream();
 
@@ -160,7 +154,6 @@ initPRScope();
       window.history.replaceState({}, '', cleanUrl);
     } catch {}
   } else {
-    await restoreWorkspaceTabs();
     if (hasGitChanges) await selectChangedFileTab();
   }
 

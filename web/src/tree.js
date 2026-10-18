@@ -24,16 +24,6 @@ function setExpandBusy(busy) {
   button.title = busy ? 'Expanding project folders (Collapse all to stop)' : 'Expand all project folders (ignored folders stay closed)';
 }
 
-let saveDirsTimer = null;
-function persistOpenDirs() {
-  if (saveDirsTimer) clearTimeout(saveDirsTimer);
-  saveDirsTimer = setTimeout(async () => {
-    try {
-      await apiPostJson('/api/session', { openDirs: Array.from(openDirs) });
-    } catch {}
-  }, 300);
-}
-
 /* git status letter -> CSS class + label. Empty/absent = clean, no badge. */
 const GIT_STATUS = {
   M: ['git-M', 'modified'], A: ['git-A', 'added'], D: ['git-D', 'deleted'],
@@ -156,14 +146,6 @@ export async function refreshTree() {
   markTreeCleanState();
 }
 
-export function restoreOpenDirs(dirs) {
-  if (Array.isArray(dirs)) {
-    for (const d of dirs) {
-      if (typeof d === 'string') openDirs.add(d);
-    }
-  }
-}
-
 export function collapseAllDirs() {
   expansionVersion++;
   openDirs.clear();
@@ -177,7 +159,6 @@ export function collapseAllDirs() {
   });
 
   setExpandBusy(false);
-  persistOpenDirs();
 }
 
 export async function expandAllDirs() {
@@ -222,7 +203,6 @@ export async function expandAllDirs() {
     }
   } finally {
     if (version === expansionVersion) {
-      persistOpenDirs();
       setExpandBusy(false);
       if (failed) showToast('!', failed + (failed === 1 ? ' folder could not be loaded' : ' folders could not be loaded'));
     }
@@ -261,7 +241,6 @@ export async function revealDir(dir) {
   if (!isCurrent()) return;
   const last = treeEl.querySelector('[data-dir="' + CSS.escape(dir) + '"]');
   if (last) last.scrollIntoView({ block: 'center' });
-  persistOpenDirs();
 }
 
 export async function revealFile(path) {
@@ -301,7 +280,6 @@ export async function expandDirtyDirs(container = treeEl, version = expansionVer
       }
     }
   }
-  if (isCurrent()) persistOpenDirs();
 }
 
 export async function patchTreeGitStatus(statuses = {}, dirtyDirs = {}, staged = {}, yourStatuses = {}, yourDirtyDirs = {}) {
@@ -670,7 +648,6 @@ export function initTree() {
           }
         }
       } else openDirs.delete(path);
-      persistOpenDirs();
       return;
     }
     const f = e.target.closest('[data-file]');

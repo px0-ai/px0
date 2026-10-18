@@ -1,5 +1,5 @@
 // web/src/tabs.js
-import { $, esc, S, doc_, api, apiPost, apiPostJson, LH, CHUNK, withKeys } from './state.js';
+import { $, esc, S, doc_, api, apiPost, LH, CHUNK, withKeys } from './state.js';
 import { emit } from './bus.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 import { render, layout, refineChunk } from './renderer.js';
@@ -201,7 +201,6 @@ export async function openFile(path, opts = {}) {
   updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
   if (push) pushHistory(path, line || d.cur);
-  saveWorkspaceState();
   emit('tab:activated', { doc: d, prevDoc: prev });
 }
 
@@ -369,7 +368,6 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
   drawTabs();
   drawCrumbs();
   updateStatus();
-  saveWorkspaceState();
   if (d) emit('tab:activated', { doc: d });
 }
 
@@ -449,7 +447,6 @@ function closeTabs(indices) {
     rowsEl.innerHTML = ''; sizer.style.height = '0px';
     $('#empty').hidden = false; drawCrumbs();
     drawTabs(); updateStatus();
-    saveWorkspaceState();
     for (const event of closedEvents) emit('tab:closed', event);
     emit('tabs:cleared');
     return;
@@ -465,7 +462,6 @@ function closeTabs(indices) {
   }
   drawTabs(); drawCrumbs(); layout();
   vp.scrollTop = d.scrollTop; render(); updateStatus();
-  saveWorkspaceState();
   for (const event of closedEvents) emit('tab:closed', event);
   if (d) emit('tab:activated', { doc: d });
 }
@@ -539,35 +535,7 @@ export function switchTab(i) {
   render(); updateStatus();
   if ($('#panel-outline')?.classList.contains('active')) loadOutline();
   pushHistory(S.tabs[i].path, S.tabs[i].cur);
-  saveWorkspaceState();
   emit('tab:activated', { doc: S.tabs[i], prevDoc: prev });
-}
-
-let saveSessionTimer = null;
-export function saveWorkspaceState() {
-  if (saveSessionTimer) clearTimeout(saveSessionTimer);
-  saveSessionTimer = setTimeout(async () => {
-    try {
-      const tabs = S.tabs.map(t => ({ path: t.path, ref: t.diffRef || '' }));
-      await apiPostJson('/api/session', { tabs, active: S.active });
-    } catch {}
-  }, 200);
-}
-
-export async function restoreWorkspaceTabs() {
-  try {
-    const session = await api('/api/session');
-    if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) return false;
-    for (const t of session.tabs) {
-      if (t.path) await openFile(t.path, { push: false, ref: t.ref || '' });
-    }
-    if (typeof session.active === 'number' && session.active >= 0 && session.active < S.tabs.length) {
-      switchTab(session.active);
-    }
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function drawCrumbs() {
