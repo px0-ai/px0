@@ -1933,11 +1933,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := r.URL.Query()
 	opts := SearchOpts{
-		Query: q.Get("q"),
-		Regex: q.Get("re") == "1",
-		Case:  q.Get("case") == "1",
-		Word:  q.Get("word") == "1",
-		Glob:  q.Get("glob"),
+		Query:   q.Get("q"),
+		Regex:   q.Get("re") == "1",
+		Case:    q.Get("case") == "1",
+		Word:    q.Get("word") == "1",
+		Glob:    q.Get("glob"),
+		Exclude: q.Get("exclude"),
 	}
 	res, truncated, err := SearchContext(r.Context(), s.ix, opts)
 	if err != nil {

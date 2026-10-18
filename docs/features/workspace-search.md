@@ -20,6 +20,7 @@ Traditional IDEs often struggle with whole-workspace text scans, stalling the UI
 - **Structured File Grouping**: Matches are organized hierarchically by file path in the right Inspector panel. Clicking any file header expands or collapses its matches.
 - **Contextual Snippet Elision**: Each match displays a contextual code snippet with the matching phrase highlighted. Long lines are intelligently elided around the match so you can immediately understand the surrounding code without scrolling horizontally.
 - **One-Click Navigation**: Clicking any snippet immediately opens the target file in the viewer, positions the caret at the matching row, and scrolls the line into the center of the screen.
+- **Per-Search Path Filters**: Narrow candidates with an include glob, then remove exact paths, directory globs, or filename globs with a comma-separated exclude field. Exclusions run before files are opened.
 
 ---
 
@@ -44,9 +45,10 @@ Using regex syntax, you can audit code patterns across the entire project. For e
 1. Press **`Cmd/Ctrl+Shift+F`** to reveal the right-hand Inspector and focus the search input field.
 2. Enter your query or regex pattern and press `Enter`.
 3. As results stream in, the Inspector header displays the total match count and the number of affected files.
-4. Click any result snippet to open the corresponding file at that line.
-5. Use the collapsible chevron next to each file header to collapse files you have already reviewed.
-6. Press `Esc` or click the close button to dismiss the Inspector panel.
+4. Optionally set **files to include** (for example `*.go`) and **files to exclude** (for example `vendor/**, *.min.js`). Include narrows the candidate set first; exclude removes paths from that set.
+5. Click any result snippet to open the corresponding file at that line.
+6. Use the collapsible chevron next to each file header to collapse files you have already reviewed.
+7. Press `Esc` or click the close button to dismiss the Inspector panel.
 
 ---
 
