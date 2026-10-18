@@ -13,17 +13,51 @@ export const btnEditMode = $('#btn-edit-mode');
 export const btnSaveFile = $('#btn-save-file');
 export const btnCancelEdit = $('#btn-cancel-edit');
 
+let mirror = null;
+
 export function updateGutter() {
   if (!editTextarea || !editGutterEl) return;
   const text = editTextarea.value;
-  const lineCount = (text.match(/\n/g) || []).length + 1;
+  const lines = text.split('\n');
+  const lineCount = lines.length;
   const digits = String(lineCount).length;
   editGutterEl.style.width = Math.max(45, digits * (S.chW || 7.8) + 26) + 'px';
-  let s = '';
-  for (let i = 1; i <= lineCount; i++) {
-    s += i + '\n';
+  if (!S.wrap) {
+    let s = '';
+    for (let i = 1; i <= lineCount; i++) s += i + '\n';
+    editGutterEl.textContent = s;
+    return;
   }
-  editGutterEl.textContent = s;
+  // Wrapped lines span several visual rows: measure each in a hidden mirror
+  // laid out like the textarea and size the matching gutter number to it.
+  if (!mirror) {
+    mirror = document.createElement('div');
+    mirror.id = 'editview-mirror';
+    mirror.setAttribute('aria-hidden', 'true');
+    editTextarea.parentElement.appendChild(mirror);
+  }
+  mirror.style.width = editTextarea.clientWidth + 'px';
+  mirror.textContent = '';
+  const frag = document.createDocumentFragment();
+  for (const l of lines) {
+    const row = document.createElement('div');
+    row.textContent = l || ' ';
+    frag.appendChild(row);
+  }
+  mirror.appendChild(frag);
+  const rows = mirror.children;
+  const heights = new Array(lineCount);
+  for (let i = 0; i < lineCount; i++) heights[i] = rows[i].offsetHeight;
+  mirror.textContent = '';
+  const out = document.createDocumentFragment();
+  for (let i = 0; i < lineCount; i++) {
+    const n = document.createElement('div');
+    n.textContent = i + 1;
+    n.style.height = heights[i] + 'px';
+    out.appendChild(n);
+  }
+  editGutterEl.textContent = '';
+  editGutterEl.appendChild(out);
 }
 
 export function syncEditUI() {
@@ -164,6 +198,16 @@ export async function saveActiveFile() {
 
 export function initEditView() {
   if (!editTextarea) return;
+
+  let lastW = 0;
+  new ResizeObserver(() => {
+    const w = editTextarea.clientWidth;
+    if (S.wrap && w && w !== lastW && !editViewEl.hidden) updateGutter();
+    lastW = w;
+  }).observe(editTextarea);
+  new MutationObserver(() => {
+    if (!editViewEl.hidden) updateGutter();
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   editTextarea.addEventListener('scroll', () => {
     if (editGutterEl) editGutterEl.scrollTop = editTextarea.scrollTop;
