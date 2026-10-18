@@ -8,9 +8,10 @@ px0 can check out a pull request's full source tree and review it like any local
 
 GitHub's web PR view shows you the isolated diff, but not the codebase around it: jumping to a caller three files away, or checking how a changed function is used elsewhere, means either trusting memory or manually cloning and switching branches.
 
-With px0, you simply pass the pull request URL:
+With px0, you simply pass the pull request URL — from GitHub or from a self-hosted Gitea (or Forgejo) instance:
 ```bash
 px0 https://github.com/owner/repo/pull/123
+px0 https://gitea.example.com/owner/repo/pulls/123
 ```
 
 px0 automatically prepares a temporary worktree or clone, computes the merge-base diff against the target branch, and opens a lightweight, zero-latency code viewer in your browser.
@@ -23,7 +24,10 @@ Pull request review is triggered by passing the full URL directly:
 
 ```bash
 px0 https://github.com/owner/repo/pull/123
+px0 https://gitea.example.com/owner/repo/pulls/123   # Gitea / Forgejo, any host, optionally under a subpath
 ```
+
+A Gitea URL must include its `http(s)://` scheme, so a local path that happens to contain `/pulls/` is never taken for a PR.
 
 > [!NOTE]
 > Bare PR numbers (e.g. `px0 123`) and the `px0 pr` subcommand have been deprecated in favor of explicit URL routing (`px0 <url>`). Running `px0 pr` provides a helpful reminder to pass the URL directly.
@@ -94,12 +98,18 @@ A PR checkout is a real git worktree, and the git panel works inside it exactly 
 
 ## Authentication & Read-Only Review
 
-px0 discovers forge credentials in the following order:
+px0 discovers GitHub credentials in the following order:
 
 1. **`github.token`** in px0 Settings (`Cmd/Ctrl+,` → GitHub, or `~/.px0/settings.json`).
 2. **`GITHUB_TOKEN`** environment variable.
 3. **`GH_TOKEN`** environment variable.
 4. **`gh auth token`** via the GitHub CLI if installed and authenticated.
+
+For Gitea:
+
+1. **`gitea.token`** in px0 Settings (`Cmd/Ctrl+,` → Gitea).
+2. **`GITEA_TOKEN`** environment variable.
+3. **The `tea` CLI's login for the PR's host** (`tea login add`), read through tea's git credential helper (`tea login helper get`). With several tea logins, the one whose URL is on the PR's host is used.
 
 ### Unauthenticated & Read-Only Access
 If no token is configured:
@@ -107,7 +117,7 @@ If no token is configured:
 - You can draft review comments in memory and use **⚡ Batch Apply** with local AI agents.
 - Formal review submission back to the remote forge requires an auth token. The CLI banner displays:
   ```text
-  access: read-only (no github token: set GITHUB_TOKEN or gh auth login to submit reviews)
+  access: read-only (no GitHub token: set GITHUB_TOKEN or run 'gh auth login' to submit reviews)
   ```
 
 ---
@@ -115,7 +125,7 @@ If no token is configured:
 ## Extensible Forge Architecture (`GitProvider`)
 
 px0 abstracts forge interactions through a clean, minimal `GitProvider` interface in [`provider.go`](file:///home/arpit/workspace/px0/px0/provider.go):
-- **Provider Detection**: Matches input URLs against registered providers (GitHub, and in the future GitLab, Bitbucket, etc.).
+- **Provider Detection**: Matches input URLs against registered providers (GitHub and Gitea; GitLab, Bitbucket, etc. could follow).
 - **Normalized Metadata**: Maps forge-specific PR/MR objects to standard `PRMeta` structures.
 - **Push Access & Token Discovery**: Isolates provider-specific authentication mechanisms.
 
@@ -126,7 +136,7 @@ px0 abstracts forge interactions through a clean, minimal `GitProvider` interfac
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
 | `Alt+R` | Selection in editor or diff view | Open review comment composer |
-| Line Hover (`✏`) | Hovering on editor line number | Choose between GitHub review comment or inline agent edit |
+| Line Hover (`✏`) | Hovering on editor line number | Choose between a PR review comment or inline agent edit |
 | `Cmd/Ctrl+D` | Active tab | Toggle side-by-side / unified diff against merge-base |
 | Command Palette (`Cmd/Ctrl+K`) | Command Palette → **Git: Open Pull Request…** | Launch a new PR review tab |
 | **`⚡ Batch Apply`** | PR header bar | Dispatch all drafted comments to local AI coding harness |

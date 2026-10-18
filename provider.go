@@ -8,11 +8,35 @@ import (
 
 // PRTarget identifies a pull request or merge request across any git forge.
 type PRTarget struct {
-	Provider string // "github", "gitlab", etc.
+	Provider string // "github", "gitea", etc.
+	BaseURL  string // forge web root, e.g. "https://gitea.example.com" ("" means https://github.com)
 	Owner    string // namespace/owner
 	Repo     string // project/repo name
 	Number   int    // PR/MR number
 	URL      string // original URL
+}
+
+// WebBase returns the forge's web root with no trailing slash.
+func (t PRTarget) WebBase() string {
+	if t.BaseURL == "" {
+		return "https://github.com"
+	}
+	return strings.TrimRight(t.BaseURL, "/")
+}
+
+// WebURL is the PR's canonical web page; both GitHub and Gitea serve its
+// commit list at WebURL()+"/commits".
+func (t PRTarget) WebURL() string {
+	seg := "pull"
+	if t.Provider == "gitea" {
+		seg = "pulls"
+	}
+	return fmt.Sprintf("%s/%s/%s/%s/%d", t.WebBase(), t.Owner, t.Repo, seg, t.Number)
+}
+
+// RepoCloneURL is the https clone URL of the PR's base repository.
+func (t PRTarget) RepoCloneURL() string {
+	return fmt.Sprintf("%s/%s/%s.git", t.WebBase(), t.Owner, t.Repo)
 }
 
 // PRMeta holds the normalized metadata px0 needs to check out a PR,
@@ -53,8 +77,15 @@ type PRComment struct {
 // GitProvider abstracts forge-specific operations (GitHub, GitLab, etc.)
 // for pull/merge request reviews.
 type GitProvider interface {
-	// Name returns the provider name (e.g. "github", "gitlab").
+	// Name returns the provider name (e.g. "github", "gitea"). It also names
+	// the provider's token setting: "<name>.token".
 	Name() string
+
+	// Label returns the forge's display name (e.g. "GitHub", "Gitea").
+	Label() string
+
+	// TokenHint tells the user how to give px0 a token for this forge.
+	TokenHint() string
 
 	// MatchURL reports whether this provider recognizes and handles the given URL.
 	MatchURL(rawURL string) bool
@@ -62,9 +93,9 @@ type GitProvider interface {
 	// ParseURL extracts the PR target from the URL.
 	ParseURL(rawURL string) (PRTarget, error)
 
-	// ResolveToken looks for an auth token across settings, env vars, and CLI tools.
-	// An empty return means the session stays read-only.
-	ResolveToken(cfg settings) (token, source string)
+	// ResolveToken looks for an auth token for target's forge across settings,
+	// env vars, and CLI tools. An empty return means the session stays read-only.
+	ResolveToken(cfg settings, target PRTarget) (token, source string)
 
 	// FetchPR fetches pull/merge request metadata from the forge API.
 	FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error)
@@ -79,7 +110,7 @@ type GitProvider interface {
 	// ("issue") comments and inline ("review") comments anchored to a diff line.
 	FetchComments(ctx context.Context, target PRTarget, token string) (issue, review []PRComment, err error)
 
-	// PostIssueComment posts a new top-level PR comment immediately. GitHub has
+	// PostIssueComment posts a new top-level PR comment immediately. Forges have
 	// no threading for these, so "replying" to one is just posting a new one.
 	PostIssueComment(ctx context.Context, target PRTarget, token, body string) (PRComment, error)
 
@@ -90,6 +121,7 @@ type GitProvider interface {
 
 var defaultProviders = []GitProvider{
 	&GitHubProvider{},
+	&GiteaProvider{},
 }
 
 // RegisterProvider registers a custom or additional GitProvider.
@@ -131,5 +163,5 @@ func ParsePRURL(rawURL string) (GitProvider, PRTarget, error) {
 			return p, target, nil
 		}
 	}
-	return nil, PRTarget{}, fmt.Errorf("unsupported or unrecognized PR URL: %q (expected full GitHub URL like https://github.com/owner/repo/pull/123)", rawURL)
+	return nil, PRTarget{}, fmt.Errorf("unsupported or unrecognized PR URL: %q (expected a full GitHub or Gitea URL like https://github.com/owner/repo/pull/123 or https://gitea.example.com/owner/repo/pulls/123)", rawURL)
 }

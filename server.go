@@ -884,7 +884,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	if s.pr != nil {
 		p := s.pr
 		p.mu.Lock()
-		meta["pr"] = map[string]any{
+		prMeta := map[string]any{
 			"number":          p.meta.Number,
 			"title":           p.meta.Title,
 			"author":          p.meta.Author,
@@ -901,6 +901,10 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 			"url":             p.target.URL,
 			"files":           s.ix.PRFiles(),
 		}
+		for k, v := range p.forgeMeta() {
+			prMeta[k] = v
+		}
+		meta["pr"] = prMeta
 		p.mu.Unlock()
 	}
 	writeJSON(w, meta)

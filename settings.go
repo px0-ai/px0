@@ -33,6 +33,7 @@ type settings struct {
 	TablePreviewOpen            *bool    `json:"table.preview.open,omitempty"`
 	TelemetryEnabled            *bool    `json:"telemetry.enabled,omitempty"`
 	GitHubToken                 *string  `json:"github.token,omitempty"`
+	GiteaToken                  *string  `json:"gitea.token,omitempty"`
 	GitCommitMessageInstruction *string  `json:"git.commitMessageInstruction,omitempty"`
 	ServerBasePath              *string  `json:"server.basePath,omitempty"`
 	ExplorerAutoReveal          *bool    `json:"explorer.autoReveal,omitempty"`
@@ -358,6 +359,15 @@ var settingsSchema = []settingSchemaItem{
 		Title:       "GitHub Token",
 		Description: "Personal access token used to check out and review pull requests (px0 <url>). Takes precedence over the GITHUB_TOKEN environment variable and 'gh auth token'.",
 		Category:    "GitHub",
+		Type:        "string",
+		Default:     "",
+		Secret:      true,
+	},
+	{
+		Key:         "gitea.token",
+		Title:       "Gitea Token",
+		Description: "Access token used to check out and review Gitea pull requests (px0 <url>). Takes precedence over the GITEA_TOKEN environment variable and the tea CLI's login for the PR's host.",
+		Category:    "Gitea",
 		Type:        "string",
 		Default:     "",
 		Secret:      true,

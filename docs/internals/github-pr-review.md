@@ -1,6 +1,6 @@
 # Git Forge PR Review & Provider Architecture
 
-This document describes the design and implementation of px0's pull request review feature: the `GitProvider` abstraction layer ([`provider.go`](../../provider.go)), GitHub REST implementation ([`github.go`](../../github.go)), checkout lifecycle and progress reporting ([`pr.go`](../../pr.go)), merge-base diffing ([`git.go`](../../git.go)), and the frontend review interface ([`web/src/pr.js`](../../web/src/pr.js), [`web/src/linecomment.js`](../../web/src/linecomment.js)).
+This document describes the design and implementation of px0's pull request review feature: the `GitProvider` abstraction layer ([`provider.go`](../../provider.go)), GitHub and Gitea REST implementations ([`github.go`](../../github.go), [`gitea.go`](../../gitea.go)), checkout lifecycle and progress reporting ([`pr.go`](../../pr.go)), merge-base diffing ([`git.go`](../../git.go)), and the frontend review interface ([`web/src/pr.js`](../../web/src/pr.js), [`web/src/linecomment.js`](../../web/src/linecomment.js)).
 
 ---
 
@@ -8,7 +8,7 @@ This document describes the design and implementation of px0's pull request revi
 
 Two core px0 tenets shape pull request reviews:
 
-- **Zero-dependency shell-out**: Like `git.go` (which links no Go git library), px0 avoids external forge SDKs. `github.go` uses standard Go `net/http` against the GitHub REST API, plus an optional shell-out to `gh auth token`. Checkout itself uses standard `git fetch`, `git worktree add`, or `git clone` via `exec.Command`.
+- **Zero-dependency shell-out**: Like `git.go` (which links no Go git library), px0 avoids external forge SDKs. `github.go` and `gitea.go` use standard Go `net/http` against the forge's REST API, plus an optional shell-out to `gh auth token` / `tea login helper get` for a token. Checkout itself uses standard `git fetch`, `git worktree add`, or `git clone` via `exec.Command`.
 - **Stateless on disk**: px0 maintains no persistent cache in `~/.px0`. A PR checkout is strictly process-scoped: `checkoutPR` (`pr.go`) places the worktree in `os.MkdirTemp("", "px0-pr-*")`, and `prSession.Close` removes it upon exit (`Ctrl+C` or normal shutdown). This ensures zero leftover disk clutter and prevents stale cache bugs.
 - **In-memory draft comments**: Draft comments live in `prSession.comments` as a thread-safe, mutex-guarded slice in server memory. They never touch disk and vanish when the process exits (submitted or discarded).
 
@@ -20,18 +20,23 @@ To support multiple git forges (GitHub, GitLab, Bitbucket, etc.) without entangl
 
 ```go
 type GitProvider interface {
-    Name() string
+    Name() string      // "github", "gitea"; also names the token setting "<name>.token"
+    Label() string     // "GitHub", "Gitea"
+    TokenHint() string // how to supply a token, for the CLI banner and UI
     MatchURL(rawURL string) bool
     ParseURL(rawURL string) (PRTarget, error)
-    ResolveToken(cfg settings) (token, source string)
+    ResolveToken(cfg settings, target PRTarget) (token, source string)
     FetchPR(ctx context.Context, target PRTarget, token string) (PRMeta, error)
     CheckPushAccess(ctx context.Context, target PRTarget, token string) bool
     SubmitReview(ctx context.Context, target PRTarget, token, headSHA string, comments []prComment, event, body string) error
+    FetchComments(ctx context.Context, target PRTarget, token string) (issue, review []PRComment, err error)
+    PostIssueComment(ctx context.Context, target PRTarget, token, body string) (PRComment, error)
+    ReplyToReviewComment(ctx context.Context, target PRTarget, token string, commentID int64, body string) (PRComment, error)
 }
 ```
 
 ### Data Models
-- **`PRTarget`**: Normalized identifier containing `Provider`, `Owner`, `Repo`, `Number`, and original `URL`.
+- **`PRTarget`**: Normalized identifier containing `Provider`, `BaseURL` (the forge's web root; empty means `https://github.com`), `Owner`, `Repo`, `Number`, and original `URL`. `WebBase()`, `WebURL()`, and `RepoCloneURL()` derive the forge's URLs from it, so nothing in `pr.go` hardcodes github.com.
 - **`PRMeta`**: Standardized metadata across all providers:
   - `Number`, `Title`, `Author`
   - `State`, `Merged`, `MergedAt`
@@ -44,7 +49,7 @@ Pull requests are opened exclusively via `px0 <url>`. URL routing in `main.go` c
 ```go
 provider, target, ok := DetectPRURL(arg0)
 ```
-- Iterates over `defaultProviders` (which includes `&GitHubProvider{}`).
+- Iterates over `defaultProviders` (`&GitHubProvider{}`, then `&GiteaProvider{}`). Gitea is self-hosted, so `GiteaProvider` matches any `http(s)://host[/subpath]/owner/repo/pulls/N` (except on github.com) and takes the instance's root from the URL itself; the scheme is required so a relative path containing `/pulls/` stays a path.
 - If a provider matches and successfully parses the URL, px0 enters PR review mode.
 - Bare numbers (e.g. `px0 123`) and file paths are never mistaken for PR targets; they are processed as regular filesystem paths.
 - Running `px0 pr` outputs an explicit error guiding the user to pass the URL directly.
@@ -98,6 +103,13 @@ When `meta.Merged` is true, px0 does not block or prompt: it proceeds immediatel
 3. `GH_TOKEN` environment variable.
 4. `gh auth token` (GitHub CLI session).
 
+`GiteaProvider.ResolveToken` queries three:
+1. `gitea.token` in `settings.json`.
+2. `GITEA_TOKEN` environment variable.
+3. The `tea` CLI's login for the PR's host, via its git credential helper: `tea login helper get` with `protocol=<scheme>` / `host=<host[:port]>` on stdin, answering `password=<token>`. This finds tea's config wherever tea keeps it and picks the right login among several instances.
+
+`gitAuthCmd` scopes git's `Authorization` header to `target.WebBase()`, so clone/fetch/push to a Gitea host carry its token (Gitea, like GitHub, accepts the token as the Basic password).
+
 ### Fail-Closed Push Access
 `CheckPushAccess` queries `GET /repos/{owner}/{repo}` and extracts `permissions.push`. It **fails closed**: any network error, HTTP error, or missing permission field yields `false`.
 - Gating: `Server.handlePRMeta` passes `writeAccess` to the frontend.
@@ -109,8 +121,16 @@ If no token is found:
 - Draft comments can be created in memory and batch-applied locally with AI agents.
 - The CLI banner alerts the user:
   ```text
-  access: read-only (no github token: set GITHUB_TOKEN or gh auth login to submit reviews)
+  access: read-only (no GitHub token: set GITHUB_TOKEN or run 'gh auth login' to submit reviews)
   ```
+
+### Gitea API Differences
+`gitea.go` talks to `<base>/api/v1` with `Authorization: token <token>`. PR, repository, and issue-comment objects are shaped like GitHub's, so `decodePRMeta`, `decodePushPermission`, and `ghIssueComment` are shared, as is the Link-header pager `getAllPages`. Where Gitea differs:
+- **Review verdicts**: approval is spelled `APPROVED`; inline comments are addressed by line number as `new_position` (head side) or `old_position` (base side).
+- **Existing inline comments**: there is no PR-wide endpoint, only one per review, so `giteaFetchReviewComments` lists the reviews and fetches the comments of each submitted review that has any (pending reviews are someone's drafts and are skipped), a few at a time.
+- **Threads**: Gitea comments carry no `in_reply_to_id`. Its UI groups a conversation by path, side, and line, so `giteaThreads` does the same and points each later comment's `InReplyTo` at the first one.
+- **Replies**: the API has no reply endpoint, so a reply is posted as a `COMMENT` review with one comment on the original's path, side, line, and commit, which Gitea shows in the same conversation.
+- **PR refs**: Gitea also publishes `refs/pull/N/head`, so the worktree path in §3 works unchanged.
 
 ---
 
@@ -140,7 +160,7 @@ Users can delegate all drafted PR comments directly to an AI coding agent (Claud
 
 ### Formal Review Submission
 - `POST /api/pr/submit`: Requires auth token.
-- Calls `provider.SubmitReview` which constructs a single review payload containing the head commit SHA, all drafted comments, and the review body/event (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`).
+- Calls `provider.SubmitReview` which constructs a single review payload containing the head commit SHA, all drafted comments, and the review body/event (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`; Gitea's provider sends `APPROVED` for the first).
 - Clears in-memory drafts upon successful submission.
 
 ---
