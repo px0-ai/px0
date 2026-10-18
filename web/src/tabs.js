@@ -171,6 +171,13 @@ export async function openFile(path, opts = {}) {
     }
   }
 
+  // A diff was asked for on a file that is open for editing: show the diff.
+  // The unsaved text stays in editContent for when editing resumes.
+  if (d && d.isEditing && d.diffMode && wantsDiff) {
+    d.isEditing = false;
+    document.body.classList.remove('editing-file');
+  }
+
   $('#empty').hidden = true;
   syncImageView();
   syncPreview();

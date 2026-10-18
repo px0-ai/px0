@@ -60,6 +60,20 @@ export function updateGutter() {
   editGutterEl.appendChild(out);
 }
 
+// The doc whose text is currently in the textarea; lets any tab switch path
+// (openFile, switchTab, closeTab) swap the content without each repeating it.
+let loadedDoc = null;
+
+function loadEditContent(d) {
+  if (loadedDoc === d) return;
+  if (loadedDoc && loadedDoc.isEditing) loadedDoc.editContent = editTextarea.value;
+  loadedDoc = d;
+  editTextarea.value = d.editContent || '';
+  editTextarea.scrollTop = d.editScrollTop || 0;
+  updateGutter();
+  if (editGutterEl) editGutterEl.scrollTop = editTextarea.scrollTop;
+}
+
 export function syncEditUI() {
   const d = doc_();
   if (!editSwitch) return;
@@ -83,6 +97,7 @@ export function syncEditUI() {
     if (btnSaveFile) btnSaveFile.hidden = false;
     if (btnCancelEdit) btnCancelEdit.hidden = false;
     if (editViewEl) editViewEl.hidden = false;
+    if (editTextarea) loadEditContent(d);
     vp.hidden = true;
     const mv = $('#mdview');
     if (mv) mv.hidden = true;
@@ -131,6 +146,7 @@ export async function enterEditMode(line) {
   syncEditUI();
 
   editTextarea.value = text;
+  loadedDoc = d;
   updateGutter();
 
   const targetLine = line || d.cur || 1;
@@ -210,6 +226,7 @@ export function initEditView() {
   }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   editTextarea.addEventListener('scroll', () => {
+    if (loadedDoc) loadedDoc.editScrollTop = editTextarea.scrollTop;
     if (editGutterEl) editGutterEl.scrollTop = editTextarea.scrollTop;
   }, { passive: true });
 
