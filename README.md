@@ -22,6 +22,7 @@ See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://p
 - GitHub PR reviews & Git panel: Review pull requests directly (`px0 <pr-url>`), inspect scoped merge-base diffs, draft inline review comments, expand recent commits to browse what each one changed, and stage, commit, or push from the browser.
 - Unpushed commit review: Read the commits your branch is ahead of its tracking branch by, one file diff at a time, before you push them.
 - AI coding harness integration: Dispatch edits directly to Claude Code, Gemini CLI, Cursor Agent, Antigravity, OpenCode, Codex, Aider, or Goose with live reloading.
+- Quick edits: Edit and save a file in the browser (`Cmd/Ctrl+E`, `Cmd/Ctrl+S`) with word wrap and unsaved-change protection, and create new files and folders from the sidebar.
 - Fast navigation: Fuzzy file search, symbol outline, and workspace regex search in milliseconds.
 - Remote-first: Run on any remote server, VM, or container and browse locally without SSH key setups or remote daemons.
 - Virtual rendering: Opens 400,000-line files smoothly by mounting only visible rows; frees memory back to the OS after 15 seconds of inactivity.
@@ -85,8 +86,9 @@ include LAN, VPN, and container-network addresses, depending on the remote
 host's interfaces.
 
 Access securely over Tailscale, WireGuard, reverse proxy, or Cloudflare Tunnel
-with zero remote setup overhead and strict read-only sandboxing
-(path traversal protection & DNS rebinding checks).
+with zero remote setup overhead and workspace-confined file access
+(path traversal protection & DNS rebinding checks). Anyone who can reach the
+address can also edit files in that workspace, so expose it only over trusted networks.
 
 ## Development
 
