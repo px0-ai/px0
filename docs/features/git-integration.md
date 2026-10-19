@@ -36,6 +36,7 @@ The sidebar's git panel is the one part of this feature that *does* write to the
 - **Side-by-Side & Unified Diff Modes**:
   - **Side-by-Side (Split)**: View original `HEAD` code on the left and active working-tree code on the right with synchronized scrolling.
   - **Unified**: View changes inline with consecutive additions and deletions.
+- **Expandable Hunk Context**: The unchanged lines git skips between hunks stay reachable the way GitHub reaches them: each hunk header (and a standalone row after the last hunk) wears a blue expander cell that reveals 20 more lines at a time from the edge adjacent to the hunk, walking the gap open hunk-ward. Expanded lines are syntax-highlighted, carry old/new line numbers on both sides, and can be selected and sent to the agent like any diff row. Expansions reset automatically whenever the diff itself refreshes.
 - **Whitespace Diff Filtering**: Toggle whitespace trimming to hide trivial indentation and trailing space differences when reviewing significant logic changes.
 - **Direct Agent Editing from Diffs**: Select any modified or added line in the diff view and trigger an AI agent edit (`Alt+E`) to refine or correct the change on the spot.
 - **Battery and Focus Awareness**: The live stream automatically suspends when the browser tab is hidden (`document.visibilityState === 'hidden'`), conserving CPU cycles and laptop battery. When you switch back to px0, it instantly reconnects and queries `/api/git/refresh` to catch any changes made while the window was in the background.
