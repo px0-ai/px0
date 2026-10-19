@@ -402,3 +402,102 @@ func TestThreadDeleteAPI(t *testing.T) {
 		t.Fatalf("delete without id = %d, want 400", code)
 	}
 }
+
+func TestBuildQueuedMessage(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.go")
+	b := filepath.Join(root, "b.py")
+	os.WriteFile(a, []byte("package a\n\nfunc One() {}\nfunc Two() {}\n"), 0o644)
+	os.WriteFile(b, []byte("x = 1\ny = 2\n"), 0o644)
+
+	cmds := []queuedCommand{
+		{abs: a, rel: "a.go", l1: 3, l2: 4, comment: "rename these"},
+		{abs: b, rel: "b.py", l1: 2, l2: 2, comment: "make y 3"},
+	}
+	got := buildQueuedMessage(cmds, "then run the tests")
+
+	// First queued, first in the prompt; each carries file, lines, code and comment.
+	order := []string{
+		"2 commands", "command 1 first",
+		"### Command 1: @a.go 3-4", "func One() {}", "rename these",
+		"### Command 2: @b.py 2", "y = 2", "make y 3",
+		"### Also", "then run the tests",
+	}
+	last := -1
+	for _, want := range order {
+		i := strings.Index(got, want)
+		if i < 0 || i < last {
+			t.Fatalf("%q missing or out of order in:\n%s", want, got)
+		}
+		last = i
+	}
+	if !strings.Contains(got, "```go\n") || !strings.Contains(got, "```py\n") {
+		t.Fatalf("snippets should be fenced by file type:\n%s", got)
+	}
+
+	// A single command reads naturally, with no typed message.
+	one := buildQueuedMessage(cmds[:1], "")
+	if strings.Contains(one, "commands one at a time") || strings.Contains(one, "### Also") || !strings.Contains(one, "@a.go 3-4") {
+		t.Fatalf("single command = %q", one)
+	}
+	if buildQueuedMessage(nil, "  just a message ") != "just a message" {
+		t.Fatal("no queue should pass the message through")
+	}
+}
+
+func TestThreadQueuedCommandsAPI(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n\nfunc One() {}\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "b.go"), []byte("package b\n\nfunc Two() {}\n"), 0o644)
+	h := writeHarness(t, `printf 'saw: %s\n' "$1"`)
+	s := agentServer(t, root, h)
+
+	queue := []map[string]any{
+		{"path": "a.go", "l1": 3, "l2": 3, "comment": "first thing"},
+		{"path": "b.go", "l1": 3, "l2": 3, "comment": "second thing"},
+	}
+
+	// A queue alone is enough to start a thread; the title comes from the commands.
+	code, m := agentPostJSON(t, s, "/api/threads/create", map[string]any{"queue": queue})
+	if code != 200 {
+		t.Fatalf("create = %d %v", code, m)
+	}
+	id := m["id"].(string)
+	th := waitThreadIdle(t, s, id)
+	reply := th.Turns[0].Reply
+	i1, i2 := strings.Index(reply, "first thing"), strings.Index(reply, "second thing")
+	if i1 < 0 || i2 < i1 || !strings.Contains(reply, "func One() {}") || !strings.Contains(reply, "func Two() {}") {
+		t.Fatalf("both commands, in order, with their code, expected in %q", reply)
+	}
+	if !strings.HasPrefix(th.Title, "2 queued: first thing") {
+		t.Fatalf("title = %q", th.Title)
+	}
+
+	// A follow-up can queue more alongside a typed message.
+	code, _ = agentPostJSON(t, s, "/api/threads/send", map[string]any{"id": id, "message": "and be quick", "queue": queue[:1]})
+	if code != 200 {
+		t.Fatalf("send = %d", code)
+	}
+	th = waitThreadIdle(t, s, id)
+	if r := th.Turns[1].Prompt; !strings.Contains(r, "first thing") || !strings.Contains(r, "and be quick") {
+		t.Fatalf("second prompt = %q", r)
+	}
+
+	// Bad queues are rejected before anything runs.
+	for name, bad := range map[string][]map[string]any{
+		"no comment": {{"path": "a.go", "l1": 1, "l2": 1, "comment": "  "}},
+		"no path":    {{"l1": 1, "l2": 1, "comment": "x"}},
+		"escape":     {{"path": "../outside.go", "l1": 1, "l2": 1, "comment": "x"}},
+	} {
+		if code, _ := agentPostJSON(t, s, "/api/threads/create", map[string]any{"queue": bad}); code != 400 {
+			t.Errorf("%s: create = %d, want 400", name, code)
+		}
+	}
+	tooMany := make([]map[string]any, threadQueueMax+1)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"path": "a.go", "l1": 1, "l2": 1, "comment": "x"}
+	}
+	if code, _ := agentPostJSON(t, s, "/api/threads/create", map[string]any{"queue": tooMany}); code != 400 {
+		t.Errorf("too many: create = %d, want 400", code)
+	}
+}

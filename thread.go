@@ -294,14 +294,19 @@ func cloneThread(t *thread) *thread {
 
 // Create opens a thread anchored at path:l1-l2 (path may be empty for a thread
 // about the workspace as a whole) and starts its first turn.
-func (tm *threadManager) Create(abs, rel string, l1, l2 int, message, scope string) (*thread, error) {
+// Create starts a thread and sends its first message. title seeds the thread's
+// title and may be empty, in which case the message is used.
+func (tm *threadManager) Create(abs, rel string, l1, l2 int, message, scope, title string) (*thread, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return nil, errors.New("message is empty")
 	}
+	if strings.TrimSpace(title) == "" {
+		title = message
+	}
 	t := &thread{
 		ID:      newThreadID(),
-		Title:   threadTitle(message),
+		Title:   threadTitle(title),
 		Path:    rel,
 		Scope:   cleanThreadScope(scope),
 		Created: time.Now().UnixMilli(),
@@ -399,6 +404,98 @@ func threadArgv(name string, template []string, sessionID string, resume bool) [
 // threadPrompt composes what the harness is told for one turn. The anchor and
 // ground rules go in only when the harness has no memory of them: the first
 // turn, or a replay after a harness switch.
+// threadQueueMax bounds how many queued commands one message may carry.
+const threadQueueMax = 50
+
+// threadQueueItem is one queued command from the Threads pane: a comment about
+// a range of code, sent later together with the others, oldest first.
+type threadQueueItem struct {
+	Path    string `json:"path"`
+	L1      int    `json:"l1"`
+	L2      int    `json:"l2"`
+	Comment string `json:"comment"`
+}
+
+// queuedCommand is a threadQueueItem whose path has been resolved.
+type queuedCommand struct {
+	abs, rel string
+	l1, l2   int
+	comment  string
+}
+
+// buildQueuedMessage turns queued commands (first in the slice is first to run)
+// and an optional typed message into one prompt. Each command carries its file,
+// line range and the code at that range, so the harness knows what it refers
+// to. The wording tells the harness to do them in order, which is what lets the
+// same thread prompt serve one command or many.
+func buildQueuedMessage(cmds []queuedCommand, message string) string {
+	message = strings.TrimSpace(message)
+	if len(cmds) == 0 {
+		return message
+	}
+	var b strings.Builder
+	if len(cmds) == 1 {
+		b.WriteString("Carry out the command below. It names the code it refers to; the file may have changed since, so read it if needed.\n\n")
+	} else {
+		fmt.Fprintf(&b, "Carry out these %d commands one at a time, in the order listed (command 1 first). ", len(cmds))
+		b.WriteString("Each names the code it refers to; the file may have changed since, so read it if needed. ")
+		b.WriteString("When done, reply with one short line per command saying what you did.\n\n")
+	}
+	for i, c := range cmds {
+		fmt.Fprintf(&b, "### Command %d: @%s %s\n", i+1, c.rel, lineRef(c.l1, c.l2))
+		if snip := anchorSnippet(c.abs, c.l1, c.l2); snip != "" {
+			fmt.Fprintf(&b, "```%s\n%s\n```\n", strings.TrimPrefix(filepath.Ext(c.rel), "."), snip)
+		}
+		b.WriteString(c.comment)
+		b.WriteString("\n\n")
+	}
+	if message != "" {
+		b.WriteString("### Also\n")
+		b.WriteString(message)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// composeQueued validates and resolves the queue from a request, then returns
+// the message to send and a title seed for a new thread. With no queue the
+// message passes through unchanged.
+func (s *Server) composeQueued(queue []threadQueueItem, message string) (composed, title string, err error) {
+	if len(queue) == 0 {
+		return strings.TrimSpace(message), "", nil
+	}
+	if len(queue) > threadQueueMax {
+		return "", "", fmt.Errorf("too many queued commands (max %d)", threadQueueMax)
+	}
+	cmds := make([]queuedCommand, 0, len(queue))
+	for i, q := range queue {
+		comment := strings.TrimSpace(q.Comment)
+		if comment == "" {
+			return "", "", fmt.Errorf("queued command %d has no comment", i+1)
+		}
+		abs, rel, ok := s.resolvePath(q.Path)
+		if !ok || q.Path == "" {
+			return "", "", fmt.Errorf("queued command %d: bad file %q", i+1, q.Path)
+		}
+		l1, l2 := q.L1, q.L2
+		if l1 < 1 {
+			l1 = 1
+		}
+		if l2 < l1 {
+			l2 = l1
+		}
+		cmds = append(cmds, queuedCommand{abs: abs, rel: rel, l1: l1, l2: l2, comment: comment})
+	}
+	title = strings.TrimSpace(message)
+	if title == "" {
+		title = cmds[0].comment
+		if len(cmds) > 1 {
+			title = fmt.Sprintf("%d queued: %s", len(cmds), title)
+		}
+	}
+	return buildQueuedMessage(cmds, message), title, nil
+}
+
 func threadPrompt(t *thread, prior []*threadTurn, message string, replay bool, prCtx string, scopeChanged bool) string {
 	var b strings.Builder
 	if len(prior) == 0 || replay {
@@ -1096,14 +1193,20 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Path    string `json:"path"`
-		L1      int    `json:"l1"`
-		L2      int    `json:"l2"`
-		Message string `json:"message"`
-		Scope   string `json:"scope"`
+		Path    string            `json:"path"`
+		L1      int               `json:"l1"`
+		L2      int               `json:"l2"`
+		Message string            `json:"message"`
+		Scope   string            `json:"scope"`
+		Queue   []threadQueueItem `json:"queue"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		fail(w, 400, "bad request")
+		return
+	}
+	message, title, err := s.composeQueued(body.Queue, body.Message)
+	if err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	var abs, rel string
@@ -1114,7 +1217,7 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	t, err := s.threads.Create(abs, rel, body.L1, body.L2, body.Message, body.Scope)
+	t, err := s.threads.Create(abs, rel, body.L1, body.L2, message, body.Scope, title)
 	if err != nil {
 		fail(w, threadStatus(err), err.Error())
 		return
@@ -1127,14 +1230,20 @@ func (s *Server) handleThreadSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ID      string `json:"id"`
-		Message string `json:"message"`
+		ID      string            `json:"id"`
+		Message string            `json:"message"`
+		Queue   []threadQueueItem `json:"queue"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		fail(w, 400, "bad request")
 		return
 	}
-	t, err := s.threads.Send(body.ID, body.Message)
+	message, _, err := s.composeQueued(body.Queue, body.Message)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	t, err := s.threads.Send(body.ID, message)
 	if err != nil {
 		fail(w, threadStatus(err), err.Error())
 		return

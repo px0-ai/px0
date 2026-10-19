@@ -390,6 +390,7 @@
         <button class="footer-btn" data-sel="copy-ref" title="Copy file and line reference ({Alt+C})"><span class="footer-btn-label">Copy Ref</span><kbd class="footer-kbd" data-keys="Alt+C"></kbd></button>
         <button class="footer-btn" data-sel="copy-agent" title="Copy snippet with file path and line numbers ({Alt+A})"><span class="footer-btn-label">Copy with Context</span><kbd class="footer-kbd" data-keys="Alt+A"></kbd></button>
         <button class="footer-btn" data-sel="thread" title="Start a thread on this selection ({Alt+T})"><span class="footer-btn-label">Thread</span><kbd class="footer-kbd" data-keys="Alt+T"></kbd></button>
+        <button class="footer-btn" data-sel="queue-thread" title="Queue a command on this selection, to send to the agent with others ({Alt+Q})"><span class="footer-btn-label">Queue</span><kbd class="footer-kbd" data-keys="Alt+Q"></kbd></button>
         <button class="footer-btn" data-sel="agent-edit" title="Edit this selection inline ({Alt+E})"><span class="footer-btn-label">Edit Inline</span><kbd class="footer-kbd" data-keys="Alt+E"></kbd></button>
       </div>
       <div id="footer-actions">
@@ -550,6 +551,21 @@
             <select class="agent-harness-select" id="thr-harness" title="Coding harness"></select>
             <select class="agent-model-select" id="thr-model" title="Model"></select>
           </div>
+          <!-- Queue Agent Thread: a command about a file and lines, held until Send (thread.js) -->
+          <form id="thr-qform" class="thr-qform" hidden autocomplete="off">
+            <div class="thr-qrow">
+              <input id="thr-q-path" class="thr-q-field thr-q-path" type="text" spellcheck="false" placeholder="file" aria-label="File">
+              <input id="thr-q-lines" class="thr-q-field thr-q-lines" type="text" spellcheck="false" placeholder="lines e.g. 12-20" aria-label="Line numbers">
+            </div>
+            <textarea id="thr-q-comment" class="agent-input" rows="2" spellcheck="false" placeholder="What should the agent do here?"></textarea>
+            <div class="agent-foot">
+              <span class="agent-hint" id="thr-q-hint">Enter to queue, Esc to cancel</span>
+              <button type="button" id="thr-q-cancel" class="agent-cancel">Cancel</button>
+              <button type="submit" id="thr-q-add" class="agent-send">Queue</button>
+            </div>
+          </form>
+          <!-- Queued commands, oldest first; Send ships them all together -->
+          <div id="thr-queue" class="thr-queue" role="list" aria-label="Queued commands" hidden></div>
           <textarea id="thr-input" class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Ask about this code, or ask for changes anywhere..."></textarea>
           <div class="agent-foot">
             <span class="agent-hint" id="thr-hint">Enter to send, Shift+Enter for a new line</span>
