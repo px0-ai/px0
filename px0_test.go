@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,7 +61,8 @@ func TestFuzzyRanking(t *testing.T) {
 	files := make([]FileEntry, len(paths))
 	for i, p := range paths {
 		name := p[strings.LastIndex(p, "/")+1:]
-		files[i] = FileEntry{Path: p, Name: name, lower: strings.ToLower(p), nameStart: len(p) - len(name)}
+		lower := strings.ToLower(p)
+		files[i] = FileEntry{Path: p, Name: name, lower: lower, nameStart: len(p) - len(name), depth: strings.Count(p, "/"), mask: pathMask(lower)}
 	}
 
 	got := FuzzyFind(files, "httpserver", 10)
@@ -86,6 +89,50 @@ func TestFuzzyRanking(t *testing.T) {
 	if got := FuzzyFind(files, "appjs", 10); got[0].Path != "web/app.js" {
 		t.Errorf("best match for appjs = %q, want web/app.js", got[0].Path)
 	}
+}
+
+func TestPrefilterEquivalence(t *testing.T) {
+	files := buildRandomEntries(20000)
+	nomask := slices.Clone(files)
+	for i := range nomask {
+		nomask[i].mask = 0
+	}
+	queries := []string{"a", "fz", "README", "é", "~x", "src/ma", "zzzz",
+		"sv", "日", "😀", "%", "+", "=", "SRC", "main.go", "d f", "100"}
+	for _, q := range queries {
+		for _, limit := range []int{50, len(files)} {
+			got := FuzzyFind(files, q, limit)
+			want := FuzzyFind(nomask, q, limit)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("mismatch for %q limit %d", q, limit)
+			}
+			t.Logf("%q limit=%d -> %d results", q, limit, len(want))
+		}
+	}
+}
+
+// buildRandomEntries constructs n FileEntry values exercising the full
+// character space the prefilter mask covers: uppercase, unicode, punctuation,
+// digits and the mapped separator bytes.
+func buildRandomEntries(n int) []FileEntry {
+	dirs := []string{"src", "pkg", "internal", "cmd", "SRC", "Docs", "lib", "testdata", "café", "项目"}
+	bases := []string{"server.go", "README.md", "main.GO", "café_ünïcödé.txt", "a~b.go", "x+y=z.js", "data file.csv", "100%.md", "日本語.go", "emoji_😀.ts", "under_score-dash.dot"}
+	entries := make([]FileEntry, n)
+	for i := 0; i < n; i++ {
+		d := dirs[i%len(dirs)]
+		name := strconv.Itoa(i) + "_" + bases[(i*7)%len(bases)]
+		p := d + "/" + name
+		lower := strings.ToLower(p)
+		entries[i] = FileEntry{
+			Path:      p,
+			Name:      name,
+			lower:     lower,
+			nameStart: len(p) - len(name),
+			depth:     strings.Count(p, "/"),
+			mask:      pathMask(lower),
+		}
+	}
+	return entries
 }
 
 func subsequence(q, s string) bool {
@@ -1223,8 +1270,8 @@ func TestSnipBoundsChecks(t *testing.T) {
 
 func TestFuzzyCaseSensitivity(t *testing.T) {
 	files := []FileEntry{
-		{Path: "src/HTTPServer.go", Name: "HTTPServer.go", lower: "src/httpserver.go", nameStart: 4},
-		{Path: "src/httpserver.go", Name: "httpserver.go", lower: "src/httpserver.go", nameStart: 4},
+		{Path: "src/HTTPServer.go", Name: "HTTPServer.go", lower: "src/httpserver.go", nameStart: 4, depth: 1, mask: pathMask("src/httpserver.go")},
+		{Path: "src/httpserver.go", Name: "httpserver.go", lower: "src/httpserver.go", nameStart: 4, depth: 1, mask: pathMask("src/httpserver.go")},
 	}
 
 	// Uppercase query should rank exact-case match higher
@@ -1478,5 +1525,90 @@ func TestFSNew(t *testing.T) {
 
 
 
+	// 2. Reject path traversal
+	body, _ = json.Marshal(map[string]string{
+		"path":    "../../escape.txt",
+		"content": "bad",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/file/save", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path traversal, got %d", rec.Code)
+	}
 
+	// 3. Reject directory target
+	body, _ = json.Marshal(map[string]string{
+		"path":    "sub",
+		"content": "bad",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/file/save", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for directory target, got %d", rec.Code)
+	}
+}
 
+func TestFSNew(t *testing.T) {
+	s, root := newTestServer(t)
+
+	// 1. Create new file with nested directory
+	body, _ := json.Marshal(map[string]string{
+		"path": "pkg/nested/new_file.go",
+		"type": "file",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	targetPath := filepath.Join(root, "pkg", "nested", "new_file.go")
+	st, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("expected file to exist at %s: %v", targetPath, err)
+	}
+	if st.IsDir() {
+		t.Fatalf("expected regular file, got directory")
+	}
+
+	// 2. Creating already existing file should fail with 409 Conflict
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict, got %d", rec.Code)
+	}
+
+	// 3. Create new directory
+	body, _ = json.Marshal(map[string]string{
+		"path": "src/components",
+		"type": "dir",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	dirPath := filepath.Join(root, "src", "components")
+	st, err = os.Stat(dirPath)
+	if err != nil || !st.IsDir() {
+		t.Fatalf("expected directory to exist at %s", dirPath)
+	}
+
+	// 4. Reject traversal
+	body, _ = json.Marshal(map[string]string{
+		"path": "../evil",
+		"type": "file",
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/new", bytes.NewReader(body))
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path traversal, got %d", rec.Code)
+	}
+}

@@ -20,6 +20,8 @@ type FileEntry struct {
 	Size      int64  `json:"size"` // File size in bytes
 	lower     string // Cached lowercase Path for fast case-insensitive matching
 	nameStart int    // Byte offset in Path where the basename begins
+	depth     int    // strings.Count(Path, "/") — precomputed for fuzzy scoring
+	mask      uint64 // character bitmask of lower — prefilter for fuzzy scoring
 }
 
 // Node represents a file or directory entry in the hierarchical file tree view.
@@ -406,9 +408,12 @@ func (ix *Index) Build() {
 			}
 			kids = append(kids, Node{Name: name, Path: childRel, Size: info.Size(), Status: gs[childRel], Staged: staged[childRel], YourStatus: yourStatuses[childRel]})
 			mu.Lock()
+			lower := strings.ToLower(childRel)
 			files = append(files, FileEntry{
 				Path: childRel, Name: name, Size: info.Size(),
-				lower: strings.ToLower(childRel), nameStart: len(childRel) - len(name),
+				lower: lower, nameStart: len(childRel) - len(name),
+				depth: strings.Count(childRel, "/"),
+				mask:  pathMask(lower),
 			})
 			mu.Unlock()
 		}

@@ -17,11 +17,14 @@ func generateFileEntries(n int) []FileEntry {
 		d := dirs[i%len(dirs)]
 		name := fmt.Sprintf("%d_%s", i, names[i%len(names)])
 		p := fmt.Sprintf("%s/%s", d, name)
+		lower := strings.ToLower(p)
 		entries[i] = FileEntry{
 			Path:      p,
 			Name:      name,
-			lower:     strings.ToLower(p),
+			lower:     lower,
 			nameStart: len(p) - len(name),
+			depth:     strings.Count(p, "/"),
+			mask:      pathMask(lower),
 		}
 	}
 	return entries
@@ -63,6 +66,8 @@ func BenchmarkFuzzyScore(b *testing.B) {
 		Name:      "http_server.go",
 		lower:     "internal/server/http_server.go",
 		nameStart: 16,
+		depth:     2,
+		mask:      pathMask("internal/server/http_server.go"),
 	}
 	q := "httpserver"
 	origQ := "httpserver"
