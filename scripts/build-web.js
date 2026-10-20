@@ -99,8 +99,10 @@ function buildWithNode(entryFile, outFile) {
       else declaredIn.set(m[1], rel);
     }
 
-    // Strip ES import declarations
-    src = src.replace(/^\s*import\s+.*?;?\s*$/gm, '');
+    // Strip ES import declarations (single-line and multi-line)
+    src = src.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]+['"];?\s*$/gm, ''); // single-line: import { A, B } from './x.js';
+    src = src.replace(/^\s*import\s+\{[^}]*$(\n[^}]*)*\n\s*\}\s+from\s+['"][^'"]+['"];?\s*$/gm, ''); // multi-line: import {\n  A,\n  B\n} from './x.js';
+    src = src.replace(/^\s*import\s+.*?;?\s*$/gm, ''); // remaining: import X from './y.js'; import './z.js';
 
     // Replace `export const X =` / `export function X(` / `export async function X(` / `export let X`
     src = src.replace(/^\s*export\s+(?:async\s+)?function\s+/gm, (m) => m.replace('export ', ''));

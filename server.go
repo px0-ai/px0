@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -210,6 +212,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(s.routePath("/api/pr/merge-message"), s.handlePRMergeMessage)
 	s.mux.HandleFunc(s.routePath("/api/forge/connect"), s.handleForgeConnect)
 	s.mux.HandleFunc(s.routePath("/api/session"), s.handleSession)
+	s.mux.HandleFunc(s.routePath("/api/local-comments"), s.handleLocalComments)
+	s.mux.HandleFunc(s.routePath("/api/local-comments/"), s.handleLocalCommentDelete)
 }
 
 // NewServer creates and initializes a px0 Server instance, binding index and language servers,
@@ -2372,6 +2376,108 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, 405, "method not allowed")
 	}
+}
+
+// --- Local comments: plain text review notes, no agent dispatch ---
+
+// LocalComment is a plain-text note attached to a line range, stored on disk.
+type LocalComment struct {
+	ID        string `json:"id"`
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	EndLine   int    `json:"endLine"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+}
+
+func (s *Server) localCommentsPath() string {
+	h := sha256.Sum256([]byte(filepath.Clean(s.ix.Root())))
+	key := hex.EncodeToString(h[:8])
+	dir := filepath.Join(sessionDir(), "..", "local-comments")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, key+".json")
+}
+
+func (s *Server) loadLocalComments() []LocalComment {
+	data, err := os.ReadFile(s.localCommentsPath())
+	if err != nil {
+		return []LocalComment{}
+	}
+	var comments []LocalComment
+	if err := json.Unmarshal(data, &comments); err != nil {
+		return []LocalComment{}
+	}
+	return comments
+}
+
+func (s *Server) saveLocalComments(comments []LocalComment) {
+	p := s.localCommentsPath()
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	b, err := json.MarshalIndent(comments, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(p, append(b, '\n'), 0o644)
+}
+
+func (s *Server) handleLocalComments(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, s.loadLocalComments())
+	case http.MethodPost:
+		if !localPost(w, r) {
+			return
+		}
+		var c LocalComment
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&c); err != nil {
+			fail(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		if c.Path == "" || c.Body == "" {
+			fail(w, http.StatusBadRequest, "path and body are required")
+			return
+		}
+		if c.EndLine < c.Line {
+			c.EndLine = c.Line
+		}
+		h := sha256.Sum256([]byte(fmt.Sprintf("%d-%s", time.Now().UnixNano(), c.Path)))
+		c.ID = hex.EncodeToString(h[:8])
+		c.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		comments := s.loadLocalComments()
+		comments = append(comments, c)
+		s.saveLocalComments(comments)
+		writeJSON(w, c)
+	default:
+		fail(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleLocalCommentDelete(w http.ResponseWriter, r *http.Request) {
+	if !localPost(w, r) {
+		return
+	}
+	prefix := s.routePath("/api/local-comments/")
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	if id == "" {
+		fail(w, http.StatusBadRequest, "comment id required")
+		return
+	}
+	comments := s.loadLocalComments()
+	filtered := make([]LocalComment, 0, len(comments))
+	found := false
+	for _, c := range comments {
+		if c.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	if !found {
+		fail(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	s.saveLocalComments(filtered)
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // CloseThreads stops every thread turn still running at shutdown.

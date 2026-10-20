@@ -462,7 +462,8 @@
         <button class="inspector-tab" data-itab="symbols" title="View file symbols outline">Symbols</button>
         <button class="inspector-tab" data-itab="calls" title="Trace callers and callees ({Alt+Shift+H})">Calls</button>
         <button class="inspector-tab" data-itab="search" title="Search text across workspace ({Mod+Shift+F})">Search</button>
-        <button class="inspector-tab" data-itab="tips" id="tab-tips" title="Tips & Tricks">Tips</button>
+        <button class="inspector-tab" data-itab="tips" id="tab-tips" title="Tips & Tricks" hidden>Tips</button>
+        <button class="inspector-tab" data-itab="local-comments" id="tab-local-comments" title="Review Comments (Alt+N to add)">Comments<span id="lc-tab-count" class="thr-tab-count" hidden></span></button>
       </div>
       <div class="inspector-head-actions">
         <button id="btn-close-right" class="mini" title="Close inspector (Esc)">&#10005;</button>
@@ -606,6 +607,16 @@
         </label>
       </div>
       <div class="panel-body" id="tips-list"></div>
+    </section>
+    <section class="inspector-pane" id="pane-right-local-comments">
+      <div class="inspector-bar">
+        <span class="inspector-sym-title">💬 Review Comments</span>
+        <span class="inspector-badge" id="lc-panel-count">0</span>
+        <span class="grow"></span>
+        <button id="lc-clear-all" class="mini" title="Delete all comments">🗑</button>
+        <button id="lc-export" class="mini" title="Copy all comments as JSON">📋</button>
+      </div>
+      <div class="panel-body" id="lc-panel-list"></div>
     </section>
   </aside>
 </div>

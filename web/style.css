@@ -708,7 +708,7 @@ a.cc-who:hover { color: var(--accent-fg); }
 
 /* ---------- right-side inspector ---------- */
 #right-side {
-  width: 384px; flex: none; background: var(--bg2); border-left: 1px solid var(--line);
+  width: 440px; flex: none; background: var(--bg2); border-left: 1px solid var(--line);
   display: flex; flex-direction: column; overflow: hidden;
 }
 body.right-hidden #right-side, body.right-hidden #right-resizer { display: none; }
@@ -3611,3 +3611,107 @@ body.hide-git-gutter .g-git, body.hide-git-gutter [class*="git-"] { display: non
   line-height: 1.5;
   color: var(--dim);
 }
+
+/* --- Local comments (localcomments.js) --- */
+.lc-composer {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 200;
+  background: var(--bg2, #1e1e2e);
+  border: 1px solid var(--line, #45475a);
+  border-radius: 8px;
+  padding: 12px;
+  width: 420px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.lc-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #cdd6f4);
+  margin-bottom: 8px;
+}
+.lc-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg, #11111b);
+  color: var(--fg, #cdd6f4);
+  border: 1px solid var(--line, #45475a);
+  border-radius: 4px;
+  padding: 8px;
+  font: 12px/1.5 var(--font-mono, monospace);
+  resize: vertical;
+  min-height: 60px;
+}
+.lc-textarea:focus { outline: 1px solid var(--accent, #89b4fa); border-color: var(--accent, #89b4fa); }
+.lc-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.lc-hint { font-size: 11px; color: var(--dim, #6c7086); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.lc-btns { display: flex; gap: 6px; }
+.lc-btn {
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--line, #45475a);
+  background: var(--bg2, #1e1e2e);
+  color: var(--fg, #cdd6f4);
+}
+.lc-btn:hover { background: var(--bg3, #313244); }
+.lc-save { background: var(--accent, #89b4fa); color: var(--bg, #11111b); border-color: transparent; font-weight: 600; }
+.lc-save:hover { opacity: 0.9; }
+.lc-gutter-badge {
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: 2px;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+/* --- Local comments: panel + line highlighting --- */
+.lc-empty { padding: 20px 12px; color: var(--dim, #6c7086); font-size: 12px; text-align: center; line-height: 1.6; }
+.lc-file-header {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #89b4fa);
+  background: var(--bg, #11111b);
+  border-bottom: 1px solid var(--line, #45475a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lc-item {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line, #45475a);
+}
+.lc-item:hover { background: var(--bg3, #313244); }
+.lc-item-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.lc-item-line {
+  font-size: 11px;
+  color: var(--accent, #89b4fa);
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+}
+.lc-item-line:hover { text-decoration: underline; }
+.lc-item-del {
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--dim, #6c7086);
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.lc-item-del:hover { color: var(--red, #f38ba8); background: var(--bg3, #313244); }
+.lc-item-body {
+  font-size: 12px;
+  color: var(--fg, #cdd6f4);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* Line highlighting for commented lines */
+.row.lc-highlight { background: rgba(137, 180, 250, 0.08); }
+.row.lc-highlight .n { color: var(--accent, #89b4fa); }

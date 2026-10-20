@@ -19,6 +19,7 @@ const mdviewEl = $('#mdview');
 
 // e.code, not e.key: Option+letter types a symbol on macOS.
 export const SEL_KEYS = {
+  KeyN: 'local-comment',
   KeyC: 'copy-ref',
   KeyA: 'copy-agent',
   KeyU: 'usages',
@@ -46,6 +47,11 @@ export function setReviewHandler(fn) { reviewHandler = fn; }
 // Read-only accessor so the diff gutter's pencil (linecomment.js) can offer
 // "Add Review Comment" directly, without duplicating the registration.
 export function getReviewHandler() { return reviewHandler; }
+
+/* Local text comments (localcomments.js): plain notes, no agent dispatch. */
+let localCommentHandler = null;
+export function setLocalCommentHandler(fn) { localCommentHandler = fn; }
+export function getLocalCommentHandler() { return localCommentHandler; }
 
 let current = null;   // the selection the bar is showing, or null when it is not
 let pinnedInfo = null; // the line a gutter button opened the menu for; independent of any text selection
@@ -374,6 +380,9 @@ export function runSelectionAction(act, triggerBtn = null, override = null) {
   } else if (act === 'review-comment') {
     if (!reviewHandler) return false;
     reviewHandler(target);
+  } else if (act === 'local-comment') {
+    if (!localCommentHandler) return false;
+    localCommentHandler(target);
   } else if (act === 'usages') {
     findReferences(text.split(/\s+/)[0] || text);
   } else {
@@ -403,6 +412,7 @@ export function openLineMenu(info, x, y) {
 // Exported so pr.js can append "Add Review Comment" in a PR review session
 // without selbar needing to know PR review exists.
 export const SEL_MENU_ITEMS = [
+  { sel: 'local-comment', label: 'Add Comment', keys: 'Alt+N' },
   { sel: 'thread', label: 'Start Agent Thread', keys: 'Alt+T' },
   { sel: 'agent-edit', label: 'Edit Inline', keys: 'Alt+E' },
   { sel: 'copy-source', label: 'Copy Source', keys: 'Mod+C', forCode: true },

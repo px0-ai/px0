@@ -38,6 +38,7 @@ export function setRightInspectorTab(tab) {
   $('#pane-right-search')?.classList.toggle('active', tab === 'search');
   $('#pane-right-threads')?.classList.toggle('active', tab === 'threads');
   $('#pane-right-tips')?.classList.toggle('active', tab === 'tips');
+  $('#pane-right-local-comments')?.classList.toggle('active', tab === 'local-comments');
   if (tab === 'threads') emit('threads:shown');
   if (tab === 'tips') {
     emit('tips:shown');
