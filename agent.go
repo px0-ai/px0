@@ -798,11 +798,30 @@ func changedSince(root string, before map[string]string) []string {
 func worktreeSnapshot(root string) map[string]string {
 	st := gitStatus(root)
 	for rel, code := range st {
-		if fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
-			st[rel] = code + " " + strconv.FormatInt(fi.Size(), 10) + " " + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+		if stamp := fileStamp(root, rel); stamp != "" {
+			st[rel] = code + " " + stamp
 		}
 	}
 	return st
+}
+
+// fileStamp is a file's size and mtime, or "" when it can't be stat'd (a
+// deleted file, say). An edit changes it even when the status letter doesn't.
+func fileStamp(root, rel string) string {
+	fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(fi.Size(), 10) + " " + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+}
+
+// fileStamps is fileStamp for every path git status listed.
+func fileStamps(root string, status map[string]string) map[string]string {
+	out := make(map[string]string, len(status))
+	for rel := range status {
+		out[rel] = fileStamp(root, rel)
+	}
+	return out
 }
 
 // changedSinceMaps compares two status snapshots in both directions. Outside a
