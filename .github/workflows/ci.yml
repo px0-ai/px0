@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches: [master]
   workflow_dispatch:
@@ -17,21 +18,24 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version-file: "go.mod"
           cache: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       # web/app.js is not committed — regenerate it so go:embed has a fresh
       # bundle, and prove the source modules bundle cleanly.
       - name: Bundle web assets
         run: node ./scripts/build-web.js
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Build px0
         run: go build -trimpath -o px0 .
 
-      - name: Run tests
-        run: go test -v ./...
+      - name: Run tests with race detector
+        run: go test -race -v -count=1 ./...
