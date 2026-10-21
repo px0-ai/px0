@@ -1005,11 +1005,20 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 #viewport.linking, #viewport.linking *, #diffview.linking, #diffview.linking * { cursor: pointer; }
 
 @keyframes diffFlash {
-  0% { background-color: rgba(255, 215, 0, 0.35); }
-  100% { background-color: transparent; }
+  0% { opacity: 1; }
+  100% { opacity: 0; }
 }
 .diff-row-flash {
-  animation: diffFlash 1.2s ease-out;
+  position: relative;
+}
+.diff-row-flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: rgba(255, 215, 0, 0.16);
+  pointer-events: none;
+  z-index: 5;
+  animation: diffFlash 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* ---------- hover card ---------- */
@@ -1127,7 +1136,7 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
    modified file's git diff against HEAD, in its own overlay like the
    Markdown preview -- not virtualized, since a single file's diff is small. */
 #diffview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
-#diffcontent { font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
+#diffcontent { position: relative; font: var(--fs)/var(--lh) var(--mono); padding-bottom: 40vh; }
 .diff-empty { padding: 24px 16px; color: var(--faint); font: 12px/1.4 var(--ui); }
 /* A pinned tab's place in its commit, with ‹ › to step through the files. */
 .diff-commit-strip {
@@ -1220,6 +1229,207 @@ body.word-wrap .c { white-space: pre-wrap; word-break: break-word; overflow-wrap
 .diff-row-pair { display: flex; }
 .diff-side { flex: 1 1 50%; min-width: 0; }
 .diff-side-left { border-right: 1px solid var(--line); }
+
+/* Middle gutter channel in split view: hidden when 0 moves, displayed when moves exist */
+.diff-split-gutter {
+  display: none;
+}
+
+.has-diff-moves .diff-side {
+  flex: 1 1 0;
+}
+
+.has-diff-moves .diff-side-left {
+  border-right: none;
+}
+
+.has-diff-moves .diff-split-gutter {
+  display: block;
+  flex: none;
+  width: var(--diff-gutter-w, 28px);
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  user-select: none;
+  box-sizing: border-box;
+}
+
+/* ---------- moved code block detection & navigation ---------- */
+:root {
+  --diff-move: var(--accent-fg);
+  --diff-move-border: color-mix(in srgb, var(--accent) 45%, var(--line));
+  --diff-move-bg: color-mix(in srgb, var(--accent) 6%, transparent);
+  --diff-move-active-border: var(--accent);
+  --diff-move-active-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.diff-moved-row {
+  position: relative;
+  box-shadow: inset 2px 0 0 var(--diff-move-border), inset -2px 0 0 var(--diff-move-border);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.diff-moved-row.diff-moved-first {
+  box-shadow: inset 2px 0 0 var(--diff-move-border), inset -2px 0 0 var(--diff-move-border), inset 0 1px 0 var(--diff-move-border);
+}
+
+.diff-moved-row.diff-moved-last {
+  box-shadow: inset 2px 0 0 var(--diff-move-border), inset -2px 0 0 var(--diff-move-border), inset 0 -2px 0 var(--diff-move-border);
+}
+
+.diff-moved-row.diff-moved-first.diff-moved-last {
+  box-shadow: inset 0 0 0 2px var(--diff-move-border);
+}
+
+.diff-moved-del {
+  background: color-mix(in srgb, var(--gd-bg, transparent) 75%, var(--diff-move-bg)) !important;
+}
+
+.diff-moved-add {
+  background: color-mix(in srgb, var(--gi-bg, transparent) 75%, var(--diff-move-bg)) !important;
+}
+
+.diff-moved-row.diff-move-hover {
+  box-shadow: inset 2px 0 0 var(--diff-move-active-border), inset -2px 0 0 var(--diff-move-active-border) !important;
+  background-color: var(--diff-move-active-bg) !important;
+}
+
+.diff-moved-row.diff-moved-first.diff-move-hover {
+  box-shadow: inset 2px 0 0 var(--diff-move-active-border), inset -2px 0 0 var(--diff-move-active-border), inset 0 1px 0 var(--diff-move-active-border) !important;
+}
+
+.diff-moved-row.diff-moved-last.diff-move-hover {
+  box-shadow: inset 2px 0 0 var(--diff-move-active-border), inset -2px 0 0 var(--diff-move-active-border), inset 0 -2px 0 var(--diff-move-active-border) !important;
+}
+
+.diff-moved-row.diff-moved-first.diff-moved-last.diff-move-hover {
+  box-shadow: inset 0 0 0 2px var(--diff-move-active-border) !important;
+}
+
+/* Header bar matching .diff-hunk-head: exact color, background, and borders */
+.diff-move-header-pair {
+  display: flex;
+}
+
+.diff-side-move-header {
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.diff-side-left.diff-side-move-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.diff-side-right.diff-side-move-header {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.diff-move-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg3);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--accent-fg);
+  font: 12px/1.4 var(--mono);
+  user-select: none;
+  cursor: pointer;
+  white-space: pre;
+  box-sizing: border-box;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.diff-move-bar:hover,
+.diff-move-bar.diff-move-hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg3));
+}
+
+/* Left section: keep it to the right (close to middle gutter) */
+.diff-side-left .diff-move-bar {
+  margin-left: auto;
+  justify-content: flex-end;
+  border: 1px solid var(--line);
+  border-right: none;
+}
+
+/* Right section: keep it to the left (close to middle gutter) */
+.diff-side-right .diff-move-bar {
+  margin-right: auto;
+  justify-content: flex-start;
+  border: 1px solid var(--line);
+  border-left: none;
+}
+
+/* Unified layout: space-between */
+.diff-unified .diff-move-bar {
+  width: 100%;
+  justify-content: space-between;
+  border-left: none;
+  border-right: none;
+}
+
+.diff-move-text {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.diff-move-jump {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font: 11px/1.3 var(--mono);
+  font-weight: 500;
+  color: var(--accent-fg);
+  border: 1px solid var(--line);
+  border-radius: var(--r, 2px);
+  background: var(--bg2);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.diff-move-jump:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.diff-move-header-pair .diff-blank {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* SVG connector overlay between split columns */
+.diff-moves-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+  overflow: visible;
+}
+
+.diff-move-connector {
+  fill: none;
+  stroke: var(--diff-move);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 3;
+  stroke-linejoin: miter;
+  stroke-linecap: square;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+}
+
+.diff-move-connector.diff-move-hover {
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: none;
+}
 
 /* ---------- markdown preview ---------- */
 #mdview { position: absolute; inset: 0; overflow: auto; background: var(--bg); }

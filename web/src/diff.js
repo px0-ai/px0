@@ -127,23 +127,26 @@ async function drawDiff(d, force = false) {
     diffview.scrollTop = d.diffScroll;
     d.diffScroll = 0;
   } else if (d.cur) {
-    scrollDiffToLine(d.cur);
+    scrollDiffToLine(d.cur, false, false);
   }
 }
 
-export function scrollDiffToLine(line) {
+export function scrollDiffToLine(line, smooth = false, flash = false) {
   if (!diffview || !line) return;
   const row = diffview.querySelector(`[data-l="${line}"]`) ||
               diffview.querySelector(`[data-at="${line}"]`) ||
               diffview.querySelector(`[data-old-l="${line}"]`);
   if (row) {
-    row.scrollIntoView({ block: 'center', behavior: 'auto' });
-    row.classList.add('diff-row-flash');
-    setTimeout(() => row.classList.remove('diff-row-flash'), 1200);
+    row.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+    if (flash) {
+      row.classList.add('diff-row-flash');
+      setTimeout(() => row.classList.remove('diff-row-flash'), 1200);
+    }
   }
 }
 
 function appendHunks(frag, hunks, mode, reviewable) {
+  detectMoves(hunks);
   for (const hunk of hunks) {
     frag.append(hunkHeader(hunk));
     frag.append(mode === 'unified' ? unifiedTable(hunk, reviewable) : splitTable(hunk, reviewable));
@@ -152,6 +155,16 @@ function appendHunks(frag, hunks, mode, reviewable) {
 
 function renderDiff(d) {
   diffContent.replaceChildren();
+  diffContent.classList.remove('has-diff-moves');
+  if (diffContent.style.getPropertyValue('--diff-gutter-w')) {
+    diffContent.style.removeProperty('--diff-gutter-w');
+  }
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'diff-moves-svg';
+  svg.setAttribute('class', 'diff-moves-svg');
+  diffContent.append(svg);
+
   const frag = document.createDocumentFragment();
   if (d.diffRef) {
     /* Pinned to one commit by the Unpushed sidebar section. Its line numbers
@@ -171,6 +184,7 @@ function renderDiff(d) {
     diffContent.append(frag);
     syncDiffAgentTargets();
     if (prSyncHandler) prSyncHandler();
+    scheduleDrawMoveConnectors();
     return;
   }
   if (S.meta?.pr && d.prDiffHunks !== undefined) {
@@ -216,6 +230,7 @@ function renderDiff(d) {
   diffContent.append(frag);
   syncDiffAgentTargets();
   if (prSyncHandler) prSyncHandler();
+  scheduleDrawMoveConnectors();
 }
 
 /* Points a tab's diff at the section the sidebar scope is showing. A section
@@ -273,6 +288,7 @@ function createDiffSection(d, kind, title, sub, populateBody) {
     sec.classList.toggle('collapsed');
     d[collapsedKey] = sec.classList.contains('collapsed');
     if (prSyncHandler) prSyncHandler();
+    scheduleDrawMoveConnectors();
   });
 
   sec.append(head, body);
@@ -403,6 +419,405 @@ function parseDiff(text) {
   return hunks;
 }
 
+/* ---------- moved block detection ---------- */
+
+let diffMoveCounter = 0;
+
+function isTrivialMoveLine(str) {
+  const t = (str || '').trim();
+  return t.length === 0 || /^[{}\[\]();,\/\\*]+$/.test(t);
+}
+
+function isValidMoveSlice(rows) {
+  if (rows.length < 3) return false;
+  let nonTrivial = 0;
+  let totalChars = 0;
+  for (const r of rows) {
+    const t = (r.text || '').trim();
+    if (!isTrivialMoveLine(t)) {
+      nonTrivial++;
+      totalChars += t.length;
+    }
+  }
+  return nonTrivial >= 2 && totalChars >= 15;
+}
+
+function computeMaxConcurrentTracks(moveList) {
+  if (!moveList || moveList.length <= 1) return moveList ? moveList.length : 0;
+  const events = [];
+  for (const m of moveList) {
+    const s = Math.min(m.delStart, m.addStart);
+    const e = Math.max(m.delEnd, m.addEnd);
+    events.push({ pos: s, type: 1 });
+    events.push({ pos: e, type: -1 });
+  }
+  events.sort((a, b) => a.pos - b.pos || b.type - a.type);
+  let cur = 0, maxTracks = 0;
+  for (const ev of events) {
+    cur += ev.type;
+    if (cur > maxTracks) maxTracks = cur;
+  }
+  return maxTracks;
+}
+
+function detectMoves(hunks) {
+  diffMoveCounter = 0;
+  if (!hunks || !hunks.length) return;
+  for (const h of hunks) {
+    for (const r of h.rows) {
+      delete r.move;
+    }
+  }
+
+  const detectedMoves = [];
+
+  // Collect contiguous runs of 'del' rows and contiguous runs of 'add' rows
+  const delRuns = [];
+  const addRuns = [];
+
+  for (let hi = 0; hi < hunks.length; hi++) {
+    const rows = hunks[hi].rows;
+    let i = 0;
+    while (i < rows.length) {
+      if (rows[i].type === 'del') {
+        const run = [];
+        while (i < rows.length && rows[i].type === 'del') run.push(rows[i++]);
+        delRuns.push(run);
+      } else if (rows[i].type === 'add') {
+        const run = [];
+        while (i < rows.length && rows[i].type === 'add') run.push(rows[i++]);
+        addRuns.push(run);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  // Find candidate matches between delRuns and addRuns
+  const candidates = [];
+  for (let di = 0; di < delRuns.length; di++) {
+    const dRun = delRuns[di];
+    for (let ai = 0; ai < addRuns.length; ai++) {
+      const aRun = addRuns[ai];
+      for (let dStart = 0; dStart < dRun.length; dStart++) {
+        for (let aStart = 0; aStart < aRun.length; aStart++) {
+          if (dStart > 0 && aStart > 0 && dRun[dStart - 1].text === aRun[aStart - 1].text) continue;
+          let len = 0;
+          while (
+            dStart + len < dRun.length &&
+            aStart + len < aRun.length &&
+            dRun[dStart + len].text === aRun[aStart + len].text
+          ) {
+            len++;
+          }
+          if (len >= 3) {
+            const slice = dRun.slice(dStart, dStart + len);
+            if (isValidMoveSlice(slice)) {
+              candidates.push({ di, dStart, ai, aStart, len });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Sort candidates by length descending so largest matching blocks win
+  candidates.sort((a, b) => b.len - a.len);
+
+  const matchedDels = new Set();
+  const matchedAdds = new Set();
+
+  for (const cand of candidates) {
+    const dRun = delRuns[cand.di];
+    const aRun = addRuns[cand.ai];
+
+    let overlaps = false;
+    for (let k = 0; k < cand.len; k++) {
+      if (matchedDels.has(dRun[cand.dStart + k]) || matchedAdds.has(aRun[cand.aStart + k])) {
+        overlaps = true;
+        break;
+      }
+    }
+    if (overlaps) continue;
+
+    for (let k = 0; k < cand.len; k++) {
+      matchedDels.add(dRun[cand.dStart + k]);
+      matchedAdds.add(aRun[cand.aStart + k]);
+    }
+
+    const moveId = 'move-' + (++diffMoveCounter);
+    const dSlice = dRun.slice(cand.dStart, cand.dStart + cand.len);
+    const aSlice = aRun.slice(cand.aStart, cand.aStart + cand.len);
+
+    const delStart = dSlice[0].oldLine;
+    const delEnd = dSlice[dSlice.length - 1].oldLine;
+    const addStart = aSlice[0].newLine;
+    const addEnd = aSlice[aSlice.length - 1].newLine;
+
+    detectedMoves.push({ delStart, delEnd, addStart, addEnd });
+
+    for (let k = 0; k < cand.len; k++) {
+      const d = dSlice[k];
+      const a = aSlice[k];
+      d.move = {
+        id: moveId,
+        side: 'from',
+        isFirst: k === 0,
+        isLast: k === cand.len - 1,
+        lineCount: cand.len,
+        myStartLine: delStart,
+        myEndLine: delEnd,
+        otherStartLine: addStart,
+        otherEndLine: addEnd,
+      };
+      a.move = {
+        id: moveId,
+        side: 'to',
+        isFirst: k === 0,
+        isLast: k === cand.len - 1,
+        lineCount: cand.len,
+        myStartLine: addStart,
+        myEndLine: addEnd,
+        otherStartLine: delStart,
+        otherEndLine: delEnd,
+      };
+    }
+  }
+
+  // Dynamically size the middle gutter corridor based on maximum concurrent tracks
+  const maxTracks = computeMaxConcurrentTracks(detectedMoves);
+  if (diffContent) {
+    diffContent.classList.toggle('has-diff-moves', maxTracks > 0);
+    if (maxTracks > 0) {
+      const gutterW = maxTracks === 1 ? 28 : Math.min(84, 16 + maxTracks * 14);
+      diffContent.style.setProperty('--diff-gutter-w', gutterW + 'px');
+    } else {
+      diffContent.style.removeProperty('--diff-gutter-w');
+    }
+  }
+}
+
+function createMoveHeader(move, layout = 'unified') {
+  const el = document.createElement('div');
+  el.className = 'diff-move-bar diff-move-bar-' + move.side;
+  el.dataset.moveId = move.id;
+  el.dataset.targetLine = move.otherStartLine;
+  el.dataset.moveSide = move.side;
+
+  const isFrom = move.side === 'from';
+  const rangeStr = move.otherStartLine + (move.otherStartLine !== move.otherEndLine ? '–' + move.otherEndLine : '');
+
+  const text = document.createElement('span');
+  text.className = 'diff-move-text';
+  text.textContent = (isFrom ? 'Code moved to line ' : 'Code moved from line ') + rangeStr;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'diff-move-jump';
+  btn.dataset.moveId = move.id;
+  btn.dataset.targetLine = move.otherStartLine;
+  btn.dataset.moveSide = move.side;
+  btn.title = 'Jump to ' + (isFrom ? 'destination' : 'source') + ' (line ' + move.otherStartLine + ')';
+  btn.innerHTML = isFrom ? '↷ Jump' : '↶ Jump';
+
+  el.append(text, btn);
+  return el;
+}
+
+let diffMoveRaf = null;
+
+function scheduleDrawMoveConnectors() {
+  if (diffMoveRaf) cancelAnimationFrame(diffMoveRaf);
+  diffMoveRaf = requestAnimationFrame(() => {
+    diffMoveRaf = null;
+    drawMoveConnectors();
+  });
+}
+
+function drawMoveConnectors() {
+  const svg = $('#diff-moves-svg');
+  if (!svg || diffview.hidden) return;
+
+  svg.replaceChildren();
+
+  const d = doc_();
+  if (d?.diffMode === 'unified') return;
+
+  const moveIds = new Set();
+  for (const el of diffContent.querySelectorAll('.diff-side-move-header[data-move-id], .diff-move-bar[data-move-id]')) {
+    moveIds.add(el.dataset.moveId);
+  }
+  if (!moveIds.size) return;
+
+  const w = Math.max(diffContent.scrollWidth, diffContent.clientWidth, diffview.scrollWidth || 0);
+  const h = Math.max(diffContent.scrollHeight, diffContent.clientHeight, diffview.scrollHeight || 0);
+  svg.setAttribute('width', String(w));
+  svg.setAttribute('height', String(h));
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `
+    <marker id="diff-move-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="var(--diff-move)" />
+    </marker>
+    <marker id="diff-move-arrow-active" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="var(--accent)" />
+    </marker>
+  `;
+  svg.append(defs);
+
+  const cRect = diffContent.getBoundingClientRect();
+
+  // Collect all moves with their geometry and vertical spans
+  const moves = [];
+  for (const moveId of moveIds) {
+    const sEl = diffContent.querySelector(`.diff-side-left.diff-side-move-header[data-move-id="${moveId}"]`) ||
+                diffContent.querySelector(`.diff-side-left.diff-moved-first[data-move-id="${moveId}"]`);
+    const tEl = diffContent.querySelector(`.diff-side-right.diff-side-move-header[data-move-id="${moveId}"]`) ||
+                diffContent.querySelector(`.diff-side-right.diff-moved-first[data-move-id="${moveId}"]`);
+    if (!sEl || !tEl || !sEl.offsetParent || !tEl.offsetParent) continue;
+
+    const sRect = sEl.getBoundingClientRect();
+    const tRect = tEl.getBoundingClientRect();
+    if (sRect.height === 0 || tRect.height === 0) continue;
+
+    const gutterEl = sEl.parentElement?.querySelector('.diff-split-gutter') || diffContent.querySelector('.diff-split-gutter');
+    const gRect = gutterEl ? gutterEl.getBoundingClientRect() : null;
+
+    const y1 = sRect.top - cRect.top + sRect.height / 2;
+    const y2 = tRect.top - cRect.top + tRect.height / 2;
+
+    moves.push({
+      moveId,
+      sRect,
+      tRect,
+      gRect,
+      y1,
+      y2,
+      minY: Math.min(y1, y2),
+      maxY: Math.max(y1, y2),
+      track: 0,
+    });
+  }
+
+  if (!moves.length) return;
+
+  // Sort moves vertically to allocate non-overlapping tracks
+  moves.sort((a, b) => a.minY - b.minY || a.maxY - b.maxY);
+
+  // Interval track allocation (greedy coloring) so overlapping vertical lines use distinct lanes
+  const trackEndTimes = [];
+  for (const m of moves) {
+    let assigned = -1;
+    for (let t = 0; t < trackEndTimes.length; t++) {
+      if (trackEndTimes[t] + 4 < m.minY) {
+        assigned = t;
+        trackEndTimes[t] = m.maxY;
+        break;
+      }
+    }
+    if (assigned === -1) {
+      assigned = trackEndTimes.length;
+      trackEndTimes.push(m.maxY);
+    }
+    m.track = assigned;
+  }
+
+  const numTracks = Math.max(1, trackEndTimes.length);
+
+  for (const m of moves) {
+    let x1, x2, xTrack;
+    if (m.gRect) {
+      x1 = m.gRect.left - cRect.left;
+      x2 = m.gRect.right - cRect.left;
+      const gWidth = m.gRect.width;
+
+      if (numTracks === 1) {
+        xTrack = x1 + gWidth / 2;
+      } else {
+        const pad = Math.min(10, Math.max(6, gWidth * 0.16));
+        const avail = gWidth - 2 * pad;
+        const step = avail / (numTracks - 1);
+        xTrack = x1 + pad + m.track * step;
+      }
+    } else {
+      const xMid = m.sRect.right - cRect.left;
+      x1 = xMid - 22;
+      x2 = xMid + 22;
+      if (numTracks === 1) {
+        xTrack = xMid;
+      } else {
+        const pad = 8;
+        const avail = 44 - 2 * pad;
+        const step = avail / (numTracks - 1);
+        xTrack = x1 + pad + m.track * step;
+      }
+    }
+
+    // Straight orthogonal path with non-overlapping vertical track
+    const dStr = `M ${x1} ${m.y1} L ${xTrack} ${m.y1} L ${xTrack} ${m.y2} L ${x2} ${m.y2}`;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', dStr);
+    path.setAttribute('class', 'diff-move-connector');
+    path.dataset.moveId = m.moveId;
+    path.setAttribute('marker-end', 'url(#diff-move-arrow)');
+    svg.append(path);
+  }
+}
+
+function flashMoveSection(moveId, targetSide) {
+  if (!diffview || !moveId || !targetSide) return;
+  const els = diffview.querySelectorAll(
+    `.diff-moved-row.diff-moved-${targetSide}[data-move-id="${moveId}"], .diff-move-bar-${targetSide}[data-move-id="${moveId}"]`
+  );
+  for (const el of els) {
+    el.classList.remove('diff-row-flash');
+    void el.offsetWidth;
+    el.classList.add('diff-row-flash');
+    setTimeout(() => el.classList.remove('diff-row-flash'), 1050);
+  }
+}
+
+const FLASH_PAUSE_MS = 180; // Intentional pause after arriving before the blink triggers
+
+function jumpAndFlash(targetEl, moveId, targetSide) {
+  if (!targetEl || !diffview) return;
+  const diffRect = diffview.getBoundingClientRect();
+  const targetRect = targetEl.getBoundingClientRect();
+  const isCentered = Math.abs((targetRect.top + targetRect.height / 2) - (diffRect.top + diffRect.height / 2)) < 30;
+
+  targetEl.scrollIntoView({ block: 'center', behavior: isCentered ? 'auto' : 'smooth' });
+
+  if (isCentered) {
+    if (moveId && targetSide) {
+      setTimeout(() => flashMoveSection(moveId, targetSide), FLASH_PAUSE_MS);
+    }
+    return;
+  }
+
+  if (moveId && targetSide) {
+    let fired = false;
+    const trigger = () => {
+      if (fired) return;
+      fired = true;
+      setTimeout(() => flashMoveSection(moveId, targetSide), FLASH_PAUSE_MS);
+    };
+    diffview.addEventListener('scrollend', trigger, { once: true });
+    setTimeout(trigger, 450);
+  }
+}
+
+function setMoveHover(moveId, active) {
+  if (!diffview || !moveId) return;
+  const els = diffview.querySelectorAll(`[data-move-id="${moveId}"]`);
+  for (const el of els) {
+    el.classList.toggle('diff-move-hover', active);
+    if (el instanceof SVGPathElement || (el.tagName && el.tagName.toLowerCase() === 'path')) {
+      el.setAttribute('marker-end', active ? 'url(#diff-move-arrow-active)' : 'url(#diff-move-arrow)');
+    }
+  }
+}
+
 /* ---------- unified layout: one row per diff line ---------- */
 
 function unifiedTable(hunk, reviewable = true) {
@@ -417,17 +832,28 @@ function unifiedTable(hunk, reviewable = true) {
     let dels = [], adds = [];
     while (i < hunk.rows.length && hunk.rows[i].type === 'del') dels.push(hunk.rows[i++]);
     while (i < hunk.rows.length && hunk.rows[i].type === 'add') adds.push(hunk.rows[i++]);
-    const n = Math.min(dels.length, adds.length);
+    const nonMovedDels = dels.filter(d => !d.move);
+    const nonMovedAdds = adds.filter(a => !a.move);
+    const n = Math.min(nonMovedDels.length, nonMovedAdds.length);
     for (let k = 0; k < n; k++) {
-      const diff = diffLine(dels[k].text, adds[k].text);
-      rowHtml.set(dels[k], diff.oldHtml);
-      rowHtml.set(adds[k], diff.newHtml);
+      const diff = diffLine(nonMovedDels[k].text, nonMovedAdds[k].text);
+      rowHtml.set(nonMovedDels[k], diff.oldHtml);
+      rowHtml.set(nonMovedAdds[k], diff.newHtml);
     }
   }
 
   for (const row of hunk.rows) {
+    if (row.move && row.move.isFirst) {
+      table.append(createMoveHeader(row.move, 'unified'));
+    }
     const r = document.createElement('div');
     r.className = 'diff-row diff-' + row.type;
+    if (row.move) {
+      r.classList.add('diff-moved-row', 'diff-moved-' + row.move.side);
+      r.dataset.moveId = row.move.id;
+      if (row.move.isFirst) r.classList.add('diff-moved-first');
+      if (row.move.isLast) r.classList.add('diff-moved-last');
+    }
     anchor(r, row, reviewable);
     r.append(
       lineCell(row.type === 'add' ? '' : row.oldLine, reviewable),
@@ -449,16 +875,42 @@ function splitTable(hunk, reviewable = true) {
     let leftRow = pair.left;
     let rightRow = pair.right;
     if (leftRow && rightRow && leftRow.type === 'del' && rightRow.type === 'add') {
-      const diff = diffLine(leftRow.text, rightRow.text);
-      leftRow = { ...leftRow, html: diff.oldHtml };
-      rightRow = { ...rightRow, html: diff.newHtml };
+      if (!leftRow.move && !rightRow.move) {
+        const diff = diffLine(leftRow.text, rightRow.text);
+        leftRow = { ...leftRow, html: diff.oldHtml };
+        rightRow = { ...rightRow, html: diff.newHtml };
+      }
+    }
+    if (leftRow?.move?.isFirst || rightRow?.move?.isFirst) {
+      const hr = document.createElement('div');
+      hr.className = 'diff-row-pair diff-move-header-pair';
+      const leftHead = document.createElement('div');
+      leftHead.className = 'diff-side diff-side-left' + (leftRow?.move?.isFirst ? ' diff-side-move-header' : ' diff-blank');
+      if (leftRow?.move?.isFirst) {
+        leftHead.dataset.moveId = leftRow.move.id;
+        leftHead.append(createMoveHeader(leftRow.move, 'split'));
+      }
+      const rightHead = document.createElement('div');
+      rightHead.className = 'diff-side diff-side-right' + (rightRow?.move?.isFirst ? ' diff-side-move-header' : ' diff-blank');
+      if (rightRow?.move?.isFirst) {
+        rightHead.dataset.moveId = rightRow.move.id;
+        rightHead.append(createMoveHeader(rightRow.move, 'split'));
+      }
+      hr.append(leftHead, splitGutter(), rightHead);
+      table.append(hr);
     }
     const r = document.createElement('div');
     r.className = 'diff-row-pair';
-    r.append(splitSide(leftRow, 'left', reviewable), splitSide(rightRow, 'right', reviewable));
+    r.append(splitSide(leftRow, 'left', reviewable), splitGutter(), splitSide(rightRow, 'right', reviewable));
     table.append(r);
   }
   return table;
+}
+
+function splitGutter() {
+  const el = document.createElement('div');
+  el.className = 'diff-split-gutter';
+  return el;
 }
 
 // Walks a hunk's flat row list, pairing each run of deletions with the run of
@@ -473,8 +925,39 @@ function pairRows(rows) {
     let dels = [], adds = [];
     while (i < rows.length && rows[i].type === 'del') dels.push(rows[i++]);
     while (i < rows.length && rows[i].type === 'add') adds.push(rows[i++]);
-    const n = Math.max(dels.length, adds.length);
-    for (let k = 0; k < n; k++) pairs.push({ left: dels[k] || null, right: adds[k] || null });
+
+    const hasMovedDel = dels.some(d => d.move);
+    const hasMovedAdd = adds.some(a => a.move);
+
+    if (hasMovedDel || hasMovedAdd) {
+      let dIdx = 0, aIdx = 0;
+      while (dIdx < dels.length || aIdx < adds.length) {
+        const d = dels[dIdx];
+        const a = adds[aIdx];
+        if (d && a && d.move && a.move && d.move.id === a.move.id) {
+          pairs.push({ left: d, right: a });
+          dIdx++; aIdx++;
+        } else if (d && d.move) {
+          pairs.push({ left: d, right: null });
+          dIdx++;
+        } else if (a && a.move) {
+          pairs.push({ left: null, right: a });
+          aIdx++;
+        } else if (d && a) {
+          pairs.push({ left: d, right: a });
+          dIdx++; aIdx++;
+        } else if (d) {
+          pairs.push({ left: d, right: null });
+          dIdx++;
+        } else if (a) {
+          pairs.push({ left: null, right: a });
+          aIdx++;
+        }
+      }
+    } else {
+      const n = Math.max(dels.length, adds.length);
+      for (let k = 0; k < n; k++) pairs.push({ left: dels[k] || null, right: adds[k] || null });
+    }
   }
   return pairs;
 }
@@ -482,6 +965,12 @@ function pairRows(rows) {
 function splitSide(row, side, reviewable = true) {
   const el = document.createElement('div');
   el.className = 'diff-side diff-side-' + side + (row ? ' diff-' + row.type : ' diff-blank');
+  if (row?.move) {
+    el.classList.add('diff-moved-row', 'diff-moved-' + row.move.side);
+    el.dataset.moveId = row.move.id;
+    if (row.move.isFirst) el.classList.add('diff-moved-first');
+    if (row.move.isLast) el.classList.add('diff-moved-last');
+  }
   if (!row) { el.append(lineCell('', reviewable), markerCell(''), codeCell(null)); return el; }
   const ln = side === 'left' ? row.oldLine : row.newLine;
   anchor(el, row, reviewable);
@@ -730,6 +1219,27 @@ export function initDiff() {
   // the diff shows what changed, but reading it usually means seeing it in
   // context, not just the hunk. Clicking a symbol highlights and opens hover actions.
   diffContent.addEventListener('click', e => {
+    const moveJump = e.target.closest('.diff-move-jump, .diff-move-bar, .diff-move-pill');
+    if (moveJump) {
+      e.stopPropagation();
+      const targetLine = +(moveJump.dataset.targetLine || moveJump.closest('[data-target-line]')?.dataset.targetLine);
+      const moveId = moveJump.dataset.moveId || moveJump.closest('[data-move-id]')?.dataset.moveId;
+      const currentSide = moveJump.dataset.moveSide ||
+                          moveJump.closest('[data-move-side]')?.dataset.moveSide ||
+                          (moveJump.classList.contains('diff-move-bar-to') || moveJump.closest('.diff-move-bar-to') ? 'to' : 'from');
+      const targetSide = currentSide === 'from' ? 'to' : 'from';
+
+      const targetEl = diffview.querySelector(`.diff-side-${targetSide === 'from' ? 'left' : 'right'}.diff-side-move-header[data-move-id="${moveId}"]`) ||
+                       diffview.querySelector(`.diff-moved-row.diff-moved-${targetSide}[data-move-id="${moveId}"]`) ||
+                       (targetLine ? diffview.querySelector(`[data-l="${targetLine}"], [data-at="${targetLine}"], [data-old-l="${targetLine}"]`) : null);
+
+      if (targetEl) {
+        jumpAndFlash(targetEl, moveId, targetSide);
+      } else if (targetLine) {
+        scrollDiffToLine(targetLine, true, false);
+      }
+      return;
+    }
     const step = e.target.closest('[data-commit-step]');
     if (step) {
       const d = doc_();
@@ -758,6 +1268,47 @@ export function initDiff() {
       }
     }
   });
+
+  diffContent.addEventListener('mouseover', e => {
+    const moveEl = e.target.closest('[data-move-id]');
+    const fromEl = e.relatedTarget?.closest?.('[data-move-id]');
+    if (moveEl && moveEl.dataset.moveId !== fromEl?.dataset?.moveId) {
+      setMoveHover(moveEl.dataset.moveId, true);
+    }
+  });
+
+  diffContent.addEventListener('mouseout', e => {
+    const moveEl = e.target.closest('[data-move-id]');
+    const toEl = e.relatedTarget?.closest?.('[data-move-id]');
+    if (moveEl && moveEl.dataset.moveId !== toEl?.dataset?.moveId) {
+      setMoveHover(moveEl.dataset.moveId, false);
+    }
+  });
+
+  window.addEventListener('resize', () => scheduleDrawMoveConnectors(), { passive: true });
+
+  if (typeof ResizeObserver !== 'undefined') {
+    const diffRo = new ResizeObserver(() => {
+      if (diffview && !diffview.hidden) scheduleDrawMoveConnectors();
+    });
+    if (diffview) diffRo.observe(diffview);
+    if (diffContent) diffRo.observe(diffContent);
+    const editor = $('#editor');
+    if (editor) diffRo.observe(editor);
+  }
+
+  // Live real-time tracking while dragging any UI resizer/sash
+  window.addEventListener('mousemove', () => {
+    if (diffview && !diffview.hidden && document.querySelector('.drag, #resizer.drag, #right-resizer.drag, [id$="-resizer"].drag')) {
+      scheduleDrawMoveConnectors();
+    }
+  }, { passive: true });
+
+  window.addEventListener('mouseup', () => {
+    if (diffview && !diffview.hidden) {
+      scheduleDrawMoveConnectors();
+    }
+  }, { passive: true });
 
   diffContent.addEventListener('dblclick', e => {
     const w = wordAtPoint(e.clientX, e.clientY);

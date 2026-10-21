@@ -62,6 +62,13 @@ export const DEFAULT_TIPS = [
     shortcut: "Mod+D"
   },
   {
+    id: "diff-moved-blocks",
+    title: "Moved Code Block Detection",
+    category: "Git",
+    tag: "Diff",
+    content: "In split diff view, moved blocks are automatically detected with visual connectors across the gutter. Click the **Jump to source/destination** bar to instantly scroll and flash the relocated code."
+  },
+  {
     id: "pr-scope-toggle",
     title: "Scoped Review: PR Changes vs Yours",
     category: "Git",
