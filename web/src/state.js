@@ -84,7 +84,17 @@ export function applyKeyLabels(root = document) {
   for (const el of $$('[title*="{"]', root)) el.title = withKeys(el.title);
 }
 
-export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
+// Keep virtualization geometry in sync with the CSS row height. The value is
+// updated after the document is available and whenever editor typography changes.
+export let LH = 21;
+export const CHUNK = 1000, OVERSCAN = 24;
+
+export function syncLineHeight() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--lh');
+  const measured = parseFloat(raw);
+  if (Number.isFinite(measured) && measured > 0) LH = measured;
+  return LH;
+}
 
 /**
  * @typedef {Object} LSPState

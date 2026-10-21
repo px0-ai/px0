@@ -1,11 +1,12 @@
 // web/src/renderer.js
-import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
+import { $, S, doc_, api, esc, LH, syncLineHeight, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 
 export function measure() {
   const m = $('#measure');
   m.textContent = 'x'.repeat(100);
   S.chW = m.getBoundingClientRect().width / 100 || 7.8;
+  syncLineHeight();
 }
 
 export function layout() {
