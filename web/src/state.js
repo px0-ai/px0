@@ -110,6 +110,12 @@ export const LH = 20, CHUNK = 1000, OVERSCAN = 24;
  * @property {number} cur - Active line number
  * @property {number} [col] - Active column number
  * @property {any} [outline]
+ * @property {string} [version]
+ * @property {any} [folds]
+ * @property {boolean} [foldLoaded]
+ * @property {boolean} [foldLimited]
+ * @property {AbortController|null} [foldRequest]
+ * @property {Promise<void>|null} [foldPromise]
  * @property {number} [gen]
  * @property {boolean} [markdown]
  * @property {boolean} [isImage]

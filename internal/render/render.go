@@ -179,11 +179,13 @@ type Doc struct {
 	lineOff []int // lineOff[i] is the byte offset of line i; lineOff[Total] == len(src)
 	lexer   chroma.Lexer
 
-	mu     sync.RWMutex
-	chunks map[int][]string
-	full   bool
+	mu       sync.RWMutex
+	chunks   map[int][]string
+	full     bool
+	foldKind uint8
 
 	bgOnce sync.Once
+	folds  *foldData
 
 	// key identifies this document in the cache so the chunks it accumulates
 	// can be charged against the budget as they appear. Sizing a document once
@@ -197,7 +199,8 @@ func NewDoc(src, rel string) *Doc {
 	total := strings.Count(src, "\n") + 1
 	d := &Doc{
 		src: src, Total: total, chunks: map[int][]string{},
-		lineOff: make([]int, total+1),
+		foldKind: foldingKind(rel),
+		lineOff:  make([]int, total+1),
 		// Source plus line table. Rendered chunks are charged as they appear.
 		bytes: len(src) + total*32,
 	}
@@ -255,6 +258,25 @@ func (d *Doc) Raw(n int) string {
 		return ""
 	}
 	return d.src[start:end]
+}
+
+// RawText returns a borrowed source slice for a selected half-open line range.
+// It does not tokenize or populate the highlighted-line cache.
+func (d *Doc) RawText(start, end int) string {
+	if start < 0 {
+		start = 0
+	}
+	if end > d.Total {
+		end = d.Total
+	}
+	if start >= end {
+		return ""
+	}
+	last := d.lineOff[end]
+	if end < d.Total && last > d.lineOff[start] && d.src[last-1] == '\n' {
+		last--
+	}
+	return d.src[d.lineOff[start]:last]
 }
 
 // Lines returns highlighted HTML for the half-open line range [start, end).

@@ -70,10 +70,10 @@ type Server struct {
 	lsp       *lspManager
 	tel       *telemetry.Service // nil in tests; Track is nil-safe
 	agent     *agentManager      // nil unless main wires editing for this session
-	threads   *threadManager    // nil unless editing is wired: threads run on the same harness
-	pr        *prSession        // nil unless main launched this process as `px0 pr ...`
-	diffBase  string            // ref /api/diff and /api/gutter diff against; "HEAD" unless in PR mode
-	prHeadSHA string            // PR mode only: the checked-out PR head commit. Frozen boundary between
+	threads   *threadManager     // nil unless editing is wired: threads run on the same harness
+	pr        *prSession         // nil unless main launched this process as `px0 pr ...`
+	diffBase  string             // ref /api/diff and /api/gutter diff against; "HEAD" unless in PR mode
+	prHeadSHA string             // PR mode only: the checked-out PR head commit. Frozen boundary between
 	// the PR's own diff (diffBase..prHeadSHA) and the reviewer's local edits
 	// since checkout (prHeadSHA..working tree); refreshed on Pull.
 	gitWatcher *GitWatcher
@@ -149,6 +149,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc(s.routePath("/api/tree"), s.handleTree)
 	s.mux.HandleFunc(s.routePath("/api/find"), s.handleFind)
 	s.mux.HandleFunc(s.routePath("/api/file"), s.handleFile)
+	s.mux.HandleFunc(s.routePath("/api/folds"), s.handleFolds)
 	s.mux.HandleFunc(s.routePath("/api/close"), s.handleClose)
 	s.mux.HandleFunc(s.routePath("/api/raw"), s.handleRaw)
 	s.mux.HandleFunc(s.routePath("/api/file/save"), s.handleFileSave)
@@ -1311,6 +1312,18 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	if start > d.Total {
 		start = d.Total
 	}
+	if q.Get("text") == "1" {
+		if version := q.Get("version"); version != "" && version != d.Version() {
+			fail(w, http.StatusConflict, "file changed; reload before copying")
+			return
+		}
+		end := d.Total
+		if count < d.Total-start {
+			end = start + count
+		}
+		writeJSON(w, map[string]any{"text": d.RawText(start, end), "version": d.Version()})
+		return
+	}
 	if ui.Verbose && start == 0 {
 		ui.Status("info", "view", fmt.Sprintf("%s · %d lines (%s)", rel, d.Total, ui.FormatBytes(st.Size())), 0, os.Stdout)
 	}
@@ -1338,7 +1351,8 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{
 		"path": rel, "lang": d.Lang, "total": d.Total, "maxCols": d.MaxCols,
-		"start": start, "lines": lines, "size": st.Size(),
+		"version": d.Version(),
+		"start":   start, "lines": lines, "size": st.Size(),
 		"exact": exact, "refine": !exact && coming,
 		"markdown":      render.IsMarkdown(rel),
 		"table":         table.IsTable(rel),
@@ -1354,6 +1368,49 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		resp["raw"] = rawLines
 	}
 	writeJSON(w, resp)
+}
+
+// Detection is requested after first paint. Two workers bound concurrent scans
+// across tabs/workspaces; queued requests do not retain document source buffers.
+var foldWorkers = make(chan struct{}, 2)
+
+func (s *Server) handleFolds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	abs, rel, ok := s.resolvePath(r.URL.Query().Get("path"))
+	if !ok {
+		fail(w, 400, "bad path")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	select {
+	case foldWorkers <- struct{}{}:
+		defer func() { <-foldWorkers }()
+	case <-ctx.Done():
+		fail(w, http.StatusRequestTimeout, "fold detection cancelled")
+		return
+	}
+	d, err := render.Open(abs, rel)
+	if err != nil {
+		fail(w, 415, err.Error())
+		return
+	}
+	if version := r.URL.Query().Get("version"); version != "" && version != d.Version() {
+		fail(w, http.StatusConflict, "file changed; reload before folding")
+		return
+	}
+	ranges, limited, err := d.Folds(ctx)
+	if err != nil {
+		fail(w, http.StatusRequestTimeout, "fold detection cancelled")
+		return
+	}
+	if ranges == nil {
+		ranges = []render.FoldRange{}
+	}
+	writeJSON(w, map[string]any{"ranges": ranges, "version": d.Version(), "limited": limited})
 }
 
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {

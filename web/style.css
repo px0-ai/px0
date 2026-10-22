@@ -921,6 +921,20 @@ body.editing-file #tabs { padding-right: 180px; }
   box-sizing: border-box;
 }
 .row.cur .g { background: var(--cur); }
+.fold-toggle {
+  position: absolute; right: 0; top: 0; width: 14px; height: var(--lh);
+  padding: 0; border: 0; background: transparent; color: var(--muted);
+  cursor: pointer; font: 12px/var(--lh) var(--mono); user-select: none;
+}
+.fold-toggle:hover, .fold-toggle:focus-visible { color: var(--accent); background: var(--bg4); }
+.row.folded .c { flex: 0 1 auto; padding-right: 10px; }
+.fold-summary {
+  flex: none; align-self: flex-start; height: var(--lh); padding: 0 6px;
+  border: 0; border-radius: var(--r); background: var(--bg4); color: var(--muted);
+  font: 11px/var(--lh) var(--mono); cursor: pointer; user-select: none;
+}
+.fold-summary:hover, .fold-summary:focus-visible { color: var(--accent); }
+.g .line-btn { max-width: calc(100% - 14px); }
 .c { flex: 1; min-width: 0; white-space: pre; tab-size: 4; -moz-tab-size: 4; padding-right: 40px; }
 /* Ctrl+A: the whole file is selected, shaded on whichever rows are rendered. */
 #rows.all .c { background: var(--sel); }

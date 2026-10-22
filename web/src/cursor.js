@@ -1,6 +1,7 @@
 // web/src/cursor.js
 import { $, S, doc_, MOD, LH } from './state.js';
 import { vp, rowsEl } from './ui.js';
+import { moveFoldLine } from './folding.js';
 import { paint, render, rowFor, placeCaret, toPoint, getLH, lineTopY, lineHeightAt } from './renderer.js';
 import { updateStatus } from './status.js';
 import { gotoDefinition } from './lsp.js';
@@ -209,7 +210,7 @@ export function moveCursor(delta, shift = false) {
   if (shift) ensureAnchor(d);
   else d.selAnchor = null;
 
-  d.cur = Math.max(1, Math.min(d.total, d.cur + delta));
+  d.cur = moveFoldLine(d.folds, d.cur, delta, d.total);
   const lh = getLH();
   const y = lineTopY(d.cur, d);
   const h = Math.min(lineHeightAt(d.cur, d), Math.max(lh, vp.clientHeight * 0.5));
@@ -224,7 +225,7 @@ export function initCursor() {
     // Only the primary button moves the caret: a right click opens a menu on
     // what is already selected and must leave it where it is.
     if (e.button !== 0) return;
-    if (e.target.closest('.line-btn')) return;
+    if (e.target.closest('.line-btn, [data-fold]')) return;
     const row = e.target.closest('.row');
     if (!row) return;
     const d = doc_(); if (!d) return;

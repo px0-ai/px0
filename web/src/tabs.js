@@ -1,8 +1,9 @@
 // web/src/tabs.js
 import { $, esc, S, doc_, api, apiPost, LH, CHUNK, withKeys } from './state.js';
 import { emit } from './bus.js';
+import { releaseDocFolds } from './folding-ui.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
-import { render, layout, refineChunk, getLH, lineTopY } from './renderer.js';
+import { render, layout, refineChunk, getLH, lineTopY, lineAtScrollY, revealSourceLine, invalidatePaint } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
 import { pushHistory } from './history.js';
 import { warmLSP } from './lsp.js';
@@ -133,6 +134,7 @@ export async function openFile(path, opts = {}) {
     const d = {
       path, name: path.split('/').pop(), lang: isImg ? 'image' : j.lang,
       total: isImg ? 0 : j.total, maxCols: isImg ? 0 : j.maxCols,
+      version: j.version,
       size: j.size, lines: isImg ? [] : new Array(j.total),
       chunks: new Set(isImg ? [] : [start / CHUNK]),
       pending: new Set(), refining: new Set(), scrollTop: 0, cur: line || 1,
@@ -312,7 +314,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
     const diagCount = (j.diagnostics || []).length;
     const keepDiagCount = (keep.diagnostics || []).length;
     if (onlyIfChanged && linesSame && diagCount === keepDiagCount &&
-        keep.size === j.size && keep.total === j.total &&
+        keep.version === j.version && keep.size === j.size && keep.total === j.total &&
         !!keep.diffAvailable === hasDiff && !!keep.deleted === !!j.deleted) continue;
     anyChanged = true;
     const newCur = Math.max(1, Math.min(keep.cur || 1, j.total || 1));
@@ -329,6 +331,7 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
       total: j.total,
       maxCols: j.maxCols,
       size: j.size,
+      version: j.version,
       lines: new Array(j.total),
       chunks: new Set([tgt.start / CHUNK]),
       pending: new Set(),
@@ -366,7 +369,20 @@ export async function reloadOpenTabs({ onlyIfChanged = false } = {}) {
     }
     d.lsp = j.lsp || { state: 'off', server: '' };
 
+    const topLine = keep === activeDoc ? lineAtScrollY(keep.scrollTop, keep) : 0;
+    if (keep.version === j.version) {
+      d.folds = keep.folds;
+      if (d.folds) { d.folds.pixelOffsets = null; d.folds.pixelVersion = -1; }
+      d.foldLoaded = keep.foldLoaded; d.foldLimited = keep.foldLimited;
+      d.foldError = keep.foldError;
+    }
     S.tabs[idx] = d;
+    releaseDocFolds(keep);
+    keep.reqGen = (keep.reqGen || 0) + 1;
+    keep.lines = null; keep._wrap = null; keep._lineCols = null;
+    invalidatePaint();
+    // Preserve a source anchor when edits invalidate the old fold geometry.
+    if (topLine && keep.version !== j.version) d.scrollTop = lineTopY(Math.min(topLine, d.total), d);
     if (j.refine) refineChunk(d, tgt.start / CHUNK);
   }
 
@@ -403,6 +419,7 @@ export function centerLine(n) {
     return;
   }
   if (previewing()) { previewLine(n); return; }
+  revealSourceLine(n, d);
   const lh = getLH();
   const y = lineTopY(n) - Math.max(0, vp.clientHeight / 2 - lh * 2);
   vp.scrollTop = Math.max(0, y);
@@ -459,6 +476,8 @@ function closeTabs(indices) {
       evictions.push(api('/api/close', { path: closed.path }));
     }
     // Release large arrays to assist garbage collection
+    releaseDocFolds(closed);
+    closed.reqGen = (closed.reqGen || 0) + 1;
     closed.lines = null;
     closed._wrap = null;
     closed._lineCols = null;

@@ -7,6 +7,13 @@ export const TIPS_STORAGE_KEY_INDEX = 'px0.tips.lastIndex';
 
 export const DEFAULT_TIPS = [
   {
+    id: "code-folding",
+    title: "Focus with Code Folding",
+    category: "Navigation",
+    tag: "Folding",
+    content: "Click a gutter chevron to collapse a code block or HTML/XML element. Use **Fold All** or **Unfold All** in the command palette; searching or jumping to hidden code reveals it automatically."
+  },
+  {
     id: "file-navigation",
     title: "Quick File Navigation",
     category: "Navigation",

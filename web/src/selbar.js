@@ -1,8 +1,9 @@
 // web/src/selbar.js
-import { $, S, doc_, keyLabel } from './state.js';
+import { $, S, doc_, keyLabel, api } from './state.js';
 import { on } from './bus.js';
 import { vp, rowsEl, copyToClipboard, copyRichToClipboard, showToast } from './ui.js';
 import { render, toPos, rowFor } from './renderer.js';
+import { foldSpanAt } from './folding.js';
 import { findReferences } from './lsp.js';
 import { fitStatus } from './status.js';
 import { domToMarkdown, getFragmentPlainText, getFragmentHtml, getMarkdownRangeLines, getDocRaw, previewTopLine } from './markdown.js';
@@ -61,6 +62,33 @@ function lineToText(body) {
   return noTags.replace(/&(lt|gt|amp|quot|#39);/g, m => HTML_ENTITIES[m] || m);
 }
 
+let foldedSelection = null;
+
+function selectedFoldText(d, l1, c1, l2, c2) {
+  const key = [d.path, d.version, l1, c1, l2, c2].join(':');
+  if (foldedSelection?.key === key && foldedSelection.doc === d) return foldedSelection;
+  foldedSelection?.controller?.abort();
+  const info = { key, doc: d, text: '', l1, l2, path: d.path, isEditor: true, loaded: false, controller: null, promise: null, load: null };
+  info.load = () => {
+    if (info.loaded) return Promise.resolve(info);
+    if (info.promise) return info.promise;
+    const controller = new AbortController();
+    info.controller = controller;
+    info.promise = api('/api/file', { path: d.path, start: l1 - 1, count: l2 - l1 + 1, text: 1, version: d.version }, { signal: controller.signal })
+      .then(j => {
+        if (!S.tabs.includes(d) || controller.signal.aborted || j.version !== d.version) throw new Error('Selection changed; select it again');
+        const end = l1 === l2 ? c2 : j.text.lastIndexOf('\n') + 1 + c2;
+        info.text = j.text.slice(c1, end);
+        info.loaded = true; info.load = null;
+        if (current === info) showSelectionBar(info);
+        return info;
+      }).finally(() => { info.promise = null; info.controller = null; });
+    return info.promise;
+  };
+  foldedSelection = info;
+  return info;
+}
+
 function extractEditorSelection(range, d) {
   const p1 = toPos(range.startContainer, range.startOffset);
   const p2 = toPos(range.endContainer, range.endOffset);
@@ -89,6 +117,16 @@ function extractEditorSelection(range, d) {
     c2 = rows[rows.length - 1].querySelector('.c')?.textContent.length || 0;
   }
 
+  // A selection spanning a collapsed block still means its complete source
+  // range. Fetch only that raw range when an action needs it, never every hidden
+  // highlighted chunk or an extra whole-file copy.
+  const f = d.folds;
+  if (f?.spans.length) {
+    const i = Math.max(0, foldSpanAt(f, l1));
+    const start = f.spans[i * 3], end = f.spans[i * 3 + 1];
+    const next = f.spans[(i + 1) * 3];
+    if (l1 <= end && l2 > start || next !== undefined && l2 > next) return selectedFoldText(d, l1, c1, l2, c2);
+  }
   // Gather code lines from l1 to l2 exclusively from .c elements or d.lines
   const parts = [];
   for (let line = l1; line <= l2; line++) {
@@ -222,7 +260,7 @@ function showSelectionBar(info) {
   current = info;
   const lines = info.l2 - info.l1 + 1;
   statsEl.textContent = (lines === 1 ? '1 line' : lines + ' lines') + ' · ' +
-    info.text.length.toLocaleString() + ' chars';
+    (info.load ? 'source selected' : info.text.length.toLocaleString() + ' chars');
 
   const d = doc_();
   const footerSel = bar();
@@ -252,6 +290,8 @@ function showSelectionBar(info) {
 
 export function hideSelectionBar() {
   if (!pinnedInfo) closeSelMenu(); // a menu opened from the gutter is not tied to a selection
+  foldedSelection?.controller?.abort();
+  foldedSelection = null;
   if (!current) return;
   current = null;
   if (statsEl) statsEl.textContent = '';
@@ -331,6 +371,11 @@ export function runSelectionAction(act, triggerBtn = null, override = null) {
       }
     }
     return false;
+  }
+  if (target.load && act !== 'copy-ref') {
+    target.load().then(() => runSelectionAction(act, triggerBtn, target))
+      .catch(e => showToast('!', e.message));
+    return true;
   }
   const { text, path } = target;
   const ref = selectionRef(target);
@@ -472,6 +517,7 @@ export function initSelectionBar() {
     const info = getSelectedRangeInfo();
     if (info) {
       e.preventDefault();
+      if (info.load) { runSelectionAction('copy-source', null, info); return; }
       if (info.isMarkdownPreview) {
         e.clipboardData.setData('text/plain', info.text);
         if (info.html) {
@@ -545,6 +591,7 @@ export function initSelectionBar() {
   addEventListener('resize', closeSelMenu);
   addEventListener('blur', closeSelMenu);
   document.addEventListener('scroll', closeSelMenu, true);
-  on('tab:activated', clearSelectAll);
+  on('tab:activated', () => { closeSelMenu(); clearSelectAll(); window.getSelection()?.removeAllRanges(); hideSelectionBar(); });
+  on('tabs:cleared', () => { closeSelMenu(); hideSelectionBar(); });
 }
 
