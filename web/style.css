@@ -487,8 +487,10 @@ a.cc-who:hover { color: var(--accent-fg); }
    side, as in the batch-edit bar), with the AI commit action -- the panel's
    primary action -- right below. */
 .git-agent-picker { display: flex; flex-direction: column; gap: 6px; }
+.agent-field { display: flex; align-items: center; gap: 6px; }
+.agent-field .agent-meta-label { width: 48px; }
 .git-agent-picker .agent-harness-select,
-.git-agent-picker .agent-model-select { width: 100%; max-width: none; }
+.git-agent-picker .agent-model-select { flex: 1; min-width: 0; max-width: none; }
 #git-generate-msg,
 .git-generate-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -1639,6 +1641,7 @@ kbd {
   font: 600 10px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase;
   color: var(--faint); flex: none;
 }
+.agent-meta .agent-model-select { max-width: 45%; }
 .agent-harness-select,
 .agent-model-select {
   background: var(--bg); color: var(--fg);
