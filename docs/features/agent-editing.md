@@ -26,8 +26,11 @@ px0 auto-detects and integrates with all leading terminal coding harnesses:
 | **OpenAI Codex** | `gpt-5-codex` | `codex exec --ask-for-approval never -m gpt-5-codex {prompt}` |
 | **Aider** | `claude-3-7-sonnet` | `aider --yes-always --no-auto-commits --model claude-3-7-sonnet --message {prompt}` |
 | **Goose** | `gpt-4o` | `goose run --no-session --model gpt-4o -t {prompt}` |
+| **fx** | _fx's own setting_ | `fx ask --auto --model <model> -- {prompt}` |
 
 By default, px0 selects fast and cost-effective models for each harness, but allows you to select any supported model directly from the harness menu.
+
+**Harness and model are two separate choices.** The *harness* is the agent CLI that does the work (`claude`, `fx`, ...). The *model* is the LLM it uses, and each harness lists its own (for `fx`, the output of `fx models --json`). The editor, batch bar, thread composer and git panel each show a **Harness** dropdown and a **Model** dropdown. If a harness cannot list models (for example `fx` before you have signed in), the Model dropdown shows `<harness> default` and the harness uses its own setting.
 
 ---
 
@@ -88,7 +91,7 @@ The same harness and model you pick here are also used by the sidebar git panel'
 
 Agent preferences are managed in Settings (`Cmd/Ctrl+,`) or stored in `~/.px0/settings.json`:
 
-- **Agent: Harness** (`agent.harness`): The default CLI tool to execute (`claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`).
+- **Agent: Harness** (`agent.harness`): The default CLI tool to execute (`claude`, `gemini`, `cursor-agent`, `agy`, `opencode`, `codex`, `aider`, `goose`, `fx`). Settings only picks the harness; the model is chosen in the Model dropdown next to it.
 - **Agent: Timeout Seconds** (`agent.timeoutSeconds`): Maximum execution time before px0 terminates the background process (defaults to `120` seconds, range `10`–`600`).
 - **CLI Flags**:
   - `px0 -agent <name>`: Force a specific agent harness for the current session.

@@ -82,6 +82,33 @@ export function applyAgentMeta() {
   syncGitPanelHarnessMeta();
 }
 
+// Fills a model dropdown for harness h. The control stays visible when the
+// harness lists no models (e.g. fx before it is signed in), so Harness and Model
+// remain two separate choices and the user can see the harness uses its own default.
+function fillModelSelect(sel, h, currentModel, disabled) {
+  sel.innerHTML = '';
+  const models = h?.models || [];
+  sel.hidden = false;
+  if (models.length > 0) {
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      if (m === currentModel) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.disabled = disabled;
+    sel.title = 'Model for ' + h.name;
+    return;
+  }
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = (h ? h.name + ' ' : '') + 'default';
+  sel.appendChild(opt);
+  sel.disabled = true;
+  sel.title = (h ? h.name : 'This harness') + ' did not list any models, so it uses its own default';
+}
+
 function updateSessionMeta(session) {
   if (!session.harnessSelect || !session.modelSelect) return;
   const ready = (S.meta?.agents || []).filter(h => h.installed);
@@ -116,22 +143,7 @@ function updateSessionMeta(session) {
 
   // Populate model select for the currently selected harness
   const activeH = ready.find(h => h.name === (session.harnessSelect.value || currentHarness)) || ready[0];
-  session.modelSelect.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      session.modelSelect.appendChild(opt);
-    }
-    session.modelSelect.hidden = false;
-    session.modelSelect.disabled = isBusy;
-    session.modelSelect.title = 'Model for ' + activeH.name;
-  } else {
-    session.modelSelect.hidden = true;
-  }
+  fillModelSelect(session.modelSelect, activeH, currentModel, isBusy);
 }
 
 // Loads harnesses and models asynchronously after the browser UI has loaded.
@@ -176,22 +188,7 @@ function syncBatchMeta() {
   batchHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (batchHarness.value || currentHarness)) || ready[0];
-  batchModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      batchModel.appendChild(opt);
-    }
-    batchModel.hidden = false;
-    batchModel.disabled = isBusy;
-    batchModel.title = 'Model for ' + activeH.name;
-  } else {
-    batchModel.hidden = true;
-  }
+  fillModelSelect(batchModel, activeH, currentModel, isBusy);
 }
 
 // Harness/model pickers for the sidebar git panel's "Generate" commit
@@ -226,21 +223,7 @@ function syncGitPanelHarnessMeta() {
   gitHarness.title = S.meta && S.meta.agentPinned ? 'Fixed for this run by -agent' : 'Change the coding harness';
 
   const activeH = ready.find(h => h.name === (gitHarness.value || currentHarness)) || ready[0];
-  gitModel.innerHTML = '';
-  const models = activeH?.models || [];
-  if (models.length > 0) {
-    for (const m of models) {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      if (m === currentModel) opt.selected = true;
-      gitModel.appendChild(opt);
-    }
-    gitModel.hidden = false;
-    gitModel.title = 'Model for ' + activeH.name;
-  } else {
-    gitModel.hidden = true;
-  }
+  fillModelSelect(gitModel, activeH, currentModel, false);
 }
 
 function getReadySessions() {
