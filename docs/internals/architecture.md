@@ -96,7 +96,8 @@ px0 is structured into decoupled core files and modular `internal/` packages:
 | `/api/meta`           | `GET`  | Workspace metadata (root path, file count, index duration, git status)  | JSON (`{root, name, files, build_ms, git}`)|
 | `/api/metrics`        | `GET`  | Point-in-time process memory, CPU, and goroutine stats (polled via `/api/stream` SSE) | JSON (`{rssBytes, cpuUsage, goroutines}`)|
 | `/api/tree`           | `GET`  | Directory contents for the sidebar file explorer (`?dir=path`)          | JSON array of `Node` objects               |
-| `/api/file`           | `GET`  | Windowed, highlighted source file lines (`?path=...&start=0&count=500`) | JSON (`{lines, total, refine, markdown}`)  |
+| `/api/file`           | `GET`  | Windowed highlighted source (`?path=...&start=0&count=500`); `text=1&version=...` returns raw selected lines | JSON (`{lines, total, version, refine, markdown}`) or `{text, version}` |
+| `/api/folds`          | `GET`  | Lazy, bounded fold detection for a source snapshot (`?path=...&version=...`); see [Code Folding](code-folding.md) | JSON (`{ranges, version, limited}`) |
 | `/api/file/save`      | `POST` | Write edited file content, creating parent folders                      | JSON (`{ok, path, size}`)                  |
 | `/api/fs/new`         | `POST` | Create an empty file or a folder (`409` if it exists)                   | JSON (`{ok, path, type}`)                  |
 | `/api/close`          | `POST` | Release cached document handles and LSP files when tab closes          | JSON (`{ok: true}`)                        |

@@ -1,7 +1,7 @@
 // web/src/shortcuts.js
 import { $, $$, esc, S, doc_, isMac, MOD, LH, keyCaps } from './state.js';
 import { vp, sizer } from './ui.js';
-import { layout, render, paint, toggleWordWrap } from './renderer.js';
+import { layout, render, paint, toggleWordWrap, revealSourceLine } from './renderer.js';
 import { updateStatus } from './status.js';
 import { closeTab, switchTab, reopenClosedTab } from './tabs.js';
 import { go } from './history.js';
@@ -266,7 +266,7 @@ export function initShortcuts() {
       const info = getSelectedRangeInfo();
       if (info) {
         e.preventDefault();
-        runSelectionAction(info.isMarkdownPreview ? 'copy-preview-text' : 'copy-source');
+        runSelectionAction(info.isMarkdownPreview ? 'copy-preview-text' : 'copy-source', null, info);
         return;
       }
     }
@@ -279,7 +279,7 @@ export function initShortcuts() {
     if (d.isImage) { if (handleImageKey(e)) e.preventDefault(); return; }
     if (previewing(d)) { if (previewKey(e)) e.preventDefault(); return; }
     const toTop = () => { vp.scrollTop = 0; d.cur = 1; render(); updateStatus(); };
-    const toBottom = () => { vp.scrollTop = sizer.offsetHeight; d.cur = d.total; render(); updateStatus(); };
+    const toBottom = () => { revealSourceLine(d.total, d); vp.scrollTop = sizer.offsetHeight; d.cur = d.total; render(); updateStatus(); };
     const shift = e.shiftKey;
     if (mod && e.key === 'Home') { e.preventDefault(); if (shift) caretToEdge(false, true); else toTop(); return; }
     if (mod && e.key === 'End') { e.preventDefault(); if (shift) caretToEdge(true, true); else toBottom(); return; }

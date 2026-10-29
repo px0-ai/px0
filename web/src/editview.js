@@ -2,7 +2,7 @@
 import { $, S, doc_, apiPostJson, LH } from './state.js';
 import { vp, showToast, flashActionSuccess } from './ui.js';
 import { drawTabs, loadGutter, reloadOpenTabs } from './tabs.js';
-import { lineTopY } from './renderer.js';
+import { lineTopY, revealSourceLine } from './renderer.js';
 import { syncPreview, previewing, previewTopLine, previewKind } from './markdown.js';
 import { syncDiffView } from './diff.js';
 import { triggerRefresh } from './gitstream.js';
@@ -300,6 +300,7 @@ export async function exitEditMode(force = false) {
     return;
   }
   d.cur = top;
+  revealSourceLine(top, d);
   vp.scrollTop = lineTopY(top, d);
   if (previewKind(d)) d.mdLine = top;
   // Reloads the source and, through a fresh doc, the preview: a save made in

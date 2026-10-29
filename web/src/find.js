@@ -1,8 +1,9 @@
 // web/src/find.js
 import { $, S, doc_, api, LH } from './state.js';
 import { on } from './bus.js';
+import { foldedLineY } from './folding.js';
 import { vp } from './ui.js';
-import { render, paint, getLH, lineTopY } from './renderer.js';
+import { render, paint, getLH, lineTopY, lineAtScrollY, revealSourceLine } from './renderer.js';
 import { centerLine } from './tabs.js';
 import { updateStatus } from './status.js';
 import { mdview, previewing, findInPreview, showPreviewHit, clearPreviewMarks, previewHitOffsets, scrollPreviewTo } from './markdown.js';
@@ -149,12 +150,17 @@ export function drawMinimap(hits, total) {
   if (!hits.length || !total) { mm.innerHTML = ''; return; }
   const seenBuckets = new Set();
   const parts = [];
+  const d = doc_();
+  const foldedHeight = d?.folds?.spans.length && !d.isEditing ? Math.max(1, lineTopY(total + 1, d)) : 0;
   for (let i = 0; i < hits.length; i++) {
     const h = hits[i];
-    const bucket = Math.round((h.line - 1) / total * 400);
+    const ratio = foldedHeight
+      ? foldedLineY(d.folds, h.line, S.wrap ? d._wrap?.offsets : null, getLH()) / foldedHeight
+      : (h.line - 1) / total;
+    const bucket = Math.round(ratio * 400);
     if (seenBuckets.has(bucket)) continue;
     seenBuckets.add(bucket);
-    parts.push('<i style="top:' + ((h.line - 1) / total * 100).toFixed(2) + '%"></i>');
+    parts.push('<i style="top:' + (ratio * 100).toFixed(2) + '%"></i>');
   }
   mm.innerHTML = parts.join('');
 }
@@ -177,6 +183,7 @@ export function jumpToHit(i) {
     return;
   }
   const lh = getLH();
+  revealSourceLine(h.line, d);
   const y = lineTopY(h.line, d);
   if (y < vp.scrollTop + lh * 2 || y > vp.scrollTop + vp.clientHeight - lh * 3) centerLine(h.line);
   render(); updateStatus();
@@ -244,8 +251,13 @@ export function initFind() {
     const r = $('#minimap-hits').getBoundingClientRect();
     const d = doc_(); if (!d || !r.height || !d.total) return;
     if (previewing(d)) { scrollPreviewTo((e.clientY - r.top) / r.height); return; }
-    centerLine(Math.round((e.clientY - r.top) / r.height * d.total));
+    const ratio = (e.clientY - r.top) / r.height;
+    const line = d.folds?.spans.length && !d.isEditing
+      ? lineAtScrollY(ratio * lineTopY(d.total + 1, d), d)
+      : Math.max(1, Math.round(ratio * d.total));
+    centerLine(line);
     if (!d.isEditing) render();
   });
   on('tab:activated', clearFind);
+  on('folds:changed', () => { if (S.find && !S.find.preview) drawMinimap(S.find.hits, doc_().total); });
 }

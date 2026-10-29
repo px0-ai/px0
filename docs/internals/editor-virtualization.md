@@ -6,6 +6,8 @@ The sidebar file tree uses a separate on-demand rendering path in [`web/src/tree
 
 The tab bar is managed by [`web/src/tabs.js`](../../web/src/tabs.js). Its right-click menu closes selected groups in descending index order. Single and bulk actions share cache cleanup and active-tab selection, then redraw the tab bar and editor once per action. Open tabs are not saved across reloads.
 
+Code folding projects the original source through sparse collapsed intervals; see [Code Folding Architecture](code-folding.md) for folded coordinates, wrapped heights, and chunk loading. The formulas below describe the uncollapsed fast path.
+
 ## 1. Why a Bespoke Virtualized Viewer?
 
 General-purpose browser code editors (such as Monaco, CodeMirror 6, or Ace) are engineered for bidirectional text editing, undo/redo trees, multi-cursor keystrokes, and complex grammar parsing inside the browser. Consequently:

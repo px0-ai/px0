@@ -1,5 +1,6 @@
 // web/src/palette.js
 import { $, esc, S, doc_, api, debounce, withKeys } from './state.js';
+import { runFoldAction } from './folding-ui.js';
 import { render, toggleWordWrap } from './renderer.js';
 import { openFile, centerLine, closeTab, closeAllTabs, reopenClosedTab } from './tabs.js';
 import { updateStatus, openLspMenu } from './status.js';
@@ -19,7 +20,7 @@ import { launchPR } from './pr.js';
 import { newThread, deleteCurrentThread } from './thread.js';
 import { copyToClipboard, copyRichToClipboard } from './ui.js';
 import { getDocRaw } from './markdown.js';
-import { getSelectedRangeInfo } from './selbar.js';
+import { getSelectedRangeInfo, runSelectionAction } from './selbar.js';
 import { enterEditMode, exitEditMode, saveActiveFile } from './editview.js';
 import { promptNewItem } from './newitem.js';
 import { navigateToTips, showTipWidget } from './tips.js';
@@ -34,8 +35,8 @@ export const COMMANDS = [
   { name: withKeys('File: Copy Source Code ({Mod+C})'), run: () => {
     const info = getSelectedRangeInfo();
     const d = doc_();
-    if (info && info.text) {
-      copyToClipboard(info.text, 'Copied source code');
+    if (info) {
+      runSelectionAction('copy-source', null, info);
     } else if (d) {
       getDocRaw(d).then(raw => copyToClipboard(raw, `Copied ${d.name} (${d.total} lines)`));
     }
@@ -75,6 +76,10 @@ export const COMMANDS = [
   { name: 'File: New Folder…', run: () => promptNewItem('dir') },
   { name: withKeys('Preferences: Open Settings (UI) ({Mod+,})'), run: () => openSettings('ui') },
   { name: 'Preferences: Open Settings (JSON)', run: () => openSettings('json') },
+  { name: 'Fold Block', run: () => runFoldAction('fold') },
+  { name: 'Unfold Block', run: () => runFoldAction('unfold') },
+  { name: 'Fold All', run: () => runFoldAction('all') },
+  { name: 'Unfold All', run: () => runFoldAction('none') },
   { name: 'Go to File…', run: () => openPalette('file') },
   { name: 'Go to Symbol in File…', run: () => openPalette('symbol') },
   { name: 'Go to Line…', run: () => openPalette('line') },
