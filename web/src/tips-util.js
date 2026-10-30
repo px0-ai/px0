@@ -232,6 +232,13 @@ export const DEFAULT_TIPS = [
     content: "Run `px0 -host 0.0.0.0` on your remote VM, container, or server to review code locally over Tailscale, SSH port forward, or private LAN without remote agent daemons."
   },
   {
+    id: "shell-completion",
+    title: "Tab Completion in Your Shell",
+    category: "Terminal",
+    tag: "CLI",
+    content: "Add `source <(px0 completion zsh)` to `~/.zshrc` (or `eval \"$(px0 completion bash)\"` to `~/.bashrc`) and press **`Tab`** to complete px0 flags, `-agent` harnesses, and paths. Fish and PowerShell are supported too."
+  },
+  {
     id: "virtual-rendering",
     title: "Ultra-Fast Virtualized Rendering",
     category: "Performance",

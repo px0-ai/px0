@@ -79,6 +79,30 @@ px0 -host 0.0.0.0 -port 7777 ~/workspace
 px0 -base-path /rev-123/ -host 0.0.0.0 -port 7777 ~/workspace
 ```
 
+### Shell completion
+
+`px0 completion <shell>` prints a Tab-completion script for `-agent`
+harness names, the `completion` and `version` commands, and file paths. Load it from your shell's startup file so it
+is regenerated whenever px0 updates itself:
+
+```bash
+# zsh (~/.zshrc, after compinit)
+source <(px0 completion zsh)
+
+# bash (~/.bashrc)
+eval "$(px0 completion bash)"
+
+# fish
+px0 completion fish > ~/.config/fish/completions/px0.fish
+
+# PowerShell ($PROFILE)
+px0 completion powershell | Out-String | Invoke-Expression
+```
+
+Global flag names are not suggested. Pass `-no-descriptions` to leave command descriptions out of the zsh, fish, and
+PowerShell menus. If you save the script to a file instead (for example as
+`_px0` on zsh's `$fpath`), regenerate it after updating px0.
+
 When px0 binds to `0.0.0.0`, it prints a `network` URL for every unique
 non-loopback IPv4 address on the machine, using the port selected by the
 listener:
