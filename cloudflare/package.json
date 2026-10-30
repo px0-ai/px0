@@ -1,0 +1,20 @@
+{
+  "name": "px0-cf",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:web": "node ../scripts/build-web.js",
+    "dev": "npm run build:web && wrangler dev",
+    "deploy": "npm run build:web && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/containers": "^0.1.0",
+    "@cloudflare/workers-types": "^5.20260916.1",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.133.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260916.1": true
+  }
+}
