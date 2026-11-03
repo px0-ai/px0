@@ -70,8 +70,10 @@
         </div>
         <div id="git-commit-section" class="git-commit-section">
           <div class="git-agent-picker">
-            <select id="git-harness" class="agent-harness-select" title="Coding harness"></select>
-            <select id="git-model" class="agent-model-select" title="Model"></select>
+            <label class="agent-field"><span class="agent-meta-label">Harness</span>
+              <select id="git-harness" class="agent-harness-select" title="Coding harness: the agent that runs your request"></select></label>
+            <label class="agent-field"><span class="agent-meta-label">Model</span>
+              <select id="git-model" class="agent-model-select" title="Model: the LLM the harness uses"></select></label>
             <div class="git-ai-row">
               <button id="git-generate-msg" class="git-generate-btn" title="Stage all changes and write a commit message using the selected coding harness">Stage all + Commit with AI</button>
             </div>
@@ -300,9 +302,10 @@
             <button class="agent-close" title="Close ({Esc})">&#10005;</button>
           </div>
           <div class="agent-meta">
+            <span class="agent-meta-label">Harness</span>
+            <select class="agent-harness-select" title="Coding harness: the agent that runs your request"></select>
             <span class="agent-meta-label">Model</span>
-            <select class="agent-harness-select" title="Coding harness"></select>
-            <select class="agent-model-select" title="Model"></select>
+            <select class="agent-model-select" title="Model: the LLM the harness uses"></select>
           </div>
           <!-- A comment that has been added to the batch: click to edit it again -->
           <button class="agent-queued" title="Click to edit this comment" hidden></button>
@@ -662,9 +665,10 @@
             <button id="agent-batch-clear" class="agent-batch-clear" title="Clear all comments">Clear All</button>
           </div>
           <div class="agent-batch-meta">
+            <span class="agent-meta-label">Harness</span>
+            <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness: the agent that runs your request"></select>
             <span class="agent-meta-label">Model</span>
-            <select id="agent-batch-harness" class="agent-harness-select" title="Coding harness"></select>
-            <select id="agent-batch-model" class="agent-model-select" title="Model"></select>
+            <select id="agent-batch-model" class="agent-model-select" title="Model: the LLM the harness uses"></select>
           </div>
         </div>
         <div class="agent-batch-actions">
@@ -704,9 +708,10 @@
             <button type="button" data-scope="selection" title="Just the code this thread is anchored to">Selection</button>
           </div>
           <div class="agent-meta">
+            <span class="agent-meta-label">Harness</span>
+            <select class="agent-harness-select" id="thr-harness" title="Coding harness: the agent that runs your request"></select>
             <span class="agent-meta-label">Model</span>
-            <select class="agent-harness-select" id="thr-harness" title="Coding harness"></select>
-            <select class="agent-model-select" id="thr-model" title="Model"></select>
+            <select class="agent-model-select" id="thr-model" title="Model: the LLM the harness uses"></select>
           </div>
           <textarea id="thr-input" class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Ask about this code, or ask for changes anywhere..."></textarea>
           <div class="agent-foot">
