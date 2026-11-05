@@ -359,6 +359,88 @@ func TestHighlightDiff(t *testing.T) {
 	}
 }
 
+func TestHighlightDiffJSONFragments(t *testing.T) {
+	// A dependency moved between objects, as in a package.json diff. Neither
+	// hunk contains the opening of the document or its enclosing objects.
+	diff := `@@ -43,3 +43,2 @@
+     "@ali/deep": "3.3.2",
+-    "sdk": "0.2.0",
+     "next": "1.0.0"
+@@ -81,4 +80,5 @@
+     "xss": "^1.0.14"
+   },
+   "devDependencies": {
++    "sdk": "0.2.0",
+     "next": "1.0.0"`
+	for _, name := range []string{"package.json", "settings.jsonc", "schema.avsc"} {
+		t.Run(name, func(t *testing.T) {
+			hunks := HighlightDiff(name, diff)
+			if len(hunks) != 2 {
+				t.Fatalf("expected two hunks, got %d", len(hunks))
+			}
+			for _, h := range hunks {
+				for _, row := range h.Rows {
+					if strings.Contains(row.HTML, "class=err") {
+						t.Errorf("false syntax error in %q: %s", row.Text, row.HTML)
+					}
+					if strings.Contains(row.Text, `"sdk"`) {
+						if !strings.Contains(row.HTML, `<i class=nt>"sdk"</i>`) ||
+							!strings.Contains(row.HTML, `<i class=s>"0.2.0"</i>`) {
+							t.Errorf("lost key/value highlighting: %s", row.HTML)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestJSONDiffBlockComments(t *testing.T) {
+	for _, src := range []string{
+		"/*",
+		"/* unterminated\n\"key\": true, <tag>&",
+		"/* nested /* opener is comment text */",
+		"/* comment ending with stars ***/",
+		"/*" + strings.Repeat("*", 24000),
+		strings.Repeat("/* ", 8000),
+	} {
+		raw := strings.Split(src, "\n")
+		lines := highlightLines(jsonDiffLexer, src, len(raw))
+		for i, line := range lines {
+			text := strings.ReplaceAll(strings.ReplaceAll(line, "<i class=c>", ""), "</i>", "")
+			if text != htmlEscaper.Replace(raw[i]) {
+				t.Fatalf("comment text or highlighting changed on line %d (input length %d)", i, len(src))
+			}
+			if !strings.Contains(line, "<i class=c>") {
+				t.Fatalf("missing comment highlighting on line %d", i)
+			}
+		}
+	}
+
+	// The first closing delimiter ends the comment; following JSON tokens
+	// must regain their normal colours, on both sides of a diff.
+	hunks := HighlightDiff("settings.jsonc", "@@ -1 +1 @@\n-/* old */ \"key\": false\n+/* /* new ***/ \"key\": true")
+	for _, row := range hunks[0].Rows {
+		if !strings.Contains(row.HTML, `<i class=nt>"key"</i>`) ||
+			(!strings.Contains(row.HTML, `<i class=k>true</i>`) && !strings.Contains(row.HTML, `<i class=k>false</i>`)) {
+			t.Errorf("JSON highlighting did not resume after block comment: %s", row.HTML)
+		}
+	}
+}
+
+func BenchmarkHighlightDiffUnterminatedJSONComment(b *testing.B) {
+	for _, n := range []int{1000, 2000, 4000, 8000} {
+		diff := "@@ -1 +1 @@\n-0\n+" + strings.Repeat("/* ", n)
+		b.Run(fmt.Sprintf("%d-bytes", n*3), func(b *testing.B) {
+			b.SetBytes(int64(n * 3))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = HighlightDiff("settings.jsonc", diff)
+			}
+		})
+	}
+}
+
 func BenchmarkHighlightDiff(b *testing.B) {
 	diff := `@@ -10,3 +10,4 @@ func greet() {
 -	return "hello"
@@ -506,4 +588,3 @@ func BenchmarkColdHighlight_Go(b *testing.B) {
 		_, _ = d.Lines(0, 300)
 	}
 }
-

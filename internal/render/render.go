@@ -663,6 +663,31 @@ type DiffHunk struct {
 
 var diffHunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[ \t]?(.*)$`)
 
+// Diff hunks can start inside an object or array and omit any number of
+// enclosing delimiters. JSON's document lexer needs that missing state and
+// otherwise marks valid colons/commas as errors. Colour fragment tokens without
+// treating the hunk as a complete JSON document.
+var jsonDiffLexer = chroma.MustNewLexer(&chroma.Config{Name: "JSON diff fragment"}, func() chroma.Rules {
+	const str = `"(?:\\.|[^"\\])*"`
+	return chroma.Rules{"root": {
+		{Pattern: `\s+`, Type: chroma.Text},
+		{Pattern: `//[^\n]*`, Type: chroma.Comment},
+		{Pattern: `/\*`, Type: chroma.Comment, Mutator: chroma.Push("block-comment")},
+		{Pattern: str + `(?=\s*:)`, Type: chroma.NameTag},
+		{Pattern: str, Type: chroma.LiteralStringDouble},
+		{Pattern: `\b(?:true|false|null)\b`, Type: chroma.KeywordConstant},
+		{Pattern: `-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?`, Type: chroma.LiteralNumber},
+		{Pattern: `[{}\[\]:,]`, Type: chroma.Punctuation},
+		// A diff is a code fragment, not a syntax diagnostic.
+		{Pattern: `.`, Type: chroma.Text},
+	}, "block-comment": {
+		// Consume even an unterminated comment once, rather than searching
+		// the remaining hunk for a closing delimiter at every nested opener.
+		{Pattern: `\*/`, Type: chroma.Comment, Mutator: chroma.Pop(1)},
+		{Pattern: `(?:[^*]|\*(?!/))+`, Type: chroma.Comment},
+	}}
+})
+
 // HighlightDiff parses unified diff text into hunks and tokenises each line
 // with the Chroma lexer matched for rel, returning structured hunks with HTML.
 func HighlightDiff(rel, diffText string) []DiffHunk {
@@ -711,6 +736,9 @@ func HighlightDiff(rel, diffText string) []DiffHunk {
 
 	lexer := lexers.Match(filepath.Base(rel))
 	if lexer != nil {
+		if lexer.Config().Name == "JSON" {
+			lexer = jsonDiffLexer
+		}
 		lexer = chroma.Coalesce(lexer)
 	}
 
