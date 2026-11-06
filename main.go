@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/px0-ai/harness"
 
 	"px0/internal/settings"
 	"px0/internal/telemetry"
@@ -59,7 +62,7 @@ func main() {
 		wbChild      = flag.Bool("workbench-child", false, "internal: run as a workspace of the px0 workbench")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags]                      open the workbench\n  px0 [flags] <file or directory>\n  px0 [flags] <pr-url>\n\nflags:\n", version)
+		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags]                      open the workbench\n  px0 [flags] <file or directory>\n  px0 [flags] <pr-url>\n  px0 completion <shell>           print a bash, zsh, fish or powershell completion script\n\nflags:\n", version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -80,6 +83,14 @@ func main() {
 
 	if *showVer || *showVerShort || (flag.NArg() == 1 && flag.Arg(0) == "version") {
 		fmt.Printf("px0 %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+
+	// Completion scripts go to stdout untouched, before telemetry or updates start.
+	if flag.NArg() > 0 && flag.Arg(0) == "completion" {
+		if err := runCompletion(os.Stdout, os.Stderr, flag.Args()[1:], flag.CommandLine); err != nil {
+			fatal(err)
+		}
 		return
 	}
 
@@ -708,4 +719,361 @@ func isWSL() bool {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "px0:", err)
 	os.Exit(1)
+}
+
+// completionShells are the shells "px0 completion <shell>" writes a script for.
+var completionShells = []string{"bash", "zsh", "fish", "powershell"}
+
+// completionCommands are the words px0 accepts in place of a target.
+var completionCommands = []completionCommand{
+	{"completion", "print a shell completion script"},
+	{"version", "print version and exit"},
+}
+
+// completionCommand is one command as the completion scripts offer it.
+type completionCommand struct{ name, desc string }
+
+// completionHidden are flags left out of completion: internal or deprecated.
+var completionHidden = map[string]bool{"workbench-child": true, "y": true, "yes": true}
+
+// completionFlag is one flag as the completion scripts offer it.
+type completionFlag struct {
+	name   string
+	desc   string
+	value  bool     // takes a value (-port 7777) rather than standing alone (-no-lsp)
+	values []string // fixed choices for the value, if any
+}
+
+// completionFlags lists the visible flags of fs, in the order flag.VisitAll
+// gives (sorted by name), so new flags reach the scripts without extra work.
+func completionFlags(fs *flag.FlagSet) []completionFlag {
+	var out []completionFlag
+	fs.VisitAll(func(f *flag.Flag) {
+		if completionHidden[f.Name] {
+			return
+		}
+		cf := completionFlag{name: f.Name, desc: completionDesc(f.Usage), value: true}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			cf.value = false
+		}
+		if f.Name == "agent" {
+			cf.values = harness.PresetNames()
+		}
+		out = append(out, cf)
+	})
+	return out
+}
+
+// completionDesc shortens a flag's usage to the clause before any
+// parenthetical or semicolon, which is all a completion menu has room for.
+func completionDesc(usage string) string {
+	if i := strings.IndexAny(usage, "(;"); i > 0 {
+		usage = usage[:i]
+	}
+	return strings.TrimSpace(usage)
+}
+
+// printCompletion writes the completion script for shell to w. The script is
+// rebuilt from the binary on every call, so sourcing it at shell startup
+// (rather than saving it) keeps it in step with self-updates.
+func printCompletion(w io.Writer, shell string, fs *flag.FlagSet, descriptions bool) error {
+	flags := completionFlags(fs)
+	cmds := append([]completionCommand(nil), completionCommands...)
+	if !descriptions {
+		for i := range flags {
+			flags[i].desc = ""
+		}
+		for i := range cmds {
+			cmds[i].desc = ""
+		}
+	}
+	switch shell {
+	case "bash":
+		writeBashCompletion(w, flags, cmds)
+	case "zsh":
+		writeZshCompletion(w, flags, cmds)
+	case "fish":
+		writeFishCompletion(w, flags, cmds)
+	case "powershell":
+		writePowerShellCompletion(w, flags, cmds)
+	default:
+		return fmt.Errorf("unsupported shell %q (supported: %s)", shell, strings.Join(completionShells, ", "))
+	}
+	return nil
+}
+
+// runCompletion handles "px0 completion [-no-descriptions] <shell>".
+func runCompletion(stdout, stderr io.Writer, args []string, fs *flag.FlagSet) error {
+	cfs := flag.NewFlagSet("completion", flag.ContinueOnError)
+	cfs.SetOutput(stderr)
+	noDesc := cfs.Bool("no-descriptions", false, "leave descriptions out of the completion menu")
+	cfs.Usage = func() { fmt.Fprint(stderr, completionUsage) }
+	if err := cfs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if cfs.NArg() != 1 {
+		cfs.Usage()
+		return fmt.Errorf("expected one shell (%s)", strings.Join(completionShells, ", "))
+	}
+	return printCompletion(stdout, cfs.Arg(0), fs, !*noDesc)
+}
+
+const completionUsage = `usage: px0 completion [-no-descriptions] <bash|zsh|fish|powershell>
+
+Prints a shell completion script for px0. Load it from your shell's startup
+file so it is regenerated whenever px0 updates itself:
+
+  bash        add to ~/.bashrc:     eval "$(px0 completion bash)"
+  zsh         add to ~/.zshrc:      source <(px0 completion zsh)
+              (after compinit runs: autoload -Uz compinit && compinit)
+  fish        run once:             px0 completion fish > ~/.config/fish/completions/px0.fish
+  powershell  add to $PROFILE:      px0 completion powershell | Out-String | Invoke-Expression
+
+Start a new shell afterwards. If you save the script to a file instead
+(for example as _px0 on zsh's $fpath), regenerate it after updating px0.
+`
+
+// valueFlags returns the names of flags that take a value, with and without
+// fixed choices, for scripts that complete them differently.
+func valueFlags(flags []completionFlag) (free, fixed []completionFlag) {
+	for _, f := range flags {
+		switch {
+		case len(f.values) > 0:
+			fixed = append(fixed, f)
+		case f.value:
+			free = append(free, f)
+		}
+	}
+	return free, fixed
+}
+
+// bashAlts joins the flags' -name and --name spellings as a case pattern.
+func bashAlts(flags []completionFlag) string {
+	var alts []string
+	for _, f := range flags {
+		alts = append(alts, "-"+f.name, "--"+f.name)
+	}
+	return strings.Join(alts, "|")
+}
+
+func writeBashCompletion(w io.Writer, flags []completionFlag, cmds []completionCommand) {
+	free, fixed := valueFlags(flags)
+	cmdNames := make([]string, len(cmds))
+	for i, c := range cmds {
+		cmdNames[i] = c.name
+	}
+	fmt.Fprintf(w, "# bash completion for px0. Load with: eval \"$(px0 completion bash)\"\n\n")
+	fmt.Fprintf(w, "_px0() {\n")
+	fmt.Fprintf(w, "    local cur=\"${COMP_WORDS[COMP_CWORD]}\" prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n")
+	fmt.Fprintf(w, "    COMPREPLY=()\n")
+	fmt.Fprintf(w, "    if [[ $COMP_CWORD -eq 2 && $prev == completion ]]; then\n")
+	fmt.Fprintf(w, "        COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(completionShells, " "))
+	fmt.Fprintf(w, "        return\n    fi\n")
+	// px0 stops parsing flags at its target, so offer none after one.
+	fmt.Fprintf(w, "    local i\n")
+	fmt.Fprintf(w, "    for ((i = 1; i < COMP_CWORD; i++)); do\n")
+	fmt.Fprintf(w, "        case \"${COMP_WORDS[i]}\" in\n")
+	if len(free)+len(fixed) > 0 {
+		fmt.Fprintf(w, "            %s) ((i++)); if [[ ${COMP_WORDS[i]} == = ]]; then ((i++)); fi ;;\n", bashAlts(append(free, fixed...)))
+	}
+	fmt.Fprintf(w, "            -*) ;;\n")
+	fmt.Fprintf(w, "            *) return ;;\n")
+	fmt.Fprintf(w, "        esac\n")
+	fmt.Fprintf(w, "    done\n")
+	fmt.Fprintf(w, "    local prefix=\"\"\n")
+	fmt.Fprintf(w, "    if [[ \"$cur\" == -*=* ]]; then\n")
+	fmt.Fprintf(w, "        prev=\"${cur%%%%=*}\"; prefix=\"$prev=\"; cur=\"${cur#*=}\"\n")
+	fmt.Fprintf(w, "    elif [[ \"$prev\" == = && $COMP_CWORD -ge 2 ]]; then\n")
+	fmt.Fprintf(w, "        prev=\"${COMP_WORDS[COMP_CWORD-2]}\"\n")
+	fmt.Fprintf(w, "    elif [[ \"$cur\" == = ]]; then\n")
+	fmt.Fprintf(w, "        cur=\"\"\n")
+	fmt.Fprintf(w, "    fi\n")
+	fmt.Fprintf(w, "    case \"$prev\" in\n")
+	for _, f := range fixed {
+		fmt.Fprintf(w, "        -%s|--%s)\n", f.name, f.name)
+		fmt.Fprintf(w, "            COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(f.values, " "))
+		fmt.Fprintf(w, "            if [[ -n $prefix ]]; then COMPREPLY=(\"${COMPREPLY[@]/#/$prefix}\"); fi\n")
+		fmt.Fprintf(w, "            return ;;\n")
+	}
+	if len(free) > 0 {
+		// A free-form value (a port, a host): offer nothing rather than flags.
+		fmt.Fprintf(w, "        %s)\n", bashAlts(free))
+		fmt.Fprintf(w, "            return ;;\n")
+	}
+	fmt.Fprintf(w, "    esac\n")
+	fmt.Fprintf(w, "    if [[ \"$cur\" == -* ]]; then return; fi\n")
+	// The target slot also takes a command; list matching ones beside the
+	// paths, since a match would otherwise hide them.
+	fmt.Fprintf(w, "    COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(cmdNames, " "))
+	fmt.Fprintf(w, "    if [[ ${#COMPREPLY[@]} -gt 0 ]]; then\n")
+	fmt.Fprintf(w, "        local IFS=$'\\n'\n")
+	fmt.Fprintf(w, "        COMPREPLY+=($(compgen -f -- \"$cur\"))\n")
+	fmt.Fprintf(w, "    fi\n")
+	// An empty COMPREPLY falls back to the shell's own path completion
+	// (-o default), which handles spaces, ~ and trailing slashes correctly.
+	fmt.Fprintf(w, "}\n\n")
+	fmt.Fprintf(w, "complete -o default -o filenames -F _px0 px0\n")
+}
+
+// zshQuote escapes s for a single-quoted _arguments spec's [description].
+func zshQuote(s string) string {
+	return strings.NewReplacer(`'`, `'\''`, `[`, `\[`, `]`, `\]`, `:`, `\:`).Replace(s)
+}
+
+func writeZshCompletion(w io.Writer, flags []completionFlag, cmds []completionCommand) {
+	fmt.Fprintf(w, "#compdef px0\n")
+	fmt.Fprintf(w, "# zsh completion for px0. Load with: source <(px0 completion zsh)\n\n")
+	fmt.Fprintf(w, "_px0() {\n")
+	fmt.Fprintf(w, "  if (( CURRENT == 3 )) && [[ ${words[2]} == completion ]]; then\n")
+	fmt.Fprintf(w, "    _values shell %s\n", strings.Join(completionShells, " "))
+	fmt.Fprintf(w, "    return\n")
+	fmt.Fprintf(w, "  fi\n")
+	// -A '-*': px0 stops parsing flags at its target, so offer none after one.
+	fmt.Fprintf(w, "  local context state state_descr line ret=1\n")
+	fmt.Fprintf(w, "  typeset -A opt_args\n")
+	fmt.Fprintf(w, "  _arguments -A '-*' \\\n")
+	for _, f := range flags {
+		spec := "!-" + f.name
+		if f.value {
+			spec += "="
+		}
+		if f.desc != "" {
+			spec += "[" + zshQuote(f.desc) + "]"
+		}
+		switch {
+		case len(f.values) > 0:
+			spec += ":" + f.name + ":(" + strings.Join(f.values, " ") + ")"
+		case f.value:
+			spec += ":" + f.name + ": "
+		}
+		fmt.Fprintf(w, "    '%s' \\\n", spec)
+		fmt.Fprintf(w, "    '%s' \\\n", strings.Replace(spec, "!-", "!--", 1))
+	}
+	fmt.Fprintf(w, "    '1: :->target' && ret=0\n")
+	fmt.Fprintf(w, "  if [[ $state == target ]]; then\n")
+	fmt.Fprintf(w, "    local -a commands=(\n")
+	for _, c := range cmds {
+		item := c.name
+		if c.desc != "" {
+			item += ":" + strings.ReplaceAll(c.desc, ":", `\:`)
+		}
+		fmt.Fprintf(w, "      '%s'\n", strings.ReplaceAll(item, "'", `'\''`))
+	}
+	fmt.Fprintf(w, "    )\n")
+	fmt.Fprintf(w, "    _describe -t commands command commands && ret=0\n")
+	fmt.Fprintf(w, "    _wanted files expl 'file, directory or pull request URL' _files && ret=0\n")
+	fmt.Fprintf(w, "  fi\n")
+	fmt.Fprintf(w, "  return ret\n")
+	fmt.Fprintf(w, "}\n\n")
+	// Works both autoloaded from $fpath (as _px0) and sourced after compinit.
+	fmt.Fprintf(w, "if [ \"$funcstack[1]\" = \"_px0\" ]; then\n")
+	fmt.Fprintf(w, "  _px0 \"$@\"\n")
+	fmt.Fprintf(w, "else\n")
+	fmt.Fprintf(w, "  compdef _px0 px0\n")
+	fmt.Fprintf(w, "fi\n")
+}
+
+// fishQuote single-quotes s for fish, which escapes only ' and \ inside.
+func fishQuote(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
+func writeFishCompletion(w io.Writer, flags []completionFlag, cmds []completionCommand) {
+	fmt.Fprintf(w, "# fish completion for px0. Install with: px0 completion fish > ~/.config/fish/completions/px0.fish\n\n")
+	fmt.Fprintf(w, "complete -c px0 -n '__fish_seen_subcommand_from completion' -f -a %s\n", fishQuote(strings.Join(completionShells, " ")))
+	// No -f here: paths stay on offer next to the commands.
+	for _, c := range cmds {
+		line := "complete -c px0 -n __fish_use_subcommand -a " + fishQuote(c.name)
+		if c.desc != "" {
+			line += " -d " + fishQuote(c.desc)
+		}
+		fmt.Fprintln(w, line)
+	}
+	fmt.Fprintf(w, "function __px0_value_flag\n")
+	fmt.Fprintf(w, "    set -l words (commandline -opc)\n")
+	fmt.Fprintf(w, "    set -l pending ''\n")
+	fmt.Fprintf(w, "    for word in $words[2..-1]\n")
+	fmt.Fprintf(w, "        if test -n \"$pending\"\n")
+	fmt.Fprintf(w, "            set pending ''\n")
+	fmt.Fprintf(w, "            continue\n")
+	fmt.Fprintf(w, "        end\n")
+	fmt.Fprintf(w, "        switch $word\n")
+	free, fixed := valueFlags(flags)
+	for _, f := range append(free, fixed...) {
+		fmt.Fprintf(w, "            case -%s --%s\n                set pending %s\n", f.name, f.name, fishQuote(f.name))
+	}
+	fmt.Fprintf(w, "            case '--'\n                return 1\n")
+	fmt.Fprintf(w, "            case '-*'\n            case '*'\n                return 1\n")
+	fmt.Fprintf(w, "        end\n    end\n")
+	fmt.Fprintf(w, "    test \"$pending\" = \"$argv[1]\"; or string match -qr -- \"^--?$argv[1]=\" (commandline -ct)\n")
+	fmt.Fprintf(w, "end\n")
+	for _, f := range fixed {
+		fmt.Fprintf(w, "complete -c px0 -n %s -o %s -x -a %s\n", fishQuote("__px0_value_flag "+f.name), f.name, fishQuote(strings.Join(f.values, " ")))
+	}
+
+}
+
+// psQuote single-quotes s for PowerShell, which doubles ' inside.
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func psList(items []string) string {
+	q := make([]string, len(items))
+	for i, s := range items {
+		q[i] = psQuote(s)
+	}
+	return "@(" + strings.Join(q, ", ") + ")"
+}
+
+func writePowerShellCompletion(w io.Writer, flags []completionFlag, cmds []completionCommand) {
+	free, fixed := valueFlags(flags)
+	var valueNames []string
+	for _, f := range append(free, fixed...) {
+		valueNames = append(valueNames, "-"+f.name, "--"+f.name)
+	}
+	fmt.Fprintf(w, "# powershell completion for px0. Load with: px0 completion powershell | Out-String | Invoke-Expression\n\n")
+	fmt.Fprintf(w, "Register-ArgumentCompleter -Native -CommandName px0 -ScriptBlock {\n")
+	fmt.Fprintf(w, "    param($wordToComplete, $commandAst, $cursorPosition)\n")
+	fmt.Fprintf(w, "    $words = @($commandAst.CommandElements | Where-Object { $_.Extent.EndOffset -lt $cursorPosition } | ForEach-Object { $_.ToString() })\n")
+	fmt.Fprintf(w, "    $prev = if ($words.Count -gt 1) { $words[-1] } else { '' }\n")
+	fmt.Fprintf(w, "    $values = $null\n")
+	for _, f := range fixed {
+		fmt.Fprintf(w, "    if ($prev -eq %s -or $prev -eq %s) { $values = %s }\n", psQuote("-"+f.name), psQuote("--"+f.name), psList(f.values))
+	}
+	fmt.Fprintf(w, "    if ($words.Count -eq 2 -and $prev -eq 'completion') { $values = %s }\n", psList(completionShells))
+	fmt.Fprintf(w, "    if ($values) {\n")
+	fmt.Fprintf(w, "        $values | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n")
+	fmt.Fprintf(w, "            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n")
+	fmt.Fprintf(w, "        }\n")
+	fmt.Fprintf(w, "        return\n")
+	fmt.Fprintf(w, "    }\n")
+	fmt.Fprintf(w, "    if ($wordToComplete -like '-*') { return }\n")
+	// The target slot (the first word after the flags) also takes a command.
+	fmt.Fprintf(w, "    $valueFlags = %s\n", psList(valueNames))
+	fmt.Fprintf(w, "    for ($i = 1; $i -lt $words.Count; $i++) {\n")
+	fmt.Fprintf(w, "        if ($valueFlags -contains $words[$i]) { $i++ } elseif ($words[$i] -notlike '-*') { return }\n")
+	fmt.Fprintf(w, "    }\n")
+	fmt.Fprintf(w, "    $commands = [ordered]@{\n")
+	for _, c := range cmds {
+		desc := c.desc
+		if desc == "" {
+			desc = c.name
+		}
+		fmt.Fprintf(w, "        %s = %s\n", psQuote(c.name), psQuote(desc))
+	}
+	fmt.Fprintf(w, "    }\n")
+	fmt.Fprintf(w, "    $matched = @($commands.Keys | Where-Object { $_ -like \"$wordToComplete*\" })\n")
+	fmt.Fprintf(w, "    if ($matched) {\n")
+	fmt.Fprintf(w, "        $matched | ForEach-Object {\n")
+	fmt.Fprintf(w, "            [System.Management.Automation.CompletionResult]::new($_, $_, 'Command', $commands[$_])\n")
+	fmt.Fprintf(w, "        }\n")
+	// Any result turns off the path fallback, so add the paths back.
+	fmt.Fprintf(w, "        [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)\n")
+	fmt.Fprintf(w, "    }\n")
+	// Returning nothing lets PowerShell fall back to path completion.
+	fmt.Fprintf(w, "}\n")
 }
