@@ -4,7 +4,8 @@ import { on } from './bus.js';
 import { showToast, copyToClipboard } from './ui.js';
 import { openFile } from './tabs.js';
 import { setThreadHandler, hideSelectionBar } from './selbar.js';
-import { showRightInspector } from './inspector.js';
+import { hideRightInspector } from './inspector.js';
+import { layout, render } from './renderer.js';
 import { registerAgentPicker, reloadWorkspace } from './agent.js';
 import { onStream, setStreamTopic, watchThread } from './stream.js';
 
@@ -366,6 +367,31 @@ export function thrMd(src) {
 
 /* ---------- list view ---------- */
 
+export function showThreadsSidebar() {
+  hideRightInspector();
+  document.body.classList.remove('threads-hidden');
+  $('#btn-top-threads')?.classList.add('active');
+  if (!thr.cur && !thr.draft) thrShow('list');
+  thrDrawList();
+  layout();
+  render();
+}
+
+export function hideThreadsSidebar() {
+  document.body.classList.add('threads-hidden');
+  $('#btn-top-threads')?.classList.remove('active');
+  layout();
+  render();
+}
+
+export function toggleThreadsSidebar() {
+  if (document.body.classList.contains('threads-hidden')) {
+    showThreadsSidebar();
+  } else {
+    hideThreadsSidebar();
+  }
+}
+
 const thrEl = {};
 
 function thrShow(view) {
@@ -381,8 +407,10 @@ function thrVisible() {
 function thrDrawList() {
   if (!thrEl.list) return;
   const items = thrVisible();
-  const dot = $('#tab-threads .thr-tab-dot');
-  if (dot) dot.hidden = !thr.list.some(t => t.running);
+  const running = thr.list.some(t => t.running);
+  $$('.thr-tab-dot').forEach(dot => {
+    dot.hidden = !running;
+  });
   if (!items.length) {
     thrEl.list.innerHTML = '<div class="hint">' + (thr.filter === 'file'
       ? 'No threads started in this file. Select code and press <b data-keys="Alt+T"></b> to start one.'
@@ -600,7 +628,7 @@ export async function openThread(id) {
   thr.draft = null;
   thr.cur = null;
   thrCloseStream();
-  showRightInspector('threads');
+  showThreadsSidebar();
   thrShow('thread');
   thrEl.msgs.innerHTML = '<div class="hint">Loading…</div>';
   thrEl.title.textContent = 'Thread';
@@ -638,7 +666,7 @@ export function newThread(info) {
   thr.cur = null;
   thr.draft = info && info.path ? { path: info.path, l1: info.l1, l2: info.l2 } : {};
   if (S.meta?.pr) thr.draft.scope = thrDefaultScope(info);
-  showRightInspector('threads');
+  showThreadsSidebar();
   thrShow('thread');
   thrRenderState();
   if (info) hideSelectionBar();
@@ -712,6 +740,22 @@ export function initThreads() {
 
   $('#thr-new').addEventListener('click', () => newThread(null));
   $('#thr-back').addEventListener('click', thrBack);
+  $('#btn-top-threads')?.addEventListener('click', toggleThreadsSidebar);
+  $('#btn-close-threads')?.addEventListener('click', hideThreadsSidebar);
+
+  /* Threads sidebar resizer */
+  (() => {
+    const trz = $('#threads-resizer');
+    if (!trz) return;
+    let dragging = false;
+    trz.addEventListener('mousedown', e => { dragging = true; trz.classList.add('drag'); e.preventDefault(); });
+    addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const w = Math.max(260, Math.min(800, window.innerWidth - e.clientX));
+      $('#threads-side').style.width = w + 'px';
+    });
+    addEventListener('mouseup', () => { if (dragging) { dragging = false; trz.classList.remove('drag'); layout(); render(); } });
+  })();
   thrEl.send.addEventListener('click', thrSend);
   thrEl.stop.addEventListener('click', () => {
     if (thr.cur) apiPost('/api/threads/cancel', { id: thr.cur.id }).catch(e => showToast('!', e.message));
@@ -816,26 +860,27 @@ export function initThreads() {
   }));
   on('tab:activated', () => { if (thr.filter === 'file') thrDrawList(); });
   // agent.js keeps its inline edit comments at the top of this pane and hands off here.
-  on('threads:reveal', () => showRightInspector('threads'));
+  on('threads:reveal', () => showThreadsSidebar());
   on('threads:open', id => { if (id) openThread(id); });
   on('threads:drafts', n => {
-    const c = $('#tab-threads .thr-tab-count');
-    if (!c) return;
-    c.hidden = !n;
-    c.textContent = n;
-    c.title = n + (n === 1 ? ' comment' : ' comments') + ' waiting to be applied';
+    $$('.thr-tab-count').forEach(c => {
+      c.hidden = !n;
+      c.textContent = n;
+      c.title = n + (n === 1 ? ' comment' : ' comments') + ' waiting to be applied';
+    });
   });
   on('threads:shown', () => { if (!thr.cur && !thr.draft) thrShow('list'); thrDrawList(); });
 
   // Threads exist whenever a harness manager does; -no-agent removes them.
   api('/api/threads').then(j => {
     thr.avail = true;
-    $('#tab-threads').hidden = false;
+    $('#btn-top-threads')?.removeAttribute('hidden');
     thr.list = j.threads || [];
     thrDrawList();
     thrWireStream();
     thrConnectList();
   }).catch(() => {
+    $('#btn-top-threads')?.setAttribute('hidden', '');
     $('[data-sel="thread"]')?.setAttribute('hidden', '');
   });
 }

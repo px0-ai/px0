@@ -9,6 +9,7 @@ import { clearLink, hovercard } from './hover.js';
 import { openFind, clearFind, findbar, findNextMatch } from './find.js';
 import { gotoDefinition, findReferences } from './lsp.js';
 import { showRightInspector, hideRightInspector } from './inspector.js';
+import { hideThreadsSidebar } from './thread.js';
 import { overlay, openPalette, closePalette } from './palette.js';
 import { moveCursor, moveCol, moveWord, caretToEdge } from './cursor.js';
 import { showCalls } from './calls.js';
@@ -130,6 +131,7 @@ export function initShortcuts() {
         return;
       }
       if (S.selAll) { clearSelectAll(); return; }
+      if (!document.body.classList.contains('threads-hidden')) { hideThreadsSidebar(); return; }
       if (!document.body.classList.contains('right-hidden')) { hideRightInspector(); return; }
       if (S.occ) { S.occ = null; paint(); return; }
       if (inField(document.activeElement)) /** @type {HTMLElement} */ (document.activeElement).blur();

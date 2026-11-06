@@ -15,7 +15,7 @@
 <!-- Every web/themes/*.css joined by the server. See docs/internals/styling-and-themes.md. -->
 <link rel="stylesheet" href="static/themes.css">
 </head>
-<body>
+<body class="right-hidden threads-hidden">
 <div id="app">
   <!-- SECTION: Sidebar (File explorer tree) -->
   <aside id="side">
@@ -200,8 +200,15 @@
             <span>Done</span>
           </button>
         </div>
-        <!-- Opens the right sidebar; shown only while it is closed -->
-        <button id="btn-open-right" class="open-right" title="Open sidebar ({Mod+J})" aria-label="Open right sidebar"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        <!-- Threads button -->
+        <button id="btn-top-threads" class="top-bar-btn btn-top-threads" title="Agent Threads ({Alt+T})">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Threads</span>
+          <span class="thr-tab-count" hidden></span>
+          <span class="thr-tab-dot" hidden></span>
+        </button>
+        <!-- Opens/toggles the right sidebar inspector (LSP & Tips) -->
+        <button id="btn-open-right" class="top-bar-btn open-right" title="Inspector (References, Symbols, Calls, Search, Tips) ({Mod+J})" aria-label="Toggle inspector"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
       </div>
     </header>
 
@@ -330,8 +337,64 @@
 
     <!-- Review Mode Workflow View -->
     <div id="review-view" class="review-view layout-vertical" hidden>
-      <!-- Left sidebar / Top bar: Sequential Stages Pipeline -->
-      <aside id="review-pipeline" class="review-pipeline">
+      <!-- Review Sub-Navbar: Walkthrough & Diff vs Workflow Stages -->
+      <div id="review-sub-bar" class="review-sub-bar">
+        <div class="review-sub-tabs" role="tablist">
+          <button id="btn-review-tab-walkthrough" class="review-sub-tab active" role="tab" aria-selected="true" title="Scrollytelling code diff and guardrail understanding">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            <span>Diff & Understanding</span>
+            <span id="review-walkthrough-files-badge" class="review-sub-badge">0 files</span>
+          </button>
+          <button id="btn-review-tab-stages" class="review-sub-tab" role="tab" aria-selected="false" title="AI review pipeline stages">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span>Workflow Stages</span>
+            <span id="review-stages-count-badge" class="review-sub-badge">4</span>
+          </button>
+        </div>
+
+        <div class="review-sub-bar-spacer"></div>
+
+        <div id="review-walkthrough-toolbar" class="review-walkthrough-toolbar">
+          <div class="review-filter-chips" role="group" aria-label="Filter insights">
+            <button class="review-chip active" data-filter="all" title="Show all insights">All</button>
+            <button class="review-chip" data-filter="fastReturns" title="Fast returns & guardrails">⚡ Returns (<span id="wt-count-returns">0</span>)</button>
+            <button class="review-chip" data-filter="edgeCases" title="Error & edge case exits">⚠️ Edge Cases (<span id="wt-count-edge">0</span>)</button>
+            <button class="review-chip" data-filter="coreLogic" title="Core happy-path modifications">🎯 Core (<span id="wt-count-core">0</span>)</button>
+          </div>
+          <button id="btn-refresh-walkthrough" class="mini" title="Refresh walkthrough and diff">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Diff Walkthrough & Understanding View (Default in Review Mode) -->
+      <div id="review-walkthrough-view" class="review-walkthrough-view">
+        <!-- Left: Understanding Pane -->
+        <aside id="review-understanding-pane" class="review-understanding-pane">
+          <div class="review-pane-header">
+            <div class="review-pane-title">
+              <span class="review-pane-heading">Code Understanding & Guardrails</span>
+              <span id="review-understanding-stat" class="review-pane-sub">Fast returns, edge cases & core logic</span>
+            </div>
+            <div id="review-understanding-files-nav" class="review-files-quick-nav"></div>
+          </div>
+          <div id="review-understanding-content" class="review-understanding-content">
+            <div class="review-empty-state"><div class="review-spinner"></div><p>Analyzing code changes...</p></div>
+          </div>
+        </aside>
+
+        <!-- Right: Synchronized Diff Pane with Sticky Headers -->
+        <section id="review-diff-pane" class="review-diff-pane">
+          <div id="review-diff-content" class="review-diff-content">
+            <div class="review-empty-state"><div class="review-spinner"></div><p>Loading diff...</p></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Existing Workflow Stages Pipeline View -->
+      <div id="review-stages-view" class="review-stages-view" hidden>
+        <!-- Left sidebar / Top bar: Sequential Stages Pipeline -->
+        <aside id="review-pipeline" class="review-pipeline">
         <div class="review-pipeline-head">
           <div class="review-workflow-info">
             <span class="review-section-title">Workflow</span>
@@ -424,6 +487,7 @@
           </div>
         </div>
       </section>
+      </div>
     </div>
 
     <!-- Floating Jump Return Pill (shown in Code Mode when jumped from a review link) -->
@@ -586,7 +650,6 @@
   <aside id="right-side">
     <header class="inspector-head">
       <div class="inspector-tabs">
-        <button class="inspector-tab" data-itab="threads" id="tab-threads" title="Long-running conversations with a coding harness ({Alt+T} on a selection)" hidden>Threads<span class="thr-tab-count" hidden></span><span class="thr-tab-dot" hidden></span></button>
         <button class="inspector-tab active" data-itab="refs" title="View references across workspace">References</button>
         <button class="inspector-tab" data-itab="symbols" title="View file symbols outline">Symbols</button>
         <button class="inspector-tab" data-itab="calls" title="Trace callers and callees ({Alt+Shift+H})">Calls</button>
@@ -646,9 +709,43 @@
         <div class="hint">Search text across every indexed file.</div>
       </div>
     </section>
-    <!-- Right Pane 5: Threads. Long-running, multi-turn conversations with a
-         coding harness, anchored to code. web/src/thread.js owns it. -->
-    <section class="inspector-pane" id="pane-right-threads">
+    <!-- Right Pane 5: Tips & Tricks. Browse, search and filter all px0 tips. web/src/tips.js owns it. -->
+    <section class="inspector-pane" id="pane-right-tips">
+      <div class="inspector-bar tips-header-bar">
+        <div class="tips-search-wrap">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="tips-filter" placeholder="Filter tips..." autocomplete="off" spellcheck="false">
+        </div>
+        <span id="tips-count-badge" class="inspector-badge">0 tips</span>
+        <button id="btn-refresh-tips" class="mini" title="Reload tips from px0.ai">&#x21bb;</button>
+      </div>
+      <div class="tips-toolbar-sub">
+        <label class="tips-setting-toggle" title="Toggle automatic tip popups in interface">
+          <input type="checkbox" id="tips-toggle-popup" checked>
+          <span>Show tip popups in interface</span>
+        </label>
+      </div>
+      <div class="panel-body" id="tips-list"></div>
+    </section>
+  </aside>
+
+  <!-- Threads Resizer Divider -->
+  <div id="threads-resizer" title="Drag to resize threads sidebar"></div>
+
+  <!-- SECTION: Dedicated Threads Sidebar -->
+  <aside id="threads-side">
+    <header class="inspector-head threads-head">
+      <div class="threads-head-title">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="threads-head-label">Threads</span>
+        <span class="thr-tab-count" hidden></span>
+        <span class="thr-tab-dot" hidden></span>
+      </div>
+      <div class="inspector-head-actions">
+        <button id="btn-close-threads" class="mini" title="Close threads (Esc)">&#10005;</button>
+      </div>
+    </header>
+
     <!-- Inline edit comments: one box per edit being composed or in flight, kept at the top of the
          Threads pane. #agent-batch-bar applies every added comment together, and each applied
          edit becomes a thread in the list below. web/src/agent.js owns it. -->
@@ -677,65 +774,49 @@
       </div>
       <div id="agentbox-list" class="agentbox-list"></div>
     </div>
-      <div id="thr-list-view" class="thr-view">
-        <div class="inspector-bar">
-          <span class="calls-dir" id="thr-filter">
-            <button class="opt on" data-thr-filter="all" title="Every thread in this workspace">All</button>
-            <button class="opt" data-thr-filter="file" title="Threads started in the open file">This file</button>
-          </span>
-          <button id="thr-new" class="thr-btn-primary" title="Start a thread about the workspace or the selection">+ New</button>
-        </div>
-        <div class="panel-body" id="thr-list"></div>
-      </div>
-      <div id="thr-thread-view" class="thr-view" hidden>
-        <div class="inspector-bar thr-head">
-          <button id="thr-back" class="mini" title="All threads" aria-label="All threads">&#8592;</button>
-          <span class="inspector-sym-title" id="thr-title">New thread</span>
-          <button id="thr-delete" class="mini" title="Delete this thread" aria-label="Delete thread" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
-        </div>
-        <div id="thr-anchor" class="thr-anchor" hidden></div>
-        <div id="thr-msgs" class="thr-msgs"></div>
-        <div class="thr-compose">
-          <!-- PR review only: what this thread is about (thread.js) -->
-          <div id="thr-scope" class="thr-scope" role="group" aria-label="What this thread is about" hidden>
-            <span class="thr-scope-label">About</span>
-            <button type="button" data-scope="pr" title="The whole pull request: merge-base to PR head">Whole PR</button>
-            <button type="button" data-scope="mine" title="Only your own changes on top of the PR (uncommitted and unpushed)">My changes</button>
-            <button type="button" data-scope="selection" title="Just the code this thread is anchored to">Selection</button>
-          </div>
-          <div class="agent-meta">
-            <span class="agent-meta-label">Model</span>
-            <select class="agent-harness-select" id="thr-harness" title="Coding harness"></select>
-            <select class="agent-model-select" id="thr-model" title="Model"></select>
-          </div>
-          <textarea id="thr-input" class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Ask about this code, or ask for changes anywhere..."></textarea>
-          <div class="agent-foot">
-            <span class="agent-hint" id="thr-hint">Enter to send, Shift+Enter for a new line</span>
-            <button id="thr-stop" class="agent-cancel" title="Stop this reply" hidden>Stop</button>
-            <button id="thr-send" class="agent-send" title="Send message">Send</button>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- Right Pane 6: Tips & Tricks. Browse, search and filter all px0 tips. web/src/tips.js owns it. -->
-    <section class="inspector-pane" id="pane-right-tips">
-      <div class="inspector-bar tips-header-bar">
-        <div class="tips-search-wrap">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="tips-filter" placeholder="Filter tips..." autocomplete="off" spellcheck="false">
+    <!-- Threads list view -->
+    <div id="thr-list-view" class="thr-view">
+      <div class="inspector-bar">
+        <span class="calls-dir" id="thr-filter">
+          <button class="opt on" data-thr-filter="all" title="Every thread in this workspace">All</button>
+          <button class="opt" data-thr-filter="file" title="Threads started in the open file">This file</button>
+        </span>
+        <button id="thr-new" class="thr-btn-primary" title="Start a thread about the workspace or the selection">+ New</button>
+      </div>
+      <div class="panel-body" id="thr-list"></div>
+    </div>
+
+    <!-- Thread detail & conversation view -->
+    <div id="thr-thread-view" class="thr-view" hidden>
+      <div class="inspector-bar thr-head">
+        <button id="thr-back" class="mini" title="All threads" aria-label="All threads">&#8592;</button>
+        <span class="inspector-sym-title" id="thr-title">New thread</span>
+        <button id="thr-delete" class="mini" title="Delete this thread" aria-label="Delete thread" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+      </div>
+      <div id="thr-anchor" class="thr-anchor" hidden></div>
+      <div id="thr-msgs" class="thr-msgs"></div>
+      <div class="thr-compose">
+        <!-- PR review only: what this thread is about (thread.js) -->
+        <div id="thr-scope" class="thr-scope" role="group" aria-label="What this thread is about" hidden>
+          <span class="thr-scope-label">About</span>
+          <button type="button" data-scope="pr" title="The whole pull request: merge-base to PR head">Whole PR</button>
+          <button type="button" data-scope="mine" title="Only your own changes on top of the PR (uncommitted and unpushed)">My changes</button>
+          <button type="button" data-scope="selection" title="Just the code this thread is anchored to">Selection</button>
         </div>
-        <span id="tips-count-badge" class="inspector-badge">0 tips</span>
-        <button id="btn-refresh-tips" class="mini" title="Reload tips from px0.ai">&#x21bb;</button>
+        <div class="agent-meta">
+          <span class="agent-meta-label">Model</span>
+          <select class="agent-harness-select" id="thr-harness" title="Coding harness"></select>
+          <select class="agent-model-select" id="thr-model" title="Model"></select>
+        </div>
+        <textarea id="thr-input" class="agent-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Ask about this code, or ask for changes anywhere..."></textarea>
+        <div class="agent-foot">
+          <span class="agent-hint" id="thr-hint">Enter to send, Shift+Enter for a new line</span>
+          <button id="thr-stop" class="agent-cancel" title="Stop this reply" hidden>Stop</button>
+          <button id="thr-send" class="agent-send" title="Send message">Send</button>
+        </div>
       </div>
-      <div class="tips-toolbar-sub">
-        <label class="tips-setting-toggle" title="Toggle automatic tip popups in interface">
-          <input type="checkbox" id="tips-toggle-popup" checked>
-          <span>Show tip popups in interface</span>
-        </label>
-      </div>
-      <div class="panel-body" id="tips-list"></div>
-    </section>
+    </div>
   </aside>
 </div>
 

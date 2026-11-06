@@ -5,6 +5,7 @@ import { showToast } from './ui.js';
 import { layout } from './renderer.js';
 import { thrMd } from './thread.js';
 import { onStream, setStreamTopic, watchThread } from './stream.js';
+import { initReviewWalkthrough, loadReviewWalkthrough, getWalkthroughSubTab, setWalkthroughSubTab } from './reviewwalkthrough.js';
 
 let currentMode = 'code'; // 'code' | 'review'
 let currentLayout = (typeof localStorage !== 'undefined' && localStorage.getItem('px0-review-layout')) || 'vertical';
@@ -138,6 +139,10 @@ export function setMode(mode) {
     if (reviewView) reviewView.hidden = false;
     if (returnPill) returnPill.hidden = true;
     setLayout(currentLayout);
+    setWalkthroughSubTab(getWalkthroughSubTab());
+    if (getWalkthroughSubTab() === 'walkthrough') {
+      loadReviewWalkthrough();
+    }
     renderPipeline();
     renderActiveStage();
     loadWorkflowStatus();
@@ -174,6 +179,7 @@ function releaseStageThread() {
 }
 
 export function initReviewFlow() {
+  initReviewWalkthrough();
   wireModeControls();
   wireLayoutControls();
   wirePipelineActions();
