@@ -1,0 +1,401 @@
+import { PxContainer } from "../container/PxContainer";
+
+export { PxContainer };
+
+interface RepoRef {
+  owner: string;
+  repo: string;
+  ref: string;
+}
+
+const THEME_FILES = [
+  "catppuccin-latte.css",
+  "catppuccin-mocha.css",
+  "dark.css",
+  "dracula.css",
+  "github-dark.css",
+  "gruvbox-dark.css",
+  "gruvbox-light.css",
+  "light.css",
+  "monokai.css",
+  "nord.css",
+  "one-dark.css",
+  "rose-pine.css",
+  "solarized-dark.css",
+  "solarized-light.css",
+];
+
+export default {
+  async fetch(request, env, ctx): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Static assets (px0's own web/ directory) never need repo context or a
+    // running container — identical bytes for every repo, every time.
+    if (url.pathname === "/static/themes.css") {
+      return serveThemesCss(request, env);
+    }
+    if (url.pathname.startsWith("/static/")) {
+      const assetUrl = new URL(url.pathname.slice("/static".length) || "/", url);
+      return env.ASSETS.fetch(new Request(assetUrl, request));
+    }
+
+    if (url.pathname === "/") {
+      return handleLanding(request, env);
+    }
+
+    // Polled by the loading/error overlay injected into index.html (see
+    // serveIndexHtml) — a single, non-blocking status check, not gated
+    // behind the same "wait until ready" loop /api/* goes through.
+    if (url.pathname === "/__pxcf/status") {
+      return handleStatusCheck(request, env);
+    }
+
+    // Bare API/other px0 routes (no owner/repo in the path) arrive here when
+    // px0's own frontend does `fetch('/api/...')` with an absolute path from
+    // a page that was loaded at /owner/repo. Recover the repo from Referer.
+    if (isPx0Route(url.pathname)) {
+      const ref = parseRepoFromReferer(request.headers.get("Referer"), url);
+      if (!ref) {
+        return Response.json(
+          { error: "could not determine which repo this request belongs to (missing/unparseable Referer)" },
+          { status: 400 },
+        );
+      }
+      return routeToContainer(request, env, ctx, ref);
+    }
+
+    // Otherwise: /owner/repo(/anything) — the initial page load. Serve
+    // px0's own index.html verbatim; it never needs the container itself,
+    // only the /api/* calls it makes afterwards do.
+    const parsed = parseOwnerRepo(url.pathname);
+    if (!parsed) {
+      return new Response("Not found", { status: 404 });
+    }
+    return serveIndexHtml(request, env);
+  },
+} satisfies ExportedHandler<Env>;
+
+function isPx0Route(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+function parseOwnerRepo(pathname: string): { owner: string; repo: string } | null {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return { owner: parts[0], repo: parts[1] };
+}
+
+function parseRepoFromReferer(referer: string | null, currentUrl: URL): RepoRef | null {
+  if (!referer) return null;
+  let refUrl: URL;
+  try {
+    refUrl = new URL(referer);
+  } catch {
+    return null;
+  }
+  if (refUrl.origin !== currentUrl.origin) return null;
+  const parsed = parseOwnerRepo(refUrl.pathname);
+  if (!parsed) return null;
+  const ref = refUrl.searchParams.get("ref") || "HEAD";
+  return { owner: parsed.owner, repo: parsed.repo, ref };
+}
+
+async function serveIndexHtml(request: Request, env: Env): Promise<Response> {
+  const assetUrl = new URL("/index.html", request.url);
+  const res = await env.ASSETS.fetch(new Request(assetUrl, request));
+  const out = new Response(res.body, res);
+  // Same-origin fetch() calls made by this page (fetch('/api/...')) need to
+  // carry the full path (including ?ref=) as Referer so the Worker can
+  // recover repo context on those prefix-less requests. Pin the policy
+  // explicitly rather than relying on the browser's default.
+  out.headers.set("Referrer-Policy", "same-origin");
+
+  // px0 itself has no concept of "the backend is still provisioning" or
+  // "the backend rejected this repo" — it's designed for instant local
+  // filesystem access. Without this, a cold-starting or rejected (e.g.
+  // over the size cap) repo just shows px0's bare default shell with no
+  // explanation while its own fetch()es silently fail underneath. This
+  // overlay is injected at serve time only — px0's own index.html on disk
+  // is untouched — and removes itself once the repo is actually ready.
+  return new HTMLRewriter().on("body", new AppendOverlay()).transform(out);
+}
+
+class AppendOverlay {
+  element(element: Element) {
+    element.append(LOADING_OVERLAY_HTML, { html: true });
+  }
+}
+
+async function handleStatusCheck(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const owner = url.searchParams.get("owner");
+  const repo = url.searchParams.get("repo");
+  const ref = url.searchParams.get("ref") || "HEAD";
+  if (!owner || !repo) {
+    return Response.json({ error: "missing owner/repo" }, { status: 400 });
+  }
+
+  const fwd = new Request(request.url, {
+    method: "GET",
+    headers: {
+      "X-Px0-Owner": owner,
+      "X-Px0-Repo": repo,
+      "X-Px0-Ref": ref,
+      "X-Px0-Status-Only": "1",
+    },
+  });
+  const stub = env.PX0_CONTAINER.getByName("shared");
+  const resp = await stub.fetch(fwd);
+  const out = new Response(resp.body, resp);
+  out.headers.set("Cache-Control", "no-store");
+  return out;
+}
+
+async function serveThemesCss(request: Request, env: Env): Promise<Response> {
+  // Mirrors px0's own handleThemes: concatenate web/themes/*.css in
+  // alphanumeric order (see server.go).
+  const parts = await Promise.all(
+    THEME_FILES.map(async (name) => {
+      const assetUrl = new URL(`/themes/${name}`, request.url);
+      const res = await env.ASSETS.fetch(new Request(assetUrl, request));
+      return res.ok ? res.text() : "";
+    }),
+  );
+  return new Response(parts.join("\n"), {
+    headers: { "content-type": "text/css; charset=utf-8" },
+  });
+}
+
+async function routeToContainer(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  { owner, repo, ref }: RepoRef,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const cache = caches.default;
+  // Synthetic key: the real request path (e.g. /api/tree) has no owner/repo
+  // in it, so build one that does to keep different repos' cache entries apart.
+  const cacheKeyUrl = new URL(`/__cache/${owner}/${repo}/${encodeURIComponent(ref)}${url.pathname}${url.search}`, url);
+  const cacheKey = new Request(cacheKeyUrl.toString(), { method: "GET" });
+
+  // NOTE: every request here shares the same real URL (e.g. /api/tree) no
+  // matter which repo it's for — we deliberately never put owner/repo in
+  // the path (that's the whole point of the Referer-based scheme). That
+  // means the *browser's own* HTTP cache must never be allowed to treat
+  // these as cacheable-by-URL, or it will silently serve one repo's
+  // response to a different repo's page. All caching below happens only
+  // in our own edge cache (keyed correctly, by the synthetic cacheKeyUrl),
+  // and every response handed back to the client is explicitly no-store.
+  const isCacheable = request.method === "GET";
+  if (isCacheable) {
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const out = new Response(cached.body, cached);
+      out.headers.set("Cache-Control", "no-store");
+      return out;
+    }
+  }
+
+  const fwd = new Request(request);
+  fwd.headers.set("X-Px0-Owner", owner);
+  fwd.headers.set("X-Px0-Repo", repo);
+  fwd.headers.set("X-Px0-Ref", ref);
+  // px0 gzips its own responses when it sees Accept-Encoding; Cloudflare's
+  // edge already compresses the response to the real browser, so let px0
+  // serve plain and avoid an extra (and, through the container proxy,
+  // observed-corrupting) compression layer in between.
+  fwd.headers.delete("Accept-Encoding");
+
+  // One shared container hosts every repo (see PxContainer.ts) — no longer
+  // one container per owner/repo, so there's only ever one DO name to route to.
+  const stub = env.PX0_CONTAINER.getByName("shared");
+  const resp = await stub.fetch(fwd);
+
+  if (isCacheable && resp.ok) {
+    const forCache = resp.clone();
+    const cacheHeaders = new Headers(forCache.headers);
+    cacheHeaders.set("Cache-Control", "public, max-age=300");
+    ctx.waitUntil(
+      cache.put(cacheKey, new Response(forCache.body, { status: forCache.status, headers: cacheHeaders })),
+    );
+
+    const clientHeaders = new Headers(resp.headers);
+    clientHeaders.set("Cache-Control", "no-store");
+    return new Response(resp.body, { status: resp.status, headers: clientHeaders });
+  }
+  return resp;
+}
+
+async function handleLanding(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.searchParams.has("go")) {
+    const input = url.searchParams.get("go") || "";
+    const m =
+      input.match(/github\.com\/([^/\s]+)\/([^/\s#?]+)/i) || input.match(/^([^/\s]+)\/([^/\s#?]+)$/);
+    if (m) {
+      const owner = m[1];
+      const repo = m[2].replace(/\.git$/, "");
+      return Response.redirect(new URL(`/${owner}/${repo}`, url).toString(), 302);
+    }
+    return new Response("Could not parse an owner/repo from that input.", { status: 400 });
+  }
+  return new Response(LANDING_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+const LOADING_OVERLAY_HTML = `
+<style>
+  #pxcf-overlay { position: fixed; inset: 0; z-index: 2147483647; background: #0b0d10; color: #e6e6e6;
+    display: flex; align-items: center; justify-content: center;
+    font: 15px/1.6 -apple-system,BlinkMacSystemFont,sans-serif; transition: opacity .25s ease; }
+  #pxcf-overlay.pxcf-hidden { opacity: 0; pointer-events: none; }
+  #pxcf-box { text-align: center; max-width: 440px; padding: 2rem; }
+  #pxcf-spinner { width: 26px; height: 26px; margin: 0 auto 1.25rem; border: 3px solid #262a30;
+    border-top-color: #4f7cff; border-radius: 50%; animation: pxcf-spin .8s linear infinite; }
+  @keyframes pxcf-spin { to { transform: rotate(360deg); } }
+  #pxcf-overlay.pxcf-error #pxcf-spinner { display: none; }
+  #pxcf-icon-error { display: none; font-size: 26px; margin-bottom: 1rem; }
+  #pxcf-overlay.pxcf-error #pxcf-icon-error { display: block; }
+  #pxcf-title { font-size: 16px; font-weight: 600; margin-bottom: .4rem; }
+  #pxcf-msg { color: #9aa0a6; font-size: 13px; word-break: break-word; }
+  #pxcf-back { display: none; margin-top: 1.25rem; color: #4f7cff; text-decoration: none; font-size: 13px; }
+  #pxcf-overlay.pxcf-error #pxcf-back { display: inline-block; }
+</style>
+<div id="pxcf-overlay">
+  <div id="pxcf-box">
+    <div id="pxcf-spinner"></div>
+    <div id="pxcf-icon-error">&#9888;</div>
+    <div id="pxcf-title">Loading&hellip;</div>
+    <div id="pxcf-msg"></div>
+    <a id="pxcf-back" href="/">&larr; back to px0-cf</a>
+  </div>
+</div>
+<script>
+(function () {
+  var parts = location.pathname.split('/').filter(Boolean);
+  if (parts.length < 2) return;
+  var owner = parts[0], repo = parts[1];
+  var ref = new URLSearchParams(location.search).get('ref') || 'HEAD';
+
+  var overlay = document.getElementById('pxcf-overlay');
+  var title = document.getElementById('pxcf-title');
+  var msg = document.getElementById('pxcf-msg');
+
+  var LABELS = {
+    booting: 'Starting up…',
+    'checking-size': 'Checking repository size…',
+    cloning: 'Cloning ' + owner + '/' + repo + '…'
+  };
+
+  var start = Date.now();
+  var stopped = false;
+
+  function statusUrl() {
+    return '/__pxcf/status?owner=' + encodeURIComponent(owner) + '&repo=' + encodeURIComponent(repo) + '&ref=' + encodeURIComponent(ref);
+  }
+
+  function showError(title_, message) {
+    stopped = true;
+    overlay.classList.add('pxcf-error');
+    title.textContent = title_;
+    msg.textContent = message;
+  }
+
+  function poll() {
+    if (stopped) return;
+    fetch(statusUrl())
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.status === 'ready') {
+          stopped = true;
+          overlay.classList.add('pxcf-hidden');
+          setTimeout(function () { overlay.remove(); }, 300);
+          return;
+        }
+        if (s.status === 'error') {
+          showError('Couldn\\'t load ' + owner + '/' + repo, s.message || 'Something went wrong.');
+          return;
+        }
+        title.textContent = LABELS[s.status] || ('Loading ' + owner + '/' + repo + '…');
+        msg.textContent = Date.now() - start > 20000
+          ? 'Still working — this repo may be large, or the server is cold-starting.'
+          : '';
+        setTimeout(poll, 700);
+      })
+      .catch(function () {
+        if (Date.now() - start > 45000) {
+          showError('Lost connection', 'Could not reach the server. Try reloading the page.');
+          return;
+        }
+        setTimeout(poll, 1000);
+      });
+  }
+  poll();
+})();
+</script>
+`;
+
+const EXAMPLE_REPOS = [
+  "caddyserver/caddy",
+  "pallets/flask",
+  "vuejs/core",
+  "sveltejs/svelte",
+  "expressjs/express",
+  "BurntSushi/ripgrep",
+];
+
+const AUTOCOMPLETE_REPOS = [...EXAMPLE_REPOS, "sindresorhus/awesome", "fastapi/fastapi", "px0-ai/px0"];
+
+const LANDING_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>px0-cf</title>
+<style>
+  body { background:#0b0d10; color:#e6e6e6; font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:1.5rem; box-sizing:border-box; }
+  .wrap { text-align:center; width:min(90vw,560px); }
+  .badge { display:inline-block; font-size:.75rem; letter-spacing:.02em; color:#9aa0a6;
+           border:1px solid #262a30; border-radius:999px; padding:.25rem .75rem; margin-bottom:1rem; }
+  h1 { font-weight:600; font-size:1.75rem; margin:0 0 .6rem; }
+  .sub { color:#9aa0a6; font-size:.9rem; margin:0 0 1.75rem; }
+  .sub a { color:#4f7cff; text-decoration:none; }
+  .sub a:hover { text-decoration:underline; }
+  form { display:flex; gap:.5rem; }
+  input { flex:1; min-width:0; padding:.75rem 1rem; border-radius:8px; border:1px solid #333;
+          background:#16191d; color:inherit; font-size:1rem; }
+  input:focus { outline:none; border-color:#4f7cff; }
+  button { padding:.75rem 1.25rem; border-radius:8px; border:0; background:#4f7cff; color:#fff;
+           font-size:1rem; cursor:pointer; white-space:nowrap; }
+  button:hover { background:#3d68e0; }
+  .examples { margin-top:1.5rem; display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; justify-content:center; }
+  .examples-label { color:#6b7075; font-size:.8rem; margin-right:.15rem; }
+  .chip { color:#c7cbd1; text-decoration:none; font-size:.8rem; background:#16191d; border:1px solid #262a30;
+          border-radius:999px; padding:.35rem .75rem; }
+  .chip:hover { border-color:#4f7cff; color:#fff; }
+  .foot { margin-top:2rem; color:#5a5f65; font-size:.75rem; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="badge">px0 on Cloudflare Containers</div>
+    <h1>Browse any GitHub repo, instantly</h1>
+    <p class="sub">Paste a repo and get a fast, searchable file tree with syntax highlighting &mdash;
+      no cloning, no setup. Runs the real <a href="https://github.com/px0-ai/px0" target="_blank" rel="noopener">px0</a>
+      binary for you, on demand.</p>
+    <form action="/" method="get">
+      <input name="go" list="repo-suggestions" autocomplete="off" placeholder="owner/repo or a github.com URL" autofocus>
+      <button type="submit">Browse</button>
+    </form>
+    <datalist id="repo-suggestions">
+      ${AUTOCOMPLETE_REPOS.map((r) => `<option value="${r}">`).join("\n      ")}
+    </datalist>
+    <div class="examples">
+      <span class="examples-label">Try:</span>
+      ${EXAMPLE_REPOS.map((r) => `<a class="chip" href="/${r}">${r}</a>`).join("\n      ")}
+    </div>
+    <div class="foot">Public repos only &middot; 200MB size cap &middot; idle repos are evicted to make room for others</div>
+  </div>
+</body>
+</html>`;
