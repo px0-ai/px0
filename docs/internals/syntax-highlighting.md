@@ -2,6 +2,11 @@
 
 This document details the architecture and performance strategies of px0's windowed syntax highlighting engine ([`internal/render/render.go`](../../internal/render/render.go)).
 
+Code folding reuses the source retained by the render document and charges lazy
+fold ranges to the same cache budget. Its bounded lexical scan runs separately
+after first paint and never requests another Chroma pass. See
+[Code Folding Architecture](code-folding.md) for range detection and lifetime.
+
 ## 1. The Syntax Highlighting Bottleneck
 
 px0 utilizes [Chroma](https://github.com/alecthomas/chroma) (a pure Go syntax highlighter modeled after Pygments) to tokenize ~280 programming languages without external dependencies or CGO.

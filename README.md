@@ -27,6 +27,7 @@ See full performance benchmarks and comparisons at [px0.ai/benchmarks](https://p
 - Fast navigation: Fuzzy file search (`Cmd/Ctrl+P`), symbol outline (`Cmd/Ctrl+Shift+O`), and workspace regex search (`Cmd/Ctrl+Shift+F`) in milliseconds.
 - Remote-first: Spin up on any remote server, VM, or container in `< 1 ms` (`-host 0.0.0.0`) with sandboxed traversal guards and origin verification—no SSH keys, tunnels, or remote daemons required.
 - Virtual rendering: Opens 400,000-line files smoothly by mounting only visible rows (~60 DOM rows); frees memory back to the OS after 15 seconds of inactivity.
+- Code folding: Collapse nested code blocks and HTML/XML elements with gutter chevrons, retain source line numbers, and use Fold All / Unfold All from the command palette. See [Code Folding](docs/features/code-folding.md).
 - Rich code viewer: 14 built-in themes, rendered Markdown with Mermaid diagrams, CSV/TSV table view, image inspector, and optional zero-config LSP.
 
 ## Installation

@@ -50,6 +50,7 @@ Fast code discovery is essential when reviewing large codebases or inspecting ag
 
 Understanding complex software systems requires more than raw text search. px0 delivers structural and semantic code intelligence while maintaining an ultra-lightweight footprint:
 
+- **[Code Folding](code-folding.md)**: Collapse nested blocks in the source viewer with gutter controls or Fold All / Unfold All commands, while preserving source line numbers and navigation.
 - **[Symbol Outline Navigation](symbol-outline.md)**: Open a structured list of symbols (`Cmd/Ctrl+Shift+O`) to view all functions, methods, classes, types, and variables defined within the active document.
 - **[Language Server Protocol (LSP) Integration](lsp-code-intelligence.md)**: Tap into semantic analysis for Go, Rust, TypeScript, Python, C/C++, and other languages. Jump directly to definitions (`F12`), explore all reference call sites (`Shift+F12`), inspect interactive Call Trails (`Alt+Shift+H`), and view documentation cards on hover.
 - **[Syntax Highlighting & Language Support](syntax-highlighting.md)**: Beautiful native highlighting for ~280 programming languages and markup formats via Chroma, enhanced with bracket pair colorization and word occurrence highlighting.

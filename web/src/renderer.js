@@ -1,6 +1,9 @@
 // web/src/renderer.js
 import { $, S, doc_, api, esc, LH, CHUNK, OVERSCAN } from './state.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
+import { foldIndex, foldLineToRow, foldRowToLine, visibleFoldLine, nextFoldLine, revealFoldLine, updateFoldPixels, foldedLineY, unfoldedY } from './folding.js';
+import { loadDocFolds } from './folding-ui.js';
+import { emit } from './bus.js';
 
 export function getLH() {
   return S.lh || LH;
@@ -77,6 +80,7 @@ function recomputeOffsets(w, total) {
     off[i + 1] = sum;
   }
   w.dirtyOffsets = false;
+  w.version = (w.version || 0) + 1;
 }
 
 export function ensureWrapMap(d) {
@@ -156,13 +160,26 @@ function lineIndexAtY(w, total, y) {
   return Math.max(0, Math.min(total - 1, lo));
 }
 
+function foldGeometry(d, w, lh) {
+  const f = d.folds;
+  if (f?.spans.length) updateFoldPixels(f, w?.offsets || null, w?.version || 0, lh);
+  return f?.spans.length ? f : null;
+}
+
+export function revealSourceLine(line, d = doc_()) {
+  if (!d || !revealFoldLine(d.folds, line)) return;
+  layout();
+  emit('folds:changed', { doc: d });
+}
+
 export function lineTopY(line, d = doc_()) {
   const lh = getLH();
   if (!d || !d.total) return Math.max(0, ((line || 1) - 1) * lh);
-  const idx = Math.max(0, Math.min(d.total - 1, (line || 1) - 1));
-  if (!S.wrap) return idx * lh;
-  const w = ensureWrapMap(d);
-  return w ? w.offsets[idx] : idx * lh;
+  const n = Math.max(1, Math.min(d.total + 1, line || 1));
+  const w = S.wrap ? ensureWrapMap(d) : null;
+  const f = foldGeometry(d, w, lh);
+  if (f) return foldedLineY(f, n, w?.offsets || null, lh);
+  return w ? w.offsets[n - 1] : (n - 1) * lh;
 }
 
 export function lineHeightAt(line, d = doc_()) {
@@ -176,12 +193,19 @@ export function lineHeightAt(line, d = doc_()) {
 export function lineAtScrollY(y, d = doc_()) {
   const lh = getLH();
   if (!d || !d.total) return Math.max(1, Math.floor(Math.max(0, y) / lh) + 1);
-  if (!S.wrap) return Math.max(1, Math.min(d.total, Math.floor(Math.max(0, y) / lh) + 1));
-  const w = ensureWrapMap(d);
-  return w ? lineIndexAtY(w, d.total, y) + 1 : 1;
+  const w = S.wrap ? ensureWrapMap(d) : null;
+  const f = w ? foldGeometry(d, w, lh) : d.folds?.spans.length ? d.folds : null;
+  if (w) {
+    const rawY = f ? unfoldedY(f, Math.max(0, y), w.offsets, lh) : y;
+    return visibleFoldLine(f, lineIndexAtY(w, d.total, rawY) + 1);
+  }
+  // Clamp in visible coordinates before mapping: the file's last line may be hidden.
+  const rows = f ? foldLineToRow(f, d.total + 1) - 1 : d.total;
+  return foldRowToLine(f, Math.max(1, Math.min(rows, Math.floor(Math.max(0, y) / lh) + 1)));
 }
 
 export function layout() {
+  invalidatePaint();
   const d = doc_();
   if (!d) return;
   const lh = getLH();
@@ -192,15 +216,15 @@ export function layout() {
     sizer.style.width = '100%';
     rowsEl.style.width = '100%';
     if (!sizer.offsetHeight && d.total > 0) {
-      sizer.style.height = (d.total * lh + bottomPad()) + 'px';
+      sizer.style.height = (lineTopY(d.total + 1, d) + bottomPad()) + 'px';
     }
     const w = ensureWrapMap(d);
-    sizer.style.height = ((w ? w.offsets[d.total] : d.total * lh) + bottomPad()) + 'px';
+    sizer.style.height = (lineTopY(d.total + 1, d) + bottomPad()) + 'px';
   } else {
     ensureLineCols(d);
     const maxCols = Math.max(d.maxCols || 0, d._maxLineCols || 0);
     const w = Math.max(vp.clientWidth, gutter + (maxCols + 4) * S.chW);
-    sizer.style.height = (d.total * lh + bottomPad()) + 'px';
+    sizer.style.height = (lineTopY(d.total + 1, d) + bottomPad()) + 'px';
     sizer.style.width = w + 'px';
     rowsEl.style.width = w + 'px';
   }
@@ -259,9 +283,16 @@ export function paint() {
   const d = doc_();
   if (!d) { const c = $('#caret'); if (c) c.hidden = true; return; }
   const lh = getLH();
+  loadDocFolds(d);
+  const folded = !!d.folds?.spans.length;
   const top = vp.scrollTop;
   let first, last, anchorLine = 0, w = null;
-  if (S.wrap && d.total > 0) {
+  if (folded && d.total > 0) {
+    w = S.wrap ? ensureWrapMap(d) : null;
+    anchorLine = lineAtScrollY(top, d) - 1;
+    first = lineAtScrollY(Math.max(0, top - OVERSCAN * lh), d) - 1;
+    last = Math.min(d.total, nextFoldLine(d.folds, lineAtScrollY(top + (vp.clientHeight || 600) + OVERSCAN * lh, d)));
+  } else if (S.wrap && d.total > 0) {
     w = ensureWrapMap(d);
     anchorLine = lineIndexAtY(w, d.total, top);
     const overscanPx = OVERSCAN * lh;
@@ -276,7 +307,7 @@ export function paint() {
     const count = Math.ceil((vp.clientHeight || 600) / lh) + OVERSCAN * 2;
     last = Math.min(d.total, first + count);
   }
-  ensureChunks(d, first, last);
+  if (!folded) ensureChunks(d, first, last);
 
   const gut = d.gutter || null;
   const agentRanges = (S.agentTargets || []).filter(t => t.path === d.path);
@@ -287,12 +318,12 @@ export function paint() {
   const diagList = Array.isArray(d.diagnostics) ? d.diagnostics : [];
   const diagKey = diagList.length ? diagList.length + ':' + diagList[0].line + ':' + diagList[0].message : '';
   const paintKey = [
-    d.path, d.gen || 0, first, last, d.cur, S.occ || '',
+    d.path, d.gen || 0, d.folds?.generation || 0, d.foldLoaded ? 1 : 0, first, last, d.cur, S.occ || '',
     findKey, linkKey, gutKey, diagKey, agentKey, S.selAll === d ? 1 : 0, S.wrap ? 1 : 0
   ].join('|');
 
-  if (paintKey === lastPaintKey && rowsEl.children.length === Math.max(0, last - first)) {
-    const y0 = w ? w.offsets[first] : first * lh;
+  if (paintKey === lastPaintKey) {
+    const y0 = folded ? lineTopY(first + 1, d) : w ? w.offsets[first] : first * lh;
     rowsEl.style.transform = 'translateY(' + y0 + 'px)';
     placeCaret();
     return;
@@ -308,10 +339,15 @@ export function paint() {
   }
 
   let html = '';
-  for (let i = first; i < last; i++) {
+  for (let i = first; i < last; i = folded ? nextFoldLine(d.folds, i + 1) - 1 : i + 1) {
     const n = i + 1;
+    if (folded) ensureChunks(d, i, i + 1);
+    const fold = foldIndex(d.folds, n);
+    const closed = fold >= 0 && d.folds.closed[fold];
+    const foldButton = fold < 0 ? '' : '<button type="button" class="fold-toggle" data-fold="' + n + '" aria-label="' + (closed ? 'Expand' : 'Collapse') + ' block at line ' + n + '" aria-expanded="' + !closed + '">' + (closed ? '▸' : '▾') + '</button>';
+    const summary = !closed ? '' : '<button type="button" class="fold-summary" data-fold="' + n + '" aria-label="Expand hidden lines">… ' + (d.folds.ranges[fold * 2 + 1] - n) + ' lines</button>';
     const body = d.lines[i];
-    let rc = 'row', gc = 'g';
+    let rc = closed ? 'row folded' : 'row', gc = 'g';
     if (n === d.cur) rc += ' cur';
     if (agentRanges.some(r => n >= r.l1 && n <= r.l2)) rc += ' agent-sel';
     if (agentRanges.some(r => n === r.l1)) rc += ' agent-anchor';
@@ -330,10 +366,10 @@ export function paint() {
       cAttr = ' data-diag="' + esc(label) + '" title="' + esc(dg.message || '') + '"';
     }
     html += '<div class="' + rc + '" data-l="' + n + '">' +
-      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions">Edit</span>' + n + '</div><div class="c"' + cAttr + '>' + (body === undefined ? '' : body) + '</div></div>';
+      '<div class="' + gc + '"><span class="line-btn" role="button" data-l="' + n + '" title="Thread and line actions">Edit</span>' + n + foldButton + '</div><div class="c"' + cAttr + '>' + (body === undefined ? '' : body) + '</div>' + summary + '</div>';
   }
   const sel = saveSelection();
-  const y0 = w ? w.offsets[first] : first * lh;
+  const y0 = folded ? lineTopY(first + 1, d) : w ? w.offsets[first] : first * lh;
   rowsEl.style.transform = 'translateY(' + y0 + 'px)';
   rowsEl.innerHTML = html;
   rowsEl.classList.toggle('all', S.selAll === d);
@@ -343,7 +379,7 @@ export function paint() {
     let deltaAbove = 0;
     const children = rowsEl.children;
     for (let k = 0; k < children.length; k++) {
-      const idx = first + k;
+      const idx = +children[k].dataset.l - 1;
       if (idx >= d.total) break;
       if (d.lines[idx] === undefined) continue;
       const actualH = /** @type {HTMLElement} */ (children[k]).offsetHeight;
@@ -361,7 +397,7 @@ export function paint() {
     }
     if (changed) {
       recomputeOffsets(w, d.total);
-      sizer.style.height = (w.offsets[d.total] + bottomPad()) + 'px';
+      sizer.style.height = (lineTopY(d.total + 1, d) + bottomPad()) + 'px';
       if (deltaAbove !== 0 && top > 0) {
         vp.scrollTop = Math.max(0, top + deltaAbove);
       }
@@ -568,8 +604,13 @@ export function rowFor(line) {
     const r = rowsEl.children[idx];
     if (+r.dataset.l === line) return r;
   }
-  for (const r of rowsEl.children) if (+r.dataset.l === line) return r;
-  return null;
+  let lo = 0, hi = rowsEl.children.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1, row = rowsEl.children[mid];
+    if (+row.dataset.l < line) lo = mid + 1; else hi = mid;
+  }
+  const row = rowsEl.children[lo];
+  return row && +row.dataset.l === line ? row : null;
 }
 
 export function updateLinkDecoration() {
