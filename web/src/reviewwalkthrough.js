@@ -5,7 +5,7 @@ import { showToast } from './ui.js';
 let walkthroughData = null;
 let activeFilter = 'all'; // 'all' | 'fastReturns' | 'edgeCases' | 'coreLogic'
 let activeSubTab = 'walkthrough'; // 'walkthrough' | 'stages'
-let viewedFiles = new Set();
+let walkthroughViewedFiles = new Set();
 let observer = null;
 let isProgrammaticScroll = false;
 let scrollTimeout = null;
@@ -383,13 +383,13 @@ function renderDiffBlocks(files) {
     viewedLabel.className = 'review-viewed-toggle';
     const viewedCheckbox = document.createElement('input');
     viewedCheckbox.type = 'checkbox';
-    viewedCheckbox.checked = viewedFiles.has(file.path);
+    viewedCheckbox.checked = walkthroughViewedFiles.has(file.path);
     viewedCheckbox.onchange = () => {
       if (viewedCheckbox.checked) {
-        viewedFiles.add(file.path);
+        walkthroughViewedFiles.add(file.path);
         block.classList.add('is-viewed');
       } else {
-        viewedFiles.delete(file.path);
+        walkthroughViewedFiles.delete(file.path);
         block.classList.remove('is-viewed');
       }
       updateViewedBadge(file.path);
@@ -458,7 +458,7 @@ function renderDiffBlocks(files) {
 function updateViewedBadge(filePath) {
   const card = $(`#card-file-${sanitizeId(filePath)}`);
   if (!card) return;
-  if (viewedFiles.has(filePath)) {
+  if (walkthroughViewedFiles.has(filePath)) {
     card.classList.add('is-viewed');
   } else {
     card.classList.remove('is-viewed');
