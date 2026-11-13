@@ -99,6 +99,7 @@ The frontend is modularized into clean ES modules under `web/src/` (bundled into
 | `web/src/ui.js`        | DOM references (`vp`, `sizer`, `rowsEl`, `editor`, `toastEl`), `showToast()`, `copyToClipboard()`.                                                                                         |
 | `web/src/renderer.js`  | `measure()`, `layout()`, `render()`, `paint()`, `toggleWordWrap()`, `toggleLineNumbers()`, on-demand chunk fetching.                                                                        |
 | `web/src/tabs.js`      | `openFile()`, `closeTab()`, `switchTab()`, `drawTabs()`, `drawCrumbs()`, `showImage()`, `reloadOpenTabs()` (in-place tab refresh on reindex), `reopenClosedTab()` (Alt+Shift+T), `stepCommitFile()` (the diff strip's ‹ ›: opens the next file pinned to the same commit and closes the one stepped from). |
+| `web/src/breadcrumbs.js` | `breadcrumbParts()`: splits workspace and external file paths for breadcrumbs. |
 | `web/src/editview.js`  | `enterEditMode()`, `exitEditMode()`, `saveActiveFile()`, `syncEditUI()`, `updateGutter()`: the textarea edit surface, wrap-aware gutter, per-tab edit text and scroll, refresh after save. |
 | `web/src/newitem.js`   | `promptNewItem()`, `initNewItem()`: the New File / New Folder modal; calls `/api/fs/new` and opens new files in edit mode. |
 | `web/src/history.js`   | `pushHistory()`, `go()`: jump history back/forward (Alt+Left, Alt+Right).                                                                                                                   |
