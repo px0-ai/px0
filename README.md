@@ -61,6 +61,9 @@ px0
 # Inspect current directory
 px0 .
 
+# Open in the running workbench (started in the background if needed) instead of a new server per file (-r or -reuse)
+px0 -r main.go:42
+
 # Inspect a specific directory or file
 px0 ~/workspace/project
 px0 main.go:42

@@ -225,6 +225,13 @@ export const DEFAULT_TIPS = [
     content: "Run `px0` with no arguments to launch the Review Workbench. Quickly reopen recent workspaces, pin favorite projects, or open new PR URLs from a single port."
   },
   {
+    id: "reuse-workbench",
+    title: "One Server for Every File",
+    category: "Workbench",
+    tag: "Workbench",
+    content: "Run `px0 -r <file>` to open a file in the running workbench instead of starting a new server for it. If no workbench is running, one starts in the background. Handy for a file manager's Open with or Send to."
+  },
+  {
     id: "remote-dev",
     title: "Zero-Setup Remote & Cloud Workspaces",
     category: "Terminal",

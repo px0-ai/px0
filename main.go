@@ -57,7 +57,9 @@ func main() {
 		_            = flag.Bool("yes", false, "answer yes to prompts (alias for -y)")
 		basePathFlag = flag.String("base-path", "", "base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)")
 		wbChild      = flag.Bool("workbench-child", false, "internal: run as a workspace of the px0 workbench")
+		reuse        = flag.Bool("r", false, "open the target in the running workbench, if there is one, instead of starting a server")
 	)
+	flag.BoolVar(reuse, "reuse", false, "open the target in the running workbench, if there is one, instead of starting a server (alias for -r)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "px0 %s - a code navigator\n\nusage:\n  px0 [flags]                      open the workbench\n  px0 [flags] <file or directory>\n  px0 [flags] <pr-url>\n\nflags:\n", version)
 		flag.PrintDefaults()
@@ -170,6 +172,31 @@ func main() {
 		}
 		targetDur = time.Since(tStart)
 		root, initialFile, initialLine = r, f, l
+
+		// With -r, the target opens as a workspace of the running workbench, so
+		// a file opened from the shell or a file manager does not start another
+		// server. If none is running, one is started in the background first.
+		// Without -r, the target gets a server of its own.
+		if *reuse && !*wbChild {
+			set := map[string]string{}
+			flag.Visit(func(f *flag.Flag) { set[f.Name] = f.Value.String() })
+			start := func() string {
+				exe, err := os.Executable()
+				if err != nil {
+					return ""
+				}
+				return startBackgroundWorkbench(exe, workbenchPassthrough(*noLSP, *noGit, *noAgent, *noTelemetry, *noUpdate, *agentCmd, set))
+			}
+			dest, err := reuseWorkbench(runningWorkbench, start, root, initialFile, initialLine)
+			if err == nil {
+				ui.Status("ok", "opened in the running workbench", dest, 0, os.Stdout)
+				if !*noOpen {
+					openBrowser(dest)
+				}
+				return
+			}
+			ui.Status("info", "workbench did not take it, starting a server instead", err.Error(), 0, os.Stderr)
+		}
 	}
 
 	tListen := time.Now()
