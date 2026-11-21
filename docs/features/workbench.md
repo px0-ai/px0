@@ -72,6 +72,8 @@ Every workspace runs as its own px0 process with its own index and language serv
 
 Running `px0` again while a workbench is already running opens the existing one instead of starting a second.
 
+Add `-r` (or `-reuse`) to `px0 <file or directory>` to reuse it: while a workbench is running, the target opens in it as a workspace (on the file and line you named) and the command exits, so opening many files from a shell or a file manager runs one server, not one each. If no workbench is running, `-r` first starts one in the background, with no window or terminal of its own; it keeps running until you stop that process (Task Manager, or `taskkill /im px0.exe` on Windows, `pkill px0` elsewhere). Without `-r`, `px0 <target>` starts a server of its own.
+
 ## Security
 
 The workbench can list and open **any directory the px0 process can read**. On the default `-host 127.0.0.1` that is only you. With `-host 0.0.0.0`, anyone who can reach the address can browse the machine's folders and open any of them for reading and editing, and px0 prints a warning saying so. Expose it only over networks you trust. The same DNS rebinding and same-origin checks as the rest of px0 apply.
@@ -82,4 +84,4 @@ What you opened, and which clone each repository's PRs use, is saved in `$XDG_ST
 
 ## Flags
 
-The workbench passes `-no-lsp`, `-no-git`, `-no-agent`, `-no-telemetry` and `-agent` on to every workspace it opens. `-host`, `-port`, `-base-path` and `-no-open` apply to the workbench itself. To open the current directory directly, as before, run `px0 .`.
+The workbench passes `-no-lsp`, `-no-git`, `-no-agent`, `-no-telemetry` and `-agent` on to every workspace it opens. `-host`, `-port`, `-base-path` and `-no-open` apply to the workbench itself. To open the current directory directly, as before, run `px0 .`. Use `px0 -r .` to open it in the running workbench instead.

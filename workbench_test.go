@@ -616,3 +616,210 @@ func TestWorkbenchLockLifecycle(t *testing.T) {
 	}
 }
 
+
+func TestViewQueryKeepsOnlyFileAndLine(t *testing.T) {
+	q := url.Values{"path": {"a b/c.md"}, "line": {"7"}, "retry": {"1"}, "x": {"y"}}
+	if got, want := viewQuery(q), "line=7&path=a+b%2Fc.md"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := viewQuery(url.Values{"retry": {"1"}}); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestHandOffToWorkbench(t *testing.T) {
+	newTestStore(t)
+	wb := newWorkbench("/", t.TempDir(), "", nil)
+	srv := httptest.NewServer(wb)
+	defer srv.Close()
+	defer wb.Close() // its workspaces fail to start here and rewrite the store as they do
+
+	dir := t.TempDir()
+	dest, err := handOffToWorkbench(srv.URL+"/", dir, "docs/a.md", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != strings.TrimPrefix(srv.URL, "http://") || !strings.HasPrefix(u.Path, "/w/") {
+		t.Fatalf("got %s", dest)
+	}
+	if q := u.Query(); q.Get("path") != "docs/a.md" || q.Get("line") != "3" {
+		t.Fatalf("file and line lost: %s", dest)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/w/" + wbDirItem(resolved).ID + "/"; u.Path != want {
+		t.Fatalf("workspace %s, want %s", u.Path, want)
+	}
+
+	// Handing the same directory off again reuses its workspace.
+	again, err := handOffToWorkbench(srv.URL+"/", dir, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(again, srv.URL+u.Path) {
+		t.Fatalf("second hand-off went elsewhere: %s", again)
+	}
+
+	if _, err := handOffToWorkbench(srv.URL+"/", filepath.Join(dir, "missing"), "", 0); err == nil {
+		t.Fatal("a target that does not exist was accepted")
+	}
+}
+
+// TestMain lets a test start this binary as a workbench, or as a workspace
+// that never becomes ready, standing in for px0.
+func TestMain(m *testing.M) {
+	if os.Getenv("PX0_TEST_WORKBENCH") == "1" {
+		runWorkbench("127.0.0.1", 0, "/", false, false, nil)
+		return
+	}
+	if os.Getenv("PX0_TEST_HANG") == "1" {
+		io.Copy(io.Discard, os.Stdin) // the workbench closes this to stop a workspace
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func TestStartBackgroundWorkbench(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("PX0_TEST_WORKBENCH", "1")
+	if runningWorkbench() != "" {
+		t.Fatal("a workbench is running before the test started one")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := startBackgroundWorkbench(exe, nil)
+	b, _ := os.ReadFile(workbenchLockPath())
+	var l wbLock
+	_ = json.Unmarshal(b, &l)
+	t.Cleanup(func() {
+		if p, err := os.FindProcess(l.PID); err == nil && l.PID != 0 {
+			_ = p.Kill()
+			time.Sleep(200 * time.Millisecond) // let it release the state directory
+		}
+	})
+	if u == "" {
+		t.Fatal("no workbench came up")
+	}
+	if l.PID == 0 || l.PID == os.Getpid() || l.URL != u {
+		t.Fatalf("lock %+v does not describe the workbench at %s", l, u)
+	}
+	if got := runningWorkbench(); got != u {
+		t.Fatalf("runningWorkbench = %q, want %q", got, u)
+	}
+
+	// A target handed to it opens as one of its workspaces.
+	dest, err := handOffToWorkbench(u, t.TempDir(), "x.go", 5)
+	if err != nil || !strings.Contains(dest, "/w/") {
+		t.Fatalf("hand-off to the background workbench: %q, %v", dest, err)
+	}
+}
+
+func TestStartBackgroundWorkbenchGivesUp(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if u := startBackgroundWorkbench(filepath.Join(t.TempDir(), "no-such-px0"), nil); u != "" {
+		t.Fatalf("got %q from a binary that does not exist", u)
+	}
+}
+
+func BenchmarkViewQuery(b *testing.B) {
+	q := url.Values{"path": {"docs/a.md"}, "line": {"7"}, "retry": {"1"}}
+	for i := 0; i < b.N; i++ {
+		viewQuery(q)
+	}
+}
+
+func TestWorkbenchPassthrough(t *testing.T) {
+	if got := workbenchPassthrough(false, false, false, false, false, "", nil); got != nil {
+		t.Fatalf("nothing given, got %v", got)
+	}
+	set := map[string]string{"port": "0", "base-path": "/x/", "host": "0.0.0.0", "no-open": "true", "r": "true"}
+	got := workbenchPassthrough(true, true, true, true, true, "claude", set)
+	want := []string{"-no-lsp", "-no-git", "-no-agent", "-no-telemetry", "-no-update",
+		"-agent", "claude", "-host", "0.0.0.0", "-port", "0", "-base-path", "/x/"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestReuseWorkbench(t *testing.T) {
+	newTestStore(t)
+	wb := newWorkbench("/", t.TempDir(), "", nil)
+	srv := httptest.NewServer(wb)
+	defer srv.Close()
+	defer wb.Close()
+	root := t.TempDir()
+	never := func() string { t.Helper(); t.Fatal("started a workbench although one is running"); return "" }
+
+	// One is running: it is used and none is started.
+	dest, err := reuseWorkbench(func() string { return srv.URL + "/" }, never, root, "a.go", 2)
+	if err != nil || !strings.Contains(dest, "/w/") || !strings.Contains(dest, "path=a.go") {
+		t.Fatalf("running workbench: %q, %v", dest, err)
+	}
+
+	// None is running: one is started, once, and used.
+	started := 0
+	dest, err = reuseWorkbench(func() string { return "" }, func() string { started++; return srv.URL + "/" }, root, "", 0)
+	if err != nil || started != 1 || !strings.Contains(dest, "/w/") {
+		t.Fatalf("started workbench: %q, %v (started %d times)", dest, err, started)
+	}
+
+	// None is running and none starts: an error, so the caller serves the target itself.
+	if dest, err = reuseWorkbench(func() string { return "" }, func() string { return "" }, root, "", 0); err == nil {
+		t.Fatalf("got %q without a workbench", dest)
+	}
+
+	// The workbench is gone by the time it is called: also an error.
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	if dest, err = reuseWorkbench(func() string { return gone.URL + "/" }, never, root, "", 0); err == nil {
+		t.Fatalf("got %q from a workbench that is down", dest)
+	}
+}
+
+// A workspace that is still starting shows a page that refreshes itself; the
+// file and line a hand-off asked for must survive those refreshes.
+func TestWorkbenchHoldingPageKeepsFileAndLine(t *testing.T) {
+	newTestStore(t)
+	t.Setenv("PX0_TEST_HANG", "1")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb := newWorkbench("/", t.TempDir(), exe, nil)
+	defer wb.Close()
+	it := wbDirItem(t.TempDir())
+	if err := wb.store.Record(it); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(target string) string {
+		r := httptest.NewRequest("GET", target, nil)
+		r.Host = "127.0.0.1:7777"
+		w := httptest.NewRecorder()
+		wb.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", target, w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	base := "/w/" + it.ID + "/"
+
+	body := get(base + "?path=docs%2Fa.md&line=3&retry=&other=x")
+	if !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, "url="+base+"?line=3&amp;path=docs%2Fa.md\"") {
+		t.Fatalf("refresh drops the file and line:\n%s", body)
+	}
+	if strings.Contains(body, "other=x") {
+		t.Fatal("kept a parameter that does not position the viewer")
+	}
+	if body = get(base); !strings.Contains(body, "url="+base+"\"") {
+		t.Fatalf("a plain open gained a query:\n%s", body)
+	}
+}
