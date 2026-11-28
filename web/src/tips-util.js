@@ -6,6 +6,7 @@ export const TIPS_STORAGE_KEY_CACHE = 'px0.tips.cache';
 export const TIPS_STORAGE_KEY_INDEX = 'px0.tips.lastIndex';
 
 export const DEFAULT_TIPS = [
+  { id: "markdown-on-this-page", title: "Navigate Markdown Headings", category: "Navigation", tag: "Markdown", content: "Open **On this page** in the right panel to jump between Markdown headings and follow your reading position." },
   {
     id: "file-navigation",
     title: "Quick File Navigation",
