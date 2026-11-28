@@ -61,7 +61,7 @@ initThreads();
 initMetrics();
 initLspMenu();
 initStatusFit();
-initSettings();
+const settingsReady = initSettings();
 initVim();
 initImageViewer();
 initLineComment();
@@ -94,6 +94,7 @@ initPRScope();
   applyKeyLabels();
 
   measure();
+  await settingsReady;
   S.meta = await api('/api/meta');
   if (S.meta.metrics) updateMetricsDisplay(S.meta.metrics);
   refreshLspMenu();

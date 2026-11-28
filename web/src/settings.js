@@ -158,6 +158,14 @@ const BUILTIN_SCHEMA = [
     ]
   },
   {
+    key: "diff.openByDefault",
+    title: "Open Changed Files in Diff View",
+    description: "Open changed files in diff view by default instead of the file view.",
+    category: "Git & Diff",
+    type: "boolean",
+    default: false
+  },
+  {
     key: "diffEditor.renderSideBySide",
     title: "Diff Side By Side",
     description: "Controls whether the diff editor shows changes in split (side-by-side) or unified mode.",
@@ -1117,7 +1125,7 @@ function initSettingsDOM() {
 
 export function initSettings() {
   initSettingsDOM();
-  loadSettings().then(() => {
+  return loadSettings().then(() => {
     applyAllSettingsLive();
   });
 }

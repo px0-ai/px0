@@ -1,6 +1,7 @@
 // web/src/tabs.js
 import { $, esc, S, doc_, api, apiPost, LH, CHUNK, withKeys } from './state.js';
 import { emit } from './bus.js';
+import { openDiffByDefault } from './open-view.js';
 import { vp, sizer, rowsEl, editor } from './ui.js';
 import { render, layout, refineChunk, getLH, lineTopY } from './renderer.js';
 import { updateStatus, setStatusNote, refreshMetrics } from './status.js';
@@ -92,9 +93,9 @@ export async function openFile(path, opts = {}) {
     t.turnLabel = turnLabel;
     t.diffText = undefined;
     t.diffHunks = undefined;
-    t.diffDismissed = false;
+    t.openedInDiffView = wantsDiff || (!wantsSource && S.settings?.['diff.openByDefault'] === true);
+    t.diffDismissed = !t.openedInDiffView;
     t.diffMode = null;
-    t.openedInDiffView = true;
     await loadGutter(t);
     if (base) t.diffAvailable = true;
   } else if (idx >= 0 && (turnFiles !== null || turnLabel !== '')) {
@@ -113,22 +114,11 @@ export async function openFile(path, opts = {}) {
     const isImg = !!j.image;
     const hasDiff = !isImg && (!!j.diffAvailable || !!base);
 
-    let initialDiffMode = null;
-    let initialOpenedInDiff = false;
-    let initialDismissed = false;
-
-    if (hasDiff) {
-      if (wantsSource && !j.deleted) {
-        initialDiffMode = null;
-        initialDismissed = true;
-        initialOpenedInDiff = false;
-      } else {
-        // Any file with a diff opens in diff mode unless source was asked for.
-        initialDiffMode = layoutPref() || 'split';
-        initialDismissed = false;
-        initialOpenedInDiff = true;
-      }
-    }
+    const preferDiff = S.settings?.['diff.openByDefault'] === true;
+    const openInDiff = openDiffByDefault({ hasDiff, deleted: j.deleted, view, preferDiff });
+    const initialDiffMode = openInDiff ? (layoutPref() || 'split') : null;
+    const initialOpenedInDiff = openInDiff;
+    const initialDismissed = !openInDiff;
 
     const d = {
       path, name: path.split('/').pop(), lang: isImg ? 'image' : j.lang,
@@ -176,7 +166,7 @@ export async function openFile(path, opts = {}) {
         d.diffMode = null;
         if (!soft) setStatusNote('No diff for ' + d.name + ' — showing source', 3000);
       }
-    } else if (d.diffAvailable && !d.diffDismissed && d.diffMode === null) {
+    } else if (d.diffAvailable && d.openedInDiffView && !d.diffDismissed && d.diffMode === null) {
       d.diffMode = layoutPref() || 'split';
       d.openedInDiffView = true;
     }
