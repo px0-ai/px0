@@ -28,6 +28,7 @@ type Settings struct {
 	EditorRenderWhitespace      *string  `json:"editor.renderWhitespace,omitempty"`
 	EditorMinimapEnabled        *bool    `json:"editor.minimap.enabled,omitempty"`
 	WorkbenchColorTheme         *string  `json:"workbench.colorTheme,omitempty"`
+	DiffOpenByDefault           *bool    `json:"diff.openByDefault,omitempty"`
 	DiffEditorRenderSideBySide  *bool    `json:"diffEditor.renderSideBySide,omitempty"`
 	MarkdownPreviewOpen         *bool    `json:"markdown.preview.open,omitempty"`
 	TablePreviewOpen            *bool    `json:"table.preview.open,omitempty"`
@@ -174,6 +175,14 @@ var Schema = []SchemaItem{
 			"monokai", "nord", "one-dark", "rose-pine",
 			"solarized-dark", "solarized-light",
 		},
+	},
+	{
+		Key:         "diff.openByDefault",
+		Title:       "Open Changed Files in Diff View",
+		Description: "Open changed files in diff view by default instead of the file view.",
+		Category:    "Git & Diff",
+		Type:        "boolean",
+		Default:     false,
 	},
 	{
 		Key:         "diffEditor.renderSideBySide",

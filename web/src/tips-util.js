@@ -6,6 +6,7 @@ export const TIPS_STORAGE_KEY_CACHE = 'px0.tips.cache';
 export const TIPS_STORAGE_KEY_INDEX = 'px0.tips.lastIndex';
 
 export const DEFAULT_TIPS = [
+  { id: "default-file-view", title: "Choose the Default File View", category: "Git", tag: "Diff", content: "Use **Open Changed Files in Diff View** in Settings to choose whether changed files open in the file view or diff view." },
   {
     id: "file-navigation",
     title: "Quick File Navigation",
