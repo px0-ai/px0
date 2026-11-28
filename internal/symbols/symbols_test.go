@@ -398,3 +398,29 @@ func BenchmarkIndentCols(b *testing.B) {
 		_ = indentCols(ws)
 	}
 }
+
+func TestMarkdownOutlineParser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "readme.md")
+	src := "# Title\n\n```md\n## Not a heading\n```\n\nSection *one*\n===========\n\n### Repeat\n### Repeat\n"
+	if err := os.WriteFile(path, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Outline(path, "readme.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Symbol{
+		{Name: "Title", Kind: "heading", Line: 1, Indent: 0},
+		{Name: "Section one", Kind: "heading", Line: 7, Indent: 0},
+		{Name: "Repeat", Kind: "heading", Line: 10, Indent: 2},
+		{Name: "Repeat", Kind: "heading", Line: 11, Indent: 2},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("heading %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

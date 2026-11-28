@@ -5127,3 +5127,9 @@ body.in-review-mode .review-view {
   width: 480px;
   max-width: 90vw;
 }
+
+/* Markdown reading outline */
+.md-outline-item { width: 100%; min-height: 30px; height: auto; padding-top: 6px; padding-bottom: 6px; border: 0; text-align: left; background: transparent; color: var(--fg); font: inherit; white-space: normal; }
+.md-outline-item .sn { overflow: visible; }
+.md-outline-item.sel { border-left: 2px solid var(--accent-fg); }
+.md-outline-item:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: -2px; }

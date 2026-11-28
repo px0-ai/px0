@@ -57,3 +57,7 @@ Instead of scrolling up and down through a 2,000-line source file, pressing `Cmd
 ## Technical Architecture Deep Dive
 
 For technical details regarding the LSP document symbol extraction protocol and regex tokenizing fallbacks, see [Language Server Protocol Architecture](../internals/lsp-and-intelligence.md) and [Workspace Search & Symbol Extraction](../internals/workspace-search.md).
+
+## Markdown: On this page
+
+For Markdown files, the right inspector shows **On this page**, a nested list of headings. Select a heading to jump to it in the preview or source. The current section is highlighted while scrolling the preview. The outline comes from document headings and does not require a handwritten table of contents.

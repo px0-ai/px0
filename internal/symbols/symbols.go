@@ -2,6 +2,13 @@ package symbols
 
 import (
 	"bufio"
+	"bytes"
+	"sort"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,19 +22,19 @@ import (
 // still appears in the reference list below.
 
 var familyDeclTemplates = map[string]string{
-	"go":   `^\s*(?:func\s+(?:\([^)]*\)\s*)?NAME\b|type\s+NAME\b|(?:var|const)\s+NAME\b|\tNAME\s*=)`,
-	"py":   `^\s*(?:(?:async\s+)?def|class)\s+NAME\b|^NAME\s*(?::[^=]+)?=`,
-	"js":   `^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*NAME\b|class\s+NAME\b|(?:const|let|var|type|interface|enum)\s+NAME\b)|^\s*(?:(?:public|private|protected|static|async|get|set|readonly)\s+)*NAME\s*\([^;]*\{\s*$`,
-	"rs":   `^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*(?:fn|struct|enum|trait|type|const|static|mod|union)\s+NAME\b|^\s*macro_rules!\s*NAME\b`,
-	"c":    `^\s*#\s*define\s+NAME\b|^\s*(?:typedef\s+.*\bNAME\s*;|(?:struct|enum|union|class|namespace)\s+NAME\b)|^[A-Za-z_][\w\s\*&<>:]*\bNAME\s*\([^;]*$`,
-	"jvm":  `^\s*(?:(?:public|private|protected|internal|open|abstract|final|static|override|suspend|data|sealed|value|inline)\s+)*(?:class|interface|enum|record|object|fun|val|var|def|trait|type)\s+NAME\b|^\s*(?:(?:public|private|protected|static|final|synchronized|abstract|native)\s+)+[\w<>?,\[\]\s]+\s+NAME\s*\(`,
-	"rb":   `^\s*(?:def\s+(?:self\.)?NAME\b|(?:class|module)\s+NAME\b|NAME\s*=)`,
-	"sh":   `^\s*(?:function\s+NAME\b|NAME\s*\(\s*\))`,
-	"php":  `^\s*(?:(?:public|private|protected|static|abstract|final)\s+)*function\s+&?\s*NAME\b|^\s*(?:(?:abstract|final|readonly)\s+)*(?:class|interface|trait|enum)\s+NAME\b`,
-	"lua":  `^\s*(?:local\s+)?function\s+(?:[\w.]+\.)?NAME\b|^\s*(?:local\s+)?NAME\s*=\s*function\b`,
-	"zig":  `^\s*(?:pub\s+)?(?:fn|const|var)\s+NAME\b`,
-	"ex":   `^\s*(?:def|defp|defmodule|defmacro|defmacrop|defprotocol)\s+NAME\b`,
-	"hs":   `^NAME\s*::|^s*(?:data|type|newtype|class)\s+NAME\b`,
+	"go":  `^\s*(?:func\s+(?:\([^)]*\)\s*)?NAME\b|type\s+NAME\b|(?:var|const)\s+NAME\b|\tNAME\s*=)`,
+	"py":  `^\s*(?:(?:async\s+)?def|class)\s+NAME\b|^NAME\s*(?::[^=]+)?=`,
+	"js":  `^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*NAME\b|class\s+NAME\b|(?:const|let|var|type|interface|enum)\s+NAME\b)|^\s*(?:(?:public|private|protected|static|async|get|set|readonly)\s+)*NAME\s*\([^;]*\{\s*$`,
+	"rs":  `^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*(?:fn|struct|enum|trait|type|const|static|mod|union)\s+NAME\b|^\s*macro_rules!\s*NAME\b`,
+	"c":   `^\s*#\s*define\s+NAME\b|^\s*(?:typedef\s+.*\bNAME\s*;|(?:struct|enum|union|class|namespace)\s+NAME\b)|^[A-Za-z_][\w\s\*&<>:]*\bNAME\s*\([^;]*$`,
+	"jvm": `^\s*(?:(?:public|private|protected|internal|open|abstract|final|static|override|suspend|data|sealed|value|inline)\s+)*(?:class|interface|enum|record|object|fun|val|var|def|trait|type)\s+NAME\b|^\s*(?:(?:public|private|protected|static|final|synchronized|abstract|native)\s+)+[\w<>?,\[\]\s]+\s+NAME\s*\(`,
+	"rb":  `^\s*(?:def\s+(?:self\.)?NAME\b|(?:class|module)\s+NAME\b|NAME\s*=)`,
+	"sh":  `^\s*(?:function\s+NAME\b|NAME\s*\(\s*\))`,
+	"php": `^\s*(?:(?:public|private|protected|static|abstract|final)\s+)*function\s+&?\s*NAME\b|^\s*(?:(?:abstract|final|readonly)\s+)*(?:class|interface|trait|enum)\s+NAME\b`,
+	"lua": `^\s*(?:local\s+)?function\s+(?:[\w.]+\.)?NAME\b|^\s*(?:local\s+)?NAME\s*=\s*function\b`,
+	"zig": `^\s*(?:pub\s+)?(?:fn|const|var)\s+NAME\b`,
+	"ex":  `^\s*(?:def|defp|defmodule|defmacro|defmacrop|defprotocol)\s+NAME\b`,
+	"hs":  `^NAME\s*::|^s*(?:data|type|newtype|class)\s+NAME\b`,
 }
 
 var extToFamily = map[string]string{
@@ -35,11 +42,11 @@ var extToFamily = map[string]string{
 	".py": "py", ".pyi": "py",
 	".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
 	".ts": "js", ".tsx": "js", ".mts": "js", ".cts": "js",
-	".rs":  "rs",
-	".c":   "c", ".h": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".hpp": "c", ".hh": "c",
+	".rs": "rs",
+	".c":  "c", ".h": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".hpp": "c", ".hh": "c",
 	".java": "jvm", ".kt": "jvm", ".kts": "jvm", ".scala": "jvm", ".cs": "jvm", ".swift": "jvm",
-	".rb":  "rb",
-	".sh":  "sh", ".bash": "sh", ".zsh": "sh",
+	".rb": "rb",
+	".sh": "sh", ".bash": "sh", ".zsh": "sh",
 	".php": "php",
 	".lua": "lua",
 	".zig": "zig",
@@ -167,8 +174,6 @@ var outlineRules = map[string][]outlineRule{
 	},
 }
 
-var mdHeading = regexp.MustCompile(`^(#{1,6})\s+(.+?)\s*#*\s*$`)
-
 var outlineScannerPool = sync.Pool{
 	New: func() any {
 		buf := make([]byte, 64*1024)
@@ -193,13 +198,29 @@ func Outline(abs, rel string) ([]Symbol, error) {
 	defer outlineScannerPool.Put(bufPtr)
 
 	if ext == ".md" || ext == ".markdown" {
-		sc := bufio.NewScanner(f)
-		sc.Buffer(*bufPtr, 256*1024)
-		for line := 1; sc.Scan(); line++ {
-			if m := mdHeading.FindStringSubmatch(sc.Text()); m != nil {
-				out = append(out, Symbol{Name: m[2], Kind: "heading", Line: line, Indent: len(m[1]) - 1})
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			return nil, err
+		}
+		src = bytes.ReplaceAll(src, []byte("\r\n"), []byte("\n"))
+		var newlines []int
+		for i, c := range src {
+			if c == '\n' {
+				newlines = append(newlines, i)
 			}
 		}
+		md := goldmark.New(goldmark.WithExtensions(extension.GFM, extension.Footnote))
+		doc := md.Parser().Parse(text.NewReader(src))
+		_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+			h, ok := n.(*ast.Heading)
+			if !entering || !ok || h.Lines().Len() == 0 {
+				return ast.WalkContinue, nil
+			}
+			line := sort.SearchInts(newlines, h.Lines().At(0).Start) + 1
+			name := strings.TrimSpace(string(h.Text(src)))
+			out = append(out, Symbol{Name: name, Kind: "heading", Line: line, Indent: h.Level - 1})
+			return ast.WalkContinue, nil
+		})
 		return out, nil
 	}
 

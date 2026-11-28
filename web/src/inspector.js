@@ -1,6 +1,6 @@
 // web/src/inspector.js
 import { $, $$, esc, S, doc_, api } from './state.js';
-import { emit } from './bus.js';
+import { emit, on } from './bus.js';
 import { layout, render } from './renderer.js';
 import { updateStatus, setStatusNote } from './status.js';
 import { openFile, centerLine } from './tabs.js';
@@ -136,7 +136,24 @@ export async function inspectReferences(arg) {
   }
 }
 
+function syncOutlineTab() {
+  const d = doc_();
+  const tab = $('[data-itab="symbols"]');
+  if (tab) { tab.textContent = d?.markdown ? 'On this page' : 'Symbols'; tab.title = d?.markdown ? 'View page headings' : 'View file symbols outline'; }
+  if ($('#pane-right-symbols')?.classList.contains('active')) loadOutline();
+}
+
 export function initInspector() {
+  on('tab:activated', syncOutlineTab);
+  on('tabs:cleared', syncOutlineTab);
+  on('markdown:section-changed', ({ doc, line }) => {
+    if (doc_() !== doc) return;
+    $('#right-symbols-list .md-outline-item').forEach(el => {
+      const selected = +el.dataset.n === line;
+      el.classList.toggle('sel', selected);
+      if (selected) el.setAttribute('aria-current', 'location'); else el.removeAttribute('aria-current');
+    });
+  });
   $$('.inspector-tab').forEach(btn => btn.addEventListener('click', () => {
     setRightInspectorTab(btn.dataset.itab);
   }));

@@ -1,6 +1,6 @@
 // web/src/markdown.js
 import { $, $$, S, doc_, esc, api, isMac, MOD, LH } from './state.js';
-import { on } from './bus.js';
+import { on, emit } from './bus.js';
 import { vp, rowsEl, copyToClipboard, showToast } from './ui.js';
 import { render, paint, rowFor, markNodes, lineTopY } from './renderer.js';
 import { openFile } from './tabs.js';
@@ -92,6 +92,7 @@ async function drawPreview(d) {
   d.mdAnchor = '';
   d.mdLine = 0;
   if (!findbar.hidden) runFind();
+  reportVisibleSection();
 }
 
 function scheduleMermaidThemeRender() {
@@ -469,7 +470,25 @@ export function scrollPreviewTo(fraction) {
   mdview.scrollTop = fraction * mdview.scrollHeight - mdview.clientHeight / 2;
 }
 
+function reportVisibleSection() {
+  const d = doc_();
+  if (!d?.markdown || mdDrawn !== d || mdview.hidden) return;
+  const top = mdview.getBoundingClientRect().top + 24;
+  let line = 0;
+  for (const heading of mdArticle.querySelectorAll('h1[data-line],h2[data-line],h3[data-line],h4[data-line],h5[data-line],h6[data-line]')) {
+    if (heading.getBoundingClientRect().top > top) break;
+    line = +heading.dataset.line;
+  }
+  d.mdSectionLine = line;
+  emit('markdown:section-changed', { doc: d, line });
+}
+
 export function initMarkdown() {
+  let sectionFrame = 0;
+  mdview.addEventListener('scroll', () => {
+    if (sectionFrame) return;
+    sectionFrame = requestAnimationFrame(() => { sectionFrame = 0; reportVisibleSection(); });
+  }, { passive: true });
   const sw = $('#md-switch');
   // Keep focus where it was, so arrow keys go on scrolling the view afterwards.
   sw.addEventListener('mousedown', e => e.preventDefault());

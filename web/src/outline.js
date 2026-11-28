@@ -8,13 +8,19 @@ import { pushHistory } from './history.js';
 export async function loadOutline() {
   const d = doc_();
   const el = $('#outline');
-  if (!d) { if (el) el.innerHTML = '<div class="hint">No file open.</div>'; return; }
+  if (!d) {
+    if (el) el.innerHTML = '<div class="hint">No file open.</div>';
+    const right = $('#right-symbols-list');
+    if (right) right.innerHTML = '<div class="hint">No file open.</div>';
+    return;
+  }
   if (!d.outline) {
     try { d.outline = (await api('/api/outline', { path: d.path })).symbols || []; }
     catch { d.outline = []; }
   }
+  if (doc_() !== d) return;
   drawOutline();
-  upgradeOutline(d);
+  if (!d.markdown) upgradeOutline(d);
 }
 
 /* A language server's document symbols beat regex on every axis, so swap them
@@ -62,7 +68,12 @@ export function drawOutline() {
   if (rel) {
     const rf = ($('#right-symbols-filter')?.value || '').toLowerCase();
     const rsyms = rf ? d.outline.filter(s => s.name.toLowerCase().includes(rf)) : d.outline;
-    rel.innerHTML = renderSymHtml(rsyms);
+    if (d.markdown) {
+      const base = Math.min(...rsyms.map(s => s.indent), 0);
+      rel.innerHTML = rsyms.length ? rsyms.map(s =>
+        '<button type="button" class="sym md-outline-item' + (s.line === d.mdSectionLine ? ' sel' : '') + '"' + (s.line === d.mdSectionLine ? ' aria-current="location"' : '') + ' data-n="' + s.line + '" style="padding-left:' + (12 + Math.max(0, s.indent - base) * 14) + 'px" title="Jump to ' + esc(s.name) + '">' +
+        '<span class="sn">' + esc(s.name) + '</span></button>').join('') : '<div class="hint">No headings found.</div>';
+    } else rel.innerHTML = renderSymHtml(rsyms);
   }
 }
 
